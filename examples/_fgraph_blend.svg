@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" width="600" height="400">
+  <defs>
+    <!-- feBlend chain: source vs offset+blurred source, combined with
+         "multiply" blend mode. The offset shadow's halo multiplies into
+         the source where they overlap, producing a darker rim. -->
+    <filter id="multiplyShadow">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blurred"/>
+      <feOffset in="blurred" dx="20" dy="0" result="shifted"/>
+      <feBlend in="SourceGraphic" in2="shifted" mode="multiply"/>
+    </filter>
+  </defs>
+  <rect width="300" height="200" fill="lightyellow"/>
+  <circle cx="80"  cy="100" r="40" fill="#cc4400"/>
+  <circle cx="200" cy="100" r="40" fill="#cc4400" filter="url(#multiplyShadow)"/>
+</svg>

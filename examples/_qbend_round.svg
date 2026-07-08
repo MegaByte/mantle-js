@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-30 -30 60 60">
+  <rect x="-30" y="-30" width="60" height="60" fill="#cccccc"/>
+  <!-- Two long Q segments meeting at a ~70° bend at the origin.
+       Round joins. halfW=6, both segs >> halfW so this is a pure
+       inner-bend test (no short-tail overshoot). -->
+  <path d="M -22 -18 Q -16 -6 -2 -2 Q 12 2 20 16"
+        fill="none" stroke="#000000"
+        stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

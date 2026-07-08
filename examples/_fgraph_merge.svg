@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" width="600" height="400">
+  <defs>
+    <!-- Hand-rolled drop shadow using primitives the existing
+         dropshadow heuristic doesn't pattern-match (uses operator="atop"
+         instead of "in"). The graph builder handles it:
+           SourceAlpha → feGaussianBlur (blurred-alpha)
+           → feOffset (shifted)
+           feFlood (orange tint)
+           feComposite operator="in" (tint ∩ blurred-offset-alpha) = shadow
+           feMerge (shadow under SourceGraphic) -->
+    <filter id="orangeShadow">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" result="blurAlpha"/>
+      <feOffset in="blurAlpha" dx="12" dy="8" result="offsetBlur"/>
+      <feFlood flood-color="#ff8800" flood-opacity="0.7" result="orange"/>
+      <feComposite in="orange" in2="offsetBlur" operator="in" result="shadow"/>
+      <feMerge>
+        <feMergeNode in="shadow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="300" height="200" fill="lightyellow"/>
+  <circle cx="80"  cy="100" r="40" fill="#0066cc"/>
+  <circle cx="200" cy="100" r="40" fill="#0066cc" filter="url(#orangeShadow)"/>
+</svg>

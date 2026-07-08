@@ -1,0 +1,11 @@
+# Generated TypeScript declarations (npm run gen:types)
+types/
+
+# Visual-smoke output galleries (written by test/*VisualSmoke.mjs and
+# friends for human inspection; assertions are in-memory — never goldens)
+test/visuals/
+test/font/visuals/
+
+# Third-party test fixtures — fetched by scripts/fetchTestFixtures.mjs
+test/font/fixtures/
+examples/tiger.svg

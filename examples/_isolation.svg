@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200">
+  <!-- Background: a blue rect spanning the canvas. -->
+  <rect width="300" height="200" fill="blue"/>
+  <!-- Isolated group with multiply children. Without isolation, multiply
+       blends the children with the BLUE backdrop too, giving dark
+       compounded colors. With isolation, the children blend ONLY with
+       each other (against the group's local transparent backdrop) and
+       the group composites over the blue backdrop with normal blend.
+       Expected with isolation: visible red+green colors. -->
+  <g isolation="isolate">
+    <rect x="50"  y="50" width="100" height="100" fill="red"/>
+    <rect x="100" y="50" width="100" height="100" fill="lime" style="mix-blend-mode: multiply"/>
+  </g>
+</svg>

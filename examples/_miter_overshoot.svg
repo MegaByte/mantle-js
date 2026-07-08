@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="240 380 100 50">
+  <!-- Backdrop so the stroke is visible -->
+  <rect x="240" y="380" width="100" height="50" fill="#cccccc"/>
+
+  <!-- The wheel arm Q-Q-Q-L path lifted verbatim from
+       packages/games/highway-hazards/art/karts/steeringTurns.steeringWheel/steeringTurns.00.svg
+       but with stroke-linejoin="miter" instead of "round" — this was
+       the original extractor default. The path bends from upper-left
+       down-then-right-then-flat. The transitions between Q→Q and Q→L
+       are gentle (low angle), so the miter wedge is short and
+       miterLimit=4 (default) should NOT clip to bevel.
+
+       Mantle pre-fix: visible MITER SPIKES sticking outward at each
+       interior vertex, even though miterLen ≪ halfW * miterLimit.
+
+       Chrome / librsvg: clean curve, no visible spikes. -->
+  <path d="M 266.812 417.739
+           Q 266.813 413.211 268.382 407.440
+           Q 270.535 399.272 274.841 394.432
+           Q 280.677 396.873 310.590 408.941
+           L 325.183 408.938"
+        fill="none" stroke="#A87575"
+        stroke-width="12"
+        stroke-linecap="butt"
+        stroke-linejoin="miter"/>
+</svg>

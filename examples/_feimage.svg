@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 300 200" width="600" height="400">
+  <defs>
+    <!-- Filter: feImage pulls #bmp into the graph as the source, then
+         we feComposite-in against the shape silhouette so the image
+         only fills the rectangle's interior. -->
+    <filter id="bgFill" x="0" y="0" width="100%" height="100%">
+      <feImage xlink:href="#bmp" result="img"/>
+      <feComposite in="img" in2="SourceGraphic" operator="in"/>
+    </filter>
+  </defs>
+  <rect width="300" height="200" fill="white"/>
+  <!-- An <image> with an id parked OUT OF the viewBox so it doesn't
+       render directly — the only path the bitmap appears via is the
+       feImage filter applied to the filtered rect below. -->
+  <image id="bmp" x="-100" y="-100" width="20" height="20"
+         href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAQElEQVR4nO3UsQ0AAAgCQXD/nXUEYmHlX29IvtCtHS8PSseKgYREEYkiEj1IZGn34Lv9LFExkJAoIlFEoug80QBLigU8WcCZSQAAAABJRU5ErkJggg=="/>
+  <!-- Apply the filter to a solid rect; we should see the R/G/B/Y bitmap
+       scaled across that rect rather than the rect's solid fill. -->
+  <rect x="50" y="40" width="200" height="120" fill="black" filter="url(#bgFill)"/>
+</svg>

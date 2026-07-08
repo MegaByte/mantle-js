@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mantle Vector Graphics Demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0f0f14; color: #e0e0e0; font-family: 'Inter', system-ui, sans-serif; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 32px 16px; }
+  h1 { font-size: 1.8rem; font-weight: 700; background: linear-gradient(135deg, #7c8cff, #c08bff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 24px; }
+  .card { background: #1a1a26; border: 1px solid #2d2d44; border-radius: 14px; padding: 24px; width: 100%; max-width: 720px; margin-bottom: 20px; }
+  h2 { font-size: 1rem; color: #aab; margin-bottom: 14px; }
+  .file-row { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; }
+  label { font-size: 0.78rem; color: #888; width: 90px; }
+  input[type=file] { flex: 1; background: #252535; border: 1px solid #383858; border-radius: 8px; padding: 6px 10px; color: #ccd; font-size: 0.78rem; }
+  button#load-btn { width: 100%; padding: 11px; border: none; border-radius: 10px; background: linear-gradient(135deg, #5a6fff, #9a55ff); color: #fff; font-weight: 600; cursor: pointer; transition: opacity .2s; }
+  button#load-btn:hover { opacity: 0.85; }
+  #canvas-wrap { position: relative; width: 100%; max-width: 720px; aspect-ratio: 1; overflow: hidden; border: 1px solid #2d2d44; background: #fff; }
+  canvas { display: block; width: 100%; height: 100%; }
+  .debug-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-top: 10px; padding: 10px 12px; background: #14141c; border: 1px solid #2d2d44; border-radius: 8px; font-size: 0.72rem; color: #889; }
+  .debug-legend span.legend-label { color: #667; margin-right: 4px; }
+  .debug-legend .lg { display: inline-flex; align-items: center; gap: 6px; }
+  .debug-legend i.sw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.12); flex-shrink: 0; }
+  button.secondary { padding:8px;border:1px solid #383858;border-radius:8px;background:#1e1e30;color:#aab;font-size:0.8rem;cursor:pointer; }
+  button.secondary.active { background:#2a2a50; color:#9ab; }
+</style>
+</head>
+<body>
+<h1>Mantle Vector Graphics</h1>
+
+<div class="card">
+  <h2>Render SVG</h2>
+  <div class="file-row"><label>.svg</label><input id="svg-file" type="file" accept=".svg,image/svg+xml"></div>
+  <button id="svg-btn" type="button" style="width:100%;padding:8px;margin-top:4px;">Convert &amp; render SVG in browser</button>
+  <div style="display:flex;gap:8px;margin-top:8px;">
+    <button id="debug-tri"  class="secondary" type="button" style="flex:1;">Outline triangles</button>
+    <button id="debug-bbox" class="secondary" type="button" style="flex:1;">Shape bboxes</button>
+  </div>
+  <div class="debug-legend" aria-label="Debug polygon overlay colors">
+    <span class="legend-label">Overlay</span>
+    <span class="lg"><i class="sw" style="background:rgba(255,38,38,0.95)"></i> Cover-mesh interior triangles</span>
+    <span class="lg"><i class="sw" style="background:rgba(255,210,0,0.95)"></i> Cover-mesh curve hulls</span>
+    <span class="lg"><i class="sw" style="background:rgba(199,96,5,0.95)"></i> Shape bbox</span>
+  </div>
+  <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap;">
+    <button id="bench-btn" class="secondary" type="button" style="flex:1;min-width:120px;">Benchmark</button>
+    <label for="bench-n" style="width:auto;font-size:0.72rem;color:#888;flex-shrink:0;">Frames</label>
+    <input id="bench-n" type="number" value="200" min="1" max="20000" style="width:70px;padding:6px 8px;background:#252535;border:1px solid #383858;border-radius:8px;color:#ccd;font-size:0.8rem;text-align:center;">
+  </div>
+  <div id="status" style="margin-top:12px;font-size:0.8rem;color:#aab;">Waiting for files…</div>
+</div>
+
+<div id="canvas-wrap"><canvas id="glcanvas" width="800" height="800"></canvas></div>
+
+<script type="module">
+'use strict';
+window.addEventListener('error', (e) => {
+  const st = document.getElementById('status');
+  if (st) st.textContent = 'JS error: ' + (e.message || e.error);
+  console.error('boot error:', e.error || e);
+});
+
+import {
+  importSvg,
+  createBundle,
+  createRenderer,
+  loadShaders,
+} from './src/index.js';
+
+// ============================================================
+// Canvas + GL setup
+// ============================================================
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl2', {
+  premultipliedAlpha: true,
+  antialias: false,    // MSAA interacts badly with stencil INVERT at shared edges
+  stencil: true,
+  depth: true,
+});
+if (!gl) {
+  document.getElementById('status').textContent = 'WebGL2 not available';
+  throw new Error('WebGL2 required');
+}
+
+// Shader sources: fetched from the package's .glsl files via the
+// shipped loadShaders() helper. Single source of truth — production
+// renderer, csharp_tests parity, and this demo all read the same
+// files. Prior versions inlined the GLSL in <script id="…-src"> tags
+// that silently drifted from disk; that footgun is now gone (any
+// edit to mantle.frag.glsl flows here on next reload). Requires the
+// page be served over http — file:// fetches fail per CORS, so the
+// existing bisect/probe.mjs harness's python -m http.server is the
+// supported run path.
+const shaderSources = await loadShaders(
+  new URL('./src/shaders/', location.href).href);
+const renderer = createRenderer(gl, shaderSources);
+// Headless test surface — Puppeteer-driven smokes (e.g.
+// font/test/colrV1VisualSmoke.mjs, test/patternVisualSmoke.mjs) need
+// to trigger a fresh render + read pixels from the SAME tick (the
+// demo's WebGL2 context has preserveDrawingBuffer:false by default).
+window.__mantleRenderer = renderer;
+window.__mantleGl = gl;
+window.__mantleGetBundle = () => bundle;     // current bound bundle (or null)
+
+// Current bundle. Released + replaced on each SVG load.
+let bundle = null;
+function setBundle(newBundle, statusSuffix) {
+  if (bundle) bundle.dispose();
+  bundle = newBundle;
+  renderer.setBundle(bundle);
+  if (bundle) {
+    const hv = bundle.hybridVerts;
+    document.getElementById('status').textContent =
+      'Loaded ' + bundle.numShapes + ' shapes' +
+      (hv ? ', cover mesh ' + hv + ' verts' : '') +
+      (statusSuffix || '');
+  } else {
+    document.getElementById('status').textContent = 'Cleared' + (statusSuffix || '');
+  }
+  renderer.render();
+}
+
+// ============================================================
+// SVG load — file picker + URL boot
+// ============================================================
+document.getElementById('svg-btn').addEventListener('click', async () => {
+  const status = document.getElementById('status');
+  try {
+    const svgIn = document.getElementById('svg-file');
+    if (!svgIn.files || !svgIn.files[0]) {
+      status.textContent = 'Choose an .svg file to convert.';
+      return;
+    }
+    status.textContent = 'Converting SVG …';
+    const text = await svgIn.files[0].text();
+    const sections = await importSvg(text, { nativeArcs: true });
+    setBundle(createBundle(gl, sections));
+  } catch (e) {
+    document.getElementById('status').textContent =
+      'SVG export: ' + String(e && e.message ? e.message : e);
+    console.error(e);
+  }
+});
+
+// ============================================================
+// Debug toggles (route through renderer flags)
+// ============================================================
+document.getElementById('debug-tri').addEventListener('click', () => {
+  renderer.showTriOutline = !renderer.showTriOutline;
+  document.getElementById('debug-tri').classList.toggle('active', renderer.showTriOutline);
+  renderer.render();
+});
+document.getElementById('debug-bbox').addEventListener('click', () => {
+  renderer.showBBoxes = !renderer.showBBoxes;
+  document.getElementById('debug-bbox').classList.toggle('active', renderer.showBBoxes);
+  renderer.render();
+});
+// ============================================================
+// Benchmark
+// ============================================================
+let benchLock = false;
+function renderBenchFrame(i, N) {
+  // Small Lissajous pan so the user sees motion during the bench.
+  const u = N > 1 ? (i / (N - 1)) * Math.PI * 2 * 2 : 0;
+  const panX = Math.sin(u) * bundle.globalBBox[2] * 0.05;
+  const panY = Math.cos(u * 0.73) * bundle.globalBBox[3] * 0.05;
+  const orig = [bundle.globalBBox[0], bundle.globalBBox[1]];
+  bundle.globalBBox[0] = orig[0] + panX;
+  bundle.globalBBox[1] = orig[1] + panY;
+  // globalBBox feeds uGBB + uCanvasAR; renderer normally caches
+  // both per (asset, canvas-size) so invalidate explicitly for the
+  // bench's per-frame pan.
+  renderer.invalidateRenderState();
+  renderer.render();
+  bundle.globalBBox[0] = orig[0];
+  bundle.globalBBox[1] = orig[1];
+}
+
+document.getElementById('bench-btn').addEventListener('click', async () => {
+  if (benchLock) return;
+  if (!bundle) {
+    document.getElementById('status').textContent = 'Load an SVG first.';
+    return;
+  }
+  benchLock = true;
+  const btn = document.getElementById('bench-btn');
+  btn.disabled = true;
+  try {
+    const N = Math.max(1, Math.min(20000,
+      parseInt(document.getElementById('bench-n').value, 10) || 200));
+    const status = document.getElementById('status');
+    const coverVerts = bundle.hybridVerts;
+
+    status.textContent = 'Benchmarking ' + N + ' frames (visible)…';
+    await new Promise(r => requestAnimationFrame(r));
+
+    // Warmup so shader programs + VBOs + FBOs are resident.
+    for (let i = 0; i < 2; i++) renderer.render();
+    gl.finish();
+
+    const raf = () => new Promise(resolve => requestAnimationFrame(resolve));
+    const t0 = performance.now();
+    let cpuSubmit = 0;
+    for (let i = 0; i < N; i++) {
+      await raf();
+      const tF0 = performance.now();
+      renderBenchFrame(i, N);
+      cpuSubmit += performance.now() - tF0;
+      if ((i & 31) === 0) {
+        status.textContent = 'Benchmarking ' + (i + 1) + '/' + N + '…';
+      }
+    }
+    const rb = new Uint8Array(4);
+    gl.flush();
+    gl.finish();
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, rb);
+    const t1 = performance.now();
+
+    const wallMs = t1 - t0;
+    const cpuAvg = cpuSubmit / N;
+    const wallAvg = wallMs / N;
+    const fps = wallAvg > 0 ? 1000 / wallAvg : 0;
+    const passLabel = coverVerts
+      ? bundle.numShapes + ' shapes (cover mesh ' + coverVerts + ' verts)'
+      : bundle.numShapes + ' shapes';
+    status.textContent =
+      'Benchmark: ' + passLabel + ' — ' + N + ' rAF frames. ' +
+      'CPU/frame ' + cpuAvg.toFixed(3) + ' ms, ' +
+      'wall/frame ' + wallAvg.toFixed(3) + ' ms (~' + fps.toFixed(0) + ' FPS incl. vsync). ' +
+      'Total wall ' + wallMs.toFixed(0) + ' ms.';
+    renderer.render();
+  } finally {
+    benchLock = false;
+    btn.disabled = false;
+  }
+});
+
+// ============================================================
+// Boot — URL query params
+// ============================================================
+(async function boot() {
+  const status = document.getElementById('status');
+  const params = new URLSearchParams(location.search);
+  const svgUrl = params.get('svg');
+  if (svgUrl) {
+    status.textContent = 'Fetching + converting ' + svgUrl + ' …';
+    try {
+      const r = await fetch(svgUrl);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const isSvgz = /\.svgz(\?|$)/i.test(svgUrl);
+      let text;
+      if (isSvgz) {
+        const ab = await r.arrayBuffer();
+        const ds = new DecompressionStream('gzip');
+        const stream = new Blob([ab]).stream().pipeThrough(ds);
+        text = await new Response(stream).text();
+      } else {
+        text = await r.text();
+      }
+      const sections = await importSvg(text, { nativeArcs: true });
+      setBundle(createBundle(gl, sections));
+    } catch (e) {
+      status.textContent = 'SVG URL load: ' + (e && e.message ? e.message : e);
+      console.error(e);
+    }
+  } else {
+    status.textContent = 'Choose an SVG file below to begin.';
+  }
+  if (params.get('tri') === '1') {
+    renderer.showTriOutline = true;
+    document.getElementById('debug-tri').classList.add('active');
+    renderer.render();
+  }
+  if (params.get('bbox') === '1') {
+    renderer.showBBoxes = true;
+    document.getElementById('debug-bbox').classList.add('active');
+    renderer.render();
+  }
+  const hqParam = params.get('hq');
+  if (hqParam) {
+    const sz = parseInt(hqParam, 10);
+    if (sz >= 256 && sz <= 8192) {
+      canvas.width = sz;
+      canvas.height = sz;
+      renderer.render();
+    }
+  }
+  if (params.get('bench') === '1') {
+    setTimeout(() => document.getElementById('bench-btn').click(), 120);
+  }
+
+  // ============================================================
+  // Headless text-render entry. Puppeteer (font/test/textVisualHarness.mjs)
+  // drives the page via this hook:
+  //
+  //   await page.evaluate((ttfBytes, markup, opts) =>
+  //     window.mantleRenderText(ttfBytes, markup, opts),
+  //     Array.from(ttfBytes), 'Hello, World!', { fontSizePx: 96 });
+  //
+  // ttfBytes : ArrayBuffer or array of byte values (serializable across
+  //            the Puppeteer page boundary).
+  // markup   : TMP-style string (see font/markupParser.js).
+  // opts     : { fontSizePx?, defaultColor? (3-tuple 0..1), maxWidthEm?,
+  //              align?: 'left'|'center'|'right', lineHeightEm? }
+  //
+  // Returns: { numShapes, bbox: [xmin,ymin,xmax,ymax] } once the draw
+  // has flushed. Puppeteer can then await this promise, screenshot,
+  // and exit. The font/textRun modules are loaded on first call.
+  // ============================================================
+  window.mantleRenderText = async function (ttfBytes, markup, opts) {
+    opts = opts || {};
+    const [fontMod, runMod] = await Promise.all([
+      import('./src/font/fontAsset.js'),
+      import('./src/font/textRun.js'),
+    ]);
+    const rawBytes = ttfBytes instanceof Uint8Array
+      ? ttfBytes
+      : ttfBytes instanceof ArrayBuffer
+        ? new Uint8Array(ttfBytes)
+        : new Uint8Array(ttfBytes);   // Array.from() result
+    // F4: transparently decode woff2 → sfnt before constructing the
+    // font asset. No-op on TTF/OTF input.
+    const bytes = await fontMod.decodeIfWoff2(rawBytes);
+    const font = new fontMod.MantleFontAsset(bytes);
+    const defColor = opts.defaultColor || [0, 0, 0, 1];
+    const layout = {
+      maxWidthEm: opts.maxWidthEm || 0,
+      align:      opts.align       || 'left',
+      lineHeightEm: opts.lineHeightEm || 0,
+    };
+    // Probe-build to learn the bbox, then rebuild with a translation
+    // that makes the bbox origin sit at (0,0). globalBBox is
+    // (xmin, ymin, width, height) — matches SVG bundles + shader's
+    // uGlobalBBox.
+    let b = await runMod.buildFromMarkup(markup, font, defColor, layout);
+    const [bbXmin, bbYmin] = b.globalBBox;
+    if (bbXmin !== 0 || bbYmin !== 0) {
+      const shifted = Object.assign({}, layout, {
+        originX: -bbXmin,
+        originY: -bbYmin,
+      });
+      b = await runMod.buildFromMarkup(markup, font, defColor, shifted);
+    }
+
+    // Engine package consumes a `sections` dict (Phase 4 of the JS
+    // refactor extracted createBundle/createRenderer out of the
+    // demo HTML — the old applyLoadedBins + standalone render are
+    // gone). Curves and bands have NO header — raw Float32 stream
+    // of 4-float texels. The meta section IS prefixed with a
+    // 32-byte header that parseMetaBin reads; textRun doesn't emit
+    // it (runtime bridges reconstruct from struct fields), so
+    // prepend it here.
+    const curveAb = b.curveTexels.buffer.slice(
+      b.curveTexels.byteOffset, b.curveTexels.byteOffset + b.curveTexels.byteLength);
+    const bandAb = b.bandTexels.buffer.slice(
+      b.bandTexels.byteOffset, b.bandTexels.byteOffset + b.bandTexels.byteLength);
+    const metaAb = new ArrayBuffer(32 + b.metaFloats.byteLength);
+    const mdv = new DataView(metaAb);
+    mdv.setUint32(0, b.numShapes, true);
+    mdv.setFloat32(4,  b.globalBBox[0], true);
+    mdv.setFloat32(8,  b.globalBBox[1], true);
+    mdv.setFloat32(12, b.globalBBox[2], true);
+    mdv.setFloat32(16, b.globalBBox[3], true);
+    new Uint8Array(metaAb, 32).set(new Uint8Array(
+      b.metaFloats.buffer, b.metaFloats.byteOffset, b.metaFloats.byteLength));
+    // curveGeom = per-shape OBB cover-quad chunks (one per glyph).
+    const cgeomAb = b.curveGeomFloats && b.curveGeomFloats.byteLength
+      ? b.curveGeomFloats.buffer.slice(b.curveGeomFloats.byteOffset,
+          b.curveGeomFloats.byteOffset + b.curveGeomFloats.byteLength)
+      : null;
+    const sections = {
+      flags: b.flags,
+      metaFloatsPerShape: b.metaFloatsPerShape,
+      meta: metaAb,
+      curves: curveAb,
+      bands: bandAb,
+      curveGeom: cgeomAb,
+      // textRun produces no gradients / dashes / images / filters.
+      gradients: null, gradientRamp: null,
+      dashes: null, strokeMesh: null, clipMesh: null, maskMesh: null,
+      filterTab: null, imageAtlas: null, imageAtlasDim: null,
+      // F8 COLRv1: forward the per-glyph paint-graph table + run-wide
+      // stops LUT + per-shape ids so createBundle wires them and the
+      // renderer's COLR branch fires for colour-emoji input. Null for
+      // monochrome runs (the common case) — bridge keeps the
+      // pass-through behaviour.
+      colrGraphs:         b.colrGraphs || null,
+      gradientStops:      b.gradientStops || null,
+      gradientStopsCount: b.gradientStopsCount || 0,
+      shapeIds:           b.shapeIds || null,
+    };
+    // Guard against zero-shape runs (font has no glyph for any input
+    // codepoint) — createBundle's per-shape texture sizing assumes at
+    // least one shape and otherwise tries to texImage2D buffers that
+    // don't match the expected RGBA32F size. Treat as a clear/no-op.
+    let bundle = null;
+    if (b.numShapes > 0) {
+      bundle = createBundle(gl, sections);
+      setBundle(bundle, ' (text)');
+    } else {
+      setBundle(null, ' (text: empty)');
+    }
+    // Diagnostic surface (read by font/test/colrV1VisualSmoke.mjs): expose
+    // the per-bundle colrGraphs count + per-shape colrGraphId values so
+    // the smoke can verify the dispatch wiring without parsing pixels.
+    window.__mantleLastTextDiag = {
+      numShapes: b.numShapes,
+      colrGraphsCount: (b.colrGraphs && b.colrGraphs.length) | 0,
+      colrGraphIds: Array.from({ length: b.numShapes }, (_, i) =>
+        Math.floor((b.metaFloats[i * b.metaFloatsPerShape + 45] || 0) + 0.5)),
+      flagsShape: Array.from({ length: b.numShapes }, (_, i) =>
+        Math.floor((b.metaFloats[i * b.metaFloatsPerShape + 27] || 0) + 0.5)),
+      drawListLen: bundle ? bundle.drawList.length : 0,
+      drawListSlugOps: bundle ? bundle.drawList.filter(op => op.kind === 'slugShape').length : 0,
+      drawListColrOps: bundle ? bundle.drawList.filter(op => op.kind === 'slugShape' && op.colrGraphId > 0).length : 0,
+      curveLen: bundle && bundle.curveFloats ? bundle.curveFloats.length : -1,
+      globalBBox: b.globalBBox,
+    };
+
+    // Force a synchronous render. The demo's WebGL2 context was
+    // created WITHOUT preserveDrawingBuffer, so the back buffer is
+    // implementation-defined after present. We re-render right before
+    // returning and capture pixels into window.__mantleLastFrame so
+    // Puppeteer can read them without racing the GPU clear.
+    renderer.render();
+    {
+      const cnv = document.getElementById('glcanvas');
+      const w = cnv.width, h = cnv.height;
+      const px = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      window.__mantleLastFrame = { w, h, data: px };
+    }
+    return { numShapes: b.numShapes, bbox: b.globalBBox };
+  };
+  // Tell Puppeteer / human users that the hook is ready.
+  window.mantleTextReady = true;
+})();
+</script>
+</body>
+</html>

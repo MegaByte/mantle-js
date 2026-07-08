@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-30 -30 60 60">
+  <!-- Backdrop so the strokes are visible -->
+  <rect x="-30" y="-30" width="60" height="60" fill="#cccccc"/>
+
+  <!-- (A) 3-segment Q path with a SHORT last tail relative to halfW.
+       stroke-width=12 → halfW=6; the last Q's end-to-prev-vertex
+       distance is ~1.7 → halfW exceeds the tail length.
+       Expected: flat butt cap at the TOP endpoint (and at the bottom).
+       Actual (Mantle, pre-fix): the previous interior round join's
+       natural body envelope distance leaks past the path's true end,
+       producing a round-cap-like envelope on the TOP. -->
+  <path d="M -12.0 18.0
+           Q -12.0 13.5 -10.4 7.6
+           Q -9.5 4.0  -8.1 1.0
+           Q -7.7 0.2  -7.3 -0.6"
+        fill="none" stroke="#000000"
+        stroke-width="12" stroke-linecap="butt" stroke-linejoin="round"/>
+
+  <!-- (B) Control: same path but with stroke-linejoin="miter".
+       Expected: sharp behavior, no overshoot at the end (miter has
+       its own length clamp). Render-cleanly side-by-side to confirm
+       the bug is specific to ROUND/BEVEL joins on short-tail paths. -->
+  <path d="M 8.0 18.0
+           Q 8.0 13.5 9.6 7.6
+           Q 10.5 4.0 11.9 1.0
+           Q 12.3 0.2 12.7 -0.6"
+        fill="none" stroke="#000000"
+        stroke-width="12" stroke-linecap="butt" stroke-linejoin="miter"/>
+</svg>

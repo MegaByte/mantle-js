@@ -1,0 +1,23 @@
+{
+  // Type-CHECK the JS (no emit). Scoped to the renderer modules — the seam the
+  // monolith→module split made fragile. checkJs gives `no-undef`-grade catching
+  // (bare cross-module refs, R.x that's never assigned) without converting any
+  // file to .ts. strict/noImplicitAny are OFF so the signal is the STRUCTURAL
+  // bugs (undefined names, missing properties), not null-safety noise.
+  //
+  //   npx tsc -p js.kontek.mantle/tsconfig.checkjs.json
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+    "skipLibCheck": true,
+    "lib": ["ES2022", "DOM"]
+  },
+  "include": ["src/renderer/**/*.js"]
+}

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" width="600" height="400">
+  <defs>
+    <!-- Diffuse lighting clipped to the shape silhouette:
+           1. blur source.a → height field with smooth gradient
+           2. feDiffuseLighting (orange light, distant from upper-left)
+           3. feComposite operator="in" against SourceGraphic →
+              clip the unbounded lighting output to the shape's alpha -->
+    <filter id="diffuseLit">
+      <feGaussianBlur stdDeviation="6" result="bumpField"/>
+      <feDiffuseLighting in="bumpField" surfaceScale="10"
+                         diffuseConstant="1.0" lighting-color="orange"
+                         result="lit">
+        <feDistantLight azimuth="135" elevation="45"/>
+      </feDiffuseLighting>
+      <feComposite in="lit" in2="SourceGraphic" operator="in"/>
+    </filter>
+    <!-- Specular lighting: Phong highlight from a point light overhead,
+         clipped to the shape. -->
+    <filter id="specularLit">
+      <feGaussianBlur stdDeviation="6" result="bumpField"/>
+      <feSpecularLighting in="bumpField" surfaceScale="10"
+                          specularConstant="1.8" specularExponent="20"
+                          lighting-color="white" result="lit">
+        <fePointLight x="200" y="50" z="80"/>
+      </feSpecularLighting>
+      <feComposite in="lit" in2="SourceGraphic" operator="in"/>
+    </filter>
+  </defs>
+  <rect width="300" height="200" fill="#333"/>
+  <circle cx="80"  cy="100" r="50" fill="white" filter="url(#diffuseLit)"/>
+  <circle cx="200" cy="100" r="50" fill="white" filter="url(#specularLit)"/>
+</svg>

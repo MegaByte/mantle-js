@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200">
+  <defs>
+    <filter id="eroder"><feMorphology operator="erode"  radius="6"/></filter>
+    <filter id="dilater"><feMorphology operator="dilate" radius="6"/></filter>
+  </defs>
+  <rect width="400" height="200" fill="white"/>
+  <!-- Eroded square: should shrink by 6 px on each side -->
+  <rect x="40"  y="60" width="80" height="80" fill="orange" filter="url(#eroder)"/>
+  <!-- Plain rect (reference) -->
+  <rect x="160" y="60" width="80" height="80" fill="orange"/>
+  <!-- Dilated square: should grow by 6 px on each side -->
+  <rect x="280" y="60" width="80" height="80" fill="lime" filter="url(#dilater)"/>
+</svg>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="400" height="400">
+  <defs>
+    <filter id="edge" x="0" y="0" width="100%" height="100%">
+      <feConvolveMatrix order="3" kernelMatrix="-1 0 1 -2 0 2 -1 0 1" divisor="1" bias="0.5" result="edges"/>
+      <feComposite in="edges" in2="SourceGraphic" operator="in"/>
+    </filter>
+  </defs>
+  <rect width="200" height="200" fill="white"/>
+  <circle cx="100" cy="100" r="60" fill="red" filter="url(#edge)"/>
+</svg>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" width="600" height="400">
+  <defs>
+    <!-- Use a low-frequency turbulence as the displacement map; warp the
+         source by ±20 px along the displacement channels. The result is a
+         "wobbly" version of the source circle: still red, still roughly
+         where the circle was, but with a non-circular silhouette. -->
+    <filter id="warp">
+      <feTurbulence type="turbulence" baseFrequency="0.03" numOctaves="2" seed="2"
+                    result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise"
+                         scale="20" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+  <rect width="300" height="200" fill="white"/>
+  <circle cx="150" cy="100" r="60" fill="red" filter="url(#warp)"/>
+</svg>

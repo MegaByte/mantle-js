@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-25 -25 50 50">
+  <!-- backdrop so white strokes are visible -->
+  <path d="M -25 -25 L 25 -25 L 25 25 L -25 25 Z" fill="#444444"/>
+  <!-- (A) miter join: single polyline with one ~90° interior vertex.
+       Expected: sharp corner. -->
+  <path d="M -18 -2 L -6 10 L 6 -10" fill="none" stroke="#FFFFFF"
+        stroke-width="6" stroke-linecap="butt" stroke-linejoin="miter"/>
+  <!-- (B) square caps: a straight stroke. Expected: flat ends extended
+       by half the stroke width. -->
+  <path d="M 10 -16 L 18 16" fill="none" stroke="#FFD400"
+        stroke-width="6" stroke-linecap="square" stroke-linejoin="miter"/>
+</svg>

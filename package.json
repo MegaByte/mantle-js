@@ -1,0 +1,245 @@
+{
+  "name": "@kontek/mantle",
+  "version": "1.0.0",
+  "description": "Mantle is a vector graphics renderer. WebGL2 implementation: imports .svg files into a compact bundle (curves table, per-shape meta, cover quads) and draws each shape as a single cover quad, computing exact per-curve coverage in one fragment-shader pass via the Slug ray-cast algorithm (analytic anti-aliasing, no tessellation or stencil).",
+  "keywords": [
+    "vector",
+    "graphics",
+    "svg",
+    "mantle",
+    "shader",
+    "rendering",
+    "slug",
+    "font",
+    "webgl",
+    "webgl2"
+  ],
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./types/index.d.ts",
+  "scripts": {
+    "build:shaders": "node scripts/buildShaders.mjs",
+    "gen:features": "node scripts/genFeatureEntry.mjs",
+    "gen:context": "node scripts/genRendererContext.mjs",
+    "gen:types": "node scripts/genTypes.mjs",
+    "test": "node scripts/runSmokes.mjs",
+    "test:render": "node scripts/runRenderSmokes.mjs",
+    "check:types": "node scripts/checkRendererTypes.mjs",
+    "prepublishOnly": "npm run build:shaders && npm run gen:types && npm run test && npm run test:render",
+    "fetch:fixtures": "node scripts/fetchTestFixtures.mjs",
+    "pretest": "node scripts/fetchTestFixtures.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./bundle": {
+      "types": "./types/bundle/index.d.ts",
+      "default": "./src/bundle/index.js"
+    },
+    "./bundle/featureManifest": {
+      "types": "./types/bundle/featureManifest.d.ts",
+      "default": "./src/bundle/featureManifest.js"
+    },
+    "./svg": {
+      "types": "./types/svg/importer.d.ts",
+      "default": "./src/svg/importer.js"
+    },
+    "./svg/buildContext": {
+      "types": "./types/svg/buildContext.d.ts",
+      "default": "./src/svg/buildContext.js"
+    },
+    "./svg/auto": {
+      "types": "./types/svg/auto.d.ts",
+      "default": "./src/svg/auto.js"
+    },
+    "./svg/segment": {
+      "types": "./types/svg/segment.d.ts",
+      "default": "./src/svg/segment.js"
+    },
+    "./renderer": {
+      "types": "./types/renderer/index.d.ts",
+      "default": "./src/renderer/index.js"
+    },
+    "./fallback": {
+      "types": "./types/fallback/index.d.ts",
+      "default": "./src/fallback/index.js"
+    },
+    "./core/metaBin": {
+      "types": "./types/core/metaBin.d.ts",
+      "default": "./src/core/metaBin.js"
+    },
+    "./core/morphCore": {
+      "types": "./types/core/morphCore.d.ts",
+      "default": "./src/core/morphCore.js"
+    },
+    "./core/diagnostics": {
+      "types": "./types/core/diagnostics.d.ts",
+      "default": "./src/core/diagnostics.js"
+    },
+    "./textBundle": {
+      "types": "./types/textBundle.d.ts",
+      "default": "./src/textBundle.js"
+    },
+    "./filterGraph": {
+      "types": "./types/filterGraph/index.d.ts",
+      "default": "./src/filterGraph/index.js"
+    },
+    "./filterGraph/dispatchRegistry": {
+      "types": "./types/filterGraph/dispatchRegistry.d.ts",
+      "default": "./src/filterGraph/dispatchRegistry.js"
+    },
+    "./filterGraph/primitives/all": {
+      "types": "./types/filterGraph/primitives/all.d.ts",
+      "default": "./src/filterGraph/primitives/all.js"
+    },
+    "./filterGraph/primitives/*": {
+      "types": "./types/filterGraph/primitives/*.d.ts",
+      "default": "./src/filterGraph/primitives/*.js"
+    },
+    "./filterGraph/colr/paints": {
+      "types": "./types/filterGraph/colr/paints.d.ts",
+      "default": "./src/filterGraph/colr/paints.js"
+    },
+    "./animation": {
+      "types": "./types/animation/index.d.ts",
+      "default": "./src/animation/index.js"
+    },
+    "./animation/colorMatrix": {
+      "types": "./types/animation/colorMatrix.d.ts",
+      "default": "./src/animation/colorMatrix.js"
+    },
+    "./animation/colorPalette": {
+      "types": "./types/animation/colorPalette.d.ts",
+      "default": "./src/animation/colorPalette.js"
+    },
+    "./hitTest": {
+      "types": "./types/hitTest/index.d.ts",
+      "default": "./src/hitTest/index.js"
+    },
+    "./scene": {
+      "types": "./types/scene/index.d.ts",
+      "default": "./src/scene/index.js"
+    },
+    "./font": {
+      "types": "./types/font/index.d.ts",
+      "default": "./src/font/index.js"
+    },
+    "./font/text": {
+      "types": "./types/font/text.d.ts",
+      "default": "./src/font/text.js"
+    },
+    "./font/auto": {
+      "types": "./types/font/auto.d.ts",
+      "default": "./src/font/auto.js"
+    },
+    "./font/scripts": {
+      "types": "./types/font/scripts/index.d.ts",
+      "default": "./src/font/scripts/index.js"
+    },
+    "./font/scripts/arabic": {
+      "types": "./types/font/scripts/arabic.d.ts",
+      "default": "./src/font/scripts/arabic.js"
+    },
+    "./font/scripts/hangul": {
+      "types": "./types/font/scripts/hangul.d.ts",
+      "default": "./src/font/scripts/hangul.js"
+    },
+    "./font/scripts/indic": {
+      "types": "./types/font/scripts/indic.d.ts",
+      "default": "./src/font/scripts/indic.js"
+    },
+    "./font/scripts/math": {
+      "types": "./types/font/scripts/math.d.ts",
+      "default": "./src/font/scripts/math.js"
+    },
+    "./font/scripts/thai": {
+      "types": "./types/font/scripts/thai.d.ts",
+      "default": "./src/font/scripts/thai.js"
+    },
+    "./font/scripts/use": {
+      "types": "./types/font/scripts/use.d.ts",
+      "default": "./src/font/scripts/use.js"
+    },
+    "./font/color": {
+      "types": "./types/font/color/index.d.ts",
+      "default": "./src/font/color/index.js"
+    },
+    "./font/variations": {
+      "types": "./types/font/variations/index.d.ts",
+      "default": "./src/font/variations/index.js"
+    },
+    "./font/math": {
+      "types": "./types/font/math/index.d.ts",
+      "default": "./src/font/math/index.js"
+    },
+    "./font/formats/cff": {
+      "types": "./types/font/formats/cff.d.ts",
+      "default": "./src/font/formats/cff.js"
+    },
+    "./font/formats/woff2": {
+      "types": "./types/font/formats/woff2.d.ts",
+      "default": "./src/font/formats/woff2.js"
+    },
+    "./font/typography/aat": {
+      "types": "./types/font/typography/aat.d.ts",
+      "default": "./src/font/typography/aat.js"
+    },
+    "./font/typography/legacyKern": {
+      "types": "./types/font/typography/legacyKern.d.ts",
+      "default": "./src/font/typography/legacyKern.js"
+    },
+    "./font/typography/vertical": {
+      "types": "./types/font/typography/vertical.d.ts",
+      "default": "./src/font/typography/vertical.js"
+    },
+    "./font/typography/baseline": {
+      "types": "./types/font/typography/baseline.d.ts",
+      "default": "./src/font/typography/baseline.js"
+    },
+    "./font/typography/bidi": {
+      "types": "./types/font/typography/bidi.d.ts",
+      "default": "./src/font/typography/bidi.js"
+    },
+    "./font/typography/justification": {
+      "types": "./types/font/typography/justification.d.ts",
+      "default": "./src/font/typography/justification.js"
+    },
+    "./font/unicode": {
+      "types": "./types/font/unicode/index.d.ts",
+      "default": "./src/font/unicode/index.js"
+    },
+    "./shaders": {
+      "types": "./types/shaders/index.d.ts",
+      "default": "./src/shaders/index.js"
+    },
+    "./shaders/*": "./src/shaders/*"
+  },
+  "sideEffects": [
+    "./src/index.js",
+    "./src/font/index.js",
+    "./src/filterGraph/primitives/*.js",
+    "./src/filterGraph/colr/paints.js"
+  ],
+  "files": [
+    "src/",
+    "types/",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "Apache-2.0",
+  "author": "Aaron Kaluszka <megabyte@kontek.net> (https://kaluszka.com/)",
+  "homepage": "https://github.com/MegaByte/mantle-js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MegaByte/mantle-js.git"
+  }
+}

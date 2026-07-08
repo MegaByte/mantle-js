@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200">
+  <defs>
+    <filter id="ds1">
+      <feDropShadow dx="6" dy="6" stdDeviation="3" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+    <filter id="ds2">
+      <feDropShadow dx="10" dy="10" stdDeviation="6" flood-color="#0040ff" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+  <rect width="300" height="200" fill="white"/>
+  <!-- Black-ish drop shadow on orange circle -->
+  <circle cx="75" cy="100" r="35" fill="orange" filter="url(#ds1)"/>
+  <!-- Blue drop shadow on green rect (larger blur, larger offset) -->
+  <rect x="180" y="65" width="70" height="70" fill="lime" filter="url(#ds2)"/>
+</svg>

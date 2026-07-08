@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200">
+  <defs>
+    <filter id="b1"><feGaussianBlur stdDeviation="4"/></filter>
+    <filter id="b2"><feGaussianBlur stdDeviation="12"/></filter>
+    <filter id="b3"><feGaussianBlur stdDeviation="6 1"/></filter>
+  </defs>
+
+  <rect width="400" height="200" fill="white"/>
+
+  <!-- Original -->
+  <circle cx="50"  cy="100" r="35" fill="red"/>
+  <!-- Mild blur -->
+  <circle cx="140" cy="100" r="35" fill="red" filter="url(#b1)"/>
+  <!-- Strong blur -->
+  <circle cx="240" cy="100" r="35" fill="red" filter="url(#b2)"/>
+  <!-- Anisotropic blur (mostly horizontal) -->
+  <circle cx="350" cy="100" r="35" fill="red" filter="url(#b3)"/>
+</svg>

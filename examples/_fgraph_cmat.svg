@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" width="600" height="400">
+  <defs>
+    <!-- Chain: blur → desaturate (colorMatrix) → offset. The kind
+         path can't represent this because feOffset isn't a kind;
+         buildFilterGraph emits a 3-node DAG that the renderer
+         evaluates: feGaussianBlur → feColorMatrix → feOffset. -->
+    <filter id="blurDesatOffset">
+      <feGaussianBlur stdDeviation="3"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feOffset dx="20" dy="10"/>
+    </filter>
+  </defs>
+  <rect width="300" height="200" fill="lightyellow"/>
+  <!-- Reference: unfiltered red circle -->
+  <circle cx="80"  cy="100" r="40" fill="red"/>
+  <!-- Filtered: blurred AND desaturated (gray) AND shifted +20/+10 -->
+  <circle cx="200" cy="100" r="40" fill="red" filter="url(#blurDesatOffset)"/>
+</svg>

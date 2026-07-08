@@ -1,0 +1,15 @@
+{
+  // Generate .d.ts for the public API from the existing JSDoc. Output is a
+  // BUILD ARTIFACT (types/ is gitignored); `npm run gen:types` runs this and
+  // prepublishOnly ships it. checkJs is OFF here — type-correctness is gated
+  // separately by scripts/checkRendererTypes.mjs over src/renderer.
+  "compilerOptions": {
+    "allowJs": true, "checkJs": false,
+    "declaration": true, "emitDeclarationOnly": true,
+    "noEmit": false, "noEmitOnError": false,
+    "skipLibCheck": true, "module": "esnext", "target": "es2020",
+    "moduleResolution": "bundler", "strict": false,
+    "rootDir": "src", "outDir": "types"
+  },
+  "include": ["src/**/*.js"]
+}
