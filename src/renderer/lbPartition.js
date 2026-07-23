@@ -8,10 +8,9 @@
 import { SEG_LINE, SEG_CUBIC, SEG_RQUAD } from '../primitives/seg.js';
 import { constrainedTriangulate } from './cdt.js';
 import { bezoutCubicImplicit, evalBezout, cubicKLMN, cubicSignKLMN, cubicLoop, splitCubicMulti, cubicHull, partitionCubicSplitTs, uvInHull, cubicSign, cubicPt } from './lbCubicMath.js';
-import { _kox, _koy, _koScale, _setKeyOrigin, rayWinding, rayWindingDir, calibrateInterior, segTangents, edgeEndMeta, fatArc } from './lbContour.js';
+import { _kox, _koy, _koScale, _setKeyOrigin, rayWinding, rayWindingDir, buildSegWindingTree, treeWinding, calibrateInterior, verifyInteriorSign, segTangents, edgeEndMeta, fatArc } from './lbContour.js';
 import { splitInteriorByCurve, _healCand } from './lbInteriorSplit.js';
-import { selfOrientRows, buildCornerCaps2, interiorEdgesFromTriPoints } from './lbFastMesh.js';
-
+import { selfOrientRows, interiorEdgesFromTriPoints, interiorChainsFromTris, subdivideBoundaryTriPoints } from './lbFastMesh.js';
 // ---- EXACT-PARTITION builder (Loop-Blinn 2005): control points ARE triangulation
 // vertices and hull edges ARE constraints, so every CDT face is either plain
 // interior or (a piece of) a curve hull — the partition is exact by
@@ -20,6 +19,43 @@ import { selfOrientRows, buildCornerCaps2, interiorEdgesFromTriPoints } from './
 // no T-junction healing — those exist to patch the overlay model this
 // replaces. Quads + lines only (the game-art common case); callers fall back
 // to the legacy builder for cubics/rquads.
+// Apex-tangent supporting-line clip for a Bezout cubic crescent (3-point hull) that
+// over-paints air beyond its arc. The sub-piece is inflection-free (the builder splits
+// at inflections) → convex, so the tangent at the curve apex (t=½) is a SUPPORTING line:
+// the whole arc lies on the chord side of it. Clipping the hull to that side removes the
+// beyond-apex region — where the Bezout resultant's spurious branch paints air — with NO
+// under-fill (the arc is kept). Returns fan triangles ([[x,y]×3]) of the clipped hull;
+// null if the hull is entirely on the keep side (over-paint is in the apex lens, clip
+// can't help); [] if it clips away to nothing.
+function apexTangentClip(hull, cp) {
+  if (!cp || cp.length !== 4) return null;
+  const t = 0.5, u = 0.5;
+  const ax = u*u*u*cp[0][0] + 3*u*u*t*cp[1][0] + 3*u*t*t*cp[2][0] + t*t*t*cp[3][0];
+  const ay = u*u*u*cp[0][1] + 3*u*u*t*cp[1][1] + 3*u*t*t*cp[2][1] + t*t*t*cp[3][1];
+  let tx = 3*(u*u*(cp[1][0]-cp[0][0]) + 2*u*t*(cp[2][0]-cp[1][0]) + t*t*(cp[3][0]-cp[2][0]));
+  let ty = 3*(u*u*(cp[1][1]-cp[0][1]) + 2*u*t*(cp[2][1]-cp[1][1]) + t*t*(cp[3][1]-cp[2][1]));
+  const tl = Math.hypot(tx, ty); if (tl < 1e-9) return null;
+  let nx = -ty / tl, ny = tx / tl;
+  const cmx = (cp[0][0]+cp[3][0])/2, cmy = (cp[0][1]+cp[3][1])/2;
+  if (nx*(cmx-ax) + ny*(cmy-ay) < 0) { nx = -nx; ny = -ny; }   // normal → chord (keep) side
+  const sd = (px, py) => nx*(px-ax) + ny*(py-ay);
+  const poly = [[hull[0],hull[1]],[hull[2],hull[3]],[hull[4],hull[5]]];
+  let anyOut = false; const out = [];
+  for (let i = 0; i < 3; i++) {
+    const A = poly[i], B = poly[(i+1)%3], dA = sd(A[0],A[1]), dB = sd(B[0],B[1]);
+    if (dA < 0) anyOut = true;
+    if (dA >= 0) out.push(A);
+    if ((dA >= 0) !== (dB >= 0)) { const w = dA / (dA - dB); out.push([A[0]+w*(B[0]-A[0]), A[1]+w*(B[1]-A[1])]); }
+  }
+  if (!anyOut) return null;
+  const removed = [];
+  for (let i = 0; i < 3; i++) if (sd(poly[i][0], poly[i][1]) < 0) removed.push(poly[i]);
+  if (out.length < 3) return { tris: [], removed };
+  const tris = [];
+  for (let i = 1; i < out.length - 1; i++) tris.push([out[0], out[i], out[i+1]]);
+  return { tris, removed };
+}
+
 export function buildLoopBlinnPartition(contours, opts) {
   _healCand.length = 0;
   _setKeyOrigin(contours);
@@ -33,9 +69,18 @@ export function buildLoopBlinnPartition(contours, opts) {
     if (P[1] < _ya) _ya = P[1]; if (P[1] > _yb) _yb = P[1];
   }
   const _eps = Math.max(_xb - _xa, _yb - _ya, 1e-6) * 1e-5;
+  // Winding tree: the side-bit probes below call inkAt once per curved segment, which made
+  // the whole build O(N^2) through the linear rayWinding on segment-heavy shapes. The tree
+  // answers each probe in O(log N + near) with IDENTICAL results (near segments use the
+  // same exact solvers; far runs collapse to their chords — see windingTree.js). Null below
+  // the cutoff, where the linear walk wins.
+  const _wTree = buildSegWindingTree(allSegs);
+  const _windAt = _wTree
+    ? (x, y) => treeWinding(_wTree, x, y + _eps)
+    : (x, y) => rayWinding(allSegs, x, y + _eps);
   const inkAt = evenodd
-    ? (x, y) => (rayWinding(allSegs, x, y + _eps) & 1) === 1
-    : (x, y) => rayWinding(allSegs, x, y + _eps) !== 0;
+    ? (x, y) => (_windAt(x, y) & 1) === 1
+    : (x, y) => _windAt(x, y) !== 0;
 
   const pts = [];
   const idxOf = new Map();
@@ -46,8 +91,9 @@ export function buildLoopBlinnPartition(contours, opts) {
   const constraintsOnly9 = new Set();   // hull idx → INVISIBLE boundary (both sides ink): solid fill, no AA payload
   const steiner9 = [];     // crossing-splitter insertions + their parent coords (morph pair correspondence)
   const edges = [];        // straight-edge kind-0/10 payloads (same shape the pack expects)
-  const stripArcs = [];    // kind-9 exterior strips per arc (pack plans them)
+  const stripArcs = [];    // CDT fat-ring arcs (pack plans kind-12 bands from these)
   const fallback9 = [];   // loop/cusp segs → the caller's per-shape Slug fallback
+  let hasCurve9 = false;  // any quad/rquad/cubic seg → keeps the crossing-split cubic-only (arcRing safety)
   let blendTier9 = false; // audit-marginal (fur): pieces keep BLEND compositing
   const cubicRecs = [];   // per fan-tri cubic hull records: { vis, P(2x3 or 4), rows(K/L/M)|F, sign }
   const cubics = [];      // mesh.cubics output (kind 2/4)
@@ -57,31 +103,13 @@ export function buildLoopBlinnPartition(contours, opts) {
     contourIdx9++;
     if (!segs.length) continue;
     let interiorSign = calibrateInterior(segs, (pp) => inkAt(pp[0], pp[1]));
-    // VERIFY the calibration with a direct probe: pick the longest LINE seg and
-    // test a point just inside its interior-side normal. A wrong sign here put
-    // every kind-10 strip on the INK side of straight edges — the G's crossbar
-    // lost its entire outside partial row (Slug 166 vs LB 255, 646 px>0.3 at
-    // 2.5×) while the inside double-blended.
-    {
-      let bi9 = -1, bl9 = 0;
-      for (let si9 = 0; si9 < segs.length; si9++) {
-        const s8 = segs[si9];
-        if (s8.type !== SEG_LINE) continue;
-        const l8 = Math.hypot(s8.p2[0] - s8.p1[0], s8.p2[1] - s8.p1[1]);
-        if (l8 > bl9) { bl9 = l8; bi9 = si9; }
-      }
-      if (bi9 >= 0 && bl9 > 1e-9) {
-        const s8 = segs[bi9];
-        const ex8 = s8.p2[0] - s8.p1[0], ey8 = s8.p2[1] - s8.p1[1];
-        const mx8 = (s8.p1[0] + s8.p2[0]) / 2, my8 = (s8.p1[1] + s8.p2[1]) / 2;
-        // interior side of the edge = +interiorSign × left-normal
-        const off8 = Math.min(bl9 * 0.25, 0.01 * Math.max(_xb - _xa, _yb - _ya));
-        const nx8 = (-ey8 / bl9) * interiorSign, ny8 = (ex8 / bl9) * interiorSign;
-        const inIn8 = inkAt(mx8 + nx8 * off8, my8 + ny8 * off8);
-        const inOut8 = inkAt(mx8 - nx8 * off8, my8 - ny8 * off8);
-        if (!inIn8 && inOut8) interiorSign = -interiorSign;
-      }
-    }
+    // VERIFY the calibration with a direct travel-frame probe. A wrong sign here put
+    // every kind-10 strip on the INK side of straight edges — the G's crossbar lost its
+    // entire outside partial row (Slug 166 vs LB 255, 646 px>0.3 at 2.5×) while the
+    // inside double-blended. Originally line-only; generalized to any seg type (secant
+    // tangents) because LINE-LESS contours — glyph bowls like the '8' — were never
+    // verified, and their kind-12 bands inherited inverted normals/corner types.
+    interiorSign = verifyInteriorSign(segs, (pp) => inkAt(pp[0], pp[1]), interiorSign);
     const outwardSign = -interiorSign;
     const tg = segs.map(segTangents);
     for (let si = 0; si < segs.length; si++) {
@@ -98,6 +126,7 @@ export function buildLoopBlinnPartition(contours, opts) {
         continue;
       }
       if (s9.type === SEG_CUBIC) {
+        hasCurve9 = true;
         const P0 = [s9.p1, s9.p2, s9.p3, s9.p4];
         // loop/cusp cubics: same treatment as the legacy path — the seg joins
         // the per-shape Slug fallback list and its chord becomes a constraint
@@ -147,6 +176,15 @@ export function buildLoopBlinnPartition(contours, opts) {
           // CHORD (not the ctrl sag): near-flat sub-pieces have ctrl-mid ≈ ON
           // the curve, so a sag-scaled probe landed within fp of the boundary
           // and tied randomly (the subdivided leaf shattered into ±wedges).
+          //
+          // Distance is 0.01·chord, NOT 0.05: a chord-fraction probe OVERSHOOTS a
+          // fill thinner than the offset, reads the far side, and flips the crescent
+          // sign — the whole crescent then paints AIR and the self-audit declines the
+          // shape to Slug. Thin fills (tiger fur) were the dominant decline; 0.01
+          // clears the boundary fp-tie yet stays inside the thinnest real fills
+          // (tiger 107→113 shapes on LB, corpus otherwise unchanged). Point-winding
+          // (inkAt) here beats the contour-global sideInFill the fast mesh uses —
+          // that trusts interiorSign, which is miscalibrated on some shapes (Salmon).
           const cm9 = cubicPt(P, 0.5);
           const ctrlMid9 = [(P[1][0] + P[2][0]) / 2, (P[1][1] + P[2][1]) / 2];
           let ccx9 = false;
@@ -158,7 +196,7 @@ export function buildLoopBlinnPartition(contours, opts) {
             const chord9 = Math.hypot(P[3][0] - P[0][0], P[3][1] - P[0][1]);
             if (nl9 > 1e-12 && chord9 > 1e-12) {
               if (nx9 * (ctrlMid9[0] - cm9[0]) + ny9 * (ctrlMid9[1] - cm9[1]) < 0) { nx9 = -nx9; ny9 = -ny9; }
-              const off9 = 0.05 * chord9;
+              const off9 = 0.01 * chord9;
               ccx9 = inkAt(cm9[0] + (nx9 / nl9) * off9, cm9[1] + (ny9 / nl9) * off9);
               // INVISIBLE BOUNDARY (both sides ink — a same-wound nested contour
               // under nonzero): same rule as the quad branch; the pieces fill
@@ -215,12 +253,32 @@ export function buildLoopBlinnPartition(contours, opts) {
                 [klmn9.k[hull9[tr9[2]]], klmn9.l[hull9[tr9[2]]], klmn9.m[hull9[tr9[2]]]],
               ] : null,
               F: F9, sign: sgn9, cp: P,
+              // Kind-12 end meta: real at contour-segment ends; type-0 stub at split joints.
+              e1: pieceIdx9 === 0 ? edgeEndMeta(segs, tg, si, 0, interiorSign)
+                : { nN: [0, 0], k: 0, type: 0, curve: true, tsign: 1, qn: true, turn: 0 },
+              e2: pieceIdx9 === pieces9.length - 1 ? edgeEndMeta(segs, tg, si, 1, interiorSign)
+                : { nN: [0, 0], k: 0, type: 0, curve: true, tsign: 1, qn: true, turn: 0 },
+              a: P[0], b: P[3],
+              na: (() => {
+                const u = (x, y) => { const L = Math.hypot(x, y); return L > 1e-12 ? [x / L, y / L] : null; };
+                return u(P[1][0] - P[0][0], P[1][1] - P[0][1])
+                  || u(P[2][0] - P[0][0], P[2][1] - P[0][1])
+                  || u(P[3][0] - P[0][0], P[3][1] - P[0][1]);
+              })(),
+              nb: (() => {
+                const u = (x, y) => { const L = Math.hypot(x, y); return L > 1e-12 ? [x / L, y / L] : null; };
+                const tB = u(P[3][0] - P[2][0], P[3][1] - P[2][1])
+                  || u(P[3][0] - P[1][0], P[3][1] - P[1][1])
+                  || u(P[3][0] - P[0][0], P[3][1] - P[0][1]);
+                return tB ? [-tB[0], -tB[1]] : null;
+              })(),
             });
           }
         }
         continue;
       }
       // quad/rquad: ctrl is a vertex; hull edges are constraints (the Loop-Blinn paper's key move)
+      hasCurve9 = true;
       const w9q = s9.type === SEG_RQUAD ? (s9.w || 1) : 1;
       const a = add(s9.p1), c = add(s9.p2), b = add(s9.p3);
       // near-flat arcs (sag ≪ chord) produce degenerate hulls: no usable frame,
@@ -277,7 +335,9 @@ export function buildLoopBlinnPartition(contours, opts) {
       }
       hulls.push({ a: [s9.p1[0], s9.p1[1]], c: [s9.p2[0], s9.p2[1]], b: [s9.p3[0], s9.p3[1]], ai: a, ci: c, bi: b, sign, w: w9q, si9: si,
         fat: fatArc(s9.p1[0], s9.p1[1], s9.p2[0], s9.p2[1], s9.p3[0], s9.p3[1]), ci9: contourIdx9 });
-      stripArcs.push({ tri: new Float32Array([s9.p1[0], s9.p1[1], s9.p2[0], s9.p2[1], s9.p3[0], s9.p3[1]]), sign, w: w9q, ci9: contourIdx9, si9: si });
+      // e1/e2: kind-12 band end metadata (neighbour normal/curvature/type per end).
+      stripArcs.push({ tri: new Float32Array([s9.p1[0], s9.p1[1], s9.p2[0], s9.p2[1], s9.p3[0], s9.p3[1]]), sign, w: w9q, ci9: contourIdx9, si9: si,
+        e1: edgeEndMeta(segs, tg, si, 0, interiorSign), e2: edgeEndMeta(segs, tg, si, 1, interiorSign) });
     }
   }
   if (!pts.length) return null;
@@ -324,10 +384,9 @@ export function buildLoopBlinnPartition(contours, opts) {
           const A9 = info9[i9].bb, B9 = info9[j9].bb;
           if (!(B9[0] >= A9[0] && B9[1] >= A9[1] && B9[2] <= A9[2] && B9[3] <= A9[3] && info9[j9].w !== 0 && info9[j9].w === -info9[i9].w)) continue;
           counters9++;
-          // THIN RING (counter within ~6% of the outer on every side — the
-          // MuseoSans-300 '0'): the band is thinner than the split machinery's
-          // reach and interior faces leak past the outer curve (7px 1.00).
-          // The legacy path's audit handles this outlier at 4px; bail.
+          // A counter within roughly 10% of the outer boundary on every side
+          // is thinner than the split machinery's reach; interior faces can
+          // leak past the outer curve, so retain the fallback route.
           const ow9 = A9[2] - A9[0], oh9 = A9[3] - A9[1];
           const m9 = 0.10 * Math.max(ow9, oh9);
           // curve bands only: the leak class is CURVE frames drifting in a thin
@@ -339,31 +398,17 @@ export function buildLoopBlinnPartition(contours, opts) {
             if (curved9) return null;
           }
         }
-        // ≥2 counters alone is fine ('B', double-storey 'g' measure clean here) —
-        // the failing shape is the PINCH: two counters so close that the outer
-        // contour's waist between them is a multi-boundary pixel ('8'). Bail
-        // only when two counters of this outer approach within ~6% of its size.
-        if (counters9 >= 2) {
-          const cbs9 = [];
-          for (let j9 = 0; j9 < info9.length; j9++) {
-            if (j9 === i9) continue;
-            const A9 = info9[i9].bb, B9 = info9[j9].bb;
-            if (B9[0] >= A9[0] && B9[1] >= A9[1] && B9[2] <= A9[2] && B9[3] <= A9[3] && info9[j9].w === -info9[i9].w) cbs9.push(B9);
-          }
-          const g9 = 0.06 * Math.max(info9[i9].bb[2] - info9[i9].bb[0], info9[i9].bb[3] - info9[i9].bb[1]);
-          for (let a9 = 0; a9 < cbs9.length; a9++) for (let b9 = a9 + 1; b9 < cbs9.length; b9++) {
-            const P9 = cbs9[a9], Q9 = cbs9[b9];
-            const gx9 = Math.max(P9[0], Q9[0]) - Math.min(P9[2], Q9[2]);
-            const gy9 = Math.max(P9[1], Q9[1]) - Math.min(P9[3], Q9[3]);
-            if (Math.max(gx9, gy9) < g9) return null;
-          }
-        }
+        // ≥2 counters alone is fine ('B', double-storey 'g'). A PINCH waist ('8')
+        // used to bail on a bbox-% gap heuristic; that is gone — kind-12 must own
+        // the multi-boundary pixel (near-antiparallel partition + honesty radius)
+        // without falling back to Slug. Thin-ring bail above stays: that failure
+        // is interior leak, not corner coverage.
       }
     }
   }
   // COINCIDENT-EDGE composites (abutting cell subpaths): a straight edge whose
   // exact reverse appears in another subpath is INTERNAL — not a boundary. It
-  // stays a CDT constraint, but must carry no AA payload (edge rows/strips/caps
+  // stays a CDT constraint, but must carry no AA payload (edge rows/bands
   // were dipping every shared grout line to ~0.7 coverage).
   {
     const seen9 = new Map();
@@ -381,19 +426,35 @@ export function buildLoopBlinnPartition(contours, opts) {
   // (kappa circle quadrants → a diamond through an evenodd ring's band) that
   // properly cross other hull edges — a CDT cannot honor both and drops faces
   // around the crossing (the cubicRing wedge slashes). Split every properly-
-  // crossing pair at the intersection, same as the legacy path. CUBIC-ONLY:
-  // quad/rquad hull edges never properly cross (their shapes were green before
-  // this existed) and the split points broke rquad-ring exactness (arcRing).
-  for (let pass9 = 0; pass9 < (cubicRecs.length ? 4 : 0); pass9++) {
-    let split9 = false;
-    outer9:
+  // crossing pair at the intersection, same as the fast path. Fires for CUBIC
+  // shapes (hull closing chords) and for ALL-STRAIGHT shapes (self-crossing
+  // outlines — pentagram/bowtie — whose contour edges genuinely cross; these are
+  // pure contour constraints so there are no quad/rquad hull edges to disturb).
+  // Quad/rquad shapes stay excluded: their hull edges never properly cross and the
+  // split points broke rquad-ring exactness (arcRing).
+  // Split EVERY properly-crossing pair found per sweep (a constraint that
+  // splits moves to the next i — its halves get re-scanned next pass).
+  // The old one-split-per-pass restart made this O(passes·C²) AND capped
+  // TOTAL splits at the pass count (8): shapes with more crossings (dense
+  // cubic closing-chords, complex self-crossing outlines) left crossings
+  // unsplit, and the CDT dropped faces around them with no fallback.
+  for (let pass9 = 0; pass9 < ((cubicRecs.length || !hasCurve9) ? 32 : 0); pass9++) {
+    let nSplit9 = 0;
     for (let i9 = 0; i9 < constraints.length; i9++) {
       const [a9, b9] = constraints[i9];
       const A9 = pts[a9], B9 = pts[b9];
+      // Constraint i9's bbox, hoisted out of the inner scan: two segments whose
+      // AABBs are disjoint cannot cross, so the reject below skips the intersection
+      // math (2 divisions) for the vast majority of pairs on segment-heavy shapes —
+      // an exact filter, so the SAME crossings are found in the SAME order.
+      const ax09 = A9[0] < B9[0] ? A9[0] : B9[0], ax19 = A9[0] < B9[0] ? B9[0] : A9[0];
+      const ay09 = A9[1] < B9[1] ? A9[1] : B9[1], ay19 = A9[1] < B9[1] ? B9[1] : A9[1];
       for (let j9 = i9 + 1; j9 < constraints.length; j9++) {
         const [c9, d9] = constraints[j9];
         if (c9 === a9 || c9 === b9 || d9 === a9 || d9 === b9) continue;
         const C9 = pts[c9], D9 = pts[d9];
+        if (ax19 < (C9[0] < D9[0] ? C9[0] : D9[0]) || (C9[0] < D9[0] ? D9[0] : C9[0]) < ax09
+          || ay19 < (C9[1] < D9[1] ? C9[1] : D9[1]) || (C9[1] < D9[1] ? D9[1] : C9[1]) < ay09) continue;
         const r9x = B9[0] - A9[0], r9y = B9[1] - A9[1], s9x = D9[0] - C9[0], s9y = D9[1] - C9[1];
         const den9 = r9x * s9y - r9y * s9x;
         if (Math.abs(den9) < 1e-18) continue;
@@ -408,11 +469,11 @@ export function buildLoopBlinnPartition(contours, opts) {
         steiner9.push({ pt: X9, pa: [A9[0], A9[1]], pb: [B9[0], B9[1]], pc: [C9[0], C9[1]], pd: [D9[0], D9[1]] });
         constraints[i9] = [a9, xi9]; constraints.push([xi9, b9]);
         constraints[j9] = [c9, xi9]; constraints.push([xi9, d9]);
-        split9 = true;
-        break outer9;
+        nSplit9++;
+        break;   // constraint i9 changed — its halves re-scan next pass
       }
     }
-    if (!split9) break;
+    if (!nSplit9) break;
   }
   let cdtRes = null;
   try { cdtRes = constrainedTriangulate(pts, constraints); } catch { cdtRes = null; }
@@ -449,35 +510,14 @@ export function buildLoopBlinnPartition(contours, opts) {
     ];
   };
 
-  // ---- THIN-CHANNEL mutual clip -----------------------------------------
-  // A face inside boundary A's hull can extend across a DIFFERENT boundary B
-  // that comes close (the '8' waist, thin glyph rings, the '?' hook's stroke
-  // channel). One face carries one frame, so A's coverage paints straight
-  // across B's curve. Clip such member faces to B's INK side — the clip edge
-  // is exact geometry hidden under B's own AA band; the dropped side is B's
-  // air. Candidates come from the grids; adjacent boundaries (shared curve
-  // endpoints) are exempt (their curves join smoothly).
-  const flatCurve9 = (kind9, i9) => {
-    const out9 = [];
-    if (kind9 === 0) {
-      const h9 = hulls[i9], w9 = h9.w || 1;
-      for (let k9 = 0; k9 <= 8; k9++) {
-        const t9 = k9 / 8, u9 = 1 - t9;
-        const a9 = u9 * u9, b9 = 2 * w9 * u9 * t9, c9 = t9 * t9, den9 = a9 + b9 + c9;
-        out9.push([(a9 * h9.a[0] + b9 * h9.c[0] + c9 * h9.b[0]) / den9, (a9 * h9.a[1] + b9 * h9.c[1] + c9 * h9.b[1]) / den9]);
-      }
-    } else {
-      const P9 = cubicRecs[i9].cp;
-      for (let k9 = 0; k9 <= 8; k9++) {
-        const t9 = k9 / 8, u9 = 1 - t9;
-        out9.push([
-          u9 * u9 * u9 * P9[0][0] + 3 * u9 * u9 * t9 * P9[1][0] + 3 * u9 * t9 * t9 * P9[2][0] + t9 * t9 * t9 * P9[3][0],
-          u9 * u9 * u9 * P9[0][1] + 3 * u9 * u9 * t9 * P9[1][1] + 3 * u9 * t9 * t9 * P9[2][1] + t9 * t9 * t9 * P9[3][1],
-        ]);
-      }
-    }
-    return out9;
-  };
+  // ---- THIN-CHANNEL whole-face AIR drop ---------------------------------
+  // A member face can lie entirely on a nearby SAME-CONTOUR boundary's AIR side
+  // (whisker faces beyond a thin channel's far wall: the '8' waist, thin glyph
+  // rings, the '?' hook). emitClipped9 drops such faces using the exact
+  // per-boundary implicit inkSideF9. (The old partial chord clip that reshaped
+  // STRADDLING faces — flatCurve9/clipToInk9 — flattened the boundary to a fixed
+  // 8 em-space chords, a scale-bounded approximation with no device error bound;
+  // it was inert under the shipping PART_CHAIN route and is removed.)
   const inkSideF9 = (kind9, i9, x9, y9) => {
     if (kind9 === 0) {
       const h9 = hulls[i9];
@@ -493,82 +533,8 @@ export function buildLoopBlinnPartition(contours, opts) {
   const endKeys9 = (kind9, i9) => kind9 === 0
     ? [key(hulls[i9].a), key(hulls[i9].b)]
     : [key(cubicRecs[i9].cp[0]), key(cubicRecs[i9].cp[3])];
-  // Clip a polygon to the candidate's ink side using its flattened curve.
-  // Only segments whose bbox touches the polygon's participate (the curve is
-  // locally monotone through a small face, so 1-3 near-parallel half-planes).
-  const clipToInk9 = (poly9, kind9, i9) => {
-    const pl9 = flatCurve9(kind9, i9);
-    let x09 = Infinity, x19 = -Infinity, y09 = Infinity, y19 = -Infinity;
-    for (const P9 of poly9) { if (P9[0] < x09) x09 = P9[0]; if (P9[0] > x19) x19 = P9[0]; if (P9[1] < y09) y09 = P9[1]; if (P9[1] > y19) y19 = P9[1]; }
-    const pad9 = 1e-9 + 0.05 * Math.max(x19 - x09, y19 - y09);
-    let out9 = poly9, touched9 = false;
-    for (let k9 = 0; k9 + 1 < pl9.length && out9.length; k9++) {
-      const [px9, py9] = pl9[k9], [qx9, qy9] = pl9[k9 + 1];
-      if (Math.max(px9, qx9) < x09 - pad9 || Math.min(px9, qx9) > x19 + pad9 ||
-          Math.max(py9, qy9) < y09 - pad9 || Math.min(py9, qy9) > y19 + pad9) continue;
-      const ex9 = qx9 - px9, ey9 = qy9 - py9;
-      const el9 = Math.hypot(ex9, ey9);
-      if (el9 < 1e-12) continue;
-      // the SEGMENT itself must cross the polygon (or end inside): pure hull
-      // overlap without a curve crossing must not cut (the thick '0' lost
-      // whole band faces to the cut line's INFINITE extension)
-      {
-        let touch9 = false;
-        const inP9 = (x9, y9) => {
-          let in8 = false;
-          for (let a9 = 0, b9 = out9.length - 1; a9 < out9.length; b9 = a9++) {
-            const Ax9 = out9[a9][0], Ay9 = out9[a9][1], Bx9 = out9[b9][0], By9 = out9[b9][1];
-            if ((Ay9 > y9) !== (By9 > y9) && x9 < Ax9 + (y9 - Ay9) / (By9 - Ay9) * (Bx9 - Ax9)) in8 = !in8;
-          }
-          return in8;
-        };
-        if (inP9(px9, py9) || inP9(qx9, qy9)) touch9 = true;
-        else for (let a9 = 0, b9 = out9.length - 1; a9 < out9.length && !touch9; b9 = a9++) {
-          const Ax9 = out9[a9][0], Ay9 = out9[a9][1], Bx9 = out9[b9][0], By9 = out9[b9][1];
-          const d19 = (qx9 - px9) * (Ay9 - py9) - (qy9 - py9) * (Ax9 - px9);
-          const d29 = (qx9 - px9) * (By9 - py9) - (qy9 - py9) * (Bx9 - px9);
-          const d39 = (Bx9 - Ax9) * (py9 - Ay9) - (By9 - Ay9) * (px9 - Ax9);
-          const d49 = (Bx9 - Ax9) * (qy9 - Ay9) - (By9 - Ay9) * (qx9 - Ax9);
-          if (((d19 > 0) !== (d29 > 0)) && ((d39 > 0) !== (d49 > 0))) touch9 = true;
-        }
-        if (!touch9) continue;
-      }
-      const mx9 = (px9 + qx9) / 2, my9 = (py9 + qy9) / 2;
-      // keep-side by the candidate's OWN implicit at both offsets (exact for
-      // Bezout, locally exact for klmn/quad frames near their curve): winding
-      // probes can tie inside sub-pixel channels. Winding remains the tiebreak
-      // when the frame can't decide.
-      // hug the curve: the frame's SIGN is exact arbitrarily close to it, and a
-      // probe wider than the channel can read the same on both sides.
-      const off9 = Math.min(el9, pad9) * 0.05 + 1e-9;
-      const lx9 = mx9 - (ey9 / el9) * off9, ly9 = my9 + (ex9 / el9) * off9;
-      const rx9 = mx9 + (ey9 / el9) * off9, ry9 = my9 - (ex9 / el9) * off9;
-      const fL9 = inkSideF9(kind9, i9, lx9, ly9);
-      const fR9 = inkSideF9(kind9, i9, rx9, ry9);
-      let keep9;
-      if (fL9 < 0 !== fR9 < 0) keep9 = fL9 < 0 ? 1 : -1;
-      else {
-        const iL9 = inkAt(lx9, ly9), iR9 = inkAt(rx9, ry9);
-        if (iL9 === iR9) continue;
-        keep9 = iL9 ? 1 : -1;
-      }
-      const side9 = (x9, y9) => keep9 * (ex9 * (y9 - py9) - ey9 * (x9 - px9));
-      const nxt9 = [];
-      for (let v9 = 0; v9 < out9.length; v9++) {
-        const Pc9 = out9[v9], Qc9 = out9[(v9 + 1) % out9.length];
-        const sP9 = side9(Pc9[0], Pc9[1]), sQ9 = side9(Qc9[0], Qc9[1]);
-        if (sP9 >= 0) nxt9.push(Pc9);
-        if ((sP9 >= 0) !== (sQ9 >= 0)) {
-          const tt9 = sP9 / (sP9 - sQ9);
-          nxt9.push([Pc9[0] + (Qc9[0] - Pc9[0]) * tt9, Pc9[1] + (Qc9[1] - Pc9[1]) * tt9]);
-        }
-      }
-      out9 = nxt9;
-      touched9 = true;
-    }
-    return touched9 ? out9 : null;   // null = untouched (emit the original)
-  };
-  // Emit a member face, clipped against every nearby foreign boundary.
+  // Emit a member face, dropping it when it lies WHOLLY on a nearby same-contour
+  // boundary's air side.
   const emitClipped9 = (kind9, own9, A9, B9, C9, emit9) => {
     const x09 = Math.min(A9[0], B9[0], C9[0]), x19 = Math.max(A9[0], B9[0], C9[0]);
     const y09 = Math.min(A9[1], B9[1], C9[1]), y19 = Math.max(A9[1], B9[1], C9[1]);
@@ -580,8 +546,7 @@ export function buildLoopBlinnPartition(contours, opts) {
         const lc9 = cubicGrid.get(k9); if (lc9) for (const i9 of lc9) cands9.add(i9 * 2 + 1);
       }
     const ownKeys9 = endKeys9(kind9, own9);
-    let poly9 = [[A9[0], A9[1]], [B9[0], B9[1]], [C9[0], C9[1]]];
-    let any9 = false;
+    const poly9 = [[A9[0], A9[1]], [B9[0], B9[1]], [C9[0], C9[1]]];
     for (const enc9 of cands9) {
       const ck9 = enc9 & 1, ci9 = enc9 >> 1;
       if (ck9 === (kind9 === 0 ? 0 : 1) && ci9 === own9) continue;
@@ -679,20 +644,14 @@ export function buildLoopBlinnPartition(contours, opts) {
             if (f9 > 1e-6) pos9++; else if (f9 < -1e-6) neg9++;
           }
           // fp-noise-proof epsilons: 1e-12 flipped verdicts across translations
-          // (the position-independence smoke: 33q vs 32q at offset 0.0312)
-          if (pos9 === poly9.length) poly9 = [];
-          if (!poly9.length) return;
-          if (neg9 === poly9.length) continue;   // wholly on the candidate's ink side
+          // (caught by the position-independence smoke)
+          if (pos9 === poly9.length) return;   // face wholly on this boundary's AIR side → drop
+          // neg9 === length (wholly ink) or a straddle: this candidate does not
+          // drop the face — keep scanning the rest.
         }
       }
-      const res9 = clipToInk9(poly9, ck9, ci9);
-      if (res9 === null) continue;
-      any9 = true;
-      poly9 = res9;
-      if (!poly9.length) return;
     }
-    if (!any9) { emit9(A9, B9, C9); return; }
-    for (let v9 = 1; v9 + 1 < poly9.length; v9++) emit9(poly9[0], poly9[v9], poly9[v9 + 1]);
+    emit9(A9, B9, C9);
   };
 
 
@@ -713,7 +672,7 @@ export function buildLoopBlinnPartition(contours, opts) {
   // standard-frame uv of a point in a hull (affine barycentric)
   const uvIn = uvInHull;   // module-level (shared with the morph pair transform)
 
-  const interior = [];
+  let interior = [];
   const hullEdgeOf = new Map();   // face-edge key → hull idx, filled by pass 1 (hull members)
   const hullVertOf = new Map();   // vertex idx → hull idx (junction fans share only a vertex)
   const ekey9 = (i9, j9) => i9 < j9 ? i9 * 2097152 + j9 : j9 * 2097152 + i9;
@@ -736,8 +695,10 @@ export function buildLoopBlinnPartition(contours, opts) {
             const ra9 = cubicRowsAt(r9, Pa9[0], Pa9[1]), rb9 = cubicRowsAt(r9, Pb9[0], Pb9[1]), rc9 = cubicRowsAt(r9, Pc9[0], Pc9[1]);
             if (!ra9 || !rb9 || !rc9) return;
             cubics.push({ hull: new Float32Array([Pa9[0], Pa9[1], Pb9[0], Pb9[1], Pc9[0], Pc9[1]]),
-              klmn: new Float32Array([...ra9, ...rb9, ...rc9]), sign: r9.sign, cp: r9.cp, _ri9: cri9 });
-          } else cubics.push({ hull: new Float32Array([Pa9[0], Pa9[1], Pb9[0], Pb9[1], Pc9[0], Pc9[1]]), F: r9.F, sign: r9.sign, _ri9: cri9 });
+              klmn: new Float32Array([...ra9, ...rb9, ...rc9]), sign: r9.sign, cp: r9.cp, _ri9: cri9,
+              e1: r9.e1, e2: r9.e2, a: r9.a, b: r9.b, na: r9.na, nb: r9.nb });
+          } else cubics.push({ hull: new Float32Array([Pa9[0], Pa9[1], Pb9[0], Pb9[1], Pc9[0], Pc9[1]]), F: r9.F, sign: r9.sign, cp: r9.cp, _ri9: cri9,
+              e1: r9.e1, e2: r9.e2, a: r9.a, b: r9.b, na: r9.na, nb: r9.nb });
         });
         continue;
       }
@@ -784,9 +745,11 @@ export function buildLoopBlinnPartition(contours, opts) {
             const ra9 = cubicRowsAt(r9, Pa9[0], Pa9[1]), rb9 = cubicRowsAt(r9, Pb9[0], Pb9[1]), rc9 = cubicRowsAt(r9, Pc9[0], Pc9[1]);
             if (!ra9 || !rb9 || !rc9) return;
             cubics.push({ hull: new Float32Array([Pa9[0], Pa9[1], Pb9[0], Pb9[1], Pc9[0], Pc9[1]]),
-              klmn: new Float32Array([...ra9, ...rb9, ...rc9]), sign: r9.sign, cp: r9.cp, _ri9: hit9 });
+              klmn: new Float32Array([...ra9, ...rb9, ...rc9]), sign: r9.sign, cp: r9.cp, _ri9: hit9,
+              e1: r9.e1, e2: r9.e2, a: r9.a, b: r9.b, na: r9.na, nb: r9.nb });
             emitted9 = true;
-          } else { cubics.push({ hull: new Float32Array([Pa9[0], Pa9[1], Pb9[0], Pb9[1], Pc9[0], Pc9[1]]), F: r9.F, sign: r9.sign, _ri9: hit9 }); emitted9 = true; }
+          } else { cubics.push({ hull: new Float32Array([Pa9[0], Pa9[1], Pb9[0], Pb9[1], Pc9[0], Pc9[1]]), F: r9.F, sign: r9.sign, cp: r9.cp, _ri9: hit9,
+              e1: r9.e1, e2: r9.e2, a: r9.a, b: r9.b, na: r9.na, nb: r9.nb }); emitted9 = true; }
         });
         continue;
       }
@@ -844,13 +807,12 @@ export function buildLoopBlinnPartition(contours, opts) {
       const h = hulls[hin];
       const t0 = uvIn(h, A[0], A[1]), t1 = uvIn(h, B[0], B[1]), t2 = uvIn(h, C[0], C[1]);
       if (t0 && t1 && t2) {
-        // _fat: the HULL's fatness (the ring/±2 pairing criterion) — with the exact
-        // per-segment sign, ±2 both-sides = saturate the ink side + ramp the other:
-        // the outside AA band that closes the 0.3-level seam class.
         emitClipped9(0, hin, A, B, C, (Pa9, Pb9, Pc9) => {
           const ta9 = uvIn(h, Pa9[0], Pa9[1]), tb9 = uvIn(h, Pb9[0], Pb9[1]), tc9 = uvIn(h, Pc9[0], Pc9[1]);
           if (!ta9 || !tb9 || !tc9) return;
-          quads.push({ tri: new Float32Array([Pa9[0], Pa9[1], Pb9[0], Pb9[1], Pc9[0], Pc9[1]]), sign: h.sign, w: h.w || 1, _fat: (h.w || 1) === 1 ? !!h.fat : undefined, _hi9: hin,
+          // Fatness for tip-clip exemption lives on the hull (`h.fat`); pack
+          // uses live fatArc for ring vs bbox — no per-quad `_fat` stamp.
+          quads.push({ tri: new Float32Array([Pa9[0], Pa9[1], Pb9[0], Pb9[1], Pc9[0], Pc9[1]]), sign: h.sign, w: h.w || 1, _hi9: hin,
             tc: new Float32Array([ta9[0], ta9[1], ta9[2], tb9[0], tb9[1], tb9[2], tc9[0], tc9[1], tc9[2]]) });
         });
         hullEdgeOf.set(ekey9(t[0], t[1]), hin); hullEdgeOf.set(ekey9(t[1], t[2]), hin); hullEdgeOf.set(ekey9(t[2], t[0]), hin);
@@ -907,10 +869,9 @@ export function buildLoopBlinnPartition(contours, opts) {
         const h9 = hulls[best9];
         const t09 = uvIn(h9, A[0], A[1]), t19 = uvIn(h9, B[0], B[1]), t29 = uvIn(h9, C[0], C[1]);
         if (t09 && t19 && t29) {
-          // both-sides always: the straddler face carries the boundary RAMP on
-          // whichever side it pokes (its own extent is the clip; ±1 discarded the
-          // outside half of every shallow-arc boundary pixel → binary edges).
-          quads.push({ tri: new Float32Array([A[0], A[1], B[0], B[1], C[0], C[1]]), sign: h9.sign, w: h9.w || 1, _fat: (h9.w || 1) === 1 ? true : undefined, _hi9: best9,
+          // Straddler face carries the boundary ramp on whichever side it pokes
+          // (extent is the clip). Kind-12 owns exterior AA when bands are present.
+          quads.push({ tri: new Float32Array([A[0], A[1], B[0], B[1], C[0], C[1]]), sign: h9.sign, w: h9.w || 1, _hi9: best9,
             tc: new Float32Array([t09[0], t09[1], t09[2], t19[0], t19[1], t19[2], t29[0], t29[1], t29[2]]) });
           continue;
         }
@@ -925,77 +886,274 @@ export function buildLoopBlinnPartition(contours, opts) {
   // vert-mids) against exact winding. If >15% of samples mispaint, the shape
   // needs composed coverage that this builder cannot express and draws via Slug.
   if (cubics.length) {
-    let bad9 = 0, tot9 = 0;
-    for (const c9 of cubics) {
-      const H9 = c9.hull;
-      const gx9 = (H9[0] + H9[2] + H9[4]) / 3, gy9 = (H9[1] + H9[3] + H9[5]) / 3;
-      const den9 = (H9[2] - H9[0]) * (H9[5] - H9[1]) - (H9[3] - H9[1]) * (H9[4] - H9[0]);
-      for (const [px9, py9] of [[gx9, gy9],
-        [(H9[0] + gx9) / 2, (H9[1] + gy9) / 2], [(H9[2] + gx9) / 2, (H9[3] + gy9) / 2], [(H9[4] + gx9) / 2, (H9[5] + gy9) / 2],
-        [(H9[0] + H9[2]) / 2 * 0.7 + gx9 * 0.3, (H9[1] + H9[3]) / 2 * 0.7 + gy9 * 0.3],
-        [(H9[2] + H9[4]) / 2 * 0.7 + gx9 * 0.3, (H9[3] + H9[5]) / 2 * 0.7 + gy9 * 0.3],
-        [(H9[4] + H9[0]) / 2 * 0.7 + gx9 * 0.3, (H9[5] + H9[1]) / 2 * 0.7 + gy9 * 0.3],
-        [H9[0] * 0.85 + gx9 * 0.15, H9[1] * 0.85 + gy9 * 0.15],
-        [H9[2] * 0.85 + gx9 * 0.15, H9[3] * 0.85 + gy9 * 0.15],
-        [H9[4] * 0.85 + gx9 * 0.15, H9[5] * 0.85 + gy9 * 0.15]]) {
-        let f9;
-        if (c9.klmn) {
-          if (Math.abs(den9) < 1e-18) continue;
-          const w19 = ((px9 - H9[0]) * (H9[5] - H9[1]) - (py9 - H9[1]) * (H9[4] - H9[0])) / den9;
-          const w29 = ((H9[2] - H9[0]) * (py9 - H9[1]) - (H9[3] - H9[1]) * (px9 - H9[0])) / den9;
-          const w09 = 1 - w19 - w29;
-          const T9 = c9.klmn;
-          const k9 = w09 * T9[0] + w19 * T9[3] + w29 * T9[6], l9 = w09 * T9[1] + w19 * T9[4] + w29 * T9[7], m9 = w09 * T9[2] + w19 * T9[5] + w29 * T9[8];
-          f9 = c9.sign * (k9 * k9 * k9 - l9 * m9);
-        } else f9 = c9.sign * evalBezout(c9.F, px9, py9);
-        if (f9 > -1e-9 && f9 < 1e-9) continue;   // on the ramp: no verdict
-        tot9++;
-        // ONLY over-paint is a defect: a piece painting AIR is wrong wherever
-        // it happens, but NOT-painting ink is fine — an overlapping neighbour
-        // covers it (the crescent's fat pair reads 'under' all over its
-        // overlap zone and was false-flagged to Slug).
-        if (f9 < 0 && !inkAt(px9, py9)) bad9++;
+    // DROP near-degenerate cubic pieces (hull collapsed toward a POINT). Such a
+    // sub-sliver covers ~0 arc length, so removing it leaves no crack — but its
+    // implicit is numerically unstable at ~0 extent, so it emits spurious f<0 samples.
+    // Kept in the mesh those become an over-paint that GROWS with zoom (a degenerate
+    // triangle's area scales with the reuse scale); left in the audit they FALSELY
+    // decline the whole shape to Slug (1st_Fish: 3 collapsed pieces → 2 lost shapes).
+    // Extent, NOT area (a long thin crescent has tiny area yet is visible), below a
+    // sub-pixel fraction of the shape. Mutating the const array drops them from the
+    // returned mesh too, so they never render at any zoom.
+    //
+    // STATIC ONLY. A morph PAIR builds its dst cubics one-to-one against THIS src's
+    // cubics (buildLoopBlinnPartitionPair), and a piece that is degenerate at the SRC
+    // pose can grow into a real crescent at the DST pose — dropping it here would
+    // desync the pair and under-fill the dst end of the morph. Morph builds (they pass
+    // plainRows for transient mid-frames or skipCurveInterior for the pair) keep EVERY
+    // piece to preserve the src↔dst correspondence; a genuinely-degenerate over-paint
+    // there still declines via the audit below (→ correct Slug morph).
+    if (!(opts && (opts.plainRows || opts.skipCurveInterior))) {
+      let _dx0 = Infinity, _dy0 = Infinity, _dx1 = -Infinity, _dy1 = -Infinity;
+      for (const c9 of cubics) { const h9 = c9.hull;
+        for (let k9 = 0; k9 < 6; k9 += 2) {
+          if (h9[k9] < _dx0) _dx0 = h9[k9]; if (h9[k9] > _dx1) _dx1 = h9[k9];
+          if (h9[k9 + 1] < _dy0) _dy0 = h9[k9 + 1]; if (h9[k9 + 1] > _dy1) _dy1 = h9[k9 + 1];
+        } }
+      const _diag9 = Math.hypot(_dx1 - _dx0, _dy1 - _dy0) || 1;
+      // 0.3% of the shape diagonal: a hull with EVERY edge below this is collapsed
+      // toward a point (sub-pixel at sane zoom, ~0 arc length). Verified to drop only
+      // spurious sub-slivers — corpus over/drop unchanged at 1× and 4× resolution, real
+      // pieces (Salmon) untouched — while recovering falsely-declined shapes.
+      // globalThis.__LB_MIN_EDGE is a test hook (lbDegenerateCubicDropSmoke A/Bs it);
+      // 0 disables the drop. Nullish, so an explicit 0 is honoured.
+      const _mef9 = (typeof globalThis !== 'undefined' && globalThis.__LB_MIN_EDGE != null) ? globalThis.__LB_MIN_EDGE : 3e-3;
+      const _minEdge9 = _mef9 * _diag9;
+      const _kept9 = cubics.filter((c9) => {
+        const H9 = c9.hull;
+        const e019 = Math.hypot(H9[2] - H9[0], H9[3] - H9[1]);
+        const e129 = Math.hypot(H9[4] - H9[2], H9[5] - H9[3]);
+        const e209 = Math.hypot(H9[0] - H9[4], H9[1] - H9[5]);
+        return Math.max(e019, e129, e209) >= _minEdge9;
+      });
+      if (_kept9.length !== cubics.length) { cubics.length = 0; for (const c9 of _kept9) cubics.push(c9); }
+    }
+    // Sample each cubic piece's paint verdict (centroid + vert-mids) against exact
+    // winding: a piece painting AIR (f<0 && !inkAt) is a defect. Factored so the
+    // apex clip below can RE-audit the clipped pieces. Returns per-piece bad marks too.
+    const scanCubics9 = (cubs) => {
+      let bad = 0, tot = 0; const badSet = new Set();
+      for (const c9 of cubs) {
+        const H9 = c9.hull;
+        const gx9 = (H9[0] + H9[2] + H9[4]) / 3, gy9 = (H9[1] + H9[3] + H9[5]) / 3;
+        const den9 = (H9[2] - H9[0]) * (H9[5] - H9[1]) - (H9[3] - H9[1]) * (H9[4] - H9[0]);
+        let pb = 0;
+        for (const [px9, py9] of [[gx9, gy9],
+          [(H9[0] + gx9) / 2, (H9[1] + gy9) / 2], [(H9[2] + gx9) / 2, (H9[3] + gy9) / 2], [(H9[4] + gx9) / 2, (H9[5] + gy9) / 2],
+          [(H9[0] + H9[2]) / 2 * 0.7 + gx9 * 0.3, (H9[1] + H9[3]) / 2 * 0.7 + gy9 * 0.3],
+          [(H9[2] + H9[4]) / 2 * 0.7 + gx9 * 0.3, (H9[3] + H9[5]) / 2 * 0.7 + gy9 * 0.3],
+          [(H9[4] + H9[0]) / 2 * 0.7 + gx9 * 0.3, (H9[5] + H9[1]) / 2 * 0.7 + gy9 * 0.3],
+          [H9[0] * 0.85 + gx9 * 0.15, H9[1] * 0.85 + gy9 * 0.15],
+          [H9[2] * 0.85 + gx9 * 0.15, H9[3] * 0.85 + gy9 * 0.15],
+          [H9[4] * 0.85 + gx9 * 0.15, H9[5] * 0.85 + gy9 * 0.15]]) {
+          let f9;
+          if (c9.klmn) {
+            if (Math.abs(den9) < 1e-18) continue;
+            const w19 = ((px9 - H9[0]) * (H9[5] - H9[1]) - (py9 - H9[1]) * (H9[4] - H9[0])) / den9;
+            const w29 = ((H9[2] - H9[0]) * (py9 - H9[1]) - (H9[3] - H9[1]) * (px9 - H9[0])) / den9;
+            const w09 = 1 - w19 - w29;
+            const T9 = c9.klmn;
+            const k9 = w09 * T9[0] + w19 * T9[3] + w29 * T9[6], l9 = w09 * T9[1] + w19 * T9[4] + w29 * T9[7], m9 = w09 * T9[2] + w19 * T9[5] + w29 * T9[8];
+            f9 = c9.sign * (k9 * k9 * k9 - l9 * m9);
+          } else f9 = c9.sign * evalBezout(c9.F, px9, py9);
+          if (f9 > -1e-9 && f9 < 1e-9) continue;   // on the ramp: no verdict
+          tot++;
+          // ONLY over-paint is a defect: a piece painting AIR is wrong wherever it
+          // happens, but NOT-painting ink is fine — an overlapping neighbour covers it.
+          if (f9 < 0 && !inkAt(px9, py9)) { bad++; pb++; }
+        }
+        if (pb > 0) badSet.add(c9);
+      }
+      return { bad, tot, badSet };
+    };
+    let { bad: bad9, tot: tot9, badSet: badSet9 } = scanCubics9(cubics);
+    // APEX-TANGENT CLIP (static only, OPT-IN via __LB_APEX_CLIP): when a shape would
+    // decline, clip each over-painting BEZOUT crescent to the chord side of its arc's apex
+    // tangent (a supporting line for the convex sub-piece) — removing the beyond-apex region
+    // where the resultant's spurious branch paints air, with no under-fill. RE-audit; keep
+    // the shape only if the clip removed ALL over-paint (else decline, as before — no
+    // over-paint ever ships). Selective (only over-painting pieces) so clean shapes /
+    // glyphs are byte-identical. Morph builds (plainRows/skipCurveInterior) are excluded:
+    // clipping the src changes piece count and would desync the pair.
+    //
+    // Recovers the fat-poke decline class (tiger 163→154) and is over-paint-correct at 1×
+    // and 4×. DEFAULT-ON but CONVEX-ONLY (the clip below skips a piece whose removed region
+    // is INK): an air-bordering clip has no adjacent face to crack, so it is T-junction-free
+    // (tiger forced-LB drop 30→32 at 4× vs 30→49 clipping concave too). __LB_APEX_CLIP===false
+    // disables it (the smoke A/Bs that); concave over-painters still decline.
+    if (tot9 >= 8 && bad9 > 0 && !(opts && (opts.plainRows || opts.skipCurveInterior))
+        && (typeof globalThis === 'undefined' || globalThis.__LB_APEX_CLIP !== false)) {
+      let ok = true; const kept9 = [];
+      for (const c9 of cubics) {
+        if (!badSet9.has(c9)) { kept9.push(c9); continue; }
+        if (c9.klmn) { ok = false; break; }   // klmn clip needs per-vertex interp — not yet
+        const clip9 = apexTangentClip(c9.hull, c9.cp);
+        if (clip9 === null) { ok = false; break; }   // over-paint is in the apex lens; clip can't help
+        // The clip is T-JUNCTION-FREE only when the removed region is AIR (a convex
+        // crescent — its control edges border nothing): then no adjacent face gets a
+        // clip vertex mid-edge. If the removed region is INK (concave), a neighbouring
+        // interior face abuts the clip → a crack; decline instead (no half-fix).
+        if (clip9.removed.some((v) => inkAt(v[0], v[1]))) { ok = false; break; }
+        for (const tr9 of clip9.tris) kept9.push({ hull: new Float32Array([tr9[0][0], tr9[0][1], tr9[1][0], tr9[1][1], tr9[2][0], tr9[2][1]]), F: c9.F, sign: c9.sign, cp: c9.cp, _ri9: c9._ri9 });
+      }
+      if (ok) {
+        const rescan9 = scanCubics9(kept9);
+        if (!(rescan9.tot >= 8 && rescan9.bad > 0)) { cubics.length = 0; for (const c9 of kept9) cubics.push(c9); bad9 = 0; }
       }
     }
-    if (tot9 >= 8 && bad9 > 0 && bad9 * 100 > tot9 * 2) return null;
-    // AUDIT-MARGINAL shapes (some over-paint, under the Slug gate): their
-    // pieces genuinely CO-COVER pixels (thin fur), where single-owner depth
-    // under-paints and the blend union was accidentally right — mark them to
-    // keep BLEND compositing (the pack folds the flag into the kind fraction;
-    // the VS drops their pieces to the interior tier).
+    // ANY air over-paint declines to Slug (see history: the 2% tolerance shipped visible
+    // ant/Broccoli slivers). tot9>=8 keeps the noise floor.
+    if (tot9 >= 8 && bad9 > 0) return null;
+    // AUDIT-MARGINAL shapes (some over-paint, under the Slug gate): their pieces genuinely
+    // CO-COVER pixels (thin fur) — keep BLEND compositing (folded into the kind fraction).
     blendTier9 = bad9 > 0;
   }
 
-    // DEPTH-CARVE EXPERIMENT: whole interior faces (no band splitting, no
-    // healing) — the hull pieces + strips carve them via the depth test.
-    // CORNER-AWARE interior rows: run the row-attachment machinery with EMPTY
-    // arc maps — no band splitting happens, but every face gets its nearest
-    // fitting boundary line PLUS the corner's second/third lines (the
-    // kind-0 box-combine payload). Under the depth-claim cascade the interior
-    // is the JUNCTION WEDGE's owner (pieces' spans end at the corner), and
-    // multi-row box coverage is exactly the corner-combined truth there —
-    // a single row paints 1.0 where the reference ramps, and single-owner
-    // compositing turns that same gap into holes.
-    // opts.plainRows skips the corner-row attachment pass. SEGMENT morph
-    // pairs build at mid-morph lerped endpoints, where near-flip geometry
-    // degenerates the corner classification — they take plain rows on both
-    // endpoints; statics and plain (t=0/1) pairs keep the full pass.
-    const rowsPlan9 = (opts && opts.plainRows)
-      ? { solid: new Float32Array(interior),
+    // DEPTH-CARVE interior: kind-0 solids + hull crescents + kind-12 bands.
+    // Chord-adjacent interior faces must ramp by the arc (font bowls): bare
+    // solids paint 1.0 just inside the chord while AAC is ~50%. Pass hull
+    // chords into splitInteriorByCurve (same as fast-mesh) so those faces
+    // become kind-5 curveTris.
+    //
+    // plainRows: no corner-row pass (segment morph mid-frames).
+    // skipCurveInterior: corner rows with EMPTY arc maps — morph pairs
+    // transform quads via hull `_hi9`, and fill-side curveTris have no hull,
+    // so appending them makes pair build return null → Slug (lbHoleParity).
+    // Split corner triangles carrying ≥2 STRAIGHT boundary edges so every edge
+    // gets its own inner ramp (both the chain and line-row branches pack one
+    // ramp/chain per face). Skipped for the morph opts (their pair build depends
+    // on a fixed src↔dst vertex correspondence). See subdivideBoundaryTriPoints.
+    if (!(opts && (opts.plainRows || opts.skipCurveInterior)))
+      interior = subdivideBoundaryTriPoints(interior, edges);
+    // A translucent solid must use the non-overlapping partition, but a simple
+    // convex contour does not need analytic interior chains. Its curve bands
+    // already provide AA, while running a chain kernel over the large interior
+    // faces is substantially more expensive. Keep chains for every shape with
+    // a reflex corner, concave curve, hole, or non-static build.
+    const simpleConvexTranslucent9 = !!(opts && opts.transSolid)
+      && contours.length === 1
+      && cubicRecs.length === 0
+      && hulls.some((h9) => !h9.invis9)
+      && hulls.every((h9) => h9.invis9 || (h9.sign || 1) >= 0)
+      && edges.every((e9) => (!e9.e1 || e9.e1.turn >= -1e-6) && (!e9.e2 || e9.e2.turn >= -1e-6))
+      && stripArcs.every((a9) => (!a9.e1 || a9.e1.turn >= -1e-6) && (!a9.e2 || a9.e2.turn >= -1e-6));
+    let rowsPlan9;
+    if (opts && opts.plainRows) {
+      rowsPlan9 = { solid: new Float32Array(interior),
           solidEdges: selfOrientRows(interiorEdgesFromTriPoints(new Float32Array(interior), edges), interior),
-          solidEdges2: null, solidEdges3: null }
-      : splitInteriorByCurve(
+          solidEdges2: null, solidEdges3: null, curveTris: [] };
+    } else if (opts && opts.skipCurveInterior) {
+      rowsPlan9 = splitInteriorByCurve(
         new Float32Array(interior),
         selfOrientRows(interiorEdgesFromTriPoints(new Float32Array(interior), edges), interior),
         new Map(), new Map(), true, edges);
+    } else if (globalThis.__LB_PART_CHAIN !== false && hulls.length && !simpleConvexTranslucent9) {
+      // PURE-STRAIGHT shapes (no curve hulls — HUD rects, straight glyphs like
+      // E/H/L/T) skip the chain route and take the line-row ramp path below: the
+      // chain kernel leaves a rectangle's horizontal edges solid-to-boundary
+      // (a translucent over-fill ring), while the ramp path — with the corner
+      // subdivision above — matches Slug to within a corner pixel. The chain
+      // route stays the default only where it earns its keep, on curves.
+      // ANALYTIC CHAINS for the partition interior: faces carry
+      // their local rim chains instead of line rows + chord curveTris. The rim
+      // here = straight edges + hull pseudo-edges with ONE orientation rule:
+      // outward normal = perp toward the hull's REMAINING vertex (convex chord
+      // a-b -> toward ctrl; concave legs a-ctrl, ctrl-b -> toward b, a — the
+      // concave rim detours through ctrl, so the legs ARE the boundary).
+      // A hull's chain boundary = the 2-piece CURVE polyline a→m→b, m = the
+      // on-curve midpoint (a+2wc+b)/(2+2w) — approximates the true boundary to
+      // sagitta/4, resolution-independent, correct in BOTH regimes that the
+      // simpler choices break: the CHORD halves coverage at deep-sagitta bows
+      // (a box just inside a deep chord can't see the curve: truth 1.0), and
+      // the LEGS over-fill the curve's own AA band at shallow bows (a pixel
+      // whose center is inside-chord but whose box straddles the curve gets no
+      // crescent fragment to reject it). Outward normal: toward ctrl for
+      // convex (ctrl outside fill), away for concave — the fill side of the
+      // CURVE, one rule for both signs.
+      /** @type {Array<{p1:number[], p2:number[], nx:number, ny:number, c?:number[]}>} */
+      const chainEdges9 = edges.slice();
+      const pushPE9 = (P1, P2, T, toward, ctrl) => {
+        const dx = P2[0] - P1[0], dy = P2[1] - P1[1], L = Math.hypot(dx, dy);
+        if (L < 1e-9) return;
+        let nx = -dy / L, ny = dx / L;
+        const side = nx * (T[0] - P1[0]) + ny * (T[1] - P1[1]);
+        if ((side > 0) !== toward) { nx = -nx; ny = -ny; }
+        // `c` (when present) makes this pseudo-edge a real QUADRATIC for the
+        // conic chain path; the normal still describes the chord, which is all
+        // the ordering/orientation logic uses.
+        chainEdges9.push(ctrl ? { p1: P1, p2: P2, nx, ny, c: ctrl } : { p1: P1, p2: P2, nx, ny });
+      };
+      // rational-quad point at t (de Casteljau with weight w)
+      const qAt9 = (a, c, b, w, t) => {
+        const u = 1 - t, den = u * u + 2 * u * t * w + t * t;
+        return [(u * u * a[0] + 2 * u * t * w * c[0] + t * t * b[0]) / den,
+                (u * u * a[1] + 2 * u * t * w * c[1] + t * t * b[1]) / den];
+      };
+      for (const h9 of hulls) {
+        if (h9.invis9 || globalThis.__LB_PART_NOHULL === true) continue;
+        const w9 = h9.w || 1;
+        const m9 = qAt9(h9.a, h9.c, h9.b, w9, 0.5);
+        const toward9 = (h9.sign || 1) >= 0;   // convex: outward = toward ctrl
+        // Bound polyline error by the hull sagitta. Power-of-two subdivision
+        // keeps neighbouring pieces stable under small geometry changes.
+        const mx9 = (h9.a[0] + h9.b[0]) / 2, my9 = (h9.a[1] + h9.b[1]) / 2;
+        const sag9 = Math.hypot(m9[0] - mx9, m9[1] - my9);
+        const conicHull9 = globalThis.__LB_CONIC === true && Math.abs(w9 - 1) < 1e-3;
+        // Exact conic integration needs less subdivision, but the CDT still
+        // needs enough on-curve points to keep each face's chain local.
+        const tol9 = globalThis.__LB_HULL_TOL || (conicHull9 ? 0.002 : 0.00025);
+        let n9 = 2;
+        while (n9 < (globalThis.__LB_HULL_CAP || 64) && sag9 / (n9 * n9) > tol9) n9 *= 2;
+        // Conic mode carries each integral quadratic sub-arc's control point;
+        // rational quadratics stay on the polyline path.
+        const conic9 = conicHull9;
+        const subC9 = (u, v) => {
+          const w0 = (1 - u) * (1 - v), w1 = u * (1 - v) + v * (1 - u), w2 = u * v;
+          return [w0 * h9.a[0] + w1 * h9.c[0] + w2 * h9.b[0],
+                  w0 * h9.a[1] + w1 * h9.c[1] + w2 * h9.b[1]];
+        };
+        let prev9 = h9.a;
+        for (let i9 = 1; i9 <= n9; i9++) {
+          const nxt9 = i9 === n9 ? h9.b : qAt9(h9.a, h9.c, h9.b, w9, i9 / n9);
+          pushPE9(prev9, nxt9, h9.c, toward9, conic9 ? subC9((i9 - 1) / n9, i9 / n9) : null);
+          prev9 = nxt9;
+        }
+      }
+      const coords9 = [], tris9 = [];
+      for (let i9 = 0; i9 + 1 < interior.length; i9 += 2) { coords9.push([interior[i9], interior[i9 + 1]]); tris9.push(tris9.length); }
+      const ch9 = interiorChainsFromTris(coords9, tris9, chainEdges9);
+      rowsPlan9 = { solid: new Float32Array(interior), solidEdges: null, solidEdges2: null, solidEdges3: null, curveTris: [], chains9: ch9 };
+    } else {
+      const chordArcs9 = new Map(), vertexArcs9 = new Map();
+      const ck9 = (p) => Math.round((p[0] - _kox) * _koScale) * 2097152 + Math.round((p[1] - _koy) * _koScale);
+      for (const h9 of hulls) {
+        if (h9.invis9) continue;
+        const arc9 = { a: h9.a, ctrl: h9.c, b: h9.b, sign: h9.sign, w: h9.w || 1 };
+        const ka9 = ck9(h9.a), kb9 = ck9(h9.b);
+        chordArcs9.set(ka9 < kb9 ? ka9 + '|' + kb9 : kb9 + '|' + ka9, arc9);
+        let la9 = vertexArcs9.get(ka9); if (!la9) vertexArcs9.set(ka9, la9 = []); la9.push(arc9);
+        let lb9 = vertexArcs9.get(kb9); if (!lb9) vertexArcs9.set(kb9, lb9 = []); lb9.push(arc9);
+      }
+      rowsPlan9 = splitInteriorByCurve(
+        new Float32Array(interior),
+        selfOrientRows(interiorEdgesFromTriPoints(new Float32Array(interior), edges), interior),
+        chordArcs9, vertexArcs9, true, edges);
+      if (rowsPlan9.curveTris && rowsPlan9.curveTris.length)
+        for (const ct9 of rowsPlan9.curveTris) quads.push(ct9);
+    }
     const meshD9 = {
       interior: rowsPlan9.solid instanceof Float32Array ? rowsPlan9.solid : new Float32Array(rowsPlan9.solid),
-      interiorEdges: rowsPlan9.solidEdges instanceof Float32Array ? rowsPlan9.solidEdges : new Float32Array(rowsPlan9.solidEdges),
+      interiorChainA: rowsPlan9.chains9 ? rowsPlan9.chains9.chainA : undefined,
+      interiorChainB: rowsPlan9.chains9 ? rowsPlan9.chains9.chainB : undefined,
+      interiorChainC: rowsPlan9.chains9 ? rowsPlan9.chains9.chainC : undefined,
+      interiorChainD: rowsPlan9.chains9 ? rowsPlan9.chains9.chainD : undefined,
+      interiorChainE: rowsPlan9.chains9 ? rowsPlan9.chains9.chainE : undefined,
+      interiorHasChain2: rowsPlan9.chains9 ? rowsPlan9.chains9.hasChain2 : undefined,
+      interiorEdges: rowsPlan9.solidEdges == null ? null : (rowsPlan9.solidEdges instanceof Float32Array ? rowsPlan9.solidEdges : new Float32Array(rowsPlan9.solidEdges)),
       interiorEdges2: rowsPlan9.solidEdges2 ? new Float32Array(rowsPlan9.solidEdges2) : null,
       interiorEdges3: rowsPlan9.solidEdges3 ? new Float32Array(rowsPlan9.solidEdges3) : null,
       quads, cubics, edges, fallback: fallback9,
-      caps: buildCornerCaps2(contours),
-      curveStrips: true, stripArcs, _topo: null,
+      stripArcs, _topo: null,
       _blendTier9: blendTier9,   // audit-marginal: the pack keeps these shapes on blend compositing
       hulls9: hulls,   // per-seg hull recs: the morph pair transform reframes tc against the DST hulls
       cubicRecs9: cubicRecs,   // per-fan-tri cubic recs (cp + provenance) for the pair transform

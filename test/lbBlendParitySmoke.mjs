@@ -14,10 +14,7 @@ const ROOT = path.resolve(__dirname, '..');
 // A solid green diamond (analytic) overlapped by a red diamond with
 // mix-blend-mode:multiply (→ Slug fallback). The overlap multiplies to a darker
 // colour; the red-only region is red·white.
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <path d="M80 40 L140 100 L80 160 L20 100 Z" fill="#33cc33"/>
-  <path d="M120 40 L180 100 L120 160 L60 100 Z" fill="#ff3030" style="mix-blend-mode:multiply"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/lbBlendParity__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="200" height="200"></canvas>

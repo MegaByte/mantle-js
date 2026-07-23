@@ -22,8 +22,9 @@ import { defaultStyle } from './markupParser.js';
  * output if a caller wants its `colrGraphs` / `parentShapeIdx` /
  * `shapeIds` fields (createBundle reads them through too).
  */
-export async function buildTextSections(font, text, style, markup) {
+export async function buildTextSections(font, text, style, markup, opts) {
   const layout = layoutFromStyle(style);
+  if (opts && opts.gwnTree) layout.gwnTree = true;
   const spans = markup
     ? null   // buildFromMarkup parses internally
     : [{ text: text || '', style: spanStyleFromStyle(style) }];
@@ -89,6 +90,8 @@ export async function buildTextSections(font, text, style, markup) {
 
   const sections = {
     flags: raw.flags,
+    segTypeMask: raw.segTypeMask | 0,
+    totalSegments: raw.totalSegments | 0,
     metaFloatsPerShape: raw.metaFloatsPerShape,
     meta: metaAb,
     curves: curveAb,
@@ -123,11 +126,39 @@ export async function buildTextSections(font, text, style, markup) {
   return { sections, bundleSrc: raw };
 }
 
+/**
+ * Per-string typographic metrics — the SUPPORTED layout surface for text
+ * consumers (exposed as `bundle.runMetrics` / text-handle `.runMetrics`
+ * on BOTH the WebGL and native backends; refreshed by every setText/
+ * setStyle). All values are em-normalized, in the bundle's local coord
+ * space (post-shift: the bundle's globalBBox origin is (0,0); apply the
+ * same em→world scale you draw the bundle with).
+ *
+ * Prefer `typoBBox` over the bundle's ink-tight `globalBBox` when
+ * positioning labels: the typographic rect spans ascent-to-descent, so
+ * its height does not jitter with whether the current string happens to
+ * contain descenders or tall glyphs.
+ *
+ * @typedef {Object} RunMetrics
+ * @property {[number,number,number,number]} typoBBox  (xmin, ymin, w, h)
+ *   typographic rect: from `firstBaselineY - ascent` down to
+ *   `lastBaselineY + descent`, spanning the run's layout width. NOT the
+ *   ink-tight bbox (that is `bundle.globalBBox`).
+ * @property {number} firstBaselineY  Y of the first line's baseline.
+ * @property {number} lastBaselineY   Y of the last line's baseline.
+ * @property {number} baselineY       Alias of firstBaselineY (single-line
+ *   convenience).
+ * @property {number} lineCount       Laid-out line count (≥ 1).
+ * @property {number} lastLineAdvance Pen advance of the last line — where
+ *   a caret/appended run would continue.
+ */
+
 export /// Per-string typographic rect, in the bundle's local coord space
 /// (post-shift, so ymin = 0 aligns with the bundle's globalBBox
 /// origin). `typoBBox.height = fontMetrics.emHeight` is the FONT
 /// metric; ink bounds can extend past this for fonts with glyphs
 /// that rise above the ascent (rare).
+/// @returns {RunMetrics|null} null when the font exposes no metrics.
 function buildRunMetrics(raw) {
   const fm = raw.fontMetrics;
   if (!fm) return null;

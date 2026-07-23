@@ -32,8 +32,8 @@ export class MvarTable {
     const off = tables.mvar[0];
     const major = v.getUint16(off + 0, false);
     if (major !== 1) return;
-    // reserved (2), valueRecordSize (2), valueRecordCount (2),
-    // itemVariationStoreOffset (2).
+    // Header: minorVersion (+2), reserved (+4), valueRecordSize (+6),
+    // valueRecordCount (+8), itemVariationStoreOffset (+10).
     const recSize  = v.getUint16(off + 6, false);
     const recCount = v.getUint16(off + 8, false);
     const ivsOff   = v.getUint16(off + 10, false);

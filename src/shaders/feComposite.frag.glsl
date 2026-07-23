@@ -19,16 +19,20 @@
 precision highp float;
 uniform sampler2D uIn1;
 uniform sampler2D uIn2;
+uniform vec4 uIn1Map;     // vUV → uIn1 uv (see @@FILTER_RECT@@)
+uniform vec4 uIn2Map;     // vUV → uIn2 uv — a DIFFERENT rect
 uniform int uOp;
 uniform vec4 uK;          // (k1, k2, k3, k4) for arithmetic mode
 in vec2 vUV;
 out vec4 fragColor;
 
+@@FILTER_RECT@@
+
 @@PORTER_DUFF_HELPERS@@
 
 void main() {
-  vec4 a = texture(uIn1, vUV);
-  vec4 b = texture(uIn2, vUV);
+  vec4 a = sampleIn(uIn1, mapIn(vUV, uIn1Map));
+  vec4 b = sampleIn(uIn2, mapIn(vUV, uIn2Map));
   if (uOp == 5) {
     // arithmetic — operates on UNpremultiplied RGB per spec.
     vec3 ar = a.a > 0.0 ? a.rgb / a.a : a.rgb;

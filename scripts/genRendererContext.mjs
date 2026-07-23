@@ -5,7 +5,7 @@ const D = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'src'
 // Every module that reads/writes R (keep in sync with the contract-smoke
 // MODULES list + renderer.js). A stale list drops members used only across the
 // newer modules — e.g. _autoNodeClip / _recordBundleDraw — breaking check:types.
-const mods=['renderer','shaderPrograms','drawImages','instancedFill','morphDraw','drawSprites','cacheDraw','staticCache','filterDraw','clipDraw','bundleHandle','maskBake','fillPass','frameLoop','drawDispatch'];
+const mods=['renderer','shaderPrograms','drawImages','instancedFill','morphDraw','drawSprites','cacheDraw','staticCache','filterDraw','clipDraw','bundleHandle','maskBake','fillPass','frameLoop','drawDispatch','incrementalStroke'];
 const all=mods.map(m=>readFileSync(D+m+'.js','utf8')).join('\n');
 const strip=(s)=>s.replace(/\/\*[\s\S]*?\*\//g,' ').replace(/\/\/[^\n]*/g,' ');
 const src=strip(all);

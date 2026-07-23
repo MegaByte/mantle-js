@@ -275,9 +275,11 @@ function clipAgainstFatLine(ctrlA, ctrlB) {
 }
 
 // Andrew's monotone-chain convex hull. Returns CCW hull vertices.
+// The sole caller (clipAgainstFatLine) passes the distance-polygon control
+// nodes (i/(n-1), dCoeffs[i]), whose x = i/(n-1) is already strictly ascending
+// with distinct x — so the monotone chain needs no sort (it would be a no-op).
 function convexHull(points) {
-  const pts = points.slice().sort((a, b) =>
-    a[0] !== b[0] ? a[0] - b[0] : a[1] - b[1]);
+  const pts = points;
   const n = pts.length;
   if (n < 2) return pts;
   const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1])

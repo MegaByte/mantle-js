@@ -1,4 +1,4 @@
-// A1 static-cache bake of a FILTERED shape (feDropShadow) must match the live
+// Whole-asset cache bake of a FILTERED shape (feDropShadow) must match the live
 // render. Pre-fix, every "canvas" composite/backdrop bind in the filter
 // pipeline hard-bound the DEFAULT framebuffer, so during a bake the filtered
 // result composited to the real canvas and the bake RT stayed blank — the
@@ -15,15 +15,7 @@ import puppeteer from 'puppeteer';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
-  <defs>
-    <filter id="ds" x="-50%" y="-50%" width="200%" height="200%">
-      <feDropShadow dx="0" dy="4" stdDeviation="3" flood-color="#012428" flood-opacity="0.5"/>
-    </filter>
-  </defs>
-  <rect x="20" y="20" width="80" height="70" rx="10" fill="#ffffff" filter="url(#ds)"/>
-  <circle cx="60" cy="55" r="18" fill="#cc2255"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/filterBakeCache__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body><canvas id="glcanvas" width="240" height="240"></canvas>
 <script type="module">
@@ -76,7 +68,7 @@ const result = await page.evaluate(async (svg) => {
   const inkIn = (px, x0, x1) => { let n = 0; for (let y = 0; y < 240; y++) for (let x = x0; x < x1; x++) { const i = (y * 240 + x) * 4; if (px[i] < 250 || px[i + 1] < 250 || px[i + 2] < 250) n++; } return n; };
   const pairInk = { left: inkIn(pair, 0, 120), right: inkIn(pair, 120, 240) };
 
-  renderer.enableStaticCache({ strategy: CacheStrategy.ForceA1 });
+  renderer.enableStaticCache({ strategy: CacheStrategy.ForceWholeAsset });
   renderer.render();                       // bake + blit
   const cache = renderer.staticCache;
   const baked = read();

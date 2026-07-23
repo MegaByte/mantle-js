@@ -32,14 +32,8 @@ function visibleShapeCount(s) {
 
 // ---- T1: direct text-decoration="underline" -----------------------
 {
-  const plain = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <text x="10" y="50" font-family="Arial" font-size="20" fill="#000">hi</text>
-</svg>`;
-  const underlined = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <text x="10" y="50" font-family="Arial" font-size="20" fill="#000" text-decoration="underline">hi</text>
-</svg>`;
+  const plain = readFileSync(new URL('../examples/smoke/svgTextDecoration__plain.svg', import.meta.url), 'utf8');
+  const underlined = readFileSync(new URL('../examples/smoke/svgTextDecoration__underlined.svg', import.meta.url), 'utf8');
   const sP = await importSvg(plain,      { fonts: { Arial: arial }, svgTextLayout: buildSvgTextGlyphs });
   const sU = await importSvg(underlined, { fonts: { Arial: arial }, svgTextLayout: buildSvgTextGlyphs });
   const nP = visibleShapeCount(sP);
@@ -51,12 +45,7 @@ function visibleShapeCount(s) {
 
 // ---- T2: inherited from <g text-decoration=...> -------------------
 {
-  const inherited = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <g text-decoration="underline">
-    <text x="10" y="50" font-family="Arial" font-size="20" fill="#000">hi</text>
-  </g>
-</svg>`;
+  const inherited = readFileSync(new URL('../examples/smoke/svgTextDecoration__inherited.svg', import.meta.url), 'utf8');
   const s = await importSvg(inherited, { fonts: { Arial: arial }, svgTextLayout: buildSvgTextGlyphs });
   const n = visibleShapeCount(s);
   // 2 glyphs + 1 underline = 3.
@@ -66,10 +55,7 @@ function visibleShapeCount(s) {
 
 // ---- T3: line-through stacks WITH underline ----------------------
 {
-  const both = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <text x="10" y="50" font-family="Arial" font-size="20" fill="#000" text-decoration="underline line-through">hi</text>
-</svg>`;
+  const both = readFileSync(new URL('../examples/smoke/svgTextDecoration__both.svg', import.meta.url), 'utf8');
   const s = await importSvg(both, { fonts: { Arial: arial }, svgTextLayout: buildSvgTextGlyphs });
   const n = visibleShapeCount(s);
   // 2 glyphs + 2 decoration rects.
@@ -79,10 +65,7 @@ function visibleShapeCount(s) {
 
 // ---- T4: text-decoration="none" suppresses (negative case) -------
 {
-  const noneOnGrandchild = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <text x="10" y="50" font-family="Arial" font-size="20" fill="#000">hi</text>
-</svg>`;
+  const noneOnGrandchild = readFileSync(new URL('../examples/smoke/svgTextDecoration__noneOnGrandchild.svg', import.meta.url), 'utf8');
   const s = await importSvg(noneOnGrandchild, { fonts: { Arial: arial }, svgTextLayout: buildSvgTextGlyphs });
   const n = visibleShapeCount(s);
   // 2 glyphs, no decoration.

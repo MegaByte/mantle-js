@@ -173,6 +173,11 @@ function paintMerge(nodeIdx, node, inputs, outRT, ctx) {
   gl.uniform1i(feCompositeU.uIn2, 1);
   gl.uniform1i(feCompositeU.uOp, 0);
   gl.uniform4f(feCompositeU.uK, 0, 0, 0, 0);
+  // Every COLR RT is canvas-sized, so the vUV→uv maps the shared feComposite
+  // shader takes are the identity here (see src/shaders/_filterRect.glsl) —
+  // but an unset vec4 uniform is (0,0,0,0), so upload them.
+  if (feCompositeU.uIn1Map) gl.uniform4f(feCompositeU.uIn1Map, 1, 1, 0, 0);
+  if (feCompositeU.uIn2Map) gl.uniform4f(feCompositeU.uIn2Map, 1, 1, 0, 0);
   const tex = i => pool.get(inputs[i].idx).tex;
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex(1));
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, tex(0));

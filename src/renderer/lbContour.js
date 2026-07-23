@@ -5,6 +5,8 @@
 // cap machinery consume. Owns the quantized vertex-key origin (_kox/_koy):
 // every builder that registers points keys against this shared frame.
 import { SEG_LINE, SEG_QUAD, SEG_CUBIC, SEG_RQUAD, mkLine, mkQuad, mkCubic, mkRQuad } from '../primitives/seg.js';
+import { buildWindingTree, treeWinding } from './windingTree.js';
+export { treeWinding } from './windingTree.js';
 import { solveQuadratic, solveCubicInUnit } from '../svg/pathBoolean/polyRoots.js';
 
 // Per-build ORIGIN for the point-identity quantization keys (Math.round(p*64)).
@@ -18,6 +20,53 @@ import { solveQuadratic, solveCubicInUnit } from '../svg/pathBoolean/polyRoots.j
 export let _kox = 0, _koy = 0, _koScale = 64;
 
 export const _EPS = 1e-4;
+// Minimum |unit-tangent cross| (≈ sin of the turn) above which a kind-12 band
+// trusts the sampled osculating κ when chaining. Shallower joints still chain
+// (so full-κ chaining is unnecessary for the wedge) but pack κ≡0 — pure tangent
+// combine — because the 10%-sampled κ under-corrects local curvature and used to
+// claim glyph-waist interior ('8') at small scales.
+export const LB_BAND_SHARP_TURN = 0.30;
+
+// TRAVEL-FRAME verification of a contour's interiorSign: the edgeEndMeta consumers
+// (kind-10 cap-strips, kind-12 bands) need "+1 ⇔ fill on the left-perp of the travel
+// direction" EXACTLY — their outward normals and convex/reflex corner types are derived
+// from it. calibrateInterior's sliver probe answers the ctrl-side question, whose
+// relation to the travel frame depends on which seg it lands on; the CDT builder has
+// long verified it against the longest LINE seg ("a wrong sign put every kind-10 strip
+// on the INK side" — the G-crossbar class), but a LINE-LESS contour (glyph bowls: the
+// '8') was never verified and its bands inherited inverted normals/corner types (waist
+// pixels claimed at ~0.05 coverage over interior truth 0.94). This probe generalizes the
+// verification to any seg type: sample a point on the longest segs, take the SECANT
+// tangent there, and ask inFill on both perp sides; a determinate answer pins the sign.
+export function verifyInteriorSign(segs, inFill, interiorSign) {
+  const cand = [];
+  for (let i = 0; i < segs.length; i++) {
+    const s = segs[i], e = s.p4 || s.p3 || s.p2;
+    cand.push([i, Math.hypot(e[0] - s.p1[0], e[1] - s.p1[1])]);
+  }
+  cand.sort((A, B) => B[1] - A[1]);
+  for (const [i, L] of cand.slice(0, 4)) {
+    if (L < 1e-9) continue;
+    const s = segs[i];
+    for (const t of [0.5, 0.25, 0.75]) {
+      const p0 = segPt(s, t - 0.01), p1 = segPt(s, t + 0.01);
+      let dx = p1[0] - p0[0], dy = p1[1] - p0[1];
+      const dl = Math.hypot(dx, dy);
+      if (dl < 1e-12) continue;
+      dx /= dl; dy /= dl;
+      const p = segPt(s, t);
+      for (const rel of [0.02, 0.006]) {
+        const off = L * rel;
+        // claimed fill side = left-perp (−dy,dx) times the sign under test
+        const nx = -dy * (interiorSign > 0 ? 1 : -1), ny = dx * (interiorSign > 0 ? 1 : -1);
+        const inIn = inFill([p[0] + nx * off, p[1] + ny * off]);
+        const inOut = inFill([p[0] - nx * off, p[1] - ny * off]);
+        if (inIn !== inOut) return inIn ? interiorSign : -interiorSign;
+      }
+    }
+  }
+  return interiorSign;
+}
 
 export function _setKeyOrigin(contours) {
   let ox = Infinity, oy = Infinity, ox1 = -Infinity, oy1 = -Infinity;
@@ -37,32 +86,63 @@ export function _setKeyOrigin(contours) {
 // TrueType fills by winding; the even-odd parity test reads a SELF-OVERLAPPING
 // outline's overlap as a hole (spiral terminals: e/6/8/9), vetoing every interior
 // classification exactly where Slug renders solid.
+// Signed +x-ray crossings of ONE segment at (x, y) — rayWinding's per-segment body,
+// factored so the winding tree (windingTree.js) can evaluate near leaves with the exact
+// same solvers the linear walk uses.
+// dir === 0 = the ray grazes a y-extremum (apex): the curve TOUCHES, it does
+// not cross — counting it ±1 was the quad-walker miscount (the near-unfilled
+// class had the same root on the coverage walker; cubics got the apex fix
+// there, the builder's winding never did).
+export function raySegCross(s, x, y) {
+  let wsum = 0;
+  const hit = (tx, t, dir) => { if (t >= 0 && t < 1 && tx > x && dir !== 0) wsum += dir > 0 ? 1 : -1; };
+  if (s.type === SEG_LINE) { const y1 = s.p1[1], dy = s.p2[1] - y1; if (Math.abs(dy) < 1e-15) return 0;
+    const t = (y - y1) / dy; hit(s.p1[0] + t * (s.p2[0] - s.p1[0]), t, dy); return wsum; }
+  if (s.type === SEG_QUAD || s.type === SEG_RQUAD) {
+    const w = s.type === SEG_RQUAD ? s.w : 1, d1 = s.p1[1] - y, d2 = s.p2[1] - y, d3 = s.p3[1] - y;
+    const A2 = d1 - 2 * w * d2 + d3, B2 = 2 * (w * d2 - d1);
+    for (const t of solveQuadratic(A2, B2, d1)) {
+      const u = 1 - t, a = u * u, b = 2 * w * u * t, c = t * t, den = a + b + c;
+      if (Math.abs(den) > 1e-15) hit((a * s.p1[0] + b * s.p2[0] + c * s.p3[0]) / den, t, 2 * A2 * t + B2); }
+    return wsum;
+  }
+  const y1 = s.p1[1], y2 = s.p2[1], y3 = s.p3[1], y4 = s.p4[1];
+  const a3 = -y1 + 3 * y2 - 3 * y3 + y4, b3 = 3 * (y1 - 2 * y2 + y3), c3 = 3 * (y2 - y1);
+  for (const t of solveCubicInUnit(a3, b3, c3, y1 - y)) {
+    const u = 1 - t;
+    hit(u * u * u * s.p1[0] + 3 * u * u * t * s.p2[0] + 3 * u * t * t * s.p3[0] + t * t * t * s.p4[0], t,
+        3 * a3 * t * t + 2 * b3 * t + c3); }
+  return wsum;
+}
+
 export function rayWinding(segs, x, y) {
   let wsum = 0;
-  // dir === 0 = the ray grazes a y-extremum (apex): the curve TOUCHES, it does
-  // not cross — counting it ±1 was the quad-walker miscount (the near-unfilled
-  // near-unfilled class had the same root on the coverage walker; cubics got
-  // the apex fix there, the builder's winding never did).
-  const hit = (tx, t, dir) => { if (t >= 0 && t < 1 && tx > x && dir !== 0) wsum += dir > 0 ? 1 : -1; };
-  for (const s of segs) {
-    if (s.type === SEG_LINE) { const y1 = s.p1[1], dy = s.p2[1] - y1; if (Math.abs(dy) < 1e-15) continue;
-      const t = (y - y1) / dy; hit(s.p1[0] + t * (s.p2[0] - s.p1[0]), t, dy); continue; }
-    if (s.type === SEG_QUAD || s.type === SEG_RQUAD) {
-      const w = s.type === SEG_RQUAD ? s.w : 1, d1 = s.p1[1] - y, d2 = s.p2[1] - y, d3 = s.p3[1] - y;
-      const A2 = d1 - 2 * w * d2 + d3, B2 = 2 * (w * d2 - d1);
-      for (const t of solveQuadratic(A2, B2, d1)) {
-        const u = 1 - t, a = u * u, b = 2 * w * u * t, c = t * t, den = a + b + c;
-        if (Math.abs(den) > 1e-15) hit((a * s.p1[0] + b * s.p2[0] + c * s.p3[0]) / den, t, 2 * A2 * t + B2); }
-      continue;
-    }
-    const y1 = s.p1[1], y2 = s.p2[1], y3 = s.p3[1], y4 = s.p4[1];
-    const a3 = -y1 + 3 * y2 - 3 * y3 + y4, b3 = 3 * (y1 - 2 * y2 + y3), c3 = 3 * (y2 - y1);
-    for (const t of solveCubicInUnit(a3, b3, c3, y1 - y)) {
-      const u = 1 - t;
-      hit(u * u * u * s.p1[0] + 3 * u * u * t * s.p2[0] + 3 * u * t * t * s.p3[0] + t * t * t * s.p4[0], t,
-          3 * a3 * t * t + 2 * b3 * t + c3); }
-  }
+  for (const s of segs) wsum += raySegCross(s, x, y);
   return wsum;
+}
+
+// Build a winding tree over renderer segs (see windingTree.js): the CDT builder's inkAt
+// probes call rayWinding once per curved segment (side bits) plus calibration/verify —
+// O(N^2) per build on curved shapes without it. Returns null below the cutoff where the
+// linear walk wins.
+export function buildSegWindingTree(segs) {
+  if (!segs || segs.length < 48) return null;
+  const endP = (s) => s.type === SEG_LINE ? s.p2 : s.type === SEG_CUBIC ? s.p4 : s.p3;
+  return buildWindingTree(segs.length, {
+    start: (i) => segs[i].p1,
+    end: (i) => endP(segs[i]),
+    bbox: (i) => {
+      const s = segs[i];
+      let x0 = s.p1[0], y0 = s.p1[1], x1 = x0, y1 = y0;
+      for (const p of [s.p2, s.p3, s.p4]) {
+        if (!p) break;
+        if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0];
+        if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1];
+      }
+      return [x0, y0, x1, y1];
+    },
+    cross: (i, x, yr) => raySegCross(segs[i], x, yr),
+  });
 }
 
 // rayWinding along an ARBITRARY direction d (unit): project control points
@@ -137,23 +217,23 @@ export function arcToRationalQuads(cx, cy, rx, ry, th0, th1, phi) {
   return segs;
 }
 
-// A single contour that is a FULL circle (co-circular arcs summing to 2π) → its
-// centre/radius, so the builder emits ONE circular-SDF quad (kind 6): no chord
-// polygon, no crescents, no ≤90°-split seams — an exact, perfectly-smooth disk.
-// Returns null for anything else (partial arc, ellipse, mixed segs, multi-contour).
+// A single contour that is a FULL circle → centre/radius for ONE circular-SDF
+// quad (kind 7): no chord polygon, no crescents, no ≤90°-split seams.
+// Accepts (a) tagged SVG arcs (rquad.circle) summing to 2π, or (b) cubic/quad
+// kappa approximations that fit a circle within 0.002·r (same gate as extractAnnuli).
+// Returns null for partial arcs, ellipses, mixed segs, multi-contour.
 export function circleFromContours(contours) {
   if (contours.length !== 1) return null;
   const segs = contours[0];
   if (segs.length < 2) return null;
-  let c = null, total = 0, nArc = 0;
+  // Fast path: native circular rquads with an authored .circle tag.
+  let c = null, total = 0, nArc = 0, allTagged = true;
   for (const s of segs) {
-    // A closed subpath's trailing `Z` is a zero-length line — skip it; any other
-    // line (a real straight edge) means this isn't a pure circle.
     if (s.type === SEG_LINE) {
       if (Math.hypot(s.p2[0] - s.p1[0], s.p2[1] - s.p1[1]) < 1e-4) continue;
       return null;
     }
-    if (s.type !== SEG_RQUAD || !s.circle) return null;
+    if (s.type !== SEG_RQUAD || !s.circle) { allTagged = false; break; }
     if (!c) c = s.circle;
     else if (Math.abs(s.circle.cx - c.cx) > 1e-4 || Math.abs(s.circle.cy - c.cy) > 1e-4 || Math.abs(s.circle.r - c.r) > 1e-4) return null;
     let d = Math.atan2(s.p3[1] - c.cy, s.p3[0] - c.cx) - Math.atan2(s.p1[1] - c.cy, s.p1[0] - c.cx);
@@ -162,9 +242,83 @@ export function circleFromContours(contours) {
     total += d;
     nArc++;
   }
-  if (nArc < 2) return null;
-  if (Math.abs(Math.abs(total) - 2 * Math.PI) > 1e-2) return null;   // not a closed full circle
-  return { cx: c.cx, cy: c.cy, r: c.r };
+  if (allTagged) {
+    if (nArc < 2) return null;
+    if (Math.abs(Math.abs(total) - 2 * Math.PI) > 1e-2) return null;
+    return { cx: c.cx, cy: c.cy, r: c.r };
+  }
+  // Cubic/quad (kappa) closed disc: fit endpoints + on-curve samples. Same 0.002·r
+  // tolerance as extractAnnuli — kappa circles sit at ≤2.7e-4·r; ellipses reject.
+  return fitCircularContour(segs);
+}
+
+/** On-curve sample of a non-line seg at parameter t ∈ (0,1). */
+function segAt(sg, tt) {
+  const u = 1 - tt;
+  if (sg.type === SEG_LINE) return null;
+  if (sg.type === SEG_CUBIC) return [
+    u * u * u * sg.p1[0] + 3 * u * u * tt * sg.p2[0] + 3 * u * tt * tt * sg.p3[0] + tt * tt * tt * sg.p4[0],
+    u * u * u * sg.p1[1] + 3 * u * u * tt * sg.p2[1] + 3 * u * tt * tt * sg.p3[1] + tt * tt * tt * sg.p4[1]];
+  const w9 = sg.type === SEG_RQUAD ? sg.w : 1;
+  const a9 = u * u, b9 = 2 * w9 * u * tt, c9 = tt * tt, den9 = a9 + b9 + c9;
+  return [(a9 * sg.p1[0] + b9 * sg.p2[0] + c9 * sg.p3[0]) / den9,
+          (a9 * sg.p1[1] + b9 * sg.p2[1] + c9 * sg.p3[1]) / den9];
+}
+
+/** Fit a closed curve contour to a circle; null if any real straight edge or
+ *  radial residual > 0.002·r (ellipses / coarse quads). */
+export function fitCircularContour(segs) {
+  if (!segs || segs.length < 2) return null;
+  for (const s of segs) {
+    if (s.type === SEG_LINE && Math.hypot(s.p2[0] - s.p1[0], s.p2[1] - s.p1[1]) > 1e-4) return null;
+  }
+  const f = fitCircle(segs.map(s => s.p1));
+  if (!f) return null;
+  let dev = f.res;
+  for (const s of segs) for (const tt of [0.25, 0.5, 0.75]) {
+    const m = segAt(s, tt);
+    if (m) dev = Math.max(dev, Math.abs(Math.hypot(m[0] - f.cx, m[1] - f.cy) - f.r));
+  }
+  return dev <= 0.002 * f.r ? { cx: f.cx, cy: f.cy, r: f.r } : null;
+}
+
+/** Sample on-curve points of a closed curve contour (endpoints + mid-params). */
+function contourCurveSamples(segs) {
+  const pts = [];
+  for (const s of segs) {
+    // Real straight edges reject (not an ellipse). Degenerate Z-close lines are
+    // skipped — including them double-weights the start point and skews the PCA fit.
+    if (s.type === SEG_LINE) {
+      if (Math.hypot(s.p2[0] - s.p1[0], s.p2[1] - s.p1[1]) > 1e-4) return null;
+      continue;
+    }
+    pts.push(s.p1);
+    for (const tt of [0.25, 0.5, 0.75]) {
+      const m = segAt(s, tt);
+      if (m) pts.push(m);
+    }
+  }
+  return pts.length >= 5 ? pts : null;
+}
+
+/** Fit a closed curve contour to an ellipse; null if straight edges, near-circular
+ *  (circleFromContours owns those), or unit-ellipse residual > 0.004.
+ *  Returns {cx,cy,rx,ry,phi} for kind-7 elliptical-SDF discs. */
+export function fitEllipticalContour(segs) {
+  if (!segs || segs.length < 2) return null;
+  const pts = contourCurveSamples(segs);
+  if (!pts) return null;
+  const f = fitEllipse(pts);
+  if (!f || f.res > 0.004) return null;
+  // Round enough → leave to the circular SDF (0.002·r gate there).
+  if (Math.abs(f.rx - f.ry) <= 0.002 * Math.max(f.rx, f.ry)) return null;
+  return { cx: f.cx, cy: f.cy, rx: f.rx, ry: f.ry, phi: f.phi };
+}
+
+/** Single-contour full ellipse → elliptical-SDF params; null for multi-contour / arcs. */
+export function ellipseFromContours(contours) {
+  if (contours.length !== 1) return null;
+  return fitEllipticalContour(contours[0]);
 }
 
 // 3×3 linear solve (Cramer); null if singular.
@@ -196,51 +350,40 @@ export function fitCircle(pts) {
   return { cx, cy, r, res };
 }
 
+// PCA + axis-extent ellipse fit → {cx,cy,rx,ry,phi,res} or null.
+// res = max |u²+v²−1| in the unit-ellipse frame (dimensionless). Kappa-cubic
+// ellipses sample within ~1e-3; loose polylines reject.
+export function fitEllipse(pts) {
+  if (pts.length < 5) return null;
+  let mx = 0, my = 0; const n = pts.length;
+  for (const [x, y] of pts) { mx += x; my += y; }
+  mx /= n; my /= n;
+  let xx = 0, xy = 0, yy = 0;
+  for (const [x, y] of pts) {
+    const dx = x - mx, dy = y - my;
+    xx += dx * dx; xy += dx * dy; yy += dy * dy;
+  }
+  const phi = 0.5 * Math.atan2(2 * xy, xx - yy);
+  const c = Math.cos(phi), s = Math.sin(phi);
+  let rx = 0, ry = 0;
+  for (const [x, y] of pts) {
+    const dx = x - mx, dy = y - my;
+    const u = dx * c + dy * s, v = -dx * s + dy * c;
+    if (Math.abs(u) > rx) rx = Math.abs(u);
+    if (Math.abs(v) > ry) ry = Math.abs(v);
+  }
+  if (rx < 1e-9 || ry < 1e-9) return null;
+  let res = 0;
+  for (const [x, y] of pts) {
+    const dx = x - mx, dy = y - my;
+    const u = (dx * c + dy * s) / rx, v = (-dx * s + dy * c) / ry;
+    res = Math.max(res, Math.abs(u * u + v * v - 1));
+  }
+  return { cx: mx, cy: my, rx, ry, phi, res };
+}
+
 export function extractAnnuli(contours, fillRule) {
-  const fits = contours.map(segs => {
-    if (segs.length < 2) return null;
-    for (const s of segs) if (s.type === SEG_LINE) { if (Math.hypot(s.p2[0] - s.p1[0], s.p2[1] - s.p1[1]) > 1e-4) return null; }
-    const f = fitCircle(segs.map(s => s.p1));
-    if (!f) return null;
-    // Verify circularity on the ACTUAL curve, not just the endpoints: an ellipse's
-    // on-curve endpoints can lie within tolerance of a circle while the curve
-    // bulges off it between them (MuseoSans o/O/0 fit res/r≈0.02 → rendered as a
-    // MIS-SIZED circle, ring too thick). Include each segment's t=½ on-curve point.
-    // Tolerance 0.002·r: a true circle sits at ≈0 and a cubic-approximated circle at
-    // ≈0.0003·r (both pass), but a COARSE quad approximation (8 parabola arcs bulge
-    // 0.0032·r) is a genuinely different outline — rendering it as an exact circle
-    // shifted the boundary ~0.4%·r everywhere vs the reference rasteriser. Rejected
-    // shapes take the (now seam-exact) CDT crescent path instead.
-    let dev = f.res;
-    // sample t=¼,½,¾: a kappa cubic touches the true circle exactly at t=½ (its max
-    // deviation, 2.7e-4·r, sits near the quarter points — midpoint-only sampling
-    // accepted it and the SDF rendered a perfect circle 0.13 off Slug).
-    const _at = (sg, tt) => {
-      const u = 1 - tt;
-      if (sg.type === SEG_LINE) return null;
-      if (sg.type === SEG_CUBIC) return [
-        u * u * u * sg.p1[0] + 3 * u * u * tt * sg.p2[0] + 3 * u * tt * tt * sg.p3[0] + tt * tt * tt * sg.p4[0],
-        u * u * u * sg.p1[1] + 3 * u * u * tt * sg.p2[1] + 3 * u * tt * tt * sg.p3[1] + tt * tt * tt * sg.p4[1]];
-      const w9 = sg.type === SEG_RQUAD ? sg.w : 1;
-      const a9 = u * u, b9 = 2 * w9 * u * tt, c9 = tt * tt, den9 = a9 + b9 + c9;
-      return [(a9 * sg.p1[0] + b9 * sg.p2[0] + c9 * sg.p3[0]) / den9, (a9 * sg.p1[1] + b9 * sg.p2[1] + c9 * sg.p3[1]) / den9];
-    };
-    for (const s of segs) for (const tt of [0.25, 0.5, 0.75]) {
-      const m = _at(s, tt);
-      if (m) dev = Math.max(dev, Math.abs(Math.hypot(m[0] - f.cx, m[1] - f.cy) - f.r));
-    }
-    // Uniform tight tolerance: kappa-cubic circles fit at 0.00027·r (pass); a
-    // hand-authored ring 0.3% off a true circle rendered as a PERFECT circle wobbles
-    // ~0.7px at 220px radius (the how-to-play ring's alternating over/under halo —
-    // the annulus-SDF divergence). CDT-native cubics are now healthy (klmn health
-    // gate, exterior rings, in-span guards), so imperfect rings take the exact
-    // crescent path instead.
-    // 0.002·r: hand-drawn rings ≥0.3% off a true circle (the how-to-play 0.77 halo)
-    // reject to the crescent path; kappa-cubic circles (2.7e-4·r BY CONSTRUCTION) stay
-    // SDF — their uniform 0.13-class halo currently beats the crescent path's 0.39
-    // speckle (ring smoke arbitrated). Route them out once cubic AA quality lands.
-    return dev <= 0.002 * f.r ? f : null;
-  });
+  const fits = contours.map(segs => fitCircularContour(segs));
   // signed area per contour: an annulus is a RING (the inner = a hole). Under
   // NONZERO a same-wound nested circle pair is a SOLID DISC (the inner contour
   // is an invisible boundary) — pairing it as an annulus carved a phantom hole.
@@ -250,7 +393,6 @@ export function extractAnnuli(contours, fillRule) {
     for (const sg of segs) {
       const q = sg.type === SEG_LINE ? sg.p2 : (sg.type === SEG_CUBIC ? sg.p4 : sg.p3);
       a2 += sg.p1[0] * q[1] - q[0] * sg.p1[1];
-      if (sg.type !== SEG_LINE) { a2 += 0; }
     }
     return a2;
   });
@@ -260,7 +402,10 @@ export function extractAnnuli(contours, fillRule) {
     for (let j = i + 1; j < fits.length; j++) {
       if (!fits[j] || used.has(j)) continue;
       if (fillRule !== 'evenodd' && areas[i] * areas[j] > 0) continue;   // same-wound → no hole under nonzero
-      const tol = 0.03 * fits[i].r + 0.5;
+      // RELATIVE tolerance only: an absolute em term paired DISJOINT
+      // small circles (glyph contours live in 0..1 em — two dots < 0.5em
+      // apart became a phantom ring).
+      const tol = 0.03 * fits[i].r;
       if (Math.abs(fits[i].cx - fits[j].cx) < tol && Math.abs(fits[i].cy - fits[j].cy) < tol) {
         const rO = Math.max(fits[i].r, fits[j].r), rI = Math.min(fits[i].r, fits[j].r);
         annuli.push({ cx: fits[i].cx, cy: fits[i].cy, rMid: (rO + rI) / 2, halfW: (rO - rI) / 2 });
@@ -271,12 +416,12 @@ export function extractAnnuli(contours, fillRule) {
   return annuli.length ? { annuli, rest: contours.filter((_, k) => !used.has(k)) } : { annuli: [], rest: contours };
 }
 
-// Emit a circular arc's crescent as a kind-6 SECTOR fan: triangles from the centre
+// Emit a circular arc's crescent as a kind-7 SECTOR fan: triangles from the centre
 // out past the radius, angularly limited to [p1,p3]. The circular SDF clips the
 // outer edge to the exact arc; the angular limit stops it filling the rest of the
 // disc; and adjacent co-circular sectors SHARE the radial edge to their common
 // endpoint, so they tile with NO geometric gap AND one identical field — the seam
-// undercount the control-triangle crescents left. Pushed as kind-6 quad entries.
+// undercount the control-triangle crescents left. Pushed as kind-7 quad entries.
 export function emitCircleSector(quads, circle, p1, p3, sign) {
   const { cx, cy, r } = circle;
   const th1 = Math.atan2(p1[1] - cy, p1[0] - cx);
@@ -339,7 +484,26 @@ export function curveRangeToContours(curveF32, beginFloat, endFloat) {
     }
     cur.push(seg); penX = ex; penY = ey;
   }
-  return contours.length ? contours : null;
+  // Drop ZERO-EXTENT contours (every point coincident). A shape's curve range
+  // ends at the buffer's total float count, which includes trailing zero
+  // PADDING; that padding reads back as degenerate SEG_LINE [0,0]→[0,0]
+  // segments and groups into a spurious empty contour. Left in, it inflates
+  // contours.length — defeating the single-contour LB fast path (the only route
+  // that degree-reduces a corner cubic) so the shape is forced onto the CDT
+  // partition, where a degree-reducible cubic renders as a kind-4 Bezout
+  // crescent and UNDER-fills (a corner-control squircle drew only its interior
+  // diamond, ink 0.595 vs Slug). A zero-extent contour carries no area, so
+  // dropping it changes no fill; real geometry always has extent.
+  const real = contours.filter((c) => {
+    let xlo = Infinity, ylo = Infinity, xhi = -Infinity, yhi = -Infinity;
+    for (const s of c) for (const p of [s.p1, s.p2, s.p3, s.p4]) {
+      if (!p) continue;
+      if (p[0] < xlo) xlo = p[0]; if (p[0] > xhi) xhi = p[0];
+      if (p[1] < ylo) ylo = p[1]; if (p[1] > yhi) yhi = p[1];
+    }
+    return xhi - xlo > 1e-9 || yhi - ylo > 1e-9;
+  });
+  return real.length ? real : null;
 }
 
 export function pointInPoly(px, py, poly) {
@@ -463,12 +627,7 @@ export function sideInFill(a, b, c, interiorSign) {
   return (cr > 0 ? 1 : cr < 0 ? -1 : 0) === interiorSign;
 }
 
-// Corner caps for CURVE seams. At each on-curve junction touching a curve, the two
-// adjacent crescents pinch to zero → an uncovered exterior wedge (the additive-MAX
-// notch that scallops arcs). Emit one cap per such junction: the on-curve point + the
-// outward boundary NORMAL there (average of the two adjacent segments' end/start
-// normals). The packer/VS turn it into a ~1.3px two-sided tangent-ramp that fills the
-// notch. Pure straight–straight corners are skipped (the strip AA already fans them).
+// Endpoint tangents for a segment (used by edgeEndMeta / band tip packing).
 export function segTangents(s) {
   // outward-agnostic tangents at the segment's start and end on-curve points
   if (s.type === SEG_LINE) { const d = [s.p2[0] - s.p1[0], s.p2[1] - s.p1[1]]; return { t0: d, t1: d, end: s.p2, curve: false }; }
@@ -512,16 +671,18 @@ export function segPt(sg, t) {
   return [(u*u*sg.p1[0] + 2*u*t*w*sg.p2[0] + t*t*sg.p3[0]) / d, (u*u*sg.p1[1] + 2*u*t*w*sg.p2[1] + t*t*sg.p3[1]) / d];
 }
 
-// End metadata for a straight edge's kind-10 cap-strip: at each endpoint, the NEIGHBOUR
-// segment's outward tangent normal, an osculating curvature fitted radially about the
-// corner (κ = 2·dev/r², 0 for line neighbours), the corner type (+1 convex · −1 reflex ·
-// 0 straight), and whether the neighbour is a curve (partition against the kind-9 strip's
-// tangent plane instead of the line-line bisector).
+// End metadata for a segment's band primitive (the kind-10 cap-strip; the kind-12 curve
+// band): at each endpoint, the NEIGHBOUR segment's outward tangent normal, an osculating
+// curvature fitted radially about the corner (κ = 2·dev/r², 0 for line neighbours), the
+// corner type (+1 convex · −1 reflex · 0 straight), and whether the neighbour is a curve
+// (partition against the arc's tangent plane / bisector instead of the line-line bisector).
+// Generic over the OWN segment type too: the own end tangent and endpoint come from the
+// segTangents row (which===1 on a curve is the on-curve END point, not the control point).
 export function edgeEndMeta(segs, tg, si, which, interiorSign) {
   const n = segs.length;
   const nb = which === 0 ? (si - 1 + n) % n : (si + 1) % n;
-  const V = which === 0 ? segs[si].p1 : segs[si].p2;
-  const tOwnR = tg[si].t0, tNbR = which === 0 ? tg[nb].t1 : tg[nb].t0;
+  const V = which === 0 ? segs[si].p1 : (tg[si].end || segs[si].p2);
+  const tOwnR = which === 0 ? tg[si].t0 : tg[si].t1, tNbR = which === 0 ? tg[nb].t1 : tg[nb].t0;
   const Lo = Math.hypot(tOwnR[0], tOwnR[1]) || 1, Ln = Math.hypot(tNbR[0], tNbR[1]) || 1;
   const to = [tOwnR[0] / Lo, tOwnR[1] / Lo], tn = [tNbR[0] / Ln, tNbR[1] / Ln];
   const sgn = interiorSign > 0 ? 1 : -1;
@@ -539,15 +700,18 @@ export function edgeEndMeta(segs, tg, si, which, interiorSign) {
   // (at ~90° corners perp(nN) ⊥ the edge and a tie-break flip discards the whole band).
   const into = which === 0 ? [-tn[0], -tn[1]] : [tn[0], tn[1]];
   const tsign = into[0] * (-nN[1]) + into[1] * nN[0] > 0 ? 1 : 0;
-  return { nN, k, type, curve: segs[nb].type !== SEG_LINE, tsign };
+  // qn: neighbour is bandable under kind-12 (quad / rquad / cubic).
+  // turn: sharp turns (|turn| ≥ LB_BAND_SHARP_TURN) pack full sampled κ;
+  // shallower bandable joints still chain but with κ≡0.
+  return { nN, k, type, curve: segs[nb].type !== SEG_LINE, tsign,
+    qn: segs[nb].type === SEG_QUAD || segs[nb].type === SEG_RQUAD || segs[nb].type === SEG_CUBIC,
+    turn: cross };
 }
 
 // Barycentric coords of p in triangle (a,b,c).
-// Fat-vs-shallow arc test (hull area vs chord², deterministic on the raw floats).
-// FAT arcs use the RING strip + both-sides kind-11 (raster-partitioned, tie-proof);
-// SHALLOW arcs keep the padded-bbox strip + f-sign partition (a flat hull's ring quads
-// are degenerate slivers — the bbox covers those pixels by area). The kind-11 mode and
-// the strip mode MUST agree per arc, so the flag is stamped on every crescent piece.
+// FAT arcs use the RING strip (15 verts); SHALLOW arcs keep the padded-bbox
+// strip (6). Pack derives fatness via live fatArc — hull.fat still drives CDT
+// tip-clip exemption and morph-pair strip-plan agreement.
 export function fatArc(ax, ay, cx, cy, bx, by) {
   return Math.abs((cx - ax) * (by - ay) - (cy - ay) * (bx - ax)) >= 0.02 * ((bx - ax) * (bx - ax) + (by - ay) * (by - ay));
 }

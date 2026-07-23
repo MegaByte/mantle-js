@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60">
+  <defs><mask id="rev"><path d="M0 0 L100 0 L100 52 L0 52 Z" fill="#fff"/></mask></defs>
+  <g mask="url(#rev)"><rect x="10" y="10" width="80" height="40" fill="#0000ff"/></g>
+</svg>

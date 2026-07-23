@@ -29,6 +29,8 @@
 // trivial override-table touch.
 
 import { createBundle, makeTex } from '../renderer/bundle.js';
+import { buildDrawList } from '../renderer/bundle.js';
+import { requestOcclusionCull } from '../renderer/occlusionWorkerPool.js';
 import { mantleDebugFlag } from '../core/diagnostics.js';
 import { createOverrideTable } from './overrides.js';
 
@@ -42,12 +44,33 @@ const _lerpPassByGl = new WeakMap();
 function getLerpPass(gl) {
   let p = _lerpPassByGl.get(gl);
   if (p) return p;
-  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error('lerpPass: ' + gl.getShaderInfoLog(s)); return s; };
   const prog = gl.createProgram();
-  gl.attachShader(prog, sh(gl.VERTEX_SHADER, '#version 300 es\nlayout(location=0) in vec2 a; out vec2 uv; void main(){ uv = a*0.5+0.5; gl_Position = vec4(a,0.0,1.0); }'));
-  gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, '#version 300 es\nprecision highp float; in vec2 uv; uniform highp sampler2D uA, uB; uniform float uT; out vec4 o; void main(){ o = mix(texture(uA, uv), texture(uB, uv), uT); }'));
-  gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('lerpPass link: ' + gl.getProgramInfoLog(prog));
+  let vs = null, fs = null;
+  try {
+    const sh = (type, src) => {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        const info = gl.getShaderInfoLog(s);
+        gl.deleteShader(s);
+        throw new Error('lerpPass: ' + info);
+      }
+      return s;
+    };
+    vs = sh(gl.VERTEX_SHADER, '#version 300 es\nlayout(location=0) in vec2 a; out vec2 uv; void main(){ uv = a*0.5+0.5; gl_Position = vec4(a,0.0,1.0); }');
+    fs = sh(gl.FRAGMENT_SHADER, '#version 300 es\nprecision highp float; in vec2 uv; uniform highp sampler2D uA, uB; uniform float uT; out vec4 o; void main(){ o = mix(texture(uA, uv), texture(uB, uv), uT); }');
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('lerpPass link: ' + gl.getProgramInfoLog(prog));
+  } catch (error) {
+    gl.deleteProgram(prog);
+    throw error;
+  } finally {
+    if (vs) gl.deleteShader(vs);
+    if (fs) gl.deleteShader(fs);
+  }
   const vao = gl.createVertexArray();
   const vb = gl.createBuffer();
   gl.bindVertexArray(vao);
@@ -55,9 +78,209 @@ function getLerpPass(gl) {
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);  // fullscreen tri
   gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   gl.bindVertexArray(null);
-  p = { prog, vao, uA: gl.getUniformLocation(prog, 'uA'), uB: gl.getUniformLocation(prog, 'uB'), uT: gl.getUniformLocation(prog, 'uT') };
+  p = { prog, vao, vb, users: 0, uA: gl.getUniformLocation(prog, 'uA'), uB: gl.getUniformLocation(prog, 'uB'), uT: gl.getUniformLocation(prog, 'uT') };
   _lerpPassByGl.set(gl, p);
   return p;
+}
+
+function releaseLerpPass(gl, p) {
+  if (!p || --p.users > 0) return;
+  gl.deleteProgram(p.prog);
+  gl.deleteVertexArray(p.vao);
+  gl.deleteBuffer(p.vb);
+  _lerpPassByGl.delete(gl);
+}
+
+// ── Curve-plane FIXUP pass (gl-memoized) ───────────────────────────────────
+//
+// The plain mix() above is wrong for exactly two kinds of texel, and both are
+// wrong for the same reason: they hold a quantity that is not a linear function
+// of the geometry, so interpolating it does not interpolate the shape.
+//
+//   ARC data texels — the plane feeds the lerp arcs in ENDPOINT form (p1, p4,
+//     rx, ry, phi, flags), the only exact form whose componentwise lerp keeps an
+//     arc's endpoints welded to its neighbours' (morphCore.prepareArcMorph). The
+//     SHADER, though, ray-casts against CENTRE form. So the mixed endpoint form
+//     has to be converted, per frame, before anything reads it.
+//   JOIN texels — hold the neighbours' UNIT tangents, which the stroke shader
+//     builds its joins and miters from. A lerp of two unit vectors is neither
+//     unit nor tangent to the lerped curve; it collapses toward zero as the poses
+//     diverge, and the join geometry divides by it (outlines sprout discs and
+//     spokes). Tangents must be RECOMPUTED from the lerped geometry.
+//
+// Both were CPU work, which pinned an arc-bearing morph to a full curve-plane
+// re-upload every frame. They needn't be. The key is that this pass does NOT read
+// what the mix wrote: it samples the same two STATIC planes and mixes them itself,
+// so it has no dependency on pass 1 — no read-after-write on the live texture, no
+// ping-pong. It just draws one POINT per texel the mix got wrong and overwrites
+// it. Cost is O(arcs + stroked segments) fragments, not O(plane).
+const _fixupPassByGl = new WeakMap();
+
+export const FIX_ARC_C = 0;    // write (cx, cy, rx, ry)
+export const FIX_ARC_T = 1;    // write (theta_s, theta_e, phi, 0)
+export const FIX_JOIN  = 2;    // write (inTan.xy, outTan.xy)
+
+const FIXUP_VS = `#version 300 es
+precision highp float; precision highp int;
+layout(location=0) in ivec4 aFix;   // (outTexel, kind, argA, argB)
+flat out ivec4 vFix;
+uniform int uW, uH;
+void main() {
+  vFix = aFix;
+  int i = aFix.x;
+  vec2 p = (vec2(float(i % uW), float(i / uW)) + 0.5) / vec2(float(uW), float(uH));
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+  gl_PointSize = 1.0;
+}`;
+
+const FIXUP_FS = `#version 300 es
+precision highp float; precision highp int;
+flat in ivec4 vFix;
+uniform highp sampler2D uA, uB;
+uniform float uT;
+uniform int uW;
+out vec4 o;
+
+// The lerped value of one texel — mixed HERE from the two static planes, which is
+// what keeps this pass independent of the mix that already ran.
+vec4 fx(int texel) {
+  ivec2 c = ivec2(texel % uW, texel / uW);
+  return mix(texelFetch(uA, c, 0), texelFetch(uB, c, 0), uT);
+}
+
+// SVG F.6.5 endpoint -> centre, including the F.6.6 radii correction. Mid-lerp the
+// endpoints move independently of the radii, so the correction genuinely fires —
+// and scaling the radii up to span the chord is exactly the right answer when it does.
+// Returns (cx, cy, rx, ry) in .xyzw and writes (theta_s, theta_e) to th.
+vec4 arcCentre(int hdr, out vec2 th) {
+  vec4 d0 = fx(hdr + 1);              // p1.xy, p4.xy
+  vec4 d1 = fx(hdr + 2);              // rx, ry, phi, flags
+  vec2 p1 = d0.xy, p4 = d0.zw;
+  float rx = abs(d1.x), ry = abs(d1.y), phi = d1.z;
+  int flags = int(d1.w + 0.5);
+  float large = float(flags & 1), sweep = float((flags >> 1) & 1);
+  float cp = cos(phi), sp = sin(phi);
+  vec2 m = (p1 - p4) * 0.5;
+  float x1p =  cp * m.x + sp * m.y;
+  float y1p = -sp * m.x + cp * m.y;
+  if (rx == 0.0 || ry == 0.0) {
+    vec2 chord = p4 - p1;
+    float len = length(chord);
+    if (len == 0.0) { th = vec2(0.0); return vec4(p1, 0.0, 0.0); }
+    vec2 c = (p1 + p4) * 0.5;
+    float angle = atan(chord.y, chord.x);
+    float t0;
+    if (ry == 0.0) { rx = len * 0.5; ry = 0.0; phi = angle; t0 = 3.14159265358979324; }
+    else { rx = 0.0; ry = len * 0.5; phi = angle - 1.57079632679489662; t0 = -1.57079632679489662; }
+    float dt = sweep > 0.5 ? 3.14159265358979324 : -3.14159265358979324;
+    th = vec2(t0, t0 + dt);
+    return vec4(c, rx, ry);
+  }
+  float lam = (x1p / rx) * (x1p / rx) + (y1p / ry) * (y1p / ry);
+  if (lam > 1.0) { float s = sqrt(lam); rx *= s; ry *= s; }
+  float num = rx*rx*ry*ry - rx*rx*y1p*y1p - ry*ry*x1p*x1p;
+  float den = rx*rx*y1p*y1p + ry*ry*x1p*x1p;
+  float sq = den > 0.0 ? sqrt(max(num / den, 0.0)) : 0.0;
+  if (large == sweep) sq = -sq;
+  float cxp =  sq * rx * y1p / ry;
+  float cyp = -sq * ry * x1p / rx;
+  vec2 c = vec2(cp * cxp - sp * cyp, sp * cxp + cp * cyp) + (p1 + p4) * 0.5;
+  vec2 u = vec2((x1p - cxp) / rx, (y1p - cyp) / ry);
+  vec2 v = vec2((-x1p - cxp) / rx, (-y1p - cyp) / ry);
+  float t0 = atan(u.y, u.x);
+  float dt = atan(u.x * v.y - u.y * v.x, u.x * v.x + u.y * v.y);
+  if (sweep < 0.5 && dt > 0.0) dt -= 6.28318530717958647;
+  if (sweep > 0.5 && dt < 0.0) dt += 6.28318530717958647;
+  th = vec2(t0, t0 + dt);
+  return vec4(c, rx, ry);
+}
+
+// Unit tangent of the segment whose header is at texel hdr, at its start or end.
+// Same derivative conventions (and degenerate fallbacks) as textures.js segTangentAt.
+vec2 segTangent(int hdr, bool atStart) {
+  int ty = int(fx(hdr).x + 0.5) & 3;
+  vec2 d;
+  if (ty == 3) {                                  // ARC
+    vec2 th; vec4 cr = arcCentre(hdr, th);
+    float rx = cr.z, ry = cr.w, phi = fx(hdr + 2).z;
+    float t = atStart ? th.x : th.y;
+    float dth = th.y - th.x;
+    float cp = cos(phi), sp = sin(phi), ct = cos(t), st = sin(t);
+    d = vec2((-cp * rx * st - sp * ry * ct) * dth,
+             (-sp * rx * st + cp * ry * ct) * dth);
+  } else if (ty == 0) {                           // LINE
+    vec4 a = fx(hdr + 1);
+    d = a.zw - a.xy;
+  } else {                                        // QUAD / CUBIC
+    vec4 a = fx(hdr + 1), b = fx(hdr + 2);
+    vec2 p1 = a.xy, p2 = a.zw, p3 = b.xy, p4 = b.zw;
+    float u = atStart ? 0.0 : 1.0, mu = 1.0 - u;
+    if (ty == 1) {
+      d = 2.0 * mu * (p2 - p1) + 2.0 * u * (p3 - p2);
+      if (length(d) < 1e-9) d = p3 - p1;
+    } else {
+      d = 3.0*mu*mu*(p2-p1) + 6.0*mu*u*(p3-p2) + 3.0*u*u*(p4-p3);
+      if (length(d) < 1e-9) { d = p3 - p2; if (length(d) < 1e-9) d = p4 - p1; }
+    }
+  }
+  float m = length(d);
+  return m < 1e-12 ? vec2(0.0) : d / m;
+}
+
+void main() {
+  int kind = vFix.y;
+  if (kind == ${FIX_JOIN}) {
+    vec2 inT  = vFix.z >= 0 ? segTangent(vFix.z, false) : vec2(0.0);
+    vec2 outT = vFix.w >= 0 ? segTangent(vFix.w, true)  : vec2(0.0);
+    o = vec4(inT, outT);
+  } else {
+    vec2 th; vec4 cr = arcCentre(vFix.z, th);
+    o = (kind == ${FIX_ARC_C}) ? cr : vec4(th, fx(vFix.z + 2).z, 0.0);
+  }
+}`;
+
+function getFixupPass(gl) {
+  let p = _fixupPassByGl.get(gl);
+  if (p) return p;
+  const prog = gl.createProgram();
+  let vs = null, fs = null;
+  const sh = (type, src) => {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      const info = gl.getShaderInfoLog(s);
+      gl.deleteShader(s);
+      throw new Error('fixupPass: ' + info);
+    }
+    return s;
+  };
+  try {
+    vs = sh(gl.VERTEX_SHADER, FIXUP_VS);
+    fs = sh(gl.FRAGMENT_SHADER, FIXUP_FS);
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('fixupPass link: ' + gl.getProgramInfoLog(prog));
+  } catch (error) {
+    gl.deleteProgram(prog);
+    throw error;
+  } finally {
+    if (vs) gl.deleteShader(vs);
+    if (fs) gl.deleteShader(fs);
+  }
+  p = {
+    prog, users: 0,
+    uA: gl.getUniformLocation(prog, 'uA'), uB: gl.getUniformLocation(prog, 'uB'),
+    uT: gl.getUniformLocation(prog, 'uT'),
+    uW: gl.getUniformLocation(prog, 'uW'), uH: gl.getUniformLocation(prog, 'uH'),
+  };
+  _fixupPassByGl.set(gl, p);
+  return p;
+}
+
+function releaseFixupPass(gl, p) {
+  if (!p || --p.users > 0) return;
+  gl.deleteProgram(p.prog);
+  _fixupPassByGl.delete(gl);
 }
 
 // Pure (gl-free) morph machinery lives in the core so the no-WebGL
@@ -68,6 +291,8 @@ import {
   composeMorphSections,
   resetVisibility,
   updateVisibility,
+  arcRecordToCenter,
+  rebuildJoinTangents,
 } from '../core/morphCore.js';
 
 
@@ -84,6 +309,12 @@ import {
 //   12 strokeWidth (texel 3.x) · 36..39 imageRect (texel 9). Everything else
 // stays at src.
 const MORPH_LERP_SLOTS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 36, 37, 38, 39];
+
+// Float-render-target completeness is a CONTEXT capability (constant once RGBA32F
+// is known color-renderable), but checkFramebufferStatus is a sync driver query
+// (~ms each on Metal). Cache the verdict per (gl, internalFormat) so buildLerpTarget
+// pays it ONCE, not per morph — a road of N morphs was ~0.5s of redundant checks.
+const _floatFboOk = new WeakMap();   // gl → Map(internalFormat → boolean)
 
 export function createShapeMorph(gl, srcBundle, dstBundle, opts) {
   if (!gl) throw new Error('createShapeMorph: gl required');
@@ -149,7 +380,25 @@ function _buildMorph(gl, srcBundle, dstBundle, srcRange, dstRange, opts) {
   //    rows for `dst-only` shapes appended at the end. Meta + curve
   //    + band buffers expand to accomodate.
   const sections = composeMorphSections(srcBundle, dstBundle, plan);
-  const bundle = createBundle(gl, sections);
+  // The STATIC cull must not run here: it decides what is hidden from the geometry as
+  // authored, and these sections are only the t=0 pose — setT lerps every control
+  // point, so a shape buried at t=0 can be fully exposed at t=1. The morph gets its
+  // own cull instead (below), which decides containment across the WHOLE animation.
+  // Recolour is a BUNDLE property, and a morph INHERITS it from its poses: content
+  // that is recoloured at t=0 and t=1 is recoloured at every t between. The morph
+  // bundle is rebuilt on each bracket transition, so without this the fill variant
+  // would be re-derived — and self-healed, mid-play — on every new bracket.
+  const recolor = !!((srcBundle && srcBundle.recolor) || (dstBundle && dstBundle.recolor));
+  const bundle = createBundle(gl, sections, { occlusionCull: false, recolor });
+  // No-AA (band-hard) eligibility for a stroke-covered morph: the covering stroke hides the fill's
+  // AA band throughout the morph, so band-hard fits (the per-frame band the fill pass already
+  // rebuilds carries it — no extra cost). Require BOTH endpoints covered, else the fill edge shows
+  // mid-morph. Do not rebuild the GWN tree per frame; cubic and arc morphs use
+  // band-hard only at low segment counts, otherwise AAC.
+  if (srcBundle && dstBundle && srcBundle.noAaFill && dstBundle.noAaFill) {
+    bundle.noAaFill = true;
+    bundle.minStrokeEmW = Math.min(srcBundle.minStrokeEmW || 0, dstBundle.minStrokeEmW || 0) || (srcBundle.minStrokeEmW || dstBundle.minStrokeEmW || 0);
+  }
 
   // Mark the bundle so the renderer's GPU-resident Loop-Blinn morph route
   // (opt-in via renderer.setLoopBlinnMorphFill) can build per-shape morph meshes
@@ -163,26 +412,66 @@ function _buildMorph(gl, srcBundle, dstBundle, srcRange, dstRange, opts) {
   // doesn't align with the merged curve arrays).
   const _morphCurveRanges = [];
   for (const m of plan.matched) _morphCurveRanges[m.srcIdx] = { begin: m.srcBegin, end: m.srcEnd };
-  // PREBUILD: queue the morph-pair mesh build the moment the target attaches —
-  // crash/transition morphs are normally ready before their first draw instead of
-  // building inside the frame (the idle preparer resumes it in 8ms slices).
-  try { _smEnqueue && _smEnqueue(bundle); } catch { }
   bundle._morphSrc = {
     mergedCurveF32: sections._mergedCurveF32,
     dstCurveF32: sections._dstCurveF32,
+    // Endpoint-form planes for arc-bearing morphs (centre-form lerp tears the
+    // contour). Hit tests use these the same way setT's CPU lerp does.
+    srcEpCurveF32: sections._srcEpCurveF32 || null,
+    dstEpCurveF32: sections._dstEpCurveF32 || null,
+    arcOffsets: sections._arcOffsets || null,
+    joinTable: sections._joinTable || null,
     curveRanges: _morphCurveRanges,
     mergedMetaF32: sections._mergedMetaF32,
     dstMetaF32: sections._dstAlignedMetaF32,
     metaStride: sections._metaStride,
+    matchedSrcIdxs: sections._matchedSrcIdxs || null,
+    // Arcs do NOT disqualify this route. It reads the two CENTRE-form planes,
+    // decodes each pose's contours exactly, and lerps the resulting MESH
+    // VERTICES — it never interpolates arc PARAMETERS, so it has none of the
+    // trouble that forces setT's own lerp into endpoint form (prepareArcMorph).
     matchedAll: plan.matched.length === (bundle.numShapes | 0),
     t: 0,
     skipUploads: false,
   };
+  // So hit tests can honor fade-in/out without the caller threading overrides.
+  try {
+    Object.defineProperty(bundle, '_morphOverrides', {
+      value: null, enumerable: false, configurable: true, writable: true,
+    });
+  } catch { /* ignore */ }
+
+  // 2b. MORPH OCCLUSION CULL, off the main thread. A shape a later opaque shape hides
+  //     for the WHOLE morph is never seen, so drawing it only costs — and, along a
+  //     shared edge, conflates its colour into the antialiased boundary exactly as in
+  //     the static case. Endpoint testing would be UNSOUND (an occluder can shrink
+  //     faster than what it hides and expose it midway), so morphCull.js eliminates t
+  //     analytically and certifies that the boundaries never cross for ANY t. Anything
+  //     it cannot certify keeps its draw. Landing late is harmless: until then the
+  //     morph simply draws a few shapes nobody can see.
+  requestOcclusionCull(
+    {
+      cv: sections._mergedCurveF32, cv1: sections._dstCurveF32,   // cv1 ⇒ a morph job
+      meta: sections._mergedMetaF32, meta1: sections._dstAlignedMetaF32,
+      n: bundle.numShapes | 0, stride: sections._metaStride | 0,
+      ranges: _morphCurveRanges,
+    },
+    (culled) => {
+      if (bundle._disposed || !culled || !culled.length) return;
+      const set = new Set(culled);
+      bundle._culledShapes = set;
+      bundle.drawList = buildDrawList(bundle.metaFloats, bundle.numShapes,
+                                      bundle.metaFloatsPerShape, bundle.chunkByShape,
+                                      bundle.filterGraphs, set);
+      bundle._lbCombined = null;    // the analytic route caches one combined VBO off the list
+    },
+  );
 
   // 3. Private override table for fade-in / fade-out. Initial state
   //    matches t = 0: src + matched fully visible, dst-only invisible.
   const overrides = createOverrideTable(gl, bundle);
   resetVisibility(overrides, plan, /* t = */ 0);
+  bundle._morphOverrides = overrides;
 
   // 4. Curve-lerp scratch buffer. Same shape as the seeded curve
   //    plane so we can `texSubImage2D` the whole thing per setT. We
@@ -207,6 +496,7 @@ function _buildMorph(gl, srcBundle, dstBundle, srcRange, dstRange, opts) {
   // available (EXT_color_buffer_float absent). Built lazily on first setT.
   // `undefined` = not built, `null` = no data, object = built.
   let _ltCurve, _ltStops, _ltMeta, _ltGrad;
+  let _lerpPass = null, _fixupPass = null;
   function buildLerpTarget(liveTex, src, dst, W, H, internal, format, type, cpuFallback) {
     // CPU fallback when GPU float render targets can't be set up: the
     // explicit opt (opts.cpuLerp — parity tests compare both paths), or a
@@ -219,7 +509,11 @@ function _buildMorph(gl, srcBundle, dstBundle, srcRange, dstRange, opts) {
     const fbo = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, liveTex, 0);
-    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    // Completeness is constant per (context, format) — check once, cache the verdict.
+    let fboCache = _floatFboOk.get(gl);
+    if (!fboCache) { fboCache = new Map(); _floatFboOk.set(gl, fboCache); }
+    let ok = fboCache.get(internal);
+    if (ok === undefined) { ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE; fboCache.set(internal, ok); }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     if (!ok) { gl.deleteFramebuffer(fbo); gl.deleteTexture(srcTex); gl.deleteTexture(dstTex); return { gpu: false, cpuFallback }; }
     return { gpu: true, srcTex, dstTex, fbo, W, H, cpuFallback };
@@ -230,6 +524,7 @@ function _buildMorph(gl, srcBundle, dstBundle, srcRange, dstRange, opts) {
   function runLerpTarget(tgt, t) {
     if (!tgt.gpu) { tgt.cpuFallback(t); return; }
     const lp = getLerpPass(gl);
+    if (!_lerpPass) { _lerpPass = lp; lp.users++; }
     gl.bindFramebuffer(gl.FRAMEBUFFER, tgt.fbo);
     gl.viewport(0, 0, tgt.W, tgt.H);
     gl.disable(gl.BLEND); gl.disable(gl.DEPTH_TEST); gl.disable(gl.SCISSOR_TEST);
@@ -238,7 +533,59 @@ function _buildMorph(gl, srcBundle, dstBundle, srcRange, dstRange, opts) {
     gl.activeTexture(gl.TEXTURE15); gl.bindTexture(gl.TEXTURE_2D, tgt.dstTex); gl.uniform1i(lp.uB, 15);
     gl.uniform1f(lp.uT, t);
     gl.bindVertexArray(lp.vao); gl.drawArrays(gl.TRIANGLES, 0, 3); gl.bindVertexArray(null);
+    // Pass 2: overwrite the texels the plain mix cannot get right — arc data
+    // (endpoint form -> centre form) and stroke join tangents (recomputed from
+    // the lerped geometry). Same FBO, same t, but it re-mixes from the STATIC
+    // planes rather than reading what pass 1 just wrote, so the two passes are
+    // independent and no ping-pong is needed.
+    if (tgt.fix && tgt.fix.count) {
+      const fp = getFixupPass(gl);
+      if (!_fixupPass) { _fixupPass = fp; fp.users++; }
+      gl.useProgram(fp.prog);
+      gl.activeTexture(gl.TEXTURE14); gl.bindTexture(gl.TEXTURE_2D, tgt.srcTex); gl.uniform1i(fp.uA, 14);
+      gl.activeTexture(gl.TEXTURE15); gl.bindTexture(gl.TEXTURE_2D, tgt.dstTex); gl.uniform1i(fp.uB, 15);
+      gl.uniform1f(fp.uT, t);
+      gl.uniform1i(fp.uW, tgt.W); gl.uniform1i(fp.uH, tgt.H);
+      gl.bindVertexArray(tgt.fix.vao);
+      gl.drawArrays(gl.POINTS, 0, tgt.fix.count);
+      gl.bindVertexArray(null);
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.activeTexture(gl.TEXTURE0);
+  }
+
+  /** One point per texel the mix gets wrong. Attributes are (outTexel, kind,
+   *  argA, argB): for an arc, argA is its record's HEADER texel; for a join,
+   *  argA/argB are the previous/next segments' header texels (-1 = free end). */
+  function buildFixupPoints(arcOffsets, joinTable) {
+    const nArc = arcOffsets ? arcOffsets.length : 0;
+    const nJoin = joinTable ? joinTable.length / 6 : 0;
+    if (!nArc && !nJoin) return null;
+    const a = new Int32Array((nArc * 2 + nJoin) * 4);
+    let k = 0;
+    for (let i = 0; i < nArc; i++) {
+      const hdr = arcOffsets[i] >> 2;                    // float offset -> texel
+      a[k++] = hdr + 1; a[k++] = FIX_ARC_C; a[k++] = hdr; a[k++] = 0;
+      a[k++] = hdr + 2; a[k++] = FIX_ARC_T; a[k++] = hdr; a[k++] = 0;
+    }
+    for (let i = 0; i < nJoin; i++) {
+      // Row 0 is already the JOIN texel's float slot (buildJoinTable resolved the
+      // line-vs-rest record-size difference); prev/next are HEADER float offsets.
+      const prev = joinTable[i * 6 + 2];
+      const next = joinTable[i * 6 + 4];
+      a[k++] = joinTable[i * 6] >> 2;
+      a[k++] = FIX_JOIN;
+      a[k++] = prev < 0 ? -1 : prev >> 2;
+      a[k++] = next < 0 ? -1 : next >> 2;
+    }
+    const vao = gl.createVertexArray();
+    const vb = gl.createBuffer();
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+    gl.bufferData(gl.ARRAY_BUFFER, a, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribIPointer(0, 4, gl.INT, 0, 0);
+    gl.bindVertexArray(null);
+    return { vao, vb, count: nArc * 2 + nJoin };
   }
 
   /** Upload the morph state for parameter t. */
@@ -255,15 +602,41 @@ function _buildMorph(gl, srcBundle, dstBundle, srcRange, dstRange, opts) {
     // 1. Curves (matched shapes).
     if (plan.matched.length) {
       if (_ltCurve === undefined) {
-        const merged = sections._mergedCurveF32, W = sections._curveW, H = sections._curveH;
+        const W = sections._curveW, H = sections._curveH;
+        // An arc-bearing morph interpolates the ENDPOINT-form planes, not the
+        // centre-form ones: a componentwise lerp of centre form pulls an arc's
+        // endpoints off the contour and the fill tears (morphCore.prepareArcMorph).
+        // Stroked segments likewise carry their neighbours' UNIT tangents in the
+        // join texel, and a lerp of two unit vectors is neither unit nor tangent
+        // to the lerped curve (buildJoinTable).
+        //
+        // Neither is fatal to the GPU route: both are repaired by the FIXUP pass,
+        // which re-mixes the two static planes itself and overwrites just those
+        // texels (see getFixupPass). So the mix stays on the GPU, and the CPU
+        // closure below is only the fallback for contexts with no float FBO.
+        const arcs = sections._arcOffsets;
+        const joins = sections._joinTable;
+        const hasArcs = !!(arcs && arcs.length);
+        const hasJoins = !!(joins && joins.length);
+        const merged = hasArcs ? sections._srcEpCurveF32 : sections._mergedCurveF32;
+        const dstPlane = hasArcs ? sections._dstEpCurveF32 : sections._dstCurveF32;
         const t1 = merged.slice();
-        for (const m of plan.matched) t1.set(sections._dstCurveF32.subarray(m.srcBegin, m.srcEnd), m.srcBegin);
-        _ltCurve = buildLerpTarget(bundle.curveTex, merged, t1, W, H, gl.RGBA32F, gl.RGBA, gl.FLOAT, (tt) => {
+        for (const m of plan.matched) t1.set(dstPlane.subarray(m.srcBegin, m.srcEnd), m.srcBegin);
+        const cpuLerp = (tt) => {
           if (!lerpCurves) lerpCurves = new Float32Array(merged.length);
           lerpCurves.set(merged);
-          for (const m of plan.matched) { const d = sections._dstCurveF32.subarray(m.srcBegin, m.srcEnd), s = merged.subarray(m.srcBegin, m.srcEnd), o = lerpCurves.subarray(m.srcBegin, m.srcEnd); for (let i = 0; i < o.length; i++) o[i] = s[i] * (1 - tt) + d[i] * tt; }
+          for (const m of plan.matched) { const d = dstPlane.subarray(m.srcBegin, m.srcEnd), s = merged.subarray(m.srcBegin, m.srcEnd), o = lerpCurves.subarray(m.srcBegin, m.srcEnd); for (let i = 0; i < o.length; i++) o[i] = s[i] * (1 - tt) + d[i] * tt; }
+          // Endpoint form -> centre form, in place, for every arc the morph carries.
+          if (hasArcs) for (let i = 0; i < arcs.length; i++) arcRecordToCenter(lerpCurves, arcs[i]);
+          // THEN the joins: an arc's tangent is only defined once it is back in
+          // centre form.
+          if (hasJoins) rebuildJoinTangents(lerpCurves, joins);
           gl.bindTexture(gl.TEXTURE_2D, bundle.curveTex); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, H, gl.RGBA, gl.FLOAT, lerpCurves); gl.bindTexture(gl.TEXTURE_2D, null);
-        });
+        };
+        _ltCurve = buildLerpTarget(bundle.curveTex, merged, t1, W, H, gl.RGBA32F, gl.RGBA, gl.FLOAT, cpuLerp);
+        // The fixup pass rides the GPU route only; the CPU closure does the same
+        // repairs itself, in JS.
+        if (_ltCurve.gpu) _ltCurve.fix = buildFixupPoints(arcs, joins);
       }
       runLerpTarget(_ltCurve, t);
     }
@@ -324,9 +697,15 @@ function _buildMorph(gl, srcBundle, dstBundle, srcRange, dstRange, opts) {
   /** Release all GL resources owned by the morph. */
   function dispose() {
     if (overrides) overrides.dispose();
+    bundle._morphOverrides = null;
+    if (bundle && bundle._morphSrc) bundle._morphSrc = null;
     for (const tgt of [_ltCurve, _ltStops, _ltMeta, _ltGrad]) {
       if (tgt && tgt.gpu) { gl.deleteFramebuffer(tgt.fbo); gl.deleteTexture(tgt.srcTex); gl.deleteTexture(tgt.dstTex); }
+      if (tgt && tgt.fix) { gl.deleteVertexArray(tgt.fix.vao); gl.deleteBuffer(tgt.fix.vb); }
     }
+    releaseLerpPass(gl, _lerpPass);
+    releaseFixupPass(gl, _fixupPass);
+    _lerpPass = _fixupPass = null;
     if (bundle && bundle.dispose) bundle.dispose();
   }
 

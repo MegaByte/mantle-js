@@ -15,14 +15,16 @@ import {
 
 /// Transform a marker's pre-collected sub-shapes to the vertex (vx, vy)
 /// along a stroked path with tangent angle `tangentAngle` and current
-/// stroke width `strokeWidth`. Returns a flat array of sub-shapes with
-/// segs already in user space.
-export function instantiateMarker(marker, vx, vy, tangentAngle, strokeWidth) {
+/// stroke width `strokeWidth`. `isStart` marks marker-start placement —
+/// per SVG 2 §13.4.3, orient="auto-start-reverse" flips 180° ONLY there
+/// (from marker-mid/end it behaves as plain "auto"). Returns a flat
+/// array of sub-shapes with segs already in user space.
+export function instantiateMarker(marker, vx, vy, tangentAngle, strokeWidth, isStart = false) {
   if (!marker || !marker.children.length) return [];
   let angle = 0;
   const ori = marker.orient;
   if (ori === 'auto') angle = tangentAngle;
-  else if (ori === 'auto-start-reverse') angle = tangentAngle + Math.PI;
+  else if (ori === 'auto-start-reverse') angle = tangentAngle + (isStart ? Math.PI : 0);
   else angle = (parseLengthOr(ori, 0)) * Math.PI / 180;
   // markerUnits=strokeWidth scales the marker by the shape's strokeWidth.
   // userSpaceOnUse leaves marker coords as-is.

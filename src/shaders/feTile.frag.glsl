@@ -6,10 +6,13 @@
 // correct for sub-canvas inputs that should repeat.
 precision highp float;
 uniform sampler2D uTex;
+uniform vec4 uInMap;   // vUV → input uv (see @@FILTER_RECT@@)
 in vec2 vUV;
 out vec4 fragColor;
+
+@@FILTER_RECT@@
 void main() {
-  vec2 uv = fract(vUV);
+  vec2 uv = fract(mapIn(vUV, uInMap));
   if (uv.x < 0.0) uv.x += 1.0;
   if (uv.y < 0.0) uv.y += 1.0;
   fragColor = texture(uTex, uv);

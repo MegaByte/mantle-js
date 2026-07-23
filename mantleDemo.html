@@ -15,7 +15,9 @@
   input[type=file] { flex: 1; background: #252535; border: 1px solid #383858; border-radius: 8px; padding: 6px 10px; color: #ccd; font-size: 0.78rem; }
   button#load-btn { width: 100%; padding: 11px; border: none; border-radius: 10px; background: linear-gradient(135deg, #5a6fff, #9a55ff); color: #fff; font-weight: 600; cursor: pointer; transition: opacity .2s; }
   button#load-btn:hover { opacity: 0.85; }
-  #canvas-wrap { position: relative; width: 100%; max-width: 720px; aspect-ratio: 1; overflow: hidden; border: 1px solid #2d2d44; background: #fff; }
+  /* 1:1 with the backing store (800x800), so what you look at IS what was rendered. On a
+     window too narrow for 800px the browser scales it down again — the status line says so. */
+  #canvas-wrap { position: relative; width: 800px; max-width: 100%; aspect-ratio: 1; overflow: hidden; border: 1px solid #2d2d44; background: conic-gradient(#d8d8e0 90deg, #f4f4f8 90deg 180deg, #d8d8e0 180deg 270deg, #f4f4f8 270deg) 0 0 / 20px 20px; }
   canvas { display: block; width: 100%; height: 100%; }
   .debug-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-top: 10px; padding: 10px 12px; background: #14141c; border: 1px solid #2d2d44; border-radius: 8px; font-size: 0.72rem; color: #889; }
   .debug-legend span.legend-label { color: #667; margin-right: 4px; }
@@ -30,16 +32,30 @@
 
 <div class="card">
   <h2>Render SVG</h2>
+  <!-- Every SVG the smoke suite renders, as a real file. They used to be inline template
+       literals inside the .mjs, which meant the one asset you most wanted to look at when a
+       smoke went red was the one you could not open. -->
+  <div class="file-row" style="align-items:center;">
+    <label for="smoke-sel" style="white-space:nowrap;">Asset</label>
+    <select id="smoke-sel" style="flex:1;min-width:0;padding:6px 8px;background:#252535;border:1px solid #383858;border-radius:8px;color:#ccd;font-size:0.78rem;">
+      <option value="">— pick a scene —</option>
+      <optgroup id="grp-examples" label="Examples"></optgroup>
+      <optgroup id="grp-smoke" label="Smoke-suite assets"></optgroup>
+    </select>
+  </div>
   <div class="file-row"><label>.svg</label><input id="svg-file" type="file" accept=".svg,image/svg+xml"></div>
   <button id="svg-btn" type="button" style="width:100%;padding:8px;margin-top:4px;">Convert &amp; render SVG in browser</button>
   <div style="display:flex;gap:8px;margin-top:8px;">
     <button id="debug-tri"  class="secondary" type="button" style="flex:1;">Outline triangles</button>
     <button id="debug-bbox" class="secondary" type="button" style="flex:1;">Shape bboxes</button>
   </div>
+  <!-- The overlay draws the mesh the frame actually SUBMITTED, so it follows the engine: the
+       Slug cover mesh under Slug/AAC/GWN, the Loop-Blinn partition under LB. -->
   <div class="debug-legend" aria-label="Debug polygon overlay colors">
     <span class="legend-label">Overlay</span>
-    <span class="lg"><i class="sw" style="background:rgba(255,38,38,0.95)"></i> Cover-mesh interior triangles</span>
-    <span class="lg"><i class="sw" style="background:rgba(255,210,0,0.95)"></i> Cover-mesh curve hulls</span>
+    <span class="lg"><i class="sw" style="background:rgba(255,210,0,0.95)"></i> Interior triangles</span>
+    <span class="lg"><i class="sw" style="background:rgba(255,38,38,0.95)"></i> Curve pieces (hulls / crescents)</span>
+    <span class="lg"><i class="sw" style="background:rgba(26,179,255,0.95)"></i> LB AA strips &amp; caps</span>
     <span class="lg"><i class="sw" style="background:rgba(199,96,5,0.95)"></i> Shape bbox</span>
   </div>
   <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap;">
@@ -50,7 +66,42 @@
   <div id="status" style="margin-top:12px;font-size:0.8rem;color:#aab;">Waiting for files…</div>
 </div>
 
+
+<div class="card">
+  <h2>Engine &amp; optimizations</h2>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+    <label for="eng-sel" style="width:auto;font-size:0.72rem;color:#888;">Fill engine</label>
+    <select id="eng-sel" style="flex:1;min-width:150px;padding:6px 8px;background:#252535;border:1px solid #383858;border-radius:8px;color:#ccd;font-size:0.8rem;">
+      <option value="auto">Auto (per-bundle gate)</option>
+      <option value="slug">Slug (band walk)</option>
+      <option value="lb">Loop-Blinn</option>
+      <option value="lb-only">Loop-Blinn (FORCE — no Slug fallback)</option>
+      <option value="aac">AAC (analytic area)</option>
+      <option value="gwn">GWN + SDF (band-free)</option>
+      <option value="hard">No-AA (hard band)</option>
+      <option value="hard-tree">No-AA (GWN hard tree)</option>
+    </select>
+    <label style="width:auto;font-size:0.72rem;color:#888;">Res scale</label>
+    <input id="res-scale" type="range" min="0.25" max="1" step="0.05" value="1"
+           style="flex:1;min-width:110px;" />
+    <span id="res-scale-v" style="font-size:0.72rem;color:#889;min-width:5.5em;">1.00×</span>
+  </div>
+  <div id="opt-toggles" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;font-size:0.75rem;color:#aab;"></div>
+  <div style="margin-top:10px;font-size:0.7rem;color:#778;">
+    Each toggle re-renders immediately. Turning one OFF and seeing an artifact vanish
+    identifies the culprit without a bisect.
+  </div>
+</div>
+
 <div id="canvas-wrap"><canvas id="glcanvas" width="800" height="800"></canvas></div>
+
+<div style="display:flex;gap:8px;align-items:center;margin-top:8px;width:100%;max-width:720px;">
+  <label for="bg-color" style="width:auto;font-size:0.72rem;color:#888;flex-shrink:0;">Background</label>
+  <input id="bg-color" type="color" value="#ffffff" style="width:44px;height:28px;padding:0;border:1px solid #383858;border-radius:6px;background:#252535;cursor:pointer;">
+  <button id="bg-white" class="secondary" type="button" style="padding:6px 10px;">White</button>
+  <button id="bg-black" class="secondary" type="button" style="padding:6px 10px;">Black</button>
+  <button id="bg-checker" class="secondary" type="button" style="padding:6px 10px;" title="Show a checkerboard behind the canvas to judge translucency">Checker</button>
+</div>
 
 <script type="module">
 'use strict';
@@ -99,6 +150,217 @@ const renderer = createRenderer(gl, shaderSources);
 // to trigger a fresh render + read pixels from the SAME tick (the
 // demo's WebGL2 context has preserveDrawingBuffer:false by default).
 window.__mantleRenderer = renderer;
+window.__mantleShaderSources = shaderSources;
+
+// ---------------------------------------------------------------
+// Engine + optimization controls.
+//
+// Every optimization here is meant to be OUTPUT-IDENTICAL to the plain path.
+// When one isn't, that is a bug — and the fastest way to find which one is to
+// switch them off individually and watch the artifact disappear. Each flag is
+// read at DRAW time (not baked into a bundle), so a toggle takes effect on the
+// next frame with no reload.
+// ---------------------------------------------------------------
+const OPTS = [
+  { id: 'occlusionCull',  flag: '__MANTLE_NO_OCCLUSION_CULL',  label: 'Occlusion cull',   invert: true,
+    hint: 'drop shapes a later opaque shape fully covers' },
+  { id: 'filterBbox',     flag: '__MANTLE_NO_FILTER_BBOX',     label: 'Filter bbox RTs', invert: true,
+    hint: 'restrict filter passes to the propagated bbox' },
+  { id: 'staticCache',    flag: '__MANTLE_NO_STATIC_CACHE',    label: 'Static cache',     invert: true,
+    hint: 'bake a static handle to an RT and blit' },
+  { id: 'instancedFast',  flag: '__MANTLE_NO_INSTANCED_FAST',  label: 'Instanced fast path', invert: true,
+    hint: 'one drawArraysInstanced for N copies' },
+  { id: 'occupancy',      flag: '__MANTLE_NO_OCCUPANCY',       label: 'Occupancy skip',   invert: true,
+    hint: 'skip the coverage walk on interior pixels' },
+  { id: 'groupRect',      flag: '__MANTLE_NO_GROUP_RECT',      label: 'Group/blend rects', invert: true,
+    hint: 'bound a group\'s snapshot + clear + composite to its content' },
+];
+const optWrap = document.getElementById('opt-toggles');
+for (const o of OPTS) {
+  const id = 'opt-' + o.id;
+  const row = document.createElement('label');
+  row.style.cssText = 'display:flex;gap:6px;align-items:center;cursor:pointer;';
+  row.htmlFor = id;
+  row.title = o.hint;
+  const on = o.on !== false;
+  row.innerHTML = `<input type="checkbox" id="${id}"${on ? ' checked' : ''} style="cursor:pointer;"> <span>${o.label}</span>`;
+  optWrap.appendChild(row);
+  row.querySelector('input').addEventListener('change', (e) => {
+    // Most flags are "__MANTLE_NO_x" (checked = optimization on = flag cleared). The
+    // filter scissor is opt-IN, so its flag is positive.
+    const positive = !o.flag.startsWith('__MANTLE_NO_');
+    globalThis[o.flag] = (positive ? e.target.checked : !e.target.checked) ? true : undefined;
+    redraw();
+  });
+}
+
+// The COVERAGE ENGINE is chosen by shader #defines, which are baked into the fill program
+// at createRenderer time. So an engine is not a live toggle: each one needs its own
+// renderer, built lazily and cached. (LB is the exception — it is a routing decision, not a
+// coverage kernel, so it toggles on the existing renderer.)
+//
+//   slug      (no defines)            the band walk
+//   aac       MANTLE_AAC              exact analytic area
+//   gwn       MANTLE_GWN + _GWN_SDF   band-free: run-tree winding + tree-derived SDF
+//                                     (the GWN+AAC hybrid was a failed experiment — removed)
+//   hard      MANTLE_HARD             no AA: crossing count -> 0/1
+//   hard-tree MANTLE_HARD + _HARD_TREE no AA via the GWN run tree
+//
+// An engine is TWO decisions, not one. The #defines pick the kernel, but the GWN kernels also
+// need their run TREE, and that is baked by the IMPORTER — importSvg({gwnTree:true}) — into the
+// band texture. Set the define without the tree and the kernel walks a header that was never
+// written: it renders NOTHING (measurably: ink 0). So an engine carries import opts too, and
+// changing to one that needs a different bundle re-imports the SVG.
+const ENGINE_OPTS = {
+  slug:        null,                                        // the base renderer
+  aac:        { aacFill: true },
+  // MANTLE_GWN alone is the WINDING-ONLY tier (what the hard engines ride). The AA'd
+  // GWN+SDF path is gated on MANTLE_GWN_SDF — without it you get GWN's hard fill, not GWN.
+  gwn:        { fillDefines: ['MANTLE_GWN', 'MANTLE_GWN_SDF'] },
+  // MANTLE_GWN is REQUIRED alongside MANTLE_HARD, even though the frag's #if chain reaches
+  // renderFillHardBand before any GWN branch. It is what compiles the run-tree kernel in —
+  // without it the program fails to link ("renderFillHardBand: no matching overloaded
+  // function"). This is the config fillPass itself builds for a no-AA bundle.
+  hard:       { fillDefines: ['MANTLE_HARD', 'MANTLE_GWN'] },
+  'hard-tree':{ fillDefines: ['MANTLE_HARD', 'MANTLE_HARD_TREE', 'MANTLE_GWN'] },
+};
+const ENGINE_IMPORT = {
+  gwn:         { gwnTree: true },
+  'hard-tree': { gwnTree: true },
+};
+const importOptsFor = (v) => ({ nativeArcs: true, ...(ENGINE_IMPORT[v] || {}) });
+const currentEngine = () => document.getElementById('eng-sel').value;
+const _engRenderers = new Map();
+function rendererForEngine(v) {
+  if (v === 'auto' || v === 'lb' || v === 'lb-only' || v === 'slug') return renderer;
+  if (_engRenderers.has(v)) return _engRenderers.get(v);
+  const opts = ENGINE_OPTS[v];
+  let r = renderer;
+  try {
+    r = createRenderer(gl, shaderSources, opts || {});
+    r.setLoopBlinnFill('off');   // an engine choice means "use THIS coverage kernel"
+  } catch (e) {
+    console.warn('[mantle demo] engine', v, 'failed to build a renderer:', e);
+    document.getElementById('status').textContent = `engine "${v}" failed: ${e.message}`;
+  }
+  _engRenderers.set(v, r);
+  // A renderer created LATER never saw the overlay toggles. showTriOutline/showBBoxes are
+  // per-renderer state and the toggle handler only pushes them to the renderers that exist when
+  // you click — so switching to AAC/GWN/hard after turning the overlay on gave you no overlay.
+  applyDebugFlags();
+  return r;
+}
+
+const engSel = document.getElementById('eng-sel');
+let _lastSvgText = null;                       // so an engine change can re-import
+let _lastImportKey = null;
+engSel.addEventListener('change', async () => {
+  const v = engSel.value;
+  const r = rendererForEngine(v);
+  window.__mantleActiveRenderer = r;
+  // 'lb' still lets LB DECLINE per bundle and fall back to Slug silently — which is why a
+  // shape can look like it is being drawn by an engine that never touched it. 'lb-only' is
+  // the forcing mode: no Slug fallback, so what LB cannot draw is simply not drawn, and you
+  // can SEE what it declined. (The status line reports the decision either way.)
+  if (r === renderer) renderer.setLoopBlinnFill(
+    v === 'lb' ? 'on' : v === 'lb-only' ? 'only' : v === 'slug' ? 'off' : 'auto');
+  // Rebuild the bundle on EVERY engine change, not just when the import opts differ.
+  // slug/lb/auto share one renderer, so they share its STATIC CACHE — and the cache is keyed
+  // on the bundle, not the engine. Switching slug→lb without a rebuild just re-blits the bake
+  // Slug made: identical pixels, no LB draw, and an overlay with nothing to show. The engine
+  // picker looked like it did nothing because, for those three, it did nothing.
+  if (_lastSvgText) { await loadSvgText(_lastSvgText); return; }
+  if (bundle) { try { r.setBundle(bundle); } catch {} }
+  redraw();
+});
+
+// The ONE load path: import under the current engine's opts, bind, draw.
+async function loadSvgText(text, label) {
+  const v = currentEngine();
+  _lastSvgText = text;
+  _lastImportKey = JSON.stringify(importOptsFor(v));
+  const sections = await importSvg(text, importOptsFor(v));
+  setBundle(createBundle(gl, sections), label ? ' — ' + label : '');
+  // LB builds its meshes OFF the main thread, so the first frames after a load are Slug even
+  // with LB selected — which made "Loop-Blinn" show you pixel-identical Slug output and no way
+  // to tell. Wait for the meshes before painting the frame the engine picker promised.
+  const R = window.__mantleActiveRenderer || renderer;
+  if (bundle && R.awaitLbReady && (v === 'lb' || v === 'lb-only' || v === 'auto')) {
+    try { await R.awaitLbReady(bundle); } catch {}
+  }
+  redraw();
+}
+window.__mantleLoadSvg = loadSvgText;
+window.__mantleActiveRenderer = renderer;
+
+// Resolution scale: render fewer pixels at the same on-screen size. Fill cost is linear in
+// backing-store pixels, so this is the direct dial on frame time.
+const resSlider = document.getElementById('res-scale');
+const resLabel  = document.getElementById('res-scale-v');
+resSlider.addEventListener('input', () => {
+  const s = Number(resSlider.value);
+  const R = window.__mantleActiveRenderer || renderer;
+  const size = R.setResolutionScale ? R.setResolutionScale(s) : null;
+  resLabel.textContent = `${s.toFixed(2)}×` + (size ? ` (${size[0]}×${size[1]})` : '');
+  redraw();
+});
+
+// The canvas is displayed 1:1 with its backing store — see the CSS. It used to be an 800x800
+// buffer inside a 720px box, so the browser resampled every frame by 0.897x before you saw it,
+// and a resampled edge tells you nothing about the antialiasing that produced it. This page
+// exists to judge exactly that.
+//
+// The fix is in the CSS (show it at 800 CSS px), NOT by shrinking the buffer to the box: 44
+// smokes drive this page and read its canvas, and they set small headless viewports. Sizing
+// the buffer to the box would have silently rendered every one of them at ~168px — two of them
+// failed outright, and the rest would have gone on measuring something other than what they
+// were written to measure.
+function warnIfResampled() {
+  const scale = canvas.clientWidth ? (canvas.width / (canvas.clientWidth * (devicePixelRatio || 1))) : 1;
+  return (Math.abs(scale - 1) > 0.01)
+    ? ` — NOTE: canvas ${canvas.width}px shown at ${Math.round(canvas.clientWidth * (devicePixelRatio||1))}px, so edges you see are RESAMPLED (widen the window to judge AA)`
+    : '';
+}
+
+// What actually painted this frame? An engine can DECLINE (LB falls back to Slug per bundle,
+// and defers loop/cusp/arc "sentinel" shapes even when it takes the bundle), so the picker's
+// value is a request, not a report.
+function routeReport(R, b) {
+  if (!b) return '';
+  const lb = (b._lbMeshes || []);
+  const analytic = lb.filter(m => m && m.vertexCount && !m.fallback).length;
+  const deferred = lb.filter(m => !m || !m.vertexCount).length;
+  const routed = R.debugStats && R.debugStats.loopBlinnRouteCount > (routeReport._last || 0);
+  routeReport._last = (R.debugStats && R.debugStats.loopBlinnRouteCount) || 0;
+  const v = currentEngine();
+  if (v !== 'lb' && v !== 'lb-only' && v !== 'auto') return '';
+  const forced = v === 'lb-only';
+  if (!lb.length) return forced
+    ? ' — LB DECLINED the bundle: nothing drawn (force mode, no Slug fallback)'
+    : ' — LB DECLINED the bundle (Slug drew it)';
+  return ` — LB ${routed ? 'routed' : forced ? 'DECLINED: nothing drawn' : 'DECLINED (Slug drew it)'}: `
+       + `${analytic}/${lb.length} shapes analytic`
+       + (deferred ? `, ${deferred} deferred to Slug (loop/cusp sentinel)` : '');
+}
+
+// Frame clear color, driven by the Background control. A checkerboard is drawn in CSS behind
+// the canvas, so for it we clear TRANSPARENT and let the checker show through the letterbox and
+// wherever the content is translucent. Checker is the DEFAULT (matches #canvas-wrap's CSS), so
+// translucency is visible out of the box.
+let bgColor = [0, 0, 0, 0];
+function redraw() {
+  const R = window.__mantleActiveRenderer || renderer;
+  try {
+    if (typeof render === 'function') render(R);
+    else if (bundle) { R.beginFrame(bgColor); R.drawBundle(bundle); R.endFrame(); }
+    const st = document.getElementById('status');
+    const base = st.textContent.split(' — LB ')[0].split(' — NOTE:')[0];
+    st.textContent = base + routeReport(R, bundle) + warnIfResampled();
+  }
+  catch (e) { console.warn('[mantle demo] redraw failed:', e); }
+}
+window.__mantleRedraw = redraw;
+   // smokes that need a renderer with different opts (e.g. aacFill)
 window.__mantleGl = gl;
 window.__mantleGetBundle = () => bundle;     // current bound bundle (or null)
 
@@ -108,6 +370,11 @@ function setBundle(newBundle, statusSuffix) {
   if (bundle) bundle.dispose();
   bundle = newBundle;
   renderer.setBundle(bundle);
+  // An engine other than slug/lb/auto runs on its OWN renderer (the coverage kernel is a
+  // shader #define). It has never seen this bundle — tell it, or loading a new SVG while a
+  // non-default engine is selected silently keeps drawing the old one.
+  const _act = window.__mantleActiveRenderer;
+  if (_act && _act !== renderer) { try { _act.setBundle(bundle); } catch {} }
   if (bundle) {
     const hv = bundle.hybridVerts;
     document.getElementById('status').textContent =
@@ -123,6 +390,50 @@ function setBundle(newBundle, statusSuffix) {
 // ============================================================
 // SVG load — file picker + URL boot
 // ============================================================
+// ---------------------------------------------------------------
+// Smoke-suite assets. examples/smoke/index.json is written by the extractor and lists
+// every SVG the tests render, with the smoke and the const it came from — so when a smoke
+// fails you can open the exact asset here and drive it through every engine and toggle.
+// ---------------------------------------------------------------
+(async function fillSmokePicker() {
+  const sel = document.getElementById('smoke-sel');
+  const gEx = document.getElementById('grp-examples');
+  const gSm = document.getElementById('grp-smoke');
+  const grab = async (u) => { try { const r = await fetch(u); return r.ok ? await r.json() : []; } catch { return []; } };
+  // TWO groups. The smoke fixtures are deliberately TINY — the biggest is 12 elements,
+  // because a test wants one thing isolated. The real scenes live in examples/ (tiger.svg
+  // is 240 paths), and those are what you want when you are looking at fill rate or a
+  // batching regression, so they belong in the same picker.
+  const [examples, smoke] = await Promise.all([grab('./examples/index.json'),
+                                               grab('./examples/smoke/index.json')]);
+  for (const a of examples) {
+    const o = document.createElement('option');
+    o.value = './examples/' + a.file;
+    o.textContent = `${a.file}  (${a.elements} shape${a.elements === 1 ? '' : 's'})`;
+    gEx.appendChild(o);
+  }
+  for (const a of smoke) {
+    const o = document.createElement('option');
+    o.value = './examples/smoke/' + a.file;
+    o.textContent = `${a.smoke.replace(/Smoke\.mjs$/, '')} · ${a.const}${a.generated ? '  (generated)' : ''}`;
+    gSm.appendChild(o);
+  }
+  const total = examples.length + smoke.length;
+  if (!total) { sel.disabled = true; sel.options[0].textContent = '— no assets found —'; return; }
+  sel.options[0].textContent = `— ${examples.length} examples + ${smoke.length} smoke assets —`;
+  sel.addEventListener('change', async () => {
+    if (!sel.value) return;
+    const status = document.getElementById('status');
+    try {
+      status.textContent = 'Loading ' + sel.value + ' …';
+      await loadSvgText(await (await fetch(sel.value)).text());
+    } catch (e) {
+      status.textContent = 'Failed to load ' + sel.value + ': ' + e.message;
+      console.warn('[mantle demo]', e);
+    }
+  });
+})();
+
 document.getElementById('svg-btn').addEventListener('click', async () => {
   const status = document.getElementById('status');
   try {
@@ -132,9 +443,7 @@ document.getElementById('svg-btn').addEventListener('click', async () => {
       return;
     }
     status.textContent = 'Converting SVG …';
-    const text = await svgIn.files[0].text();
-    const sections = await importSvg(text, { nativeArcs: true });
-    setBundle(createBundle(gl, sections));
+    await loadSvgText(await svgIn.files[0].text());
   } catch (e) {
     document.getElementById('status').textContent =
       'SVG export: ' + String(e && e.message ? e.message : e);
@@ -145,16 +454,51 @@ document.getElementById('svg-btn').addEventListener('click', async () => {
 // ============================================================
 // Debug toggles (route through renderer flags)
 // ============================================================
+// showTriOutline/showBBoxes are PER-RENDERER state, and every engine but slug/lb/auto runs on
+// its own renderer — so setting them on `renderer` left the overlay off for aac/gwn/hard. Keep
+// one desired value and push it to whichever renderer is live (including ones built later).
+const _dbg = { tri: false, bbox: false };
+function applyDebugFlags() {
+  for (const r of [renderer, ..._engRenderers.values()]) {
+    r.showTriOutline = _dbg.tri;
+    r.showBBoxes = _dbg.bbox;
+  }
+  document.getElementById('debug-tri').classList.toggle('active', _dbg.tri);
+  document.getElementById('debug-bbox').classList.toggle('active', _dbg.bbox);
+}
+window.__mantleApplyDebugFlags = applyDebugFlags;
 document.getElementById('debug-tri').addEventListener('click', () => {
-  renderer.showTriOutline = !renderer.showTriOutline;
-  document.getElementById('debug-tri').classList.toggle('active', renderer.showTriOutline);
-  renderer.render();
+  _dbg.tri = !_dbg.tri; applyDebugFlags(); redraw();
 });
 document.getElementById('debug-bbox').addEventListener('click', () => {
-  renderer.showBBoxes = !renderer.showBBoxes;
-  document.getElementById('debug-bbox').classList.toggle('active', renderer.showBBoxes);
-  renderer.render();
+  _dbg.bbox = !_dbg.bbox; applyDebugFlags(); redraw();
 });
+// ---- Background color ----
+const _wrap = document.getElementById('canvas-wrap');
+const _checkerCss = 'conic-gradient(#d8d8e0 90deg, #f4f4f8 90deg 180deg, #d8d8e0 180deg 270deg, #f4f4f8 270deg) 0 0 / 20px 20px';
+const _hexToRgba = (h) => [parseInt(h.slice(1,3),16)/255, parseInt(h.slice(3,5),16)/255, parseInt(h.slice(5,7),16)/255, 1];
+function setBg(rgba, cssBehind, activeId) {
+  bgColor = rgba;
+  // The canvas letterbox shows through wherever the fit leaves margin, and (for the checker /
+  // a transparent clear) through the content itself — so paint the wrap to match the clear.
+  _wrap.style.background = cssBehind;
+  for (const id of ['bg-white','bg-black','bg-checker'])
+    document.getElementById(id).classList.toggle('active', id === activeId);
+  redraw();
+}
+document.getElementById('bg-color').addEventListener('input', (e) => {
+  setBg(_hexToRgba(e.target.value), e.target.value, null);   // custom color: no preset is active
+});
+document.getElementById('bg-white').addEventListener('click', () => {
+  document.getElementById('bg-color').value = '#ffffff'; setBg([1,1,1,1], '#fff', 'bg-white');
+});
+document.getElementById('bg-black').addEventListener('click', () => {
+  document.getElementById('bg-color').value = '#000000'; setBg([0,0,0,1], '#000', 'bg-black');
+});
+document.getElementById('bg-checker').addEventListener('click', () => {
+  setBg([0,0,0,0], _checkerCss, 'bg-checker');   // transparent clear ⇒ the checker shows through
+});
+document.getElementById('bg-checker').classList.add('active');   // checker is the default
 // ============================================================
 // Benchmark
 // ============================================================
@@ -257,8 +601,7 @@ document.getElementById('bench-btn').addEventListener('click', async () => {
       } else {
         text = await r.text();
       }
-      const sections = await importSvg(text, { nativeArcs: true });
-      setBundle(createBundle(gl, sections));
+      await loadSvgText(text);
     } catch (e) {
       status.textContent = 'SVG URL load: ' + (e && e.message ? e.message : e);
       console.error(e);

@@ -251,15 +251,18 @@ export class MantleFontAsset {
       if (strikeIdx < 0) return null;
       const g = this.sbix.getBitmapGlyph(gid, strikeIdx);
       if (!g || !g.isPng) return null;
-      // sbix originX/Y are font units. Em-normalize via unitsPerEm.
+      // sbix originOffsetX/Y are PIXELS at the strike's ppem (they offset
+      // the bitmap, so they scale with it — HarfBuzz applies the same
+      // strike scale). Em-normalize via the strike ppem, not unitsPerEm.
       const inv = this.unitsPerEm > 0 ? 1 / this.unitsPerEm : 0;
+      const px2em = g.strikePpem > 0 ? 1 / g.strikePpem : 0;
       // PNG dimensions come from the PNG header; caller decodes.
       // For atlas pack we report ppem (= strike's render size at
       // 1em) — caller scales accordingly.
       return {
         pngBytes: g.pngBytes,
-        originXEm: g.originX * inv,
-        originYEm: g.originY * inv,
+        originXEm: g.originX * px2em,
+        originYEm: g.originY * px2em,
         widthEm: 0,            // sbix doesn't include width metric — caller reads PNG header
         heightEm: 0,           // ditto
         advanceEm: this._tables.glyphAdvanceWidth(gid) * inv,
@@ -272,14 +275,13 @@ export class MantleFontAsset {
       if (strikeIdx < 0) return null;
       const g = this.cbdt.getBitmapGlyph(gid, strikeIdx);
       if (!g) return null;
-      // CBDT SmallGlyphMetrics: bearingX/Y in font units (s8 — yes,
-      // really, narrow range), advance + W/H in PIXELS at strike ppem.
-      const inv = this.unitsPerEm > 0 ? 1 / this.unitsPerEm : 0;
+      // CBDT SmallGlyphMetrics: bearingX/Y, advance, W/H are ALL in
+      // PIXELS at the strike's ppem (spec: metrics are pixel values).
       const px2em = g.strikePpem > 0 ? 1 / g.strikePpem : 0;
       return {
         pngBytes: g.pngBytes,
-        originXEm: g.bearingX * inv,
-        originYEm: g.bearingY * inv,
+        originXEm: g.bearingX * px2em,
+        originYEm: g.bearingY * px2em,
         widthEm:   g.width  * px2em,
         heightEm:  g.height * px2em,
         advanceEm: g.advance * px2em,
@@ -293,18 +295,18 @@ export class MantleFontAsset {
       const g = this.ebdt.getBitmapGlyph(gid, strikeIdx);
       if (!g) return null;
       // EBDT carries raw coverage (not PNG): `alphaBitmap` is one 8-bit
-      // coverage byte per pixel (row-major, width*height). bearingX/Y in
-      // font units; advance + W/H in PIXELS at the strike's ppem. The
-      // glyph is monochrome/grayscale — consumers tint by the fill color.
-      const inv = this.unitsPerEm > 0 ? 1 / this.unitsPerEm : 0;
+      // coverage byte per pixel (row-major, width*height). bearingX/Y,
+      // advance, W/H are ALL in PIXELS at the strike's ppem (spec:
+      // SmallGlyphMetrics are pixel values). The glyph is monochrome/
+      // grayscale — consumers tint by the fill color.
       const px2em = g.strikePpem > 0 ? 1 / g.strikePpem : 0;
       return {
         alphaBitmap: g.alphaBitmap,
         bitDepth: g.bitDepth,
         pixelWidth: g.width,
         pixelHeight: g.height,
-        originXEm: g.bearingX * inv,
-        originYEm: g.bearingY * inv,
+        originXEm: g.bearingX * px2em,
+        originYEm: g.bearingY * px2em,
         widthEm:   g.width  * px2em,
         heightEm:  g.height * px2em,
         advanceEm: g.advance * px2em,
@@ -375,8 +377,26 @@ export class MantleFontAsset {
     if (!this.isVariable || userCoords == null) {
       return readGlyph(this._tables, gid);
     }
-    const n = this.fvar.normalizeCoords(userCoords);
-    return readGlyph(this._tables, gid, n);
+    return readGlyph(this._tables, gid, this._normCoords(userCoords));
+  }
+
+  /// Memoized fvar.normalizeCoords: layout calls the variable-glyph
+  /// accessors once PER GLYPH with the same coords object, and
+  /// normalization (clamp + avar remap + an array allocation) is pure —
+  /// cache on identity + content (in-place mutation still invalidates
+  /// via the content compare).
+  _normCoords(userCoords) {
+    const c = this._ncCache;
+    if (c && c.src === userCoords && c.key.length === userCoords.length) {
+      let same = true;
+      for (let i = 0; i < userCoords.length; i++) {
+        if (c.key[i] !== userCoords[i]) { same = false; break; }
+      }
+      if (same) return c.norm;
+    }
+    const norm = this.fvar.normalizeCoords(userCoords);
+    this._ncCache = { src: userCoords, key: Array.prototype.slice.call(userCoords), norm };
+    return norm;
   }
 
   /** Metrics for an already-resolved glyph id. */
@@ -573,7 +593,8 @@ export class MantleFontAsset {
     return metrics;
   }
 
-  /** GPOS pair adjustment. */
+  /** Legacy no-op stub — always returns 0. Kerning is applied by the
+   *  GPOS pass during shaping, not through this hook. */
   getKerning(_a, _b) { return 0; }
 
   _ensure() {
@@ -788,7 +809,7 @@ export class MantleFontAsset {
         underlineThickness: this.underlineThickness,
       };
     }
-    const n = this.fvar.normalizeCoords(userCoords);
+    const n = this._normCoords(userCoords);
     return {
       ascent:  this.ascent  + this.mvar.delta('hasc', n) * inv,
       descent: this.descent + this.mvar.delta('hdsc', n) * inv,
@@ -852,11 +873,11 @@ export class MantleFontAsset {
       return baseFu * inv;
     }
     if (this.hvar.hasHvar) {
-      const n = this.fvar.normalizeCoords(userCoords);
+      const n = this._normCoords(userCoords);
       const deltaFu = this.hvar.advanceDelta(gid, n);
       return (baseFu + deltaFu) * inv;
     }
-    const n = this.fvar.normalizeCoords(userCoords);
+    const n = this._normCoords(userCoords);
     const advFu = glyphGvarAdvanceFu(gid, this._tables, n);
     if (advFu != null) return advFu * inv;
     return baseFu * inv;

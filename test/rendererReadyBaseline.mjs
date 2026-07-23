@@ -18,11 +18,7 @@ import puppeteer from 'puppeteer';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <defs><filter id="b"><feGaussianBlur stdDeviation="3"/></filter></defs>
-  <rect id="blurred" x="20" y="20" width="120" height="120" fill="#ff0000" filter="url(#b)"/>
-  <rect id="plain"   x="150" y="150" width="40" height="40" fill="#00ff00"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/rendererReadyBaseline__SVG.svg', import.meta.url), 'utf8');
 
 // The page exposes a single async function the driver calls per mode, so
 // errors surface as a rejected evaluate() instead of a silent module hang.

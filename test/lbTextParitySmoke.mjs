@@ -5,10 +5,8 @@
 // (glyphLoc = a BAND index, not a curve offset) → the first glyphs were unfilled
 // / garbled and multi-glyph ranges were corrupt.
 //
-// Also asserts the PERF routing: under 'auto' (default) text stays on Slug —
-// holed glyphs batch fast through CDT, but cubicSignKLMN mis-signs concave/S-curve
-// cubics (CFF fonts), so text stays on Slug under 'auto' until that's fixed.
-// Under 'on' it routes LB and matches Slug (roboto's quadratics avoid the bug).
+// Explicit LB validates support and parity; automatic mode remains free to keep
+// this high-coverage text on the faster coverage renderer.
 import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
@@ -84,14 +82,12 @@ for (const word of ['Reading files', 'oo']) {
   else fail(`[${word}] LB total != Slug (${o.onTot} vs ${o.slugTot}) — glyph reconstruction`);
   if (o.maxBandRel <= 0.15) ok(`[${word}] every glyph band matches Slug (max band rel ${o.maxBandRel})`);
   else fail(`[${word}] a glyph band diverges (max band rel ${o.maxBandRel}) — first-glyph unfill / garble`);
-  // Routing: text now routes LB under 'auto' too (the old font gate is gone — fat
-  // cubic hulls are subdivided so klmn stays well-conditioned; text is just another
-  // solid-opaque shape on the combined route).
-  if (o.autoRouted > 0) ok(`[${word}] 'auto' routes text through LB`);
-  else fail(`[${word}] 'auto' did NOT route text through LB (${o.autoRouted})`);
+  if (o.autoRouted === 0 && o.autoTot === o.slugTot)
+    ok(`[${word}] 'auto' keeps high-coverage text on the coverage fallback`);
+  else fail(`[${word}] unexpected auto route/output (routes=${o.autoRouted}, ink=${o.autoTot}/${o.slugTot})`);
 }
 
 await browser.close();
 server.close();
 if (failures) { console.error('\\n' + failures + ' failure(s)'); process.exit(1); }
-console.log('\\nlbTextParitySmoke: text reconstructs correctly through LB; auto keeps text on Slug');
+console.log('\\nlbTextParitySmoke: text reconstructs correctly under forced LB and auto fallback');

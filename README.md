@@ -2,17 +2,26 @@
 
 Mantle is a WebGL2 vector-graphics renderer for the browser. It imports SVG
 (or shapes text) into a compact bundle — a curve table, per-shape metadata,
-and cover quads, all typed arrays — then draws each shape as a single quad
-whose fragment shader computes exact per-curve coverage (the Slug ray-cast
-algorithm). Anti-aliasing is analytic and resolution-independent: no
-tessellation, no stencil passes, no MSAA.
+and cover quads, all typed arrays. Its coverage routes draw each shape as a
+single quad whose fragment shader computes per-curve coverage through methods
+optimized to that shape. They do not flatten curves, and anti-aliasing is
+analytic and resolution-independent without MSAA.
 
-A second analytic fill based on Loop-Blinn implicit curves covers the cases
-where a mesh wins: GPU-resident shape morphs, streamed geometry, and solid
-static fills, each in one draw call. The renderer routes between the two
-automatically. `setLoopBlinnFill('on')` extends the Loop-Blinn fill to
-gradient and composed static fills as well; `'off'` forces the Slug path
-everywhere.
+The coverage renderer includes the original Slug band walk, signed-area AAC,
+and a hierarchical winding-tree kernel. `aacFill: 'auto'` selects Slug or AAC
+from each bundle's device-space size and segment types; `exactEdgeAa: true`
+adds an opt-in exact pixel-box refinement to Slug, while `slopeAa: true` offers
+a lower-state secant reconstruction for near-exact diagonal-edge quality.
+Large imported shapes also receive asynchronous interior-occupancy grids by
+default.
+
+A separate analytic fill based on Loop-Blinn implicit curves covers the cases
+where a mesh wins: GPU-resident shape morphs, streamed geometry, and compact
+cubic or arc static meshes. Automatic mode avoids building analytic meshes for
+straight, quadratic, mixed-curve, or otherwise consistently slower classes.
+`setLoopBlinnFill('on')` builds and enables every eligible class on demand,
+including gradient, image, and composed static fills; `'off'` forces the banded
+coverage path everywhere.
 
 ## Install
 
@@ -76,6 +85,13 @@ the renderer's view/world matrix. For mutable/streamed text use
 
 In brief:
 
+- **Rendering** — Slug, AAC, hierarchical winding, hard interior, and
+  Loop-Blinn fill routes; native line/quad/cubic/elliptical-arc segments;
+  default-on interior occupancy and opaque-occlusion culling; exact analytic
+  AA without MSAA. Depth-backed targets can preclaim certified opaque interiors
+  to reject hidden fragments. Filters render into bounded per-node targets and
+  cache their output regions instead of allocating a full canvas for every
+  primitive.
 - **SVG** — full static SVG 1.1/2 element set: paths (with native arc
   segments), shapes, `<text>`/`<tspan>`/`<textPath>`, `<use>`/`<symbol>`,
   the full stroke model (caps, joins incl. exact miter/bevel, dash arrays,
@@ -90,15 +106,23 @@ In brief:
   `ankr`/`feat`) for AAT-only faces like Zapfino; a UCD-17.0-driven Unicode
   text layer — normalization (UAX #15), grapheme segmentation (UAX #29), line
   breaking (UAX #14), bidi (UAX #9), script itemization (UAX #24), vertical
-  orientation (UAX #50), case mapping/folding — all generated for JS+C# from
-  one source and passing the official UCD conformance suites at 100%; every cmap
+  orientation (UAX #50), case mapping/folding — passing the official UCD
+  conformance suites at 100%; every cmap
   format incl. format-14 variation sequences; default-ignorable suppression;
   all four color-glyph formats (COLR v0/v1, CBDT/CBLC, EBDT/EBLC, sbix,
   SVG-in-OT); variable fonts (fvar/gvar/HVAR/VVAR/MVAR/avar/STAT, CFF2 blend);
   MATH; JSTF kashida justification.
 - **Animation** — per-shape override tables, two-pose shape morph, N-key
   timelines, plus Lottie/Rive-derived modifiers (trim path, repeater,
-  pucker/bloat, offset path, polystar, feather, text-on-path).
+  pucker/bloat, offset path, polystar, feather, text-on-path). Shape morphs
+  preserve elliptical arcs in endpoint form and retain strokes, gradients,
+  images, clips, masks, filters, translucency, and recolor state on supported
+  analytic routes.
+- **Game/runtime integration** — dynamic resolution scaling, loading-screen
+  fill precompilation, asynchronous Loop-Blinn readiness, persistent bundle
+  handles, stable `zOrder` frame submission, live instancing with per-instance
+  color state, independent nine-slice views, and incrementally growing paint
+  strokes.
 - **Color emoji & rich text** — tag-based markup runs (`<color>`, `<size>`,
   `<b>`/`<i>`, `<link>`, …) for runtime text.
 - **No-WebGL fallback** — `@kontek/mantle/fallback` renders the source SVG via
@@ -112,13 +136,20 @@ In brief:
 - `importSvg(svgText, opts) → Promise<BundleData>` — parses SVG,
   returns an in-memory bundle struct. Opts include `defaultFill`,
   `defaultStroke`, `defaultStrokeW`, `svgTextLayout` (for `<text>`
-  support; pass `buildSvgTextGlyphs` from the font subpath). Arc
-  segments are always preserved end-to-end as exact rationals (never
-  flattened or cubic-approximated): the Slug path renders them via the
-  coverage walker's `evalArc`, the analytic fill via its rational-quad
-  piece kind.
-- `createBundle(gl, bundleData) → Bundle` — uploads textures + vertex
-  buffers to a WebGL2 context.
+  support; pass `buildSvgTextGlyphs` from the font subpath), `engine`
+  (`'slug'` or `'aac'`, to pin the packed band layout), `gwnTree`, and
+  `occupancyGrid`. Use `engine: 'aac'` only when the bundle will always draw
+  through AAC; its compact layout intentionally omits useful Slug vertical
+  bands. A GWN fill define requires `gwnTree: true`. Occupancy acceleration is
+  enabled by default for sufficiently large shapes and activates
+  asynchronously; pass
+  `occupancyGrid: false` to disable it. Arcs remain dedicated elliptical-arc
+  records end-to-end rather than being flattened or cubic-approximated: the
+  Slug path evaluates them directly, and the analytic fill uses rational-quad
+  pieces.
+- `createBundle(gl, bundleData, opts?) → Bundle` — uploads textures + vertex
+  buffers to a WebGL2 context. Safe opaque-occlusion culling is enabled by
+  default; pass `{ occlusionCull: false }` to preserve every authored draw.
 - `createRenderer(gl, shaderSources, opts?) → Renderer` — owns shaders +
   state; `shaderSources` is the dict from `bundleShaders.fromPackage()` /
   `loadShaders()` / `@kontek/mantle/shaders/generated`. `renderer.render(bundle)`
@@ -128,10 +159,35 @@ In brief:
   `KHR_parallel_shader_compile` — useful on contended/weak GPUs where
   linking ~20 programs can stall tens of ms; then `await renderer.ready`
   before the first draw. `renderer.ready` is a promise that exists in
-  both modes (already-resolved in the default sync path).
+  both modes (already-resolved in the default sync path). Important fill
+  options include `aacFill: false | true | 'auto'`, `exactEdgeAa: true`,
+  `slopeAa: true` (both opt-in), `typeOmit`, `disableFillVariants`, and
+  `fillDefines` for specialized kernels such as GWN.
 - `renderer.drawBundle(target, opts?)` / `renderer.render(target)` —
   accept either a bundle or an animation handle (shape morph,
   timeline, override table); the renderer auto-unwraps `.bundle`.
+- `renderer.submitBundle(target, { zOrder, ...opts })` — queues a draw until
+  `endFrame()`. Lower `zOrder` values paint underneath; ties preserve submission
+  order. Outside a frame it behaves like `drawBundle()`.
+- **Runtime controls** — `renderer.setResolutionScale(scale, { dpr? })`
+  resizes the backing store while preserving its CSS size; call it after
+  layout and on resize, not every frame. `renderer.prewarmBundle(bundle)`
+  starts the likely fill variants, `await renderer.awaitLbReady(bundle)`
+  waits for an enabled off-thread Loop-Blinn build when the first visible frame
+  must use it (and resolves `false` when passive automatic policy deliberately
+  skips the mesh); `prepareBundle()` remains an explicit request to build it.
+  `renderer.precompileFills()` drains loaded fill pipelines behind a loading screen.
+- **Live instancing and mounts** — `renderer.drawBundleInstanced(bundle,
+  instances, shared?)` accepts per-instance `worldMatrix`, `alpha`, `tint`,
+  `colorMatrix`, and `colorMatrixOffset`; diagonal color transforms remain
+  GPU-instanced. `renderer.createBundleHandle(bundle)` keeps one mount's GL
+  state resident. `bundle.nineSliceInstance(opts)` creates an independent
+  drawable nine-slice view sharing the base bundle's textures, so one asset can
+  be mounted at several sizes simultaneously.
+- `renderer.createIncrementalStroke({ width, bbox, color?, capStyle?,
+  joinStyle?, miterLimit?, points? })` — creates a paint-tool stroke whose
+  `appendPoints()` updates only new segments. Draw `stroke.bundle` normally;
+  `finalize()` returns `{ pathD, svg }`, and `dispose()` releases its GL state.
 - `renderer.createImage(source, opts?) → ImageHandle` /
   `renderer.drawImage(handleOrSource, opts?)` — composite a raster
   image directly into the current frame (no SVG wrapper needed).
@@ -146,12 +202,18 @@ In brief:
   `drawImage` opts: `dstRect [x,y,w,h]` (viewport px, y-down),
   `worldMatrix` (column-major mat3, for rotation/skew), `srcRect
   [x,y,w,h]` (source sub-rect in px, for atlases/sprite-sheets),
-  `alpha` (0–1), `tint [r,g,b,a]`, `blendMode` (0 normal / 1 multiply
+  `alpha` (0–1), `tint [r,g,b,a]`, `colorMatrix` (column-major mat4)
+  + `colorMatrixOffset` — the same per-draw recolor as `drawBundle`
+  (`out = colorMatrix * in + colorMatrixOffset` on straight color,
+  before the tint), so N blits sharing ONE image handle can each take
+  their own colour — and `blendMode` (0 normal / 1 multiply
   / 2 screen / 4 darken / 5 lighten). Composes between
   `beginFrame`/`endFrame` like `drawBundle`.
 - `createShapeMorph(gl, src, dst, opts?)` — t-parameter morph
   between two topology-matched bundles. `.setT(t)`, `.bundle` to
-  pass to the renderer.
+  pass to the renderer. Elliptical arcs interpolate in endpoint form so
+  contours stay welded; analytic routes preserve supported paint, stroke,
+  clip, mask, and filter composition.
 - More animation builders — all return a handle exposing `.bundle` (plus
   `.setT(t)` / frame setters where applicable): `createShapeTimeline`
   (N-key timeline), `createSpatialBezierMorph` / `createPathDeltaMorph`
@@ -168,27 +230,43 @@ In brief:
 - **Text** — `MantleFontAsset(bytes)` wraps a TTF/OTF; `buildTextRun` /
   `buildStyled` / `buildFromMarkup` shape a run into per-glyph geometry;
   `measureText` / `measureFromMarkup` measure without emitting;
-  `createTextBundle` builds a mutable text bundle; `buildSvgTextGlyphs`
-  backs SVG `<text>`. `decodeIfWoff2` / `ttcFaceCount` are sfnt helpers.
+  `createTextBundle` builds a mutable text bundle and accepts `gwnTree: true`
+  for a GWN-capable text bundle; `buildSvgTextGlyphs` backs SVG `<text>`. A text
+  handle preserves `tb.bundle` identity across `setText()` / `setStyle()`
+  (including empty runs), so existing renderer handles update automatically.
+  Use `tb.runMetrics.typoBBox`, `firstBaselineY`, `lastBaselineY`, `lineCount`,
+  and `lastLineAdvance` for stable layout rather than the ink-tight
+  `globalBBox`.
+  `decodeIfWoff2` / `ttcFaceCount` are sfnt helpers.
 - **Scene** — `createScene(...)` builds a bundle from a programmatic
   scene tree; `sceneToBundle` / `sceneToSvg` serialize a scene.
 - **Static-scene cache** — `createStaticCache()` plus the `CacheStrategy`
   / `CacheLevel` / `CacheReason` enums (see the cache note below).
 - `fillHitShape(bundle, x, y, opts?)` / `fillHits(...)` /
   `fillHitId(...)` — hit testing (`HitMode.Bbox`, `.Coverage`,
-  `.Outline`, `.Auto`). Coverage and Outline test per-shape curve
-  geometry analytically (fills via winding ray-cast, strokes via exact
-  band distance including caps, joins, and dash arrays). They do **not**
-  account for clip paths, masks, filters, or `createOverrideTable`
-  visibility/tint/transform — use the same `worldMatrix` as draw time
-  for coordinate parity only.
-- `setDiagnostics({ onWarn, onError, silent, colrTrace })` — redirect or
-  silence library warnings/errors (default: `console.warn` /
-  `console.error`); `colrTrace: []` collects a per-node COLR filter-graph
-  trace for diagnostics.
+  `.Outline`, `.Auto`). Coverage fill tests walk the bundle's packed band and
+  curve data with the renderer's edge rules, so the hit boundary matches what
+  is drawn. Large shapes use cached winding trees and near-segment pruning;
+  strokes include caps, joins, and dash arrays. Morph hit tests use the current
+  pose and honor the morph's visibility table (or an explicit `overrides`
+  table). Hit tests do **not** account for clip paths, masks, filters, override
+  tint/transform, or other compositing effects; pass the draw's `worldMatrix`
+  for coordinate parity.
+- `setDiagnostics({ onWarn, onError, silent, colrTrace, stallMs,
+  engineTrace, dumpCache })` — redirect or silence library warnings/errors
+  (default: `console.warn` / `console.error`); `colrTrace: []` collects a
+  per-node COLR filter-graph trace; `stallMs` / `engineTrace` / `dumpCache`
+  opt into draw/engine/cache diagnostics (off by default — a single flag
+  check on hot paths). Read aggregates via `diagnosticTraces()` and reset them
+  with `clearDiagnosticTraces()`.
 - `chooseBackend()` / `createMantleScene(...)` — render via the browser's
   native SVG engine when WebGL2 is absent. Same scene API surface; morph
-  emits animated `path d`. The native backend also exposes
+  emits animated `path d`. The automatic WebGL path requests stencil, disables
+  browser MSAA, depth, and preserved drawing buffers, and prefers a
+  desynchronized high-performance context; pass `glAttribs` to override those
+  defaults. `scene.toScene(sections, bundleOpts)` forwards bundle options on
+  WebGL and accepts them for native signature parity. The native backend also
+  exposes
   `createNativeScene` / `createNativeMorph` / `createNativeOverrideTable`
   / `createNativeTextBundle` / `createNativeTimeline` (also under
   `@kontek/mantle/fallback`).
@@ -207,10 +285,28 @@ and path-`d` helpers (`curveRangeToPathD`, `curvesToPathDMap`).
 
 ### Static cache note
 
-The static-scene cache implements the A1 (whole-asset) tier. The A2
-(viewport-clamped) tier is a no-op here: the cache target is already
-viewport-sized, so there is nothing to clamp. `ForceA2` resolves to
-`None`; use A1 or the intermediate mask/filter caches.
+The static-scene cache exposes three descriptive levels:
+
+- `WholeAsset` (`ForceWholeAsset`) caches one fully visible bundle in a
+  viewport-sized target. `Auto` can promote stable assets to this level.
+- `ViewportWindow` (`ForceViewportWindow`) caches the viewport plus a
+  configurable `viewportWindowMarginPixels` around it and reuses that bake for
+  pans within the margin. It is opt-in because it did not improve the measured
+  JS workloads enough to justify automatic promotion; test it against the
+  direct path for the target game. Bundles using `non-scaling-size`,
+  `non-rotation`, or `fixed-position` draw live because those vector effects
+  intentionally cancel the projection compensation used by this level.
+- `SharedGroup` (`ForceSharedGroup`) lets handles with the same
+  `instanceGroupKey` share one target.
+
+`ForceA1` and `ForceA3` remain deprecated aliases for compatibility. The
+former no-op `ForceA2` was removed; numeric strategy value `3` now selects
+`ForceViewportWindow`, and `CacheReason.LevelNotImplemented` was replaced by
+`CacheReason.UnsupportedFeatures`.
+Screen-space external clips also draw live because their texture contents can
+change independently of bundle cache invalidation. Renderer-created shared
+groups are isolated per WebGL context. Handles release cache state on disposal;
+direct `createStaticCache()` consumers should call `dispose()` when finished.
 
 ### Subpath exports
 
@@ -301,12 +397,18 @@ Backend selection is an explicit API: `createMantleScene(canvas, { backend:
 'native' })` (or `forceNative: true`) pins the no-WebGL fallback, and
 `chooseBackend()` exposes the same decision for callers that branch their
 own setup. For manual testing without touching code, a `?mantleNative=1`
-URL query param forces the native backend, and one `globalThis` debug flag
-remains for automated harnesses (`__MANTLE_FORCE_NATIVE = true`) — do not
-rely on the flag in production.
+URL query param forces the native backend, and
+`globalThis.__MANTLE_FORCE_NATIVE = true` remains for automated harnesses —
+do not rely on the flag in production.
 
-Everything else is an explicit API: `setDiagnostics({ colrTrace: [] })`
-collects a per-node COLR filter-graph trace, and
+Additional A/B hooks (`__MANTLE_NO_*`) are gated behind
+`globalThis.__MANTLE_DEBUG__ = true` and read through `mantleDebugFlag(name)`.
+Without that master switch they are inert. Prefer explicit APIs
+(`renderer.setLoopBlinnFill(...)`, `renderer.setLoopBlinnMeshOpts({ forceCdt })`,
+`importSvg({ gwnTree: true })`, `setDiagnostics(...)`) in application code.
+
+Everything else is an explicit API: `setDiagnostics({ colrTrace: [],
+engineTrace: true })` collects traces, and
 `createShapeMorph(gl, src, dst, { cpuLerp: true })` pins a morph to the CPU
 curve-lerp path (parity tests compare it against the GPU path). Prefer
 `setDiagnostics({ silent: true })` to silence library warnings in
@@ -373,10 +475,12 @@ third-party fixture fonts — `npm run fetch:fixtures` downloads them once
 
 ## Status
 
-1.0. The API surface (`importSvg`, `createBundle`, `createRenderer`,
-`createShapeMorph`, `createOverrideTable`, `inspect`, hit-test API) and
-the per-subpath registration modules are stable. Internal helpers + GLSL
-helper-substitution markers are not part of the public API.
+1.1.0. The API surface (`importSvg`, `createBundle`, `createRenderer`,
+`createShapeMorph`, `createOverrideTable`, `createTextBundle`, renderer
+preparation/dynamic-resolution APIs, instancing, incremental strokes,
+`inspect`, and hit testing) and the per-subpath registration modules are
+stable. Internal helpers and GLSL helper-substitution markers are not part of
+the public API.
 
 ## Author
 
@@ -386,12 +490,24 @@ Aaron Kaluszka <<megabyte@kontek.net>>
 
 Mantle implements published algorithms including:
 
-- **Eric Lengyel** — the Slug ray-cast coverage algorithm and its
-  root-eligibility table ("GPU-Centered Font Rendering Directly from Glyph
-  Outlines", *JCGT* 6(2), 2017 — https://jcgt.org/published/0006/02/02/).
 - **Charles Loop & Jim Blinn** — the implicit-curve rendering method behind
   the analytic mesh fill ("Resolution Independent Curve Rendering using
   Programmable Graphics Hardware", SIGGRAPH 2005).
+- **Josiah Manson & Scott Schaefer** — the closed-form per-pixel curve-area
+  integral ("Analytic Rasterization of Curves
+  with Polynomial Filters", *Computer Graphics Forum* (Eurographics 2013) 32(2)
+  — https://doi.org/10.1111/cgf.12042).
+- **Eric Lengyel** — the Slug ray-cast coverage algorithm and its
+  root-eligibility table ("GPU-Centered Font Rendering Directly from Glyph
+  Outlines", *JCGT* 6(2), 2017 — https://jcgt.org/published/0006/02/02/).
+- **Alec Jacobson, Ladislav Kavan & Olga Sorkine-Hornung** — the generalized
+  winding number behind the tree fill: winding as a sum of
+  per-segment subtended angles ("Robust Inside-Outside Segmentation using
+  Generalized Winding Numbers", SIGGRAPH 2013). The curved-arc term — a chord's
+  subtended angle plus the winding of the arc↔chord lune — is the curve-domain
+  GWN of **Spainhour, Gunderman & Weiss** ("Robust Containment Queries over
+  Collections of Rational Parametric Curves via Generalized Winding Numbers",
+  SIGGRAPH 2024).
 - **Cem Yuksel** — the polynomial root finder used for cubic coverage
   ("High-Performance Polynomial Root Finding for Graphics", *PACMCGIT*
   5(3), 2022 — https://doi.org/10.1145/3543865).

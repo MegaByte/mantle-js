@@ -42,7 +42,14 @@ export function parseGradientStops(el) {
     const rgba = parseColor(color);
     stops.push({ offset: off, color: [rgba[0], rgba[1], rgba[2], rgba[3] * opac] });
   }
-  stops.sort((a, b) => a.offset - b.offset);
+  // SVG 1.1 §13.2.4: an offset smaller than any preceding one is rounded
+  // up to the largest so far — document order is preserved, never sorted
+  // (sorting would reorder the color sequence of hard-stop gradients).
+  let prev = 0;
+  for (let i = 0; i < stops.length; i++) {
+    if (stops[i].offset < prev) stops[i].offset = prev;
+    else prev = stops[i].offset;
+  }
   return stops;
 }
 
@@ -63,6 +70,23 @@ export function parseGradients(root) {
     for (let i = 0; i < kids.length; i++) visit(kids[i]);
   };
   visit(root);
+
+  // Viewport dims for percentage coordinates under
+  // gradientUnits="userSpaceOnUse" (SVG 1.1 §13.2.2: resolve against the
+  // viewport per §7.10; under objectBoundingBox a percentage is just the
+  // 0..1 fraction).
+  let vpW = NaN, vpH = NaN;
+  {
+    const vbStr = (root.getAttribute && (root.getAttribute('viewBox') || '').trim()) || '';
+    const p = vbStr ? vbStr.split(/[\s,]+/).map(parseFloat) : [];
+    if (p.length === 4 && Number.isFinite(p[2]) && p[2] > 0) { vpW = p[2]; vpH = p[3]; }
+    else if (root.getAttribute) {
+      vpW = parseFloat(root.getAttribute('width'));
+      vpH = parseFloat(root.getAttribute('height'));
+    }
+    if (!(vpH > 0)) vpH = vpW;
+  }
+  const vpDiag = (vpW > 0) ? Math.sqrt((vpW * vpW + vpH * vpH) / 2) : NaN;
 
   const resolved = {};
   const resolve = (id, seen) => {
@@ -87,35 +111,44 @@ export function parseGradients(root) {
     const xf = el.getAttribute('gradientTransform');
     const gtransform = xf ? parseTransform(xf) : (parent ? parent.gradient_transform : IDENT);
 
-    const f = (attr, defaultProp, defaultVal) => {
+    const isUser = units === GRAD_UNITS_USER;
+    const f = (attr, defaultProp, defaultVal, axis) => {
       const v = el.getAttribute(attr);
       if (v != null) {
-        if (v.endsWith('%')) return parseFloat(v.slice(0, -1)) / 100;
+        if (v.endsWith('%')) {
+          const frac = parseFloat(v.slice(0, -1)) / 100;
+          if (!isUser || !(vpW > 0)) return frac;
+          return frac * (axis === 'y' ? vpH : axis === 'd' ? vpDiag : vpW);
+        }
         const n = parseFloat(v);
         if (!isNaN(n)) return n;
       }
       if (parent) return parent[defaultProp] ?? defaultVal;
       return defaultVal;
     };
+    // Attribute defaults are percentages per spec (x2=100%, cx/cy/r=50%),
+    // so under userSpaceOnUse the numeric fallbacks scale by the viewport.
+    const dx = (frac, axis) => (isUser && vpW > 0)
+      ? frac * (axis === 'y' ? vpH : axis === 'd' ? vpDiag : vpW) : frac;
 
     let g;
     if (gtype === GRAD_LINEAR) {
       g = {
         gtype, spread, units, gradient_transform: gtransform,
-        x1: f('x1', 'x1', 0),
-        y1: f('y1', 'y1', 0),
-        x2: f('x2', 'x2', 1),
-        y2: f('y2', 'y2', 0),
+        x1: f('x1', 'x1', 0, 'x'),
+        y1: f('y1', 'y1', 0, 'y'),
+        x2: f('x2', 'x2', dx(1, 'x'), 'x'),
+        y2: f('y2', 'y2', 0, 'y'),
       };
     } else {
-      const cx = f('cx', 'cx', 0.5);
-      const cy = f('cy', 'cy', 0.5);
-      const r  = f('r',  'r',  0.5);
+      const cx = f('cx', 'cx', dx(0.5, 'x'), 'x');
+      const cy = f('cy', 'cy', dx(0.5, 'y'), 'y');
+      const r  = f('r',  'r',  dx(0.5, 'd'), 'd');
       g = {
         gtype, spread, units, gradient_transform: gtransform,
         cx, cy, r,
-        fx: f('fx', 'fx', cx),
-        fy: f('fy', 'fy', cy),
+        fx: f('fx', 'fx', cx, 'x'),
+        fy: f('fy', 'fy', cy, 'y'),
       };
     }
     let stops = parseGradientStops(el);

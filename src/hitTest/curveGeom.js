@@ -45,6 +45,16 @@ export function curveView(bundle) {
   return null;
 }
 
+/** The bundle's BAND table floats (same flavors as curveView) — the render's own fill-walk
+ *  data, which bandWinding.js walks so hit tests answer from what is DRAWN. */
+export function bandView(bundle) {
+  if (!bundle) return null;
+  if (bundle.bandFloats instanceof Float32Array) return bundle.bandFloats;
+  if (bundle.bandTexels instanceof Float32Array) return bundle.bandTexels;
+  if (bundle.bands && bundle.bands.byteLength != null) return new Float32Array(bundle.bands);
+  return null;
+}
+
 /** Per-shape `{begin,end}` float ranges — provided, or derived from meta. */
 export function curveRangesOf(bundle, meta, n, stride, curveLen) {
   if (Array.isArray(bundle.curveRangesByShape) && bundle.curveRangesByShape.length === n)
@@ -299,7 +309,7 @@ function tangentEnd(s) {
 // the nearest point as interior / start vertex / end vertex (when an
 // interior foot exists it is ≤ the endpoint distance, so the nearest
 // point is at a vertex only for points genuinely beyond that end).
-function closest(s, px, py) {
+export function closest(s, px, py) {
   const dS = sq(px, py, s.x0, s.y0), dE = sq(px, py, s.x1, s.y1);
   let dI = Infinity, tI = 0;          // tI = interior closest-point param (dashing)
   if (s.t === SEG_LINE) {

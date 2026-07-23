@@ -1,0 +1,10 @@
+import { readFileSync } from 'fs'; import path from 'path'; import { fileURLToPath } from 'url';
+import { DOMParser as DP, XMLSerializer as XS } from '@xmldom/xmldom';
+globalThis.DOMParser = DP; globalThis.XMLSerializer = XS;
+globalThis.__LB_APEX_CLIP = false;
+const { default: importSvg } = await import('../src/svg/importer.js');
+const { buildLbBundle } = await import('../src/renderer/lbBuildCore.js');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const bundle = await importSvg(readFileSync(ROOT + '/examples/tiger.svg', 'utf8'));
+const input = { curveFloats: new Float32Array(bundle.curves), metaFloats: bundle.meta ? new Float32Array(bundle.meta) : null, metaFloatsPerShape: bundle.metaFloatsPerShape, ranges: bundle.curveRangesByShape, numShapes: bundle.numShapes };
+const t = performance.now(); buildLbBundle(input); console.log((performance.now()-t).toFixed(0));

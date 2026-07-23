@@ -78,7 +78,7 @@ void main() {
   float emPerPx = uGlobalBBox.z / max(uCanvasAR.x * uViewportSize.x, 1.0);
   // Band reach = the stroke half-width, PLUS (miter joins only) the ACTUAL per-join
   // miter extent — NOT the worst-case halfW·miterLimit. This mirrors the frag's
-  // strokeCapsJoinsDash exactly: miterLen = halfW/cosHalf, used iff ≤ halfW·limit
+  // strokeCapsJoinsDash exactly: miterLen = halfW/sinHalf, used iff ≤ halfW·limit
   // (else the join bevels → halfW). On a smooth curve (cosHalf≈1) this collapses to
   // ~halfW instead of up to 8×halfW, so far fewer fragments are discarded. Round/
   // bevel joins + caps never exceed halfW. (+3px AA margin.)
@@ -89,13 +89,13 @@ void main() {
     float mS = uHalfW, mE = uHalfW;
     if (vFreeStart < 0.5) {
       if (length(dS) < 1e-6) mS = worst;   // degenerate start tangent → conservative
-      else { float ch = sqrt(max(0.5 * (1.0 + dot(-nrm(dS), vInTan)), 1e-9));
-             float m = uHalfW / max(ch, 1e-6); mS = (m <= worst) ? m : uHalfW; }
+      else { float sh = sqrt(max(0.5 * (1.0 - dot(-nrm(dS), vInTan)), 1e-9));   // sin(theta/2)
+             float m = uHalfW / max(sh, 1e-6); mS = (m <= worst) ? m : uHalfW; }
     }
     if (vFreeEnd < 0.5) {
       if (length(dE) < 1e-6) mE = worst;
-      else { float ch = sqrt(max(0.5 * (1.0 + dot(nrm(dE), -vOutTan)), 1e-9));
-             float m = uHalfW / max(ch, 1e-6); mE = (m <= worst) ? m : uHalfW; }
+      else { float sh = sqrt(max(0.5 * (1.0 - dot(nrm(dE), -vOutTan)), 1e-9));   // sin(theta/2)
+             float m = uHalfW / max(sh, 1e-6); mE = (m <= worst) ? m : uHalfW; }
     }
     reach = max(mS, mE);
   }

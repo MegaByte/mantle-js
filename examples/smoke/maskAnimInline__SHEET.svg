@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100" width="200" height="100">
+  <defs><mask id="m"><rect id="win" x="10" y="30" width="40" height="40" fill="#fff"/></mask></defs>
+  <g id="hero"><rect x="0" y="0" width="100" height="100" fill="#ff6600" mask="url(#m)"/></g>
+  <g id="plain"><rect x="120" y="20" width="60" height="60" fill="#3366ff"/></g>
+</svg>

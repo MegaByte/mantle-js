@@ -177,6 +177,39 @@ async function run(calls, samples) {
   else fail('interleave corrupted blue rect: ' + r.inter + ' (vs clean ' + r.clean + ')');
 }
 
+// 7) Per-draw colorMatrix / colorMatrixOffset. Two blits of the SAME image
+//    handle with different offsets must differ — the raster path used to
+//    drop the recolor entirely (colour came only from the per-ASSET tint,
+//    so every mount sharing an asset shared one colour). Identity matrix +
+//    offset shifts channels; the third (plain) draw proves the uniform is
+//    reset and does not leak into the next call.
+{
+  const s = await run([
+    { dstRect: [0, 0, 80, 80],   colorMatrixOffset: [0, 1, 0, 0] },
+    { dstRect: [100, 0, 80, 80], colorMatrixOffset: [0, 0, 1, 0] },
+    { dstRect: [0, 100, 80, 80] },
+  ], [[20, 20], [120, 20], [20, 120]]);
+  if (rgbNear(s[0], 255, 255, 0)) ok('colorMatrixOffset +G: red quadrant → yellow'); else fail('offset +G: ' + s[0]);
+  if (rgbNear(s[1], 255, 0, 255)) ok('colorMatrixOffset +B: red quadrant → magenta'); else fail('offset +B: ' + s[1]);
+  if (!rgbNear(s[0], s[1][0], s[1][1], s[1][2])) ok('two mounts of one asset recolor independently'); else fail('offsets produced identical pixels: ' + s[0]);
+  if (rgbNear(s[2], 255, 0, 0)) ok('recolor does not leak to the next drawImage'); else fail('leaked recolor: ' + s[2]);
+}
+
+// 8) A colorMatrix that swaps R→B (column-major mat4: column j = where
+//    input channel j lands). Red texel must come out blue.
+{
+  const swapRB = [
+    0, 0, 1, 0,   // in.r → out.b
+    0, 1, 0, 0,
+    1, 0, 0, 0,   // in.b → out.r
+    0, 0, 0, 1,
+  ];
+  const s = await run([{ dstRect: [20, 20, 80, 80], colorMatrix: swapRB }],
+    [[40, 40], [40, 80]]);
+  if (rgbNear(s[0], 0, 0, 255)) ok('colorMatrix R↔B: red quadrant → blue'); else fail('swap TL: ' + s[0]);
+  if (rgbNear(s[1], 255, 0, 0)) ok('colorMatrix R↔B: blue quadrant → red'); else fail('swap BL: ' + s[1]);
+}
+
 await browser.close();
 server.close();
 if (failures === 0) console.log('\nDRAW-IMAGE PASS');

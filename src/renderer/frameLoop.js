@@ -15,6 +15,10 @@
 // reads them). attachFrameLoop runs after the Object.assign that publishes the
 // destructured helpers.
 
+// Shared default clear colour — read-only, never mutated (verified), so one instance
+// avoids a 4-array allocation on every beginFrame that omits an explicit colour.
+const _DEFAULT_CLEAR = [1, 1, 1, 1];
+
 /** @param {import('./rendererContext.js').RendererContext} R */
 export function attachFrameLoop(R) {
   const { gl, viewportSize, _canvasUnsized } = R;
@@ -26,7 +30,7 @@ export function attachFrameLoop(R) {
     // Called when the consumer mutates bundle.globalBBox (e.g. for a
     // pan/zoom bench loop) — beginFillPass normally caches uGBB +
     // uCanvasAR but those depend on globalBBox.
-    R._handle.fillPassAssetDirty = true;
+    if (R._handle) R._handle.fillPassAssetDirty = true;
     R.fillPassCanvasW = 0;
     R.fillPassCanvasH = 0;
   }
@@ -58,6 +62,55 @@ export function attachFrameLoop(R) {
    *  @param {number} [heightPx]
    *  @param {number} [dpr] reserved; currently informational only
    */
+  /** RESOLUTION SCALE — render fewer pixels, keep the same screen size.
+   *
+   *  A canvas has two independent sizes: the BACKING STORE (canvas.width/height, what you
+   *  render into and what you pay for) and the CSS box it is displayed in. The compositor
+   *  scales one to the other for free. Fill cost is linear in backing-store pixels
+   *  (measured: 2-5 ms/Mpx), so this is a direct dial on frame time — scale 0.7 is half
+   *  the pixels and roughly double the fps, at the same screen size, slightly softer.
+   *
+   *  On a retina display the default DPR of 2 already means 4x the pixels of DPR 1. That
+   *  is usually the biggest single win available.
+   *
+   *  Sets the backing store from the canvas's CSS size, so call it AFTER layout and again
+   *  on window resize. Pass dpr to override devicePixelRatio (e.g. cap it at 1.5).
+   *  Returns the backing-store size it chose, or null if the canvas has no CSS size yet.
+   *
+   *  A change drops every canvas-sized resource (RT pools, filter caches, offscreen
+   *  targets) and forces static caches to re-bake — so it costs a hitch. Drive it with
+   *  hysteresis off a sustained frame-time trend; never per frame.
+   *
+   *  @param {number} scale  >0, typically 0.5..1
+   *  @param {{dpr?: number}} [opts]
+   */
+  function setResolutionScale(scale, opts) {
+    const cnv = gl.canvas;
+    if (!cnv || typeof cnv.width !== 'number') return null;
+    const s = Math.max(0.05, Math.min(4, +scale || 1));
+    const requestedDpr = (opts && opts.dpr != null)
+      ? +opts.dpr
+      : (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1);
+    const dpr = Number.isFinite(requestedDpr) && requestedDpr > 0 ? requestedDpr : 1;
+    // CSS size. An offscreen canvas has no client box — fall back to its current backing
+    // store, which lets a caller re-scale relative to whatever it last set.
+    const cssW = ('clientWidth' in cnv ? cnv.clientWidth : 0)
+      || (cnv.width / Math.max(R._resScale * (R._resDpr || 1), 1e-6));
+    const cssH = ('clientHeight' in cnv ? cnv.clientHeight : 0)
+      || (cnv.height / Math.max(R._resScale * (R._resDpr || 1), 1e-6));
+    if (!(cssW >= 1) || !(cssH >= 1)) return null;
+    const w = Math.max(1, Math.round(cssW * dpr * s));
+    const h = Math.max(1, Math.round(cssH * dpr * s));
+    R._resScale = s;
+    R._resDpr = dpr;
+    if (cnv.width === w && cnv.height === h) return [w, h];   // nothing moved
+    cnv.width = w; cnv.height = h;
+    R._explicitViewport = null;      // go back to reading the (new) drawing buffer
+    if (R._invalidateSizedResources) R._invalidateSizedResources();
+    R._lastSeenW = w; R._lastSeenH = h;
+    return [w, h];
+  }
+
   function setViewport(widthPx, heightPx, dpr) {
     if (widthPx == null) { R._explicitViewport = null; }
     else {
@@ -102,13 +155,26 @@ export function attachFrameLoop(R) {
    */
   function beginFrame(clearColor) {
     R._frameSerial = (R._frameSerial | 0) + 1;   // per-frame serial (build-pool epoch)
-    if (R._contextLost || _canvasUnsized()) return;
+    if (R._contextLost || _canvasUnsized()) {
+      // These frames never reach endFrame, so anything already submitted would otherwise
+      // accumulate until the canvas comes back and then paint a stale backlog at once.
+      _submitQ = []; _submitSeq = 0;
+      return;
+    }
     if (R._inFrame) endFrame();
     R._inFrame = true;
-    const cc = clearColor === undefined ? [1, 1, 1, 1] : clearColor;
+    const cc = clearColor === undefined ? _DEFAULT_CLEAR : clearColor;
     _frameClearColor = cc;
     if (R._captureFrames) { R._frameLog = []; R._lastFrameClearColor = cc; }
     const [cw, ch] = viewportSize();
+    // The canvas can be resized by ANYONE — a window resize, a layout change, our own
+    // setResolutionScale. Everything sized to it (RT pools, filter caches, offscreen
+    // targets) is stale the moment it moves, and nothing was noticing: the pools bucket by
+    // size, so they quietly allocated a fresh set and leaked the old one.
+    if (cw !== R._lastSeenW || ch !== R._lastSeenH) {
+      if (R._lastSeenW && R._invalidateSizedResources) R._invalidateSizedResources();
+      R._lastSeenW = cw; R._lastSeenH = ch;
+    }
     gl.viewport(0, 0, cw, ch);
     if (cc) {
       gl.disable(gl.DEPTH_TEST);
@@ -120,10 +186,72 @@ export function attachFrameLoop(R) {
       gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       gl.depthMask(false);
     }
+    // Compile and pipeline-warm at most one fill variant per frame, BEFORE any draw. Keeps the
+    // driver's first-draw pipeline build off the frame that first shows a bundle.
+    if (R.fillWarmTick) R.fillWarmTick();
+  }
+
+  // ---- zOrder submission queue -------------------------------------------
+  // Mantle paints in painter's order: whatever calls drawBundle first ends up underneath.
+  // That makes MOUNT order the stacking order, which is unstable as soon as anything mounts
+  // asynchronously (an overlay that finishes loading a font after the HUD, a feedback flash).
+  // Consumers were each having to keep their own sorted mount list and call drawBundle in the
+  // right sequence; this owns that instead.
+  //
+  //   r.beginFrame(clear);
+  //   r.submitBundle(hud,   { zOrder: 300 });
+  //   r.submitBundle(bg,    { zOrder: 0 });     // submitted later, still paints FIRST
+  //   r.endFrame();                             // sorts, then paints
+  //
+  // Semantics (deliberately Unity's, so JS and the C# port agree — that side delegates the
+  // same job to MeshRenderer.sortingLayerID + sortingOrder):
+  //   * LOWER zOrder paints EARLIER, i.e. underneath. Default 0.
+  //   * Equal zOrder keeps SUBMISSION order — a stable tiebreak, so re-submitting the same
+  //     scene with unchanged z is bit-identical frame to frame.
+  //   * drawBundle() is untouched and still paints immediately. Mixing the two in one frame
+  //     is allowed and well-defined: immediate draws land when called, so they sit UNDER
+  //     everything submitted (which all paints at endFrame).
+  /** @type {{target:any, opts:any, z:number, seq:number}[]} */
+  let _submitQ = [];
+  let _submitSeq = 0;
+
+  function submitBundle(target, opts) {
+    if (R._contextLost || !target) return;
+    // Outside a frame there is nothing to defer to — behave like drawBundle so a stray
+    // submit is never silently dropped.
+    if (!R._inFrame) { R.drawBundle(target, opts); return; }
+    const z = (opts && typeof opts.zOrder === 'number' && isFinite(opts.zOrder)) ? opts.zOrder : 0;
+    _submitQ.push({ target, opts: opts || null, z, seq: _submitSeq++ });
+  }
+
+  function _flushSubmitQueue() {
+    const q = _submitQ;
+    if (!q.length) return;
+    // Callers commonly re-z every frame (parallax / depth fog) while the RELATIVE order
+    // barely moves, so check for already-sorted in O(n) and skip the comparator entirely.
+    // Output-identical either way.
+    let ordered = true;
+    for (let i = 1; i < q.length; i++) {
+      const p = q[i - 1], c = q[i];
+      if (p.z > c.z || (p.z === c.z && p.seq > c.seq)) { ordered = false; break; }
+    }
+    if (!ordered) q.sort((a, b) => (a.z !== b.z ? a.z - b.z : a.seq - b.seq));
+    // Reset BEFORE painting: drawBundle can re-enter the frame API (a morph handle that
+    // rebuilds, a group that nests), and a submit issued during the flush must not append to
+    // the list being walked.
+    _submitQ = [];
+    _submitSeq = 0;
+    for (let i = 0; i < q.length; i++) R.drawBundle(q[i].target, q[i].opts);
   }
 
   /** End the current frame. Idempotent. */
   function endFrame() {
+    // Paint anything submitted this frame, in (zOrder, submission) order — while still
+    // in-frame, since drawBundle's capture/group bookkeeping keys off R._inFrame.
+    // Drained rather than flushed once: a submit issued DURING the flush lands in the fresh
+    // queue, and painting it next frame would be a silently missing draw. Bounded so a
+    // pathological submit-from-draw cycle cannot wedge the frame.
+    for (let guard = 0; guard < 8 && _submitQ.length; guard++) _flushSubmitQueue();
     R._inFrame = false;
     _frameClearColor = null;
     R.draw.overrides = null;
@@ -176,8 +304,8 @@ export function attachFrameLoop(R) {
   }
 
   /** Enable/disable per-frame draw recording for exportFrameSVG().
-   *  On by default; turn off to drop the (small) per-draw bookkeeping
-   *  when SVG export is never used. Returns the new state. */
+   *  Off by default (opts.captureFrames opts in at create time); enable
+   *  before the frame you want to export. Returns the new state. */
   function setFrameCapture(on) {
     R._captureFrames = !!on;
     if (!R._captureFrames) R._frameLog = [];
@@ -187,10 +315,13 @@ export function attachFrameLoop(R) {
   R.invalidateRenderState = invalidateRenderState;
   R.markGeometryDirty = markGeometryDirty;
   R.setViewport = setViewport;
+  R.setResolutionScale = setResolutionScale;
+  Object.defineProperty(R, 'resolutionScale', { get: () => R._resScale, configurable: true });
   R.setScissorRect = setScissorRect;
   R.clearScissorRect = clearScissorRect;
   R.beginFrame = beginFrame;
   R.endFrame = endFrame;
+  R.submitBundle = submitBundle;
   R._recordBundleDraw = _recordBundleDraw;
   R._recordImageDraw = _recordImageDraw;
   R.setFrameCapture = setFrameCapture;

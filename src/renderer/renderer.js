@@ -14,7 +14,13 @@
 // shaders on its own — the consumer chooses bundler-time inlining vs
 // runtime fetch (loadShaders).
 //
-// `opts` is reserved for future flags (debug overlay toggles).
+// `opts` flags: asyncShaderCompile (defer link stalls behind a
+// KHR_parallel_shader_compile poll), captureFrames (SVG-export frame
+// recorder, default off), fillDefines (extra fill-shader defines),
+// aacFill (false | true | 'auto' engine selection), exactEdgeAa, slopeAa
+// (secant-reconstruction edge AA, cheaper than exactEdgeAa), disableFillVariants,
+// typeOmit (strip unused curve kernels per bundle), and
+// onContextLost / onContextRestored consumer hooks.
 //
 // State ownership:
 //   - The renderer instance owns programs, uniform locations, VAOs,
@@ -23,12 +29,13 @@
 //   - The bundle owns asset textures + mesh ArrayBuffers.
 //   - The canvas + gl context are owned by the consumer.
 
-import { Constants } from './bundle.js';
-import { mantleWarn, mantleError } from '../core/diagnostics.js';
-import { buildLoopBlinnMesh, buildLoopBlinnCDT, refreshLoopBlinnMesh, packLoopBlinnMesh, curveRangeToContours, LB_VERT_FLOATS, lbCanonicalFrame, lbCanonicalHash, transformLoopBlinnRaw } from './loopBlinn.js';
+import { Constants, removeLbBuilder, removeLbPreparer } from './bundle.js';
+import { mantleWarn, mantleError, mantleDebugFlag, diagFlags, diagNoteEngine } from '../core/diagnostics.js';
+import { buildLoopBlinnMesh, buildLoopBlinnCDT, refreshLoopBlinnMesh, packLoopBlinnMesh, curveRangeToContours, LB_VERT_FLOATS, lbCanonicalFrame, lbCanonicalHash, lbCanonicalHashes, transformLoopBlinnRaw } from './loopBlinn.js';
 import { buildMorphStroke } from './loopBlinnMorph.js';
-import { mantleDebugFlag } from '../core/diagnostics.js';
-import { createRTPool, evaluateGraph } from '../filterGraph/filterGraph.js';
+import {
+  createRTPool, evaluateGraph, releaseRoot, SRC_BACKGROUND, SRC_BACKGROUND_A,
+} from '../filterGraph/filterGraph.js';
 // Read filter/COLR handlers from the opt-in registry — NOT from a module
 // that side-effect-imports every primitive, which would re-link the whole
 // filter+COLR shader-handler set into every renderer consumer and defeat
@@ -38,7 +45,7 @@ import { createRTPool, evaluateGraph } from '../filterGraph/filterGraph.js';
 // unregistered node type as passthrough, so a partial table is safe.
 import { svgFilterDispatch, colrPaintDispatch } from '../filterGraph/dispatchRegistry.js';
 import { computeNodeBboxes } from '../filterGraph/bbox.js';
-import { createStaticCache, Strategy as CacheStrategy, Level as CacheLevel, Reason as CacheReason, borrowA3GroupRt, releaseA3GroupMember } from './staticCache.js';
+import { Strategy as CacheStrategy, Level as CacheLevel } from './staticCache.js';
 import { attachShaderPrograms } from './shaderPrograms.js';
 import { attachDrawImages } from './drawImages.js';
 import { attachInstancedFill } from './instancedFill.js';
@@ -48,10 +55,12 @@ import { attachCacheDraw } from './cacheDraw.js';
 import { attachFilterDraw } from './filterDraw.js';
 import { attachMaskBake } from './maskBake.js';
 import { attachFillPass } from './fillPass.js';
+import { attachOpaquePrepass } from './opaquePrepass.js';
 import { attachFrameLoop } from './frameLoop.js';
 import { attachDrawDispatch } from './drawDispatch.js';
 import { attachBundleHandle } from './bundleHandle.js';
 import { attachClipDraw } from './clipDraw.js';
+import { attachIncrementalStroke } from './incrementalStroke.js';
 import { decodeImageHref } from '../svg/image.js';
 
 const COVER_QUAD_STRIDE = Constants.COVER_QUAD_STRIDE;
@@ -163,7 +172,14 @@ export function computeMaskRegions(bundle) {
   return regions;
 }
 
-/// Public factory.
+/**
+ * Create a Mantle WebGL2 renderer.
+ *
+ * @param {WebGL2RenderingContext} gl
+ * @param {object} shaderSources  from `loadShaders()` / `loadShadersSync()`
+ * @param {object} [opts]
+ * @returns {import('./rendererApi.js').MantleRenderer}
+ */
 export function createRenderer(gl, shaderSources, opts = {}) {
   // ------------------------------------------------------------
   // Shader readiness — synchronous by default, async opt-in
@@ -190,9 +206,41 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   // `await renderer.ready` is always safe and a no-op when not needed.
   const _asyncCompile = opts.asyncShaderCompile === true
     && !!gl.getExtension('KHR_parallel_shader_compile');
-  const _khrParallel = _asyncCompile ? gl.getExtension('KHR_parallel_shader_compile') : null;
+  // Always grab the extension when present: selectFillVariant polls it to compile per-bundle
+  // fill variants WITHOUT blocking, independently of the opt-in initial-batch async path.
+  const _khrParallel = gl.getExtension('KHR_parallel_shader_compile') || null;
   const _pendingShaders  = [];
   const _pendingPrograms = [];
+  // `aacFill: true` means "draw with AAC", not "draw with AAC eventually". Left to the variant
+  // machinery it was the latter: the AAC program compiles lazily, and until it is linked AND
+  // its Metal pipeline is warmed, every draw falls back to the Slug base — so a render of a
+  // few frames (a test, an A/B, this repo's own demo) silently produced Slug and reported it
+  // as AAC. Bake the define into the BASE program instead, so the engine you asked for is the
+  // engine that draws frame 0. ('auto' is a per-bundle decision and stays with the variants.)
+  if (opts.aacFill === true) {
+    opts = { ...opts, fillDefines: (opts.fillDefines || []).concat(
+      (opts.fillDefines || []).includes('MANTLE_AAC') ? [] : ['MANTLE_AAC']) };
+  }
+  // EXACT-EDGE AA (`exactEdgeAa: true`), OFF by default.
+  //
+  // This refines single straight-edge pixels with exact half-plane box area.
+  // Tracking the extra crossing state raises register pressure for every fragment,
+  // so keep it opt-in for straight-edge content that is not fill-rate bound.
+  if (opts.exactEdgeAa === true) {
+    opts = { ...opts, fillDefines: (opts.fillDefines || []).concat(
+      (opts.fillDefines || []).includes('MANTLE_EXACT_EDGE') ? [] : ['MANTLE_EXACT_EDGE']) };
+  }
+  // SLOPE AA (`slopeAa: true`), OFF by default.
+  //
+  // Reconstructs the boundary secant from the two nearest ray crossings and takes
+  // its exact box coverage on single-edge ramp pixels — near exact-edge quality on
+  // diagonal edges (the default combiner's weak regime) for two floats of walker
+  // state instead of MANTLE_EXACT_EDGE's per-crossing tangent tracking. Changes
+  // Slug output, so parity-gated consumers must opt in deliberately.
+  if (opts.slopeAa === true) {
+    opts = { ...opts, fillDefines: (opts.fillDefines || []).concat(
+      (opts.fillDefines || []).includes('MANTLE_SLOPE_AA') ? [] : ['MANTLE_SLOPE_AA']) };
+  }
   /** @type {import('./rendererContext.js').RendererContext} */
   const R = { gl, shaderSources, opts, mantleWarn, mantleError, mantleDebugFlag,
     _asyncCompile, _khrParallel, _pendingShaders, _pendingPrograms };
@@ -208,7 +256,8 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   // The object returned synchronously. In async mode _init() publishes
   // its methods (via defineProperties, to preserve getters) once shaders
   // are ready; in sync mode that happens inline before return.
-  const rendererState = {};
+  /** @type {import('./rendererApi.js').MantleRenderer} */
+  const rendererState = /** @type {import('./rendererApi.js').MantleRenderer} */ ({});
   let _ready = false;
   let _resolveReady, _rejectReady;
   rendererState.ready = new Promise((res, rej) => { _resolveReady = res; _rejectReady = rej; });
@@ -273,61 +322,8 @@ export function createRenderer(gl, shaderSources, opts = {}) {
       lbUGBB, lbUCanvasAR, lbUWorldM, lbUHasWorldM, lbUViewport, lbUDirect, lbUAlpha,
       lbcUCoverage, lbcUColor, morphStrokeU } = R;
 
-  const uCurveLoc       = gl.getUniformLocation(R.fillProg, 'uCurveData');
-  const uBandLoc        = gl.getUniformLocation(R.fillProg, 'uBandData');
-  const uMetaLoc        = gl.getUniformLocation(R.fillProg, 'uMetaTex');
-  const uDashLoc        = gl.getUniformLocation(R.fillProg, 'uDashTex');
-  const uGBB            = gl.getUniformLocation(R.fillProg, 'uGlobalBBox');
-  const uShapeIdxOverride = gl.getUniformLocation(R.fillProg, 'uShapeIdxOverride');
-  const uFillNumShapes  = gl.getUniformLocation(R.fillProg, 'uNumShapes');
-  const uFillCanvasAR   = gl.getUniformLocation(R.fillProg, 'uCanvasAR');
-  const uFillViewportSize = gl.getUniformLocation(R.fillProg, 'uViewportSize');
-  const uFillGradTex    = gl.getUniformLocation(R.fillProg, 'uGradientTex');
-  const uFillGradStops      = gl.getUniformLocation(R.fillProg, 'uGradientStops');
-  const uFillGradStopsCount = gl.getUniformLocation(R.fillProg, 'uGradientStopsCount');
-  const uFillGradCount  = gl.getUniformLocation(R.fillProg, 'uGradientCount');
-  const uFillImageTex   = gl.getUniformLocation(R.fillProg, 'uImageTex');
-  const uFillImageAtlasSize = gl.getUniformLocation(R.fillProg, 'uImageAtlasSize');
-  const uFillFilterTex  = gl.getUniformLocation(R.fillProg, 'uFilterTex');
-  // Per-shape override texture + presence flag.
-  const uFillOverrideTex   = gl.getUniformLocation(R.fillProg, 'uOverrideTex');
-  const uFillHasOverrides  = gl.getUniformLocation(R.fillProg, 'uHasOverrides');
-  // 9-slice: when 1, vert shader reads native em from aEmCoord (offset
-  // 16, location=2 — the v1.xy slot the importer leaves unused for
-  // cover-quad verts). Set by drawBundle when bundle._nineSliceActive.
-  const uFillHasEmCoord    = gl.getUniformLocation(R.fillProg, 'uHasEmCoord');
-  const uFillDrawAlpha     = gl.getUniformLocation(R.fillProg, 'uDrawAlpha');
-  // Dual-tint fill recolor: per-draw
-  // 4×4 color matrix + offset applied to vFill (and vStroke) in the
-  // fragment shader. Enabled flag is a uniform int, coherent → free
-  // when disabled.
-  const uFillColorMatrix         = gl.getUniformLocation(R.fillProg, 'uColorMatrix');
-  const uFillColorMatrixOffset   = gl.getUniformLocation(R.fillProg, 'uColorMatrixOffset');
-  const uFillColorMatrixEnabled  = gl.getUniformLocation(R.fillProg, 'uColorMatrixEnabled');
-  // Per-draw external screen-space clip mask (setNodeClip).
-  const uFillExtClipTex          = gl.getUniformLocation(R.fillProg, 'uExtClipTex');
-  const uFillExtClipMode         = gl.getUniformLocation(R.fillProg, 'uExtClipMode');
-  // Per-draw bilinear channel-lerp (channel-lerp recolor formula).
-  const uFillChLerpPrimary       = gl.getUniformLocation(R.fillProg, 'uChannelLerpPrimary');
-  const uFillChLerpContrast      = gl.getUniformLocation(R.fillProg, 'uChannelLerpContrast');
-  const uFillChLerpHighlight     = gl.getUniformLocation(R.fillProg, 'uChannelLerpHighlight');
-  const uFillChLerpEnabled       = gl.getUniformLocation(R.fillProg, 'uChannelLerpEnabled');
-  // Per-draw palette LUT (companion to colorMatrix; discrete index → RGB).
-  const uFillPalette             = gl.getUniformLocation(R.fillProg, 'uPalette');
-  const uFillPaletteEnabled      = gl.getUniformLocation(R.fillProg, 'uPaletteEnabled');
-  const uFillPaletteChannel      = gl.getUniformLocation(R.fillProg, 'uPaletteChannel');
-  const uFillPaletteSize         = gl.getUniformLocation(R.fillProg, 'uPaletteSize');
-  // Per-draw world-space 3×3 affine + presence flag.
-  const uFillWorldM        = gl.getUniformLocation(R.fillProg, 'uWorldM');
-  const uFillHasWorldM     = gl.getUniformLocation(R.fillProg, 'uHasWorldM');
-  // Multi-shape mask offscreen RT. uMaskRTArray is
-  // a TEXTURE_2D_ARRAY (R8); uMaskRowToLayerTex is a 1×numShapes R32I
-  // texture where entry maskId-1 is the array layer (or -1 to fall
-  // back to the inline child walk).
-  const uFillMaskRTArray       = gl.getUniformLocation(R.fillProg, 'uMaskRTArray');
-  const uFillMaskRowToLayerTex = gl.getUniformLocation(R.fillProg, 'uMaskRowToLayerTex');
-  const uFillHasOffscreenMask  = gl.getUniformLocation(R.fillProg, 'uHasOffscreenMask');
-  const uFillHasOccupancy      = gl.getUniformLocation(R.fillProg, 'uHasOccupancy');
+  // (the fill-program uniform locations are resolved in fillPass.js's
+  // attachFillPass — captureFillUniforms(prog), per program variant.)
 
   // maskBake program uniform locations.
   const mbUCurve  = R.maskBakeProg ? gl.getUniformLocation(R.maskBakeProg, 'uCurveData')         : null;
@@ -361,6 +357,7 @@ export function createRenderer(gl, shaderSources, opts = {}) {
 
   // Static-scene cache blit uniforms.
   R.cbUCacheTex = R.cacheBlitProg ? gl.getUniformLocation(R.cacheBlitProg, 'uCacheTex') : null;
+  R.cbUInMap    = R.cacheBlitProg ? gl.getUniformLocation(R.cacheBlitProg, 'uInMap')    : null;
   R.cbUTint     = R.cacheBlitProg ? gl.getUniformLocation(R.cacheBlitProg, 'uTint')     : null;
   // R.drawImage uniform locations.
   R.diUTex      = R.drawImageProg ? gl.getUniformLocation(R.drawImageProg, 'uTex')      : null;
@@ -370,6 +367,9 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   R.diUSrcRect  = R.drawImageProg ? gl.getUniformLocation(R.drawImageProg, 'uSrcRect')  : null;
   R.diUViewport = R.drawImageProg ? gl.getUniformLocation(R.drawImageProg, 'uViewport') : null;
   R.diUWorldM   = R.drawImageProg ? gl.getUniformLocation(R.drawImageProg, 'uWorldM')   : null;
+  R.diUCMatrix  = R.drawImageProg ? gl.getUniformLocation(R.drawImageProg, 'uColorMatrix')       : null;
+  R.diUCOffset  = R.drawImageProg ? gl.getUniformLocation(R.drawImageProg, 'uColorMatrixOffset') : null;
+  R.diUCEnabled = R.drawImageProg ? gl.getUniformLocation(R.drawImageProg, 'uColorMatrixEnabled'): null;
   R.diiUTex      = R.drawImageInstProg ? gl.getUniformLocation(R.drawImageInstProg, 'uTex')      : null;
   R.diiUViewport = R.drawImageInstProg ? gl.getUniformLocation(R.drawImageInstProg, 'uViewport') : null;
   R.diiUSrcRect  = R.drawImageInstProg ? gl.getUniformLocation(R.drawImageInstProg, 'uSrcRect')  : null;
@@ -379,6 +379,15 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   const solidUAR    = gl.getUniformLocation(R.solidProg, 'uCanvasAR');
   const solidUColor = gl.getUniformLocation(R.solidProg, 'uFillColor');
 
+  // vUV → texture-uv maps (src/shaders/_filterRect.glsl). Every composite below
+  // reads two CANVAS-sized textures, so both are the identity — but an unset vec4
+  // uniform is (0,0,0,0), which would sample a single texel, so upload it.
+  const COMP_IDENTITY_MAP = () => {
+    if (compUShapeMap) gl.uniform4f(compUShapeMap, 1, 1, 0, 0);
+    if (compUDstMap)   gl.uniform4f(compUDstMap,   1, 1, 0, 0);
+  };
+  const compUShapeMap    = gl.getUniformLocation(R.compProg, 'uShapeMap');
+  const compUDstMap      = gl.getUniformLocation(R.compProg, 'uDstMap');
   const compUShapeTex    = gl.getUniformLocation(R.compProg, 'uShapeTex');
   const compUDstTex      = gl.getUniformLocation(R.compProg, 'uDstTex');
   const compUBlendMode   = gl.getUniformLocation(R.compProg, 'uBlendMode');
@@ -420,6 +429,8 @@ export function createRenderer(gl, shaderSources, opts = {}) {
 
   const fcUIn1 = R.feCompositeProg ? gl.getUniformLocation(R.feCompositeProg, 'uIn1') : null;
   const fcUIn2 = R.feCompositeProg ? gl.getUniformLocation(R.feCompositeProg, 'uIn2') : null;
+  const fcUIn1Map = R.feCompositeProg ? gl.getUniformLocation(R.feCompositeProg, 'uIn1Map') : null;
+  const fcUIn2Map = R.feCompositeProg ? gl.getUniformLocation(R.feCompositeProg, 'uIn2Map') : null;
   const fcUOp  = R.feCompositeProg ? gl.getUniformLocation(R.feCompositeProg, 'uOp')  : null;
   const fcUK   = R.feCompositeProg ? gl.getUniformLocation(R.feCompositeProg, 'uK')   : null;
 
@@ -631,7 +642,7 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   const _maskBakeValidCanvas = [0, 0];
   let _maskBakeValidShapeGen = -1;   // aggregate override-gen of all mask children at bake time
   let _maskBakeCount = 0;            // debug: # of actual bakes (cache misses)
-  // Tier-2b filter result cache. Per (handle, filterGraphId) we keep the
+  // Tier-2b filter result cache. Per (handle, filterGraphId, shape) we keep the
   // evaluated filter OUTPUT in a persistent texture + the key it was
   // valid for. On a hit we skip the expensive source-render +
   // evaluateGraph (the multi-pass DAG, blurs, etc.) and re-use the tex.
@@ -639,9 +650,54 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   // changes). Key = (handle.generation, worldM, canvas, the feeding
   // shape's override generation). feedShape = op.shapeIdx — the single
   // shape rendered as SourceGraphic. Cleared on dispose.
-  const _filterCache = new Map();    // Map<filterGraphId, {tex,fbo,w,h,key}> — stable ref, exposed directly on R
+  // Filter outputs outlive the transient bundle-handle LRU: a busy scene can
+  // alternate more than eight ordinary bundles while the same filtered mount
+  // remains visible. Bound this independently so those handle swaps do not
+  // turn an otherwise static filter into an allocation + multi-pass render
+  // every frame.
+  const _filterCache = new Map();    // Map<'g<owner>_<id>_<shape>'|'k<owner>_<id>_<shape>', {tex,fbo,w,h,key}>
+  const MAX_FILTER_CACHE_ENTRIES = 8;
+  function _dropFilterCacheEntry(c) {
+    if (!c) return;
+    for (const t of [c.tex, c.shapeTex]) if (t) gl.deleteTexture(t);
+    for (const fb of [c.fbo, c.shapeTexFbo]) if (fb) gl.deleteFramebuffer(fb);
+  }
+  function _getFilterCache(key) {
+    const c = _filterCache.get(key);
+    if (!c) return null;
+    _filterCache.delete(key);
+    _filterCache.set(key, c);
+    return c;
+  }
+  function _setFilterCache(key, c) {
+    const old = _filterCache.get(key);
+    if (old && old !== c) _dropFilterCacheEntry(old);
+    _filterCache.delete(key);
+    _filterCache.set(key, c);
+    while (_filterCache.size > MAX_FILTER_CACHE_ENTRIES) {
+      const oldestKey = _filterCache.keys().next().value;
+      const oldest = _filterCache.get(oldestKey);
+      _filterCache.delete(oldestKey);
+      _dropFilterCacheEntry(oldest);
+    }
+  }
+  // Drop one cache owner's filtered output. Persistent handles own their own
+  // entries because their override tables are independent even when they share
+  // a bundle. The transient setBundle handle uses the bundle as its owner.
+  function _evictFilterCache(owner) {
+    if (!owner) return;
+    const gp = 'g' + owner + '_', kp = 'k' + owner + '_';
+    for (const [k, c] of _filterCache) {
+      if (!k.startsWith(gp) && !k.startsWith(kp)) continue;
+      _filterCache.delete(k);
+      _dropFilterCacheEntry(c);
+    }
+  }
+  R._evictFilterCache = _evictFilterCache;
+  R._getFilterCache = _getFilterCache;
+  R._setFilterCache = _setFilterCache;
   let _filterEvalCount = 0;          // debug: # of actual graph evals (misses)
-  let _filterScissorActiveCount = 0; // debug: # of graph evals that scissored ≥1 node
+  let _filterBboxActiveCount = 0;   // debug: # of graph evals that ran on bbox-sized RTs
 
   function ensurePingFbo() {
     const [cw, ch] = viewportSize();
@@ -714,6 +770,10 @@ export function createRenderer(gl, shaderSources, opts = {}) {
       fbo = _handle.cacheFbo;
     }
     gl.bindFramebuffer(target, fbo);
+    // Shadow the DRAW binding. Asking GL for it later (getParameter) is not a lookup —
+    // on ANGLE/Metal it flushes the pipeline and syncs with the GPU. We are the ones
+    // binding it; remember it.
+    if (target !== gl.READ_FRAMEBUFFER) R._boundDrawFbo = fbo;
     if (!_scissor) return;
     // READ_FRAMEBUFFER binds are blit-source only; they don't change
     // the draw target so scissor state is irrelevant. Only toggle on
@@ -726,6 +786,38 @@ export function createRenderer(gl, shaderSources, opts = {}) {
       gl.disable(gl.SCISSOR_TEST);
     }
   }
+
+  // Drop everything whose SIZE is tied to the canvas. Nothing did this: the pools bucket
+  // by size, so a resize just started allocating new buckets and kept every old one
+  // forever. It went unnoticed because nothing resized much — a resolution scaler resizes
+  // constantly, so it has to be real.
+  //
+  // Called on a detected canvas resize and by setResolutionScale. Everything here is
+  // rebuilt lazily on demand, so this is a drop, not a teardown.
+  function _invalidateSizedResources() {
+    _rtPool.invalidate();
+    _covPool.invalidate();
+    for (const e of _shapeRtCache.values()) {
+      gl.deleteTexture(e.tex); gl.deleteFramebuffer(e.fbo); gl.deleteRenderbuffer(e.rb);
+    }
+    _shapeRtCache.clear();
+    for (const e of _backdropCache.values()) { gl.deleteTexture(e.tex); gl.deleteFramebuffer(e.fbo); }
+    _backdropCache.clear();
+    for (const e of _pingRtCache.values()) { gl.deleteTexture(e.tex); gl.deleteFramebuffer(e.fbo); }
+    _pingRtCache.clear();
+    // Filtered outputs are cached at a canvas-relative RECT — every one of them moved.
+    for (const c of _filterCache.values()) {
+      for (const t of [c.tex, c.shapeTex]) if (t) gl.deleteTexture(t);
+      for (const fb of [c.fbo, c.shapeTexFbo]) if (fb) gl.deleteFramebuffer(fb);
+    }
+    _filterCache.clear();
+    // shapeFbo / mainCopyTex / pingFbo / groupBackdropTex re-create themselves from
+    // viewportSize() on next use (ensure*), and each handle's static cache re-bakes when
+    // it sees the canvas changed. Just make the fill pass re-upload its size uniforms.
+    R.fillPassCanvasW = 0;
+    R.fillPassCanvasH = 0;
+  }
+  R._invalidateSizedResources = _invalidateSizedResources;
 
   function ensureShapeFbo() {
     const [cw, ch] = viewportSize();
@@ -749,6 +841,100 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, shapeFboRb);
     bindFb(gl.FRAMEBUFFER, null);
     shapeFboSize[0] = cw; shapeFboSize[1] = ch;
+  }
+  // Pooled offscreen targets for a FILTERED SHAPE, keyed by size.
+  //
+  // Shape and backdrop targets cover only the filter rect. Sizes come from
+  // _filterNodeRects already quantized to 32px, so the working set
+  // is a handful of entries; they live with the renderer and are dropped on resize
+  // alongside the RT pool.
+  const _shapeRtCache  = new Map();   // "w,h" → { fbo, tex, rb }  color + depth/stencil
+  const _backdropCache = new Map();   // "w,h" → { fbo, tex }      color only
+  const _pingRtCache   = new Map();   // "w,h" → { fbo, tex }      the kernels' ping-pong
+  function _newColorTex(w, h) {
+    const tex = gl.createTexture();
+    // Bind on the SCRATCH unit. gl.bindTexture hits whatever unit is active, and the
+    // fill pass keeps its samplers bound across draws — allocating here on unit 0 (or
+    // wherever we happened to land) silently evicts one of them, and the renderer's
+    // binding cache goes on believing it is still there.
+    gl.activeTexture(gl.TEXTURE15);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return tex;
+  }
+  // The SourceGraphic target. Needs depth + stencil: the fill pass depth-claims and
+  // stencils exactly as it does against the canvas — so this cannot come from the
+  // colour-only RT pool.
+  function acquireShapeRT(w, h) {
+    const k = w + ',' + h;
+    let e = _shapeRtCache.get(k);
+    if (e) return e;
+    const tex = _newColorTex(w, h);
+    const fbo = gl.createFramebuffer();
+    bindFb(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    const rb = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, w, h);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, rb);
+    bindFb(gl.FRAMEBUFFER, null);
+    e = { fbo, tex, rb, size: [w, h] };
+    _shapeRtCache.set(k, e);
+    return e;
+  }
+  // Snapshot the render target's `rect` into a rect-sized texture — the backdrop the
+  // filter composite blends against (and BackgroundImage, when the graph asks for it,
+  // which is the one case that still needs the whole canvas).
+  function snapshotBackdrop(rect, cw, ch) {
+    const [rx, ry, rw, rh] = rect;
+    const k = rw + ',' + rh;
+    let e = _backdropCache.get(k);
+    if (!e) {
+      const tex = _newColorTex(rw, rh);
+      const fbo = gl.createFramebuffer();
+      bindFb(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      bindFb(gl.FRAMEBUFFER, null);
+      e = { fbo, tex };
+      _backdropCache.set(k, e);
+    }
+    // A rect may poke off-canvas, where copyTexSubImage2D simply doesn't write —
+    // leaving whatever the recycled texture held. Clear first so those texels read
+    // as transparent, which is what is behind the canvas.
+    const scWas = _scissor;
+    if (scWas) gl.disable(gl.SCISSOR_TEST);
+    bindFb(gl.FRAMEBUFFER, e.fbo);
+    gl.viewport(0, 0, rw, rh);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    if (scWas) gl.enable(gl.SCISSOR_TEST);
+    bindFb(gl.FRAMEBUFFER, null);   // back to the render target: the copy READS it
+    const sx = Math.max(0, rx), sy = Math.max(0, ry);
+    const ex = Math.min(cw, rx + rw), ey = Math.min(ch, ry + rh);
+    if (ex > sx && ey > sy) {
+      gl.activeTexture(gl.TEXTURE15);
+      gl.bindTexture(gl.TEXTURE_2D, e.tex);
+      gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, sx - rx, sy - ry, sx, sy, ex - sx, ey - sy);
+    }
+    return e;
+  }
+  // A same-sized scratch RT for the separable kernels to bounce through.
+  function acquirePingRT(w, h) {
+    const k = w + ',' + h;
+    let e = _pingRtCache.get(k);
+    if (e) return e;
+    const tex = _newColorTex(w, h);
+    const fbo = gl.createFramebuffer();
+    bindFb(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    bindFb(gl.FRAMEBUFFER, null);
+    e = { fbo, tex };
+    _pingRtCache.set(k, e);
+    return e;
   }
   function ensureMainCopyTex() {
     const [cw, ch] = viewportSize();
@@ -781,10 +967,10 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   // Render-state caches
   // ------------------------------------------------------------
 
-  // Per-bundle state. The renderer owns a single `_handle` slot
-  // that's created on setBundle() and disposed on bundle swap. The
-  // public createBundleHandle surface lets consumers hold N persistent
-  // handles for multi-bundle scenes.
+  // Per-bundle state. Bare drawBundle calls keep a small resident handle LRU
+  // so alternating assets do not re-upload their cover meshes every frame.
+  // The public createBundleHandle surface remains the unbounded explicit
+  // option for multi-bundle scenes.
   //
   // Fields:
   //   bundle:                 the createBundle() output bound to this handle
@@ -793,12 +979,11 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   //   maskRowToLayerTex:      R32I texture mirroring CPU array
   //   maskRowToLayerTexSize:  tracks reallocation
   //   hybridMeshDirty:        true until the bundle's cover quads have
-  //                           been uploaded to the renderer's shared
+  //                           been uploaded to the handle's
   //                           triBuf/shapeIdxBuf. Cleared after first
   //                           upload; stays cleared for same-bundle
-  //                           re-binds (today's renderer re-set this
-  //                           to true on every setBundle, forcing a
-  //                           pointless re-upload per mount).
+  //                           re-binds (only a bundle._geomGen bump —
+  //                           a geometry rewrite — re-flags it).
   //   _handle.fillPassAssetDirty:     forces the next beginFillPass to rebind
   //                           the bundle's texture units + uniforms.
   //                           Set on first bind + any intervening pass
@@ -809,6 +994,8 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   //                           (consumed by the static-scene cache too)
   //   generation:             counter bumped on invalidate()
   let _handle = null;
+  const _transientHandles = new Map();
+  const MAX_TRANSIENT_HANDLES = 8;
   // fillPass* and viewport cache stay on the renderer (truly shared
   // across handles within one frame).
   let fillPassCanvasW = 0, fillPassCanvasH = 0;
@@ -834,12 +1021,13 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     paletteChannel: 0,       // 0=R, 1=G, 2=B, 3=A
     channelLerp: null,       // { primary, contrast, highlight }, or null
     shapeRange: null,        // [firstRow,lastRow] sprite subset, or null
+    spriteNonContig: false,  // that subset's shapes are NOT a contiguous run → analytic slice unsafe
     spriteKey: null,         // sprite id of the active subset draw, or null
   };
   // Filter-pass scissoring on/off (default on). Internal toggle used by
   // the render-diff smoke to prove scissored == full-canvas byte-identical;
   // no public surface.
-  let _filterScissorEnabled = true;
+  let _filterBboxEnabled = true;
   // drawBundleInstanced GPU fast path on/off (default on). Internal toggle
   // so the render-diff smoke can compare the instanced draw against the
   // per-instance render() loop.
@@ -864,6 +1052,11 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   let _captureFrames = opts.captureFrames === true;
   let _frameLog = [];
   let _lastFrameClearColor = null;
+  // Resolution scale (setResolutionScale). 1 = native backing store.
+  R._resScale = 1;
+  R._resDpr = null;
+  R._lastSeenW = 0;
+  R._lastSeenH = 0;
   // Explicit viewport (setViewport). null = auto from gl.canvas.
   let _explicitViewport = null;
   // User-set scissor rect. null = no scissor; otherwise
@@ -995,8 +1188,75 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   function flushPending() {
     if (_pendingStart < 0) return;
     R.beginFillPass();
-    gl.drawArrays(gl.TRIANGLES, _pendingStart, _pendingEnd - _pendingStart);
+    _drawCoverRange(_pendingStart, _pendingEnd - _pendingStart);
     _pendingStart = -1; _pendingEnd = -1;
+  }
+
+  /** Upload cover-quad + matching shapeIdx planes onto the active handle.
+   *  shapeIdx is always sized to the vert count — attrib 7 stays enabled. */
+  function _uploadCoverMesh(h, bundle) {
+    const vboVerts = bundle.coverQuadVboFloats || bundle.coverQuadFloats;
+    if (!vboVerts) {
+      h.coverVertCount = 0;
+      h.coverStripped = false;
+      return;
+    }
+    if (h._ensureCoverResources) h._ensureCoverResources();
+    const stripped = !!(bundle.coverQuadVboFloats);
+    const coverVertCount = (vboVerts.length / 12) | 0;
+    gl.bindBuffer(gl.ARRAY_BUFFER, h.triBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, vboVerts, gl.STATIC_DRAW);
+    let vboSidx = stripped
+      ? bundle.hybridShapeIdxVboFloats
+      : (bundle.hybridShapeIdxFloats || bundle.hybridShapeIdxVboFloats);
+    if (!vboSidx || (vboSidx.length | 0) < coverVertCount) {
+      const padded = new Float32Array(coverVertCount);
+      if (vboSidx) padded.set(vboSidx.subarray(0, Math.min(vboSidx.length, coverVertCount)));
+      vboSidx = padded;
+    } else if ((vboSidx.length | 0) > coverVertCount) {
+      vboSidx = vboSidx.subarray(0, coverVertCount);
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, h.shapeIdxBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, vboSidx, gl.STATIC_DRAW);
+    h.coverVertCount = coverVertCount;
+    h.coverStripped = stripped;
+  }
+
+  /** Chunk first-vert index for the currently uploaded cover VBO. */
+  function _coverChunkStart(chunk) {
+    if (!chunk) return -1;
+    if (_handle && _handle.coverStripped) {
+      // Stripped uploads omit chunk headers, so the original `start` would
+      // address beyond the compact VBO on large Slug fallbacks.
+      return (chunk.vboStart != null) ? (chunk.vboStart | 0) : -1;
+    }
+    return (chunk.vboStart != null ? chunk.vboStart : chunk.start) | 0;
+  }
+
+  /** Clamp + draw a cover-quad range against the uploaded vert count. */
+  function _drawCoverRange(start, count) {
+    if (!_handle || !_handle.triVao) return;
+    // Always rebind — beginFillPass may have early-returned while another
+    // path left a different VAO bound.
+    gl.bindVertexArray(_handle.triVao);
+    const maxV = (_handle.coverVertCount | 0) || 0;
+    let s = start | 0, c = count | 0;
+    if (maxV <= 0 || c <= 0 || s < 0) return;
+    if (s >= maxV) return;
+    if (s + c > maxV) {
+      if (typeof console !== 'undefined') {
+        console.warn('[mantle] cover draw clamped ' + c + ' → ' + (maxV - s) +
+          ' verts @' + s + ' (VBO has ' + maxV + ')');
+      }
+      c = maxV - s;
+    }
+    if (c > 0) gl.drawArrays(gl.TRIANGLES, s, c);
+  }
+
+  function _drawCoverChunk(chunk) {
+    const s = _coverChunkStart(chunk);
+    if (s < 0 || !chunk) return;
+    _drawCoverRange(s, chunk.count | 0);
   }
 
   // ------------------------------------------------------------
@@ -1006,22 +1266,93 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   // createBundleHandle — per-bundle state handle (VAO/VBO, mask-region walk,
   // per-handle static cache, per-mount draw()) — see bundleHandle.js.
 
-  function setBundle(bundle) {
+  function _refreshBoundHandle(h, bundle) {
+    h.fillPassAssetDirty = true;
+    const gen9 = bundle._geomGen | 0;
+    if ((h._boundGeomGen | 0) !== gen9) {
+      h._boundGeomGen = gen9;
+      h.hybridMeshDirty = !!bundle.coverQuadFloats;
+      h.generation++;
+      if (h.cache) h.cache.invalidate();
+    }
+    fillPassCanvasW = 0;
+    fillPassCanvasH = 0;
+  }
+
+  function _isTransientHandle(h) {
+    return !!(h && h.bundle && _transientHandles.get(h.bundle) === h);
+  }
+
+  function _disposeTransientHandles() {
+    for (const h of _transientHandles.values()) h.dispose();
+    _transientHandles.clear();
+  }
+
+  function _getTransientHandle(bundle, deferCoverUpload) {
+    let h = _transientHandles.get(bundle);
+    if (h) {
+      _transientHandles.delete(bundle);
+      _transientHandles.set(bundle, h);
+      return h;
+    }
+    while (_transientHandles.size >= MAX_TRANSIENT_HANDLES) {
+      const oldestBundle = _transientHandles.keys().next().value;
+      const oldest = _transientHandles.get(oldestBundle);
+      _transientHandles.delete(oldestBundle);
+      if (oldest === _handle) _handle = null;
+      // Filter-output residency is independently bounded above. Keep it when
+      // this geometry handle ages out so an alternating scene can still hit
+      // a static filter result on its next visit.
+      oldest.dispose({ retainFilterCache: true });
+    }
+    h = R.createBundleHandle(bundle, {
+      filterCacheOwner: 'b' + bundle.uid,
+      deferCoverUpload: !!deferCoverUpload,
+    });
+    _transientHandles.set(bundle, h);
+    return h;
+  }
+
+  function setBundle(bundle, opts) {
     // Same-bundle bind: a no-op for the per-handle state (mask regions
     // + GL lookup texture are immutable for the lifetime of the bundle).
     // The intervening passes between renders (filter graph, mask bake,
     // cache blit) still need the next fill pass to re-bind the asset
     // textures, so we flip _handle.fillPassAssetDirty true unconditionally.
     if (_handle && _handle.bundle === bundle) {
-      _handle.fillPassAssetDirty = true;
+      _refreshBoundHandle(_handle, bundle);
+      return;
+    }
+    if (!bundle) {
+      if (_handle && !_isTransientHandle(_handle)) _handle.dispose();
+      _handle = null;
+      _disposeTransientHandles();
       fillPassCanvasW = 0;
       fillPassCanvasH = 0;
       return;
     }
-    if (_handle) _handle.dispose();
-    _handle = bundle ? R.createBundleHandle(bundle) : null;
-    fillPassCanvasW = 0;
-    fillPassCanvasH = 0;
+    if (_handle && !_isTransientHandle(_handle)) _handle.dispose({ retainFilterCache: true });
+    _handle = _getTransientHandle(bundle, opts && opts.deferCoverUpload);
+    _refreshBoundHandle(_handle, bundle);
+  }
+
+  // FRAME-INTERVAL sampling for the cache cost gate: the cached path's real cost
+  // (RT switches, blit sync) is GPU-side and invisible to JS timers, so the gate
+  // compares each mode's actual frame cadence. `_lastModeCached9` says which mode
+  // the PREVIOUS frame ran, so the interval lands in that mode's EMA. Called from
+  // handle.draw() (which decides cache-vs-LB before the route) or from render().
+  function _cacheSampleCost() {
+    if (!_handle) return;
+    const now9 = performance.now();
+    if (_handle._lastRenderT !== undefined) {
+      const dt9 = now9 - _handle._lastRenderT;
+      if (_handle._skipNextSample9) { _handle._skipNextSample9 = false; }
+      else if (dt9 > 0.5 && dt9 < 100) {
+        if (_handle._lastModeCached9) _handle._cachedCostEma = _handle._cachedCostEma === undefined ? dt9 : _handle._cachedCostEma * 0.92 + dt9 * 0.08;
+        else _handle._directCostEma = _handle._directCostEma === undefined ? dt9 : _handle._directCostEma * 0.92 + dt9 * 0.08;
+      }
+    }
+    _handle._lastRenderT = now9;
   }
 
   function render(target) {
@@ -1042,6 +1373,28 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     }
     if (!_handle || !_handle.bundle) return;
 
+    // In-place geometry rewrite detection for the PERSISTENT-handle flow.
+    // setBundle's same-bundle fast path already re-uploads on a
+    // bundle._geomGen bump, but handle.draw() enters here directly (no
+    // setBundle), so an applyNineSlice re-slice or a textBundle
+    // identity-stable setText on a handle-bound bundle would otherwise
+    // draw the stale VBO. Compare generations every render; on change,
+    // re-upload the mesh, refresh globalBBox-dependent uniforms, bump the
+    // handle generation (mask bake / instanced-compact keys) and drop any
+    // static-cache bake.
+    {
+      const genR = _handle.bundle._geomGen | 0;
+      if ((_handle._boundGeomGen | 0) !== genR) {
+        _handle._boundGeomGen = genR;
+        _handle.hybridMeshDirty = !!_handle.bundle.coverQuadFloats;
+        _handle.fillPassAssetDirty = true;
+        _handle.generation++;
+        if (_handle.cache) _handle.cache.invalidate();
+        fillPassCanvasW = 0;
+        fillPassCanvasH = 0;
+      }
+    }
+
     // Static-scene cache hookup. When the active handle has cache
     // enabled and we're not re-entering from the bake step below,
     // the cache state machine decides whether this frame should
@@ -1055,31 +1408,38 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     // FRAME-INTERVAL sampling for the cache cost gate: the cached path's real
     // cost (RT switches, blit sync) is GPU-side and invisible to JS timers, so
     // the gate compares the actual frame cadence of each mode instead.
-    {
-      const now9 = performance.now();
-      if (_handle._lastRenderT !== undefined) {
-        const dt9 = now9 - _handle._lastRenderT;
-        if (_handle._skipNextSample9) { _handle._skipNextSample9 = false; }
-        else if (dt9 > 0.5 && dt9 < 100) {
-          if (_handle._lastModeCached9) _handle._cachedCostEma = _handle._cachedCostEma === undefined ? dt9 : _handle._cachedCostEma * 0.92 + dt9 * 0.08;
-          else _handle._directCostEma = _handle._directCostEma === undefined ? dt9 : _handle._directCostEma * 0.92 + dt9 * 0.08;
-        }
-      }
-      _handle._lastRenderT = now9;
+    // A cached handle whose bundle takes the LB route never reaches render(), so
+    // its cache could never tick — the cost gate never ran and the cache never
+    // engaged (LB won unconditionally). handle.draw() now samples + ticks FIRST
+    // so the cache can COMPETE with LB, and hands the decision down here. When it
+    // pre-decided, consume that; otherwise (bare drawBundle / setBundle) decide here.
+    /** @type {number} */
+    let level = CacheLevel.None;
+    if (_handle._decidedLevel9 !== undefined) {
+      level = _handle._decidedLevel9;
+      _handle._decidedLevel9 = undefined;
+    } else if (!R._cacheBakingNow) {
+      // (never sample/tick inside a bake re-entry — that interval is bake cost,
+      // not the blit cadence the gate compares)
+      R._cacheSampleCost();
+      if (_handle.cache) level = R._cacheTick();
     }
     if (_handle.cache && !R._cacheBakingNow) {
-      const level = R._cacheTick();
-      if (level === CacheLevel.A1 || level === CacheLevel.A3) {
+      if (level === CacheLevel.WholeAsset || level === CacheLevel.ViewportWindow || level === CacheLevel.SharedGroup) {
         const _wasValid9 = _handle.cache.isCacheValid;
-        if (level === CacheLevel.A3 && !_handle.cache.isCacheValid
+        if (level === CacheLevel.SharedGroup && !_handle.cache.isCacheValid
             && _handle.cache.isGroupCacheValid()) {
           // Adopt the group's existing bake: BORROW the shared RT (so
           // _cacheBlitToCanvas has a texture — this handle never baked, so its
           // cacheTex is still null) and mark valid WITHOUT re-baking. This is
-          // the "blit twice" half of A3 bake-once. If the borrow fails we leave
+          // the "blit twice" half of shared-group caching. If borrowing fails we leave
           // the cache invalid and fall through to a normal bake below.
           const [acw, ach] = viewportSize();
-          if (R._cacheEnsureFbo(acw, ach)) _handle.cache.markBaked(R._cacheFrameSeq);
+          if (R._cacheEnsureFbo(acw, ach) && _handle.cache.isGroupCacheValid()) {
+            _handle.cache.markBaked(R._cacheFrameSeq);
+            _handle.cacheBakeCw = acw;
+            _handle.cacheBakeCh = ach;
+          }
         }
         if (!_handle.cache.isCacheValid) {
           if (!R._cacheBakeAndBlit()) {
@@ -1104,8 +1464,57 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   // The original render() body. Extracted so the cache bake path
   // can re-enter it with a different framebuffer + viewport bound,
   // and the live-render path can call it directly.
+  // Retire the occlusion cull once a per-shape override could change what covers what.
+  //
+  // occlusionCull decides containment ONCE, from static em-space geometry, and applies it by
+  // REMOVING shapes from the draw list (bundle.js:140). Overrides then move / hide / fade shapes
+  // at draw time, so an occluder can stop occluding after that decision was made — and the shape
+  // underneath, already dropped from the list, silently never draws again. (Measured: hide the
+  // occluder via `visibility: 0` and the covered shape does not come back.)
+  //
+  // A whole-bundle worldMatrix is safe — an affine map preserves containment — and the streaming
+  // path already retires the cull when geometry moves (streamGeometry.js:357). This is the
+  // remaining hole.
+  //
+  // Retirement is PERMANENT for the bundle rather than per draw: a bundle being animated through
+  // overrides will keep being animated, so re-deciding every frame would burn the scan for
+  // nothing, and it keeps the swap free of save/restore and re-entrancy hazards. Once retired the
+  // first test below short-circuits, so the scan costs nothing thereafter.
+  function _retireCullIfOverridden() {
+    const b = _handle && _handle.bundle;
+    if (!b || !b.drawListUnculled || b.drawList === b.drawListUnculled) return;
+    const ov = _ds.overrides;
+    const ovP = ov && ov.packedBuffer;
+    if (!ovP) return;
+    // Only re-scan when the override state actually moved. Without this, a table carrying only
+    // colour changes never retires the cull and so re-scans every shape on EVERY draw forever.
+    const ovGen = (ov.generation | 0);
+    if (b._cullOvScanGen === ovGen && b._cullOvScanTable === ov) return;
+    b._cullOvScanGen = ovGen;
+    b._cullOvScanTable = ov;
+    // 24 floats/shape: 0..3 affine (a,b,c,d), 4..5 (tx,ty), 6 visibility, 7 overrideMask,
+    // 8..11 tint rgba. Anything that can shrink, move, hide or fade a shape invalidates a
+    // containment decision; a pure colour change cannot, but an ALPHA change can, so tint.a and
+    // the absolute-override mask (which can carry a fill alpha) both count.
+    const n = b.numShapes | 0;
+    let affects = false;
+    for (let s = 0; s < n; s++) {
+      const o = s * 24;
+      if (Math.abs(ovP[o] - 1) > 1e-4 || Math.abs(ovP[o + 1]) > 1e-4
+       || Math.abs(ovP[o + 2]) > 1e-4 || Math.abs(ovP[o + 3] - 1) > 1e-4
+       || Math.abs(ovP[o + 4]) > 1e-4 || Math.abs(ovP[o + 5]) > 1e-4
+       || ovP[o + 6] < 0.9999 || ovP[o + 7] !== 0 || ovP[o + 11] < 0.9999) { affects = true; break; }
+    }
+    if (!affects) return;
+    b._drawListCulled = b.drawList;
+    b.drawList = b.drawListUnculled;
+    b._lbCombined = null;                          // combined VBO was built from the short list
+    b._cullGen = (b._cullGen | 0) + 1;             // draw-list derivatives must rebuild
+  }
+
   function _renderCanvasInner() {
     if (!_handle || !_handle.bundle) return;
+    _retireCullIfOverridden();
     const [cw, ch] = viewportSize();
     gl.viewport(0, 0, cw, ch);
     gl.disable(gl.DEPTH_TEST);
@@ -1137,15 +1546,15 @@ export function createRenderer(gl, shaderSources, opts = {}) {
       gl.clear(gl.STENCIL_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     }
     gl.depthMask(false);
-    if (_handle.hybridMeshDirty && _handle.bundle.coverQuadFloats) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, _handle.triBuf);
-      gl.bufferData(gl.ARRAY_BUFFER, _handle.bundle.coverQuadFloats, gl.STATIC_DRAW);
-      if (_handle.bundle.hybridShapeIdxFloats) {
-        gl.bindBuffer(gl.ARRAY_BUFFER, _handle.shapeIdxBuf);
-        gl.bufferData(gl.ARRAY_BUFFER, _handle.bundle.hybridShapeIdxFloats, gl.STATIC_DRAW);
-      }
+    if (_handle.hybridMeshDirty && (_handle.bundle.coverQuadVboFloats || _handle.bundle.coverQuadFloats)) {
+      // Re-upload the header-free VBO planes (see bundleHandle.js) so a
+      // streamed / nine-sliced re-derive keeps chunk vboStart in sync.
+      _uploadCoverMesh(_handle, _handle.bundle);
       _handle.hybridMeshDirty = false;
     }
+    // Write depth only for occupancy's certified opaque interiors. The
+    // analytic pass below remains responsible for all color and AA edges.
+    if (R.runOpaquePrepass) R.runOpaquePrepass(_handle);
     // Multi-shape mask offscreen bake. Runs before the
     // main draw list so mantle.frag can sample uMaskRTArray when a shape
     // carries a maskId pointing at a region with a baked layer.
@@ -1192,19 +1601,58 @@ export function createRenderer(gl, shaderSources, opts = {}) {
         // into mainCopyTex. Earlier dispatch paths may have left an
         // offscreen FBO bound; the snapshot MUST come from the default
         // framebuffer, so re-bind null explicitly.
+        // The group's CONTENT RECT: the union of what its children actually paint.
+        //
+        // A group cost three FULL-CANVAS operations, every group, every frame: snapshot
+        // the whole canvas as the backdrop, clear the whole accumulator, then composite
+        // the whole accumulator back. For a group covering a corner of the screen, all
+        // three were almost entirely wasted, and all three scale with the canvas — the
+        // same shape as the fullscreen problem. Bound them by what the group paints.
+        //
+        // null = could not bound it safely → full canvas, exactly as before. A group whose
+        // rect is too small drops its children's pixels on the floor, which is a far worse
+        // bug than a slow group.
+        let _gOps = null, _gDepth = 1;
+        for (let gi = di + 1; gi < drawList.length; gi++) {
+          const go = drawList[gi];
+          if (go.kind === 'groupBegin') { _gDepth++; continue; }
+          if (go.kind === 'groupEnd') { if (--_gDepth === 0) break; continue; }
+          (_gOps || (_gOps = [])).push(go);
+        }
+        // Kill switch: a wrong rect and a clipped group look identical from the outside.
+        // __MANTLE_NO_GROUP_RECT falls back to full-canvas group passes — slower,
+        // unconditionally correct. If a group's content vanishes, look here first.
+        const grpRect = (_gOps && !mantleDebugFlag('noGroupRect'))
+          ? R._contentRectPx(cw, ch, _gOps) : null;
+
         bindFb(gl.FRAMEBUFFER, null);
         gl.bindTexture(gl.TEXTURE_2D, mainCopyTex);
-        gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
+        // Snapshot only the region groupEnd will read back. mainCopyTex is canvas-sized
+        // and the copy lands at the same coordinates, so the rest of it stays stale —
+        // which is fine precisely because groupEnd only samples inside the rect.
+        if (grpRect) gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, grpRect[0], grpRect[1],
+                                          grpRect[0], grpRect[1], grpRect[2], grpRect[3]);
+        else gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
         bindFb(gl.FRAMEBUFFER, shapeFbo);
         gl.viewport(0, 0, cw, ch);
         gl.depthMask(true); gl.stencilMask(0xff);
         gl.clearColor(0, 0, 0, 0); gl.clearStencil(0); gl.clearDepth(1.0);
+        // Clear only the rect. Outside it the accumulator keeps whatever a previous group
+        // left — harmless, because nothing writes there and groupEnd never reads there.
+        if (grpRect) {
+          gl.enable(gl.SCISSOR_TEST);
+          gl.scissor(grpRect[0], grpRect[1], grpRect[2], grpRect[3]);
+        }
         gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        // bindFb(shapeFbo) had already disabled the scissor for this offscreen target;
+        // put it back the way it found it.
+        if (grpRect) gl.disable(gl.SCISSOR_TEST);
         gl.depthMask(false);
         groupStack.push({
           opacity:   op.opacity,
           blendMode: op.blendMode,
           isolation: op.isolation,
+          rect:      grpRect,
         });
         continue;
       }
@@ -1214,17 +1662,30 @@ export function createRenderer(gl, shaderSources, opts = {}) {
         const grp = groupStack.pop();
         if (!grp) continue;
         bindFb(gl.FRAMEBUFFER, null);
-        gl.viewport(0, 0, cw, ch);
+        // Composite only over the group's own rect. The accumulator is transparent outside
+        // it (nothing drew there) and blendFunc is ONE,ZERO — a REPLACE — so a full-canvas
+        // quad would have been rewriting the whole screen with "backdrop, unchanged", every
+        // group, every frame.
+        const gr = grp.rect;
+        if (gr) gl.viewport(gr[0], gr[1], gr[2], gr[3]);
+        else gl.viewport(0, 0, cw, ch);
         gl.disable(gl.DEPTH_TEST);
         gl.disable(gl.STENCIL_TEST);
         gl.enable(gl.BLEND);
         gl.blendEquation(gl.FUNC_ADD);
         gl.blendFunc(gl.ONE, gl.ZERO);
         gl.useProgram(R.compProg);
+        // vUV spans the rect now; both inputs are canvas-sized, so map it back to them.
+        if (gr) {
+          const m = [gr[2] / cw, gr[3] / ch, gr[0] / cw, gr[1] / ch];
+          if (compUShapeMap) gl.uniform4f(compUShapeMap, m[0], m[1], m[2], m[3]);
+          if (compUDstMap)   gl.uniform4f(compUDstMap,   m[0], m[1], m[2], m[3]);
+        } else {
+          COMP_IDENTITY_MAP();
+        }
+        R._fpUValid = false;
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, shapeFboTex); gl.uniform1i(compUShapeTex, 0);
         gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, mainCopyTex);  gl.uniform1i(compUDstTex, 1);
-        // Reuse shapeFboTex on the sharp sampler — the kind=0 path
-        // doesn't read it, but every declared sampler needs a binding.
         gl.uniform1i(compUBlendMode, grp.blendMode | 0);
         gl.uniform1f(compUOpacity, isFinite(grp.opacity) ? grp.opacity : 1);
         gl.bindVertexArray(coverVao);
@@ -1268,21 +1729,41 @@ export function createRenderer(gl, shaderSources, opts = {}) {
           R.endFillPass();
           ensureShapeFbo();
           ensureMainCopyTex();
-          gl.activeTexture(gl.TEXTURE15);
-          gl.bindTexture(gl.TEXTURE_2D, mainCopyTex);
-          gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
+          // Inside a group, shapeFbo IS the group accumulator and
+          // mainCopyTex holds the canvas snapshot groupEnd composites
+          // against — this branch must not clear the former or clobber
+          // the latter, and its result must land IN the group. Use the
+          // blend branch's arrangement: pingFbo for the silhouette,
+          // groupBackdropTex for the local backdrop, shapeFbo as dst.
+          const inGrpC = groupStack.length > 0;
+          let colrSrcFbo = shapeFbo, colrSrcTex = shapeFboTex;
+          let colrBackdrop = mainCopyTex, colrDst = null;
+          if (inGrpC) {
+            ensurePingFbo();
+            ensureGroupBackdropTex();
+            gl.activeTexture(gl.TEXTURE15);
+            gl.bindTexture(gl.TEXTURE_2D, groupBackdropTex);
+            bindFb(gl.FRAMEBUFFER, shapeFbo);
+            gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
+            colrSrcFbo = pingFbo; colrSrcTex = pingTex;
+            colrBackdrop = groupBackdropTex; colrDst = shapeFbo;
+          } else {
+            gl.activeTexture(gl.TEXTURE15);
+            gl.bindTexture(gl.TEXTURE_2D, mainCopyTex);
+            gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
+          }
           _handle.fillPassAssetDirty = true;
-          // Render the primary glyph silhouette into shapeFbo. Primary
-          // mask = the silhouette referenced by the top-level PaintGlyph
-          // (or the bare top-level outline when no PaintGlyph wraps).
-          bindFb(gl.FRAMEBUFFER, shapeFbo);
+          // Render the primary glyph silhouette into the silhouette FBO.
+          // Primary mask = the silhouette referenced by the top-level
+          // PaintGlyph (or the bare top-level outline when none wraps).
+          bindFb(gl.FRAMEBUFFER, colrSrcFbo);
           gl.viewport(0, 0, cw, ch);
           gl.depthMask(true); gl.stencilMask(0xff);
           gl.clearColor(0, 0, 0, 0); gl.clearStencil(0); gl.clearDepth(1.0);
           gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
           gl.depthMask(false);
           R.beginFillPass();
-          gl.drawArrays(gl.TRIANGLES, op.chunk.start, op.chunk.count);
+          _drawCoverChunk(op.chunk);
           R.endFillPass();
           // Bake per-gid alpha masks for every PaintGlyph node in the
           // graph that references a non-primary gid. Each mask uses
@@ -1300,8 +1781,8 @@ export function createRenderer(gl, shaderSources, opts = {}) {
               const maskChunk = _handle.bundle.chunkByShape[maskShapeIdx];
               if (!maskChunk) continue;
               const gidNum = +gidStr;
-              if (gidNum === op.shapeIdx + 1 /* primary already in shapeFbo */) {
-                glyphAlphaMasks.set(gidNum, shapeFboTex);
+              if (gidNum === op.shapeIdx + 1 /* primary already rendered */) {
+                glyphAlphaMasks.set(gidNum, colrSrcTex);
                 continue;
               }
               // For mask-only shapes we know the silhouette is the
@@ -1321,7 +1802,7 @@ export function createRenderer(gl, shaderSources, opts = {}) {
               gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
               gl.depthMask(false);
               R.beginFillPass();
-              gl.drawArrays(gl.TRIANGLES, maskChunk.start, maskChunk.count);
+              _drawCoverChunk(maskChunk);
               R.endFillPass();
               glyphAlphaMasks.set(gidNum, rt.tex);
             }
@@ -1383,7 +1864,7 @@ export function createRenderer(gl, shaderSources, opts = {}) {
           const ctx = {
             gl, pool: _rtPool, coverVao, w: cw, h: ch,
             bbox: bboxes,
-            glyphAlphaTex: shapeFboTex,
+            glyphAlphaTex: colrSrcTex,
             glyphAlphaMasks,
             runColor,
             // Bundle's shared gradient-stops LUT — same texture the
@@ -1399,7 +1880,8 @@ export function createRenderer(gl, shaderSources, opts = {}) {
             paintCompositeProg,  paintCompositeU,
             feCompositeProg,
             feCompositeU: feCompositeProg ? {
-              uIn1: fcUIn1, uIn2: fcUIn2, uOp: fcUOp, uK: fcUK,
+              uIn1: fcUIn1, uIn2: fcUIn2, uIn1Map: fcUIn1Map, uIn2Map: fcUIn2Map,
+              uOp: fcUOp, uK: fcUK,
             } : null,
             bundle: _handle.bundle,
           };
@@ -1417,7 +1899,7 @@ export function createRenderer(gl, shaderSources, opts = {}) {
           if (ctx._lazyStopsTextures) {
             for (const tex of ctx._lazyStopsTextures) gl.deleteTexture(tex);
           }
-          bindFb(gl.FRAMEBUFFER, null);
+          bindFb(gl.FRAMEBUFFER, colrDst);
           gl.viewport(0, 0, cw, ch);
           gl.disable(gl.DEPTH_TEST);
           gl.disable(gl.STENCIL_TEST);
@@ -1425,13 +1907,16 @@ export function createRenderer(gl, shaderSources, opts = {}) {
           gl.blendEquation(gl.FUNC_ADD);
           gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
           gl.useProgram(R.compProg);
-          gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, rootRT.tex);  gl.uniform1i(compUShapeTex, 0);
-          gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, mainCopyTex); gl.uniform1i(compUDstTex, 1);
+          COMP_IDENTITY_MAP();
+          R._fpUValid = false;
+          gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, rootRT.tex);   gl.uniform1i(compUShapeTex, 0);
+          gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, colrBackdrop); gl.uniform1i(compUDstTex, 1);
           gl.uniform1i(compUBlendMode, 0);
           gl.uniform1f(compUOpacity, 1);
           gl.bindVertexArray(coverVao);
           gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
           gl.bindVertexArray(null);
+          releaseRoot(_rtPool, rootRT);   // hand the root back — see the SVG route
           _handle.fillPassAssetDirty = true;
           continue;
         }
@@ -1452,6 +1937,12 @@ export function createRenderer(gl, shaderSources, opts = {}) {
       if (op.filterGraphId && _handle.bundle.filterGraphs) {
         const graph = _handle.bundle.filterGraphs[op.filterGraphId - 1];
         if (graph && graph.nodes && graph.nodes.length) {
+          // These inputs are not represented in the result-cache key. A
+          // filtered SourceGraphic is cacheable only when it is self-contained.
+          const _readsBackdrop = graph.nodes.some(n =>
+            n.inputs.some(i => i === SRC_BACKGROUND || i === SRC_BACKGROUND_A));
+          const _filterCacheable = !_ds.palette && !_ds.extClipTex && !_ds.shapeRange
+            && !_readsBackdrop && !_handle.bundle.maskMesh;
           // Tier-2b filter result cache. The filter OUTPUT (rootRT) is a
           // pure function of (the feeding shape's geometry+overrides,
           // worldMatrix, canvas). Build the key; on a hit, skip the
@@ -1473,43 +1964,111 @@ export function createRenderer(gl, shaderSources, opts = {}) {
               ? _ds.overrides.shapeGenOf(op.shapeIdx | 0) : 0,
             recolor: R._recolorHash(),
           };
-          const cached = _filterCache.get(op.filterGraphId);
+          // Filter graph IDs are bundle-local and a graph may feed more than one
+          // shape. Keep an output per feeding shape; otherwise two shapes sharing a
+          // graph evict each other on every frame.
+          const fCacheId = 'g' + _handle._filterCacheOwner + '_'
+            + op.filterGraphId + '_' + (op.shapeIdx | 0);
+          const cached = _getFilterCache(fCacheId);
           // An active palette LUT is mutable with no version token, so a
           // cached filtered tex can't be trusted across palette draws —
           // bar the hit (the recolor hash already separates palette rows).
-          const filterHit = !_ds.palette && R._filterKeyMatches(cached, fKey)
-            && cached.tex && cached.w === cw && cached.h === ch;
+          // The entry's w/h are its TEXTURE's — which is the filter's bbox, not the
+          // canvas. Don't compare them to the canvas; a canvas resize is already a
+          // key mismatch (the key carries cw/ch), and re-checking it here against a
+          // bbox-sized texture is a guard that can never pass.
+          const filterHit = _filterCacheable && R._filterKeyMatches(cached, fKey) && cached.tex;
+          // Inside a group: shapeFbo is the accumulator and mainCopyTex
+          // the canvas snapshot groupEnd needs — see the blend branch.
+          const inGrpF = groupStack.length > 0;
           if (filterHit) {
             // Snapshot backdrop, then composite the cached filtered tex.
             flushPending();
             R.endFillPass();
-            ensureMainCopyTex();
-            gl.activeTexture(gl.TEXTURE15);
-            gl.bindTexture(gl.TEXTURE_2D, mainCopyTex);
-            gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
-            R._compositeFilteredTex(cached.tex, mainCopyTex, cw, ch);
+            if (inGrpF) {
+              ensureGroupBackdropTex();
+              gl.activeTexture(gl.TEXTURE15);
+              gl.bindTexture(gl.TEXTURE_2D, groupBackdropTex);
+              bindFb(gl.FRAMEBUFFER, shapeFbo);
+              gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
+              R._compositeFilteredTex(cached.tex, groupBackdropTex, cw, ch, shapeFbo, cached.rect || null);
+            } else if (cached.rect) {
+              // Snapshot only the region we're about to composite into — not the canvas.
+              const bd = snapshotBackdrop(cached.rect, cw, ch);
+              R._compositeFilteredTex(cached.tex, bd.tex, cw, ch, null, cached.rect, cached.rect);
+            } else {
+              ensureMainCopyTex();
+              gl.activeTexture(gl.TEXTURE15);
+              gl.bindTexture(gl.TEXTURE_2D, mainCopyTex);
+              gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
+              R._compositeFilteredTex(cached.tex, mainCopyTex, cw, ch, null, null, null);
+            }
             _handle.fillPassAssetDirty = true;
             continue;
           }
           flushPending();
           R.endFillPass();
-          ensureShapeFbo();
-          ensureMainCopyTex();
-          // Snapshot main FB → mainCopyTex (SourceBackground for the graph).
-          gl.activeTexture(gl.TEXTURE15);
-          gl.bindTexture(gl.TEXTURE_2D, mainCopyTex);
-          gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
+          // Per-node rects. Needed BEFORE the source render now: they decide how big
+          // the SourceGraphic RT and the backdrop have to be.
+          const _fInfo = R._filterNodeRects(graph, op.shapeIdx | 0, cw, ch);
+          const _fRects = _fInfo ? _fInfo.rects : null;
+          if (_fRects) _filterBboxActiveCount++;
+          const _rootRect = _fRects ? _fRects[graph.rootOut] : null;
+          // BackgroundImage / BackgroundAlpha read the backdrop AS A GRAPH INPUT, and
+          // may sample it anywhere — so that one case still needs the whole canvas.
+          // Can the shape render into an RT covering only its own rect? Not inside a
+          // group (shapeFbo is the accumulator there, and canvas-sized by nature).
+          const _srcRect = (!inGrpF && _fInfo && _fInfo.source && !_readsBackdrop && _rootRect)
+            ? _fInfo.source : null;
+
+          let fSrcFbo, fSrcTex, fBackdrop, fDst = null;
+          let fSrcRect = null, fBackdropRect = null;
+          if (inGrpF) {
+            ensureShapeFbo();
+            ensureMainCopyTex();
+            ensurePingFbo();
+            ensureGroupBackdropTex();
+            gl.activeTexture(gl.TEXTURE15);
+            gl.bindTexture(gl.TEXTURE_2D, groupBackdropTex);
+            bindFb(gl.FRAMEBUFFER, shapeFbo);
+            gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
+            fSrcFbo = pingFbo; fSrcTex = pingTex;
+            fBackdrop = groupBackdropTex; fDst = shapeFbo;
+          } else if (_srcRect) {
+            const sRT = acquireShapeRT(_srcRect[2], _srcRect[3]);
+            fSrcFbo = sRT.fbo; fSrcTex = sRT.tex; fSrcRect = _srcRect;
+            const bd = snapshotBackdrop(_rootRect, cw, ch);
+            fBackdrop = bd.tex; fBackdropRect = _rootRect;
+          } else {
+            ensureShapeFbo();
+            ensureMainCopyTex();
+            fSrcFbo = shapeFbo; fSrcTex = shapeFboTex;
+            // Snapshot main FB → mainCopyTex (SourceBackground for the graph).
+            gl.activeTexture(gl.TEXTURE15);
+            gl.bindTexture(gl.TEXTURE_2D, mainCopyTex);
+            gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
+            fBackdrop = mainCopyTex;
+          }
           _handle.fillPassAssetDirty = true;
-          // Render the shape alone into shapeFbo — this becomes the
-          // graph's SourceGraphic input (sentinel -1).
-          bindFb(gl.FRAMEBUFFER, shapeFbo);
-          gl.viewport(0, 0, cw, ch);
+          // Render the shape alone into the SourceGraphic FBO (sentinel -1).
+          bindFb(gl.FRAMEBUFFER, fSrcFbo);
+          // Same projection, TRANSLATED: a viewport at -rect.origin puts canvas pixel
+          // (x,y) at RT texel (x-rx, y-ry), so the shape lands in a small RT with no
+          // change to any clip-space math. gl_FragCoord is then rect-local, so the
+          // fill shader is told where its framebuffer sits (uFragOrigin) — it samples
+          // canvas-space textures (mask, external clip, coverage RTs) by it.
+          if (fSrcRect) {
+            gl.viewport(-fSrcRect[0], -fSrcRect[1], cw, ch);
+            R._fragOrigin = fSrcRect;
+          } else {
+            gl.viewport(0, 0, cw, ch);
+          }
           gl.depthMask(true); gl.stencilMask(0xff);
           gl.clearColor(0, 0, 0, 0); gl.clearStencil(0); gl.clearDepth(1.0);
           gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
           gl.depthMask(false);
           R.beginFillPass();
-          gl.drawArrays(gl.TRIANGLES, op.chunk.start, op.chunk.count);
+          _drawCoverChunk(op.chunk);
           R.endFillPass();
           // Build the dispatch context. Handlers in filterGraphSvg.js
           // sample by texture; we present shapeFbo + mainCopyTex as the
@@ -1524,8 +2083,12 @@ export function createRenderer(gl, shaderSources, opts = {}) {
           // viewBox/em units and pxPerEm converts them to the canvas-res RT.
           const _pxPerEm = R._filterPxPerEm(cw, ch);
           const ctx = R._buildFilterCtx(cw, ch, _pxPerEm,
-            { fbo: shapeFbo, tex: shapeFboTex, size: [cw, ch] },
-            { fbo: null, tex: mainCopyTex, size: [cw, ch] });
+            { fbo: fSrcFbo, tex: fSrcTex,
+              size: fSrcRect ? [fSrcRect[2], fSrcRect[3]] : [cw, ch],
+              rect: fSrcRect || [0, 0, cw, ch] },
+            { fbo: null, tex: fBackdrop,
+              size: fBackdropRect ? [fBackdropRect[2], fBackdropRect[3]] : [cw, ch],
+              rect: fBackdropRect || [0, 0, cw, ch] });
           // Per-eval lookup textures for feComponentTransfer nodes.
           // Each node's params.lutBytes (256×4 RGBA8) is uploaded into
           // its own short-lived texture; dispatched in handler order
@@ -1557,19 +2120,25 @@ export function createRenderer(gl, shaderSources, opts = {}) {
           // filtered shape on a large canvas skips out-of-bbox fragment
           // work. null = no safe bound (region-filling generator) → full
           // canvas, current behavior.
-          const _fScissors = R._filterNodeScissors(graph, op.shapeIdx | 0, cw, ch);
-          if (_fScissors && _fScissors.some(Boolean)) _filterScissorActiveCount++;
-          const rootRT = evaluateGraph(gl, graph, _rtPool, _svgDispatch, ctx, cw, ch, _fScissors);
+          const rootRT = evaluateGraph(gl, graph, _rtPool, _svgDispatch, ctx, cw, ch, _fRects);
           _filterEvalCount++;
           // Release per-eval LUT textures.
           for (const tex of ctLUTs) { if (tex) gl.deleteTexture(tex); }
-          // Tier-2b: copy the filter output into the persistent cache tex
-          // so it survives the pool RT being recycled, and stamp the key.
-          R._storeFilteredTex(op.filterGraphId, rootRT.tex, cw, ch, fKey);
-          // Composite the graph's root output back to main FB. Normal
-          // src-over against the existing backdrop — the graph is
-          // expected to emit premultiplied RGBA per CSS Filter Effects §11.
-          R._compositeFilteredTex(rootRT.tex, mainCopyTex, cw, ch);
+          // Tier-2b: retain the output only when the hit gate can later use
+          // it. Backdrop-dependent and per-draw-dependent graphs are live by
+          // definition; copying their transient root into a persistent cache
+          // texture every frame only adds an allocation and a full blit.
+          if (_filterCacheable) {
+            R._storeFilteredTex(fCacheId, rootRT.tex, cw, ch, fKey, rootRT.rect || null);
+          }
+          // Composite the graph's root output back to the target (main FB,
+          // or the group accumulator when in a group). Normal src-over
+          // against the existing backdrop — the graph is expected to emit
+          // premultiplied RGBA per CSS Filter Effects §11.
+          R._compositeFilteredTex(rootRT.tex, fBackdrop, cw, ch, fDst, rootRT.rect || null, fBackdropRect);
+          // The root is ours until here; give it back or the pool allocates a fresh
+          // one for the next evaluation, every frame, forever.
+          releaseRoot(_rtPool, rootRT);
           _handle.fillPassAssetDirty = true;
           continue;
         }
@@ -1584,19 +2153,51 @@ export function createRenderer(gl, shaderSources, opts = {}) {
         if (f && f.kind >= 1) {
           flushPending();
           R.endFillPass();
-          ensureShapeFbo();
-          ensureMainCopyTex();
-          // Snapshot main FB so the composite pass sees the backdrop.
-          // Use an otherwise-unused texture unit so we don't clobber
-          // a binding that beginFillPass will sample again.
-          gl.activeTexture(gl.TEXTURE15);
-          gl.bindTexture(gl.TEXTURE_2D, mainCopyTex);
-          gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
+          // The filter kernels (blurShapeFbo & co.) filter a target in place —
+          // inside a group, that target is the canvas-sized shapeFbo (which IS the
+          // group accumulator), so stash the group's content in groupBackdropTex
+          // first, run the kernels, then restore + composite back into shapeFbo
+          // below. mainCopyTex must stay untouched (it holds groupEnd's snapshot).
+          const inGrpK = groupStack.length > 0;
+          // px/em must be known BEFORE the source render now: the kernel's reach in
+          // canvas pixels is what decides how big the target has to be.
+          const px = R._filterPxPerEm(cw, ch);
+          const pxPerEmX = px[0], pxPerEmY = px[1];
+          // Outside a group the shape can render into an RT covering only itself,
+          // dilated by the kernel's reach — no canvas-sized anything.
+          const skRect = inGrpK
+            ? null : R._filterSingleKindRect(op.shapeIdx | 0, cw, ch, f, pxPerEmX, pxPerEmY);
+          let kTarget = null, kBackdropTex = null;
+          if (inGrpK) {
+            ensureShapeFbo();
+            ensureMainCopyTex();
+            ensurePingFbo();
+            ensureGroupBackdropTex();
+            gl.activeTexture(gl.TEXTURE15);
+            gl.bindTexture(gl.TEXTURE_2D, groupBackdropTex);
+            bindFb(gl.FRAMEBUFFER, shapeFbo);
+            gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
+          } else if (skRect) {
+            const sRT = acquireShapeRT(skRect[2], skRect[3]);
+            const pRT = acquirePingRT(skRect[2], skRect[3]);
+            kTarget = { fbo: sRT.fbo, tex: sRT.tex, pingFbo: pRT.fbo, pingTex: pRT.tex,
+                        w: skRect[2], h: skRect[3] };
+            kBackdropTex = snapshotBackdrop(skRect, cw, ch).tex;
+          } else {
+            ensureShapeFbo();
+            ensureMainCopyTex();
+            // Snapshot main FB so the composite pass sees the backdrop.
+            // Use an otherwise-unused texture unit so we don't clobber
+            // a binding that beginFillPass will sample again.
+            gl.activeTexture(gl.TEXTURE15);
+            gl.bindTexture(gl.TEXTURE_2D, mainCopyTex);
+            gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
+          }
           // Force a full asset rebind on the upcoming fill pass so the
           // textures we shuffled (mainCopyTex on a high unit) don't leak
           // through.
           _handle.fillPassAssetDirty = true;
-          const drawTarget = shapeFbo;
+          const drawTarget = kTarget ? kTarget.fbo : shapeFbo;
           // Tier-2b single-kind filter cache (the COMMON blur path). The
           // filtered shapeFboTex is a pure function of (feeding shape
           // geometry+overrides, worldMatrix → pxPerEm, canvas). Cache it,
@@ -1605,7 +2206,8 @@ export function createRenderer(gl, shaderSources, opts = {}) {
           // multi-pass) blur — the kind-specific composite below runs
           // unchanged. Keyed per (filterId, shapeIdx) so two shapes
           // sharing a filter id each get their own cached output.
-          const skId = 'k' + op.filterId + '_' + (op.shapeIdx | 0);
+          const skId = 'k' + _handle._filterCacheOwner + '_'
+            + op.filterId + '_' + (op.shapeIdx | 0);
           const skKey = {
             gen: _handle.generation,
             geomGen: _handle.bundle ? (_handle.bundle._geomGen | 0) : 0,
@@ -1616,27 +2218,45 @@ export function createRenderer(gl, shaderSources, opts = {}) {
               ? _ds.overrides.shapeGenOf(op.shapeIdx | 0) : 0,
             recolor: R._recolorHash(),
           };
-          let skEntry = _filterCache.get(skId);
-          const skHit = !_ds.palette && R._filterKeyMatches(skEntry, skKey)
-            && skEntry.shapeTex && skEntry.w === cw && skEntry.h === ch;
+          // The cached texture is the FILTERED shape, so it is the size of the target
+          // it was filtered in — the kernel's rect, not the canvas.
+          const skW = skRect ? skRect[2] : cw, skH = skRect ? skRect[3] : ch;
+          let skEntry = _getFilterCache(skId);
+          const skHit = !_ds.palette && !_ds.extClipTex && !_ds.shapeRange && !_handle.bundle.maskMesh
+            && R._filterKeyMatches(skEntry, skKey)
+            && skEntry.shapeTex && skEntry.w === skW && skEntry.h === skH;
           if (skHit) {
-            ensureMainCopyTex();
-            gl.activeTexture(gl.TEXTURE15);
-            gl.bindTexture(gl.TEXTURE_2D, mainCopyTex);
-            gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
-            R._blitTexToFbo(skEntry.shapeTex, shapeFbo, cw, ch);
-            R._filterSingleKindComposite(f, cw, ch);
+            if (inGrpK) {
+              // Don't blit into shapeFbo (the group accumulator) —
+              // composite the cached filtered tex straight into it.
+              R._filterSingleKindComposite(f, cw, ch, skEntry.shapeTex, groupBackdropTex, shapeFbo);
+            } else if (skRect) {
+              // Straight from the cache to the canvas: no blit through a scratch RT,
+              // and only the shape's own rect is touched.
+              R._filterSingleKindComposite(f, cw, ch, skEntry.shapeTex, kBackdropTex, null,
+                                           skRect, skRect);
+            } else {
+              // Backdrop already snapshotted at branch entry — the old
+              // second copy here was a wasted full-canvas GPU copy on
+              // the steady-state hit path.
+              R._blitTexToFbo(skEntry.shapeTex, shapeFbo, cw, ch);
+              R._filterSingleKindComposite(f, cw, ch);
+            }
             _handle.fillPassAssetDirty = true;
             continue;
           }
           bindFb(gl.FRAMEBUFFER, drawTarget);
-          gl.viewport(0, 0, cw, ch);
+          // Same translated projection as the graph route (see acquireShapeRT):
+          // the viewport sits at -rect.origin and the fill shader is told where its
+          // framebuffer is, so its canvas-space samples stay canvas-space.
+          if (skRect) { gl.viewport(-skRect[0], -skRect[1], cw, ch); R._fragOrigin = skRect; }
+          else gl.viewport(0, 0, cw, ch);
           gl.depthMask(true); gl.stencilMask(0xff);
           gl.clearColor(0, 0, 0, 0); gl.clearStencil(0); gl.clearDepth(1.0);
           gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
           gl.depthMask(false);
           R.beginFillPass();
-          gl.drawArrays(gl.TRIANGLES, op.chunk.start, op.chunk.count);
+          _drawCoverChunk(op.chunk);
           R.endFillPass();
           // Per-kind filter math.
           //
@@ -1656,32 +2276,47 @@ export function createRenderer(gl, shaderSources, opts = {}) {
           // per-axis Frobenius scale (√(a²+b²) / √(c²+d²)), which
           // gives the right answer for uniform scale and a sensible
           // approximation otherwise.
-          const px = R._filterPxPerEm(cw, ch);
-          const pxPerEmX = px[0], pxPerEmY = px[1];
           if (f.kind === 1) {
-            // feGaussianBlur — blur the shape FBO in place.
-            R.blurShapeFbo(f.sigmaX * pxPerEmX, f.sigmaY * pxPerEmY);
+            // feGaussianBlur — blur the target in place.
+            R.blurShapeFbo(f.sigmaX * pxPerEmX, f.sigmaY * pxPerEmY, kTarget);
           } else if (f.kind === 5) {
             // feMorphology — erode (0) / dilate (1) with per-axis radii.
             const operator = f.tintR | 0;
             R.morphShapeFbo(operator,
                           f.sigmaX * pxPerEmX,
-                          f.sigmaY * pxPerEmY);
+                          f.sigmaY * pxPerEmY, kTarget);
           } else if (f.kind === 6) {
             // feConvolveMatrix — single-pass 2D convolution.
-            R.convolveShapeFbo(f);
+            R.convolveShapeFbo(f, kTarget);
           }
           // Tier-2b: store the post-filter shapeFboTex into the persistent
           // per-(filterId,shape) cache so a static re-render skips the
           // source render + filter next frame.
-          if (!skEntry) { skEntry = { w: 0, h: 0, key: null }; _filterCache.set(skId, skEntry); }
-          R._ensureCacheTex(skEntry, 'shapeTex', cw, ch);
-          skEntry.w = cw; skEntry.h = ch;
-          R._blitTexToFbo(shapeFboTex, skEntry.shapeTexFbo, cw, ch);
+          if (!skEntry) { skEntry = { w: 0, h: 0, key: null }; _setFilterCache(skId, skEntry); }
+          R._ensureCacheTex(skEntry, 'shapeTex', skW, skH);
+          skEntry.w = skW; skEntry.h = skH;
+          R._blitTexToFbo(kTarget ? kTarget.tex : shapeFboTex, skEntry.shapeTexFbo, skW, skH);
           skEntry.key = skKey;
           _filterEvalCount++;
-          // Composite back to main FB.
-          R._filterSingleKindComposite(f, cw, ch);
+          if (inGrpK) {
+            // The filtered output sits in shapeFbo, which must go back to
+            // being the group accumulator. Move the output aside (a
+            // composite can't sample shapeFboTex while writing shapeFbo —
+            // feedback loop), restore the group content, then composite
+            // the filtered shape into it.
+            bindFb(gl.FRAMEBUFFER, shapeFbo);
+            gl.activeTexture(gl.TEXTURE15);
+            gl.bindTexture(gl.TEXTURE_2D, pingTex);
+            gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
+            R._blitTexToFbo(groupBackdropTex, shapeFbo, cw, ch);
+            R._filterSingleKindComposite(f, cw, ch, pingTex, groupBackdropTex, shapeFbo);
+          } else if (skRect) {
+            R._filterSingleKindComposite(f, cw, ch, kTarget.tex, kBackdropTex, null,
+                                         skRect, skRect);
+          } else {
+            // Composite back to main FB.
+            R._filterSingleKindComposite(f, cw, ch);
+          }
           _handle.fillPassAssetDirty = true;
           continue;
         }
@@ -1707,6 +2342,14 @@ export function createRenderer(gl, shaderSources, opts = {}) {
         // the isolated RT, mainCopyTex (canvas snapshot) as backdrop,
         // canvas as final target.
         const inGroup = groupStack.length > 0;
+        // This shape's own rect. A blended leaf paid FOUR full-canvas operations — snapshot
+        // the backdrop, clear the isolated RT, render, composite it back — and only the
+        // render was ever bounded (by the shape's cover quad). The other three covered the
+        // screen for a shape that might be a badge in a corner. Same fix as the group and
+        // the cache blit: bound them by what the shape actually paints.
+        // null = could not bound it → full canvas, as before.
+        const bRect = mantleDebugFlag('noGroupRect')
+          ? null : R._contentRectPx(cw, ch, [op]);
         let isolatedFbo, isolatedTex, backdropTex, dstFbo;
         if (inGroup) {
           // The group's accumulator IS shapeFbo, so we can't reuse it
@@ -1729,7 +2372,9 @@ export function createRenderer(gl, shaderSources, opts = {}) {
           // Bind shapeFbo (the group's accumulator) so the snapshot
           // captures the in-progress group content.
           bindFb(gl.FRAMEBUFFER, shapeFbo);
-          gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
+          if (bRect) gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, bRect[0], bRect[1],
+                                          bRect[0], bRect[1], bRect[2], bRect[3]);
+          else gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
           isolatedFbo = pingFbo;
           isolatedTex = pingTex;
           backdropTex = groupBackdropTex;
@@ -1737,7 +2382,9 @@ export function createRenderer(gl, shaderSources, opts = {}) {
         } else {
           gl.activeTexture(gl.TEXTURE15);
           gl.bindTexture(gl.TEXTURE_2D, mainCopyTex);
-          gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
+          if (bRect) gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, bRect[0], bRect[1],
+                                          bRect[0], bRect[1], bRect[2], bRect[3]);
+          else gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, cw, ch);
           isolatedFbo = shapeFbo;
           isolatedTex = shapeFboTex;
           backdropTex = mainCopyTex;
@@ -1748,13 +2395,18 @@ export function createRenderer(gl, shaderSources, opts = {}) {
         gl.viewport(0, 0, cw, ch);
         gl.depthMask(true); gl.stencilMask(0xff);
         gl.clearColor(0, 0, 0, 0); gl.clearStencil(0); gl.clearDepth(1.0);
+        // Clear only the rect. The shape rasterizes inside its cover quad, which is inside
+        // the rect, so stale colour/depth/stencil outside it is never read or written.
+        if (bRect) { gl.enable(gl.SCISSOR_TEST); gl.scissor(bRect[0], bRect[1], bRect[2], bRect[3]); }
         gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        if (bRect) gl.disable(gl.SCISSOR_TEST);   // bindFb had it off for this offscreen target
         gl.depthMask(false);
         R.beginFillPass();
-        gl.drawArrays(gl.TRIANGLES, op.chunk.start, op.chunk.count);
+        _drawCoverChunk(op.chunk);
         R.endFillPass();
         bindFb(gl.FRAMEBUFFER, dstFbo);
-        gl.viewport(0, 0, cw, ch);
+        if (bRect) gl.viewport(bRect[0], bRect[1], bRect[2], bRect[3]);
+        else gl.viewport(0, 0, cw, ch);
         gl.disable(gl.DEPTH_TEST);
         gl.disable(gl.STENCIL_TEST);
         gl.enable(gl.BLEND);
@@ -1762,6 +2414,15 @@ export function createRenderer(gl, shaderSources, opts = {}) {
         gl.blendFunc(gl.ONE, gl.ZERO);  // composite shader emits the
                                          // final composited result.
         gl.useProgram(R.compProg);
+        // vUV spans the rect; both inputs are canvas-sized, so map it back to them.
+        if (bRect) {
+          const m = [bRect[2] / cw, bRect[3] / ch, bRect[0] / cw, bRect[1] / ch];
+          if (compUShapeMap) gl.uniform4f(compUShapeMap, m[0], m[1], m[2], m[3]);
+          if (compUDstMap)   gl.uniform4f(compUDstMap,   m[0], m[1], m[2], m[3]);
+        } else {
+          COMP_IDENTITY_MAP();
+        }
+        R._fpUValid = false;
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, isolatedTex); gl.uniform1i(compUShapeTex, 0);
         gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, backdropTex); gl.uniform1i(compUDstTex, 1);
         gl.uniform1i(compUBlendMode, op.blendMode | 0);
@@ -1773,7 +2434,8 @@ export function createRenderer(gl, shaderSources, opts = {}) {
         _handle.fillPassAssetDirty = true;
         continue;
       }
-      const cs = op.chunk.start, cc = op.chunk.count;
+      const cs = _coverChunkStart(op.chunk), cc = op.chunk.count | 0;
+      if (cs < 0 || cc <= 0) continue;
       if (_pendingStart < 0) {
         _pendingStart = cs;
         _pendingEnd   = cs + cc;
@@ -1792,14 +2454,86 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     }
     R.endFillPass();
     gl.bindVertexArray(null);
+    R._opaquePrepassActive = false;
 
-    if (rendererState.showTriOutline) renderTriOutlineOverlay();
-    if (rendererState.showBBoxes)     renderBBoxOverlay();
+    R._drawDebugOverlays(_handle.bundle, false);
   }
 
-  function renderTriOutlineOverlay() {
-    const b = _handle.bundle;
-    if (!b || !b.coverQuadFloats || !b.coverQuadChunks.length) return;
+  // Both analytic routes call the shared overlay hook with the mesh they served.
+  R._drawDebugOverlays = function (b, lbServed) {
+    if (!b) return;
+    if (rendererState.showTriOutline) withOverlayState(() => renderTriOutlineOverlay(b, lbServed));
+    if (rendererState.showBBoxes)     withOverlayState(() => renderBBoxOverlay(b));
+  };
+
+  // The mesh overlay must show the mesh that was actually DRAWN. Under LB that is the
+  // Loop-Blinn partition — interior triangles, curve hulls, AA strips — not the Slug cover
+  // quads, which LB never submits. Drawing the cover quads under LB shows you a mesh the
+  // frame did not use, which is worse than showing nothing.
+  //
+  // LB verts are em-space in the same aPos slot the solid overlay program projects from
+  // (loopBlinn.vert.glsl shares mantle.vert.glsl's em→NDC), so they need no remapping.
+  // Per-shape override transforms are applied in LB's VS and are NOT reflected here.
+  function renderLbTriOutlineOverlay(b) {
+    const [cw, ch] = viewportSize();
+    gl.useProgram(R.solidProg);
+    gl.uniform4f(solidUGBB, b.globalBBox[0], b.globalBBox[1], b.globalBBox[2], b.globalBBox[3]);
+    const [sx, sy] = arScale(b.globalBBox, cw, ch);
+    gl.uniform2f(solidUAR, sx, sy);
+    gl.bindVertexArray(solidVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, solidBuf);
+    const triPts = _triOverlayPts;
+    for (const m of b._lbMeshes) {
+      const v = m && m.verts;
+      if (!v) continue;
+      for (let t = 0; t + 3 <= m.vertexCount; t += 3) {
+        const base = t * LB_VERT_FLOATS;
+        // aFlags.x is kind + a fractional blend bit — floor it off.
+        const kind = Math.floor(v[base + 5] + 1e-4);
+        triPts[0] = v[base];
+        triPts[1] = v[base + 1];
+        triPts[2] = v[base + LB_VERT_FLOATS];
+        triPts[3] = v[base + LB_VERT_FLOATS + 1];
+        triPts[4] = v[base + LB_VERT_FLOATS * 2];
+        triPts[5] = v[base + LB_VERT_FLOATS * 2 + 1];
+        if (kind === 0)                                 gl.uniform4f(solidUColor, 1.0, 0.82, 0.0, 0.9);  // interior
+        else if (kind === 10 || kind === 12)
+                                                        gl.uniform4f(solidUColor, 0.1, 0.7, 1.0, 0.9);   // AA bands
+        else                                            gl.uniform4f(solidUColor, 1.0, 0.15, 0.15, 0.9); // curve pieces
+        gl.bufferData(gl.ARRAY_BUFFER, triPts, gl.DYNAMIC_DRAW);
+        gl.drawArrays(gl.LINE_LOOP, 0, 3);
+      }
+    }
+    gl.bindVertexArray(null);
+  }
+
+  // The overlay is a plain LINE_LOOP pass and owns no state, so it inherits whatever the fill
+  // left behind. LB leaves the DEPTH test on (its per-shape depth claim), which rejects every
+  // overlay line at z=0 — the overlay silently drew nothing under LB. Neutralise the tests,
+  // then put them back for whatever the caller does next.
+  function withOverlayState(fn) {
+    const depth = gl.isEnabled(gl.DEPTH_TEST), stencil = gl.isEnabled(gl.STENCIL_TEST);
+    const cm = gl.getParameter(gl.COLOR_WRITEMASK);
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.STENCIL_TEST);
+    gl.colorMask(true, true, true, true);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    try { fn(); }
+    finally {
+      if (depth) gl.enable(gl.DEPTH_TEST);
+      if (stencil) gl.enable(gl.STENCIL_TEST);
+      gl.colorMask(cm[0], cm[1], cm[2], cm[3]);
+    }
+  }
+
+  function renderTriOutlineOverlay(b, lbServed) {
+    if (!b) return;
+    if (lbServed && Array.isArray(b._lbMeshes) && b._lbMeshes.length) {
+      renderLbTriOutlineOverlay(b);
+      return;
+    }
+    if (!b.coverQuadFloats || !b.coverQuadChunks.length) return;
     const [cw, ch] = viewportSize();
     gl.useProgram(R.solidProg);
     gl.uniform4f(solidUGBB, b.globalBBox[0], b.globalBBox[1], b.globalBBox[2], b.globalBBox[3]);
@@ -1830,8 +2564,7 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     }
     gl.bindVertexArray(null);
   }
-  function renderBBoxOverlay() {
-    const b = _handle.bundle;
+  function renderBBoxOverlay(b) {
     if (!b || !b.metaFloats || !b.numShapes) return;
     const [cw, ch] = viewportSize();
     gl.useProgram(R.solidProg);
@@ -1916,8 +2649,74 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   //                   took the global setLoopBlinnFill static route).
   /** @param {object} bundle
    *  @param {{bare?:boolean, streamOnly?:boolean}} [opts] */
+  // Engine trace (setDiagnostics({ engineTrace: true })). Wraps the ROUTING
+  // DECISION itself, so it sees every entry point — bare drawBundle, handle.draw,
+  // and instanced — not just one. Off by default: one boolean check when disabled.
   function _analyticRoute(bundle, opts) {
+    const served = _analyticRouteImpl(bundle, opts);
+    if (diagFlags.engineTrace && bundle) {
+      const bb = bundle.globalBBox;
+      const key = (bundle.numShapes | 0) + '|'
+        + (bb ? `${Math.round(bb[0])},${Math.round(bb[1])},${Math.round(bb[2])},${Math.round(bb[3])}` : '-')
+        + '|' + (served ? 'LB' : 'SLUG')
+        + '|entry' + (opts && opts.bare ? 'bare' : (opts && opts.streamOnly ? 'handle' : 'instanced'))
+        + '|baking' + (R._cacheBakingNow ? 1 : 0);
+      diagNoteEngine(key);
+    }
+    return served;
+  }
+  // Would the analytic (LB) route serve this bundle RIGHT NOW? A predicate over
+  // the SAME gates _analyticRoute applies, with no side effects.
+  //
+  // The instanced fill path uses this predicate so route selection remains a
+  // property of the bundle rather than the draw entry point.
+  //
+  // LB meshes build OFF-THREAD: until one lands, LB declines and every instance
+  // would fall to its own Slug draw — strictly worse than the instanced fast path.
+  // So an unbuilt mesh reports false and the fast path keeps it until LB is ready.
+  // Draw-time kill switch for the occlusion cull. createBundle keeps the UNCULLED
+  // draw list precisely so the cull can be undone without a reload — a toggle that
+  // needed a re-import would be useless for diagnosing a live artifact.
+  function _cullSwitchTick() {
+    const off = mantleDebugFlag('noOcclusionCull');
+    const b = _handle && _handle.bundle;
+    if (!b || !b.drawListUnculled) return;
+    if (off && b.drawList !== b.drawListUnculled) {
+      b._drawListCulled = b.drawList;
+      b.drawList = b.drawListUnculled;
+      b._cullGen = (b._cullGen | 0) + 1;
+      b._lbCombined = null;
+    } else if (!off && b._drawListCulled && b.drawList === b.drawListUnculled) {
+      b.drawList = b._drawListCulled;
+      b._cullGen = (b._cullGen | 0) + 1;
+      b._lbCombined = null;
+    }
+  }
+  R._cullSwitchTick = _cullSwitchTick;
+
+  function _lbWouldServe(bundle) {
+    if (!bundle || R._lbFillMode === 'off' || mantleDebugFlag('forceSlug')) return false;
+    if (bundle._morphSrc || bundle._incStroke) return false;
+    if (bundle._geomGen && !bundle._lbStream) return false;
+    // Keep this in step with _analyticRouteImpl's veto: a sprite-subset draw is Slug-only
+    // (the combined VBO spans every shape), and _lbOverInstanced consults this to decide
+    // whether to divert drawBundleInstanced off its fast path.
+    if (_ds.shapeRange && _ds.spriteNonContig) return false;
+    if (_ds.extClipTex || _canvasUnsized()) return false;
+    if (R._requestLbBuild) R._requestLbBuild(bundle);
+    if (!Array.isArray(bundle._lbMeshes) || !bundle._lbMeshes.length) return false;
+    if ((bundle._lbGen | 0) !== (bundle._geomGen | 0)) return false;
+    if (R._preferNoAa && R._preferNoAa(bundle)) return false;
+    if (R._lbFillMode === 'auto' && !(R._staticPerfOk(bundle) && R._lbSizeOk(bundle))) return false;
+    return true;
+  }
+  function _analyticRouteImpl(bundle, opts) {
     if (!bundle) return false;
+    // Dynamic incremental stroke (paint tool): a bundle-like flagged
+    // `_incStroke` draws through its own GPU-resident stroke-coverage path
+    // (incrementalStroke.js) from EVERY entry point. It carries no Slug
+    // geometry, so this branch always handles it (returns true).
+    if (bundle._incStroke) return R._drawIncrementalStroke(bundle);
     const bare = !!(opts && opts.bare);
     const streamOnly = !!(opts && opts.streamOnly);
     // GPU-resident morph route: a dynamic MORPH handle (createShapeMorph marks
@@ -1950,15 +2749,22 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     // Cached handles route LB like everything else: the bake's re-entrant render
     // reaches here with the cache FBO as the redirect target (bindFb), and forcing
     // Slug instead rendered BLANK for bundles that carry no Slug cover-quads
-    // (lightweight builds) — the "enable A1 and components disappear" report.
+    // (lightweight builds) — the "enable WholeAsset and components disappear" report.
     // The capture also matches live frames exactly when both are LB.
-    const wantStatic = R._lbFillMode !== 'off' && !bundle._geomGen && !bundle._morphSrc;
+    const wantStatic = R._lbFillMode !== 'off' && !mantleDebugFlag('forceSlug') && !bundle._geomGen && !bundle._morphSrc;
+    if (wantStatic && R._requestLbBuild) R._requestLbBuild(bundle);
+    // Prefer the cheaper no-AA route when an opaque stroke hides the fill edge.
+    // Morph and streamed geometry remain on LB, and the draw-time gate retains LB
+    // for small shapes or strokes that are too thin in device space.
+    if (wantStatic && R._preferNoAa && R._preferNoAa(bundle)) return false;
     // 'auto' perf gate (shared by static + streamed; stub → always route). A
     // published _lbStream bundle ignores the veto: it has no draw-time Slug
     // fallback, so routing anyway beats rendering blank (its perf decision was
     // already made at stream time).
     if ((wantStatic || lbStreamed)
-        && !(R._lbFillMode === 'auto' && !R._staticPerfOk(bundle) && !lbStreamed)
+        // 'auto' vetoes unsupported/expensive features and rejects dense meshes or
+        // excessive device-space coverage per segment.
+        && !(R._lbFillMode === 'auto' && !(R._staticPerfOk(bundle) && R._lbSizeOk(bundle)) && !lbStreamed)
         // Override recolor (fill/tint/visibility — fog) is baked by the route.
         // A per-shape TRANSFORM override on a shape that has Slug geometry falls
         // back to Slug per-shape (which applies the transform); on a lightweight
@@ -1968,6 +2774,13 @@ export function createRenderer(gl, shaderSources, opts = {}) {
         // analytic composite path (_drawBundleLB rejects gradient/image bundles
         // under recolor and forces all shapes through it). ext-clip is still
         // stripped from the variant → keep it on Slug.
+        // SPRITE SUBSET: the combined VBO now carries a per-shape vertex span so the draw can be
+        // sliced to the sprite (morphDraw _ensureLbCombined + the drawArrays there). Before that,
+        // the analytic route ignored _ds.shapeRange entirely and painted the ENTIRE SHEET on any
+        // drawSprite — and cost O(bundleShapes) per call (64 sprites = 15ms/frame). The
+        // NON-CONTIGUOUS case (a pattern/clip child interleaved, bundle.spriteRangesNonContiguous)
+        // breaks the contiguous-slice assumption, so it stays on Slug.
+        && !(_ds.shapeRange && _ds.spriteNonContig)
         && !_ds.extClipTex && !_canvasUnsized()) {
       // _drawBundleLB classifies the feature set (solid → combined route;
       // gradient/image → per-shape) and checks eligibility with the right
@@ -1993,7 +2806,7 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   // Helpers below operate on whatever handle is currently active
   // (_handle.cache / _handle.cacheFbo / etc).
   //
-  // A1 caches a single bundle; A3 shares one RT per instance-group key.
+  // WholeAsset caches one bundle; SharedGroup shares a target per instance-group key.
   // ------------------------------------------------------------
 
   // Compat shim: configure cache on the internal handle. Single-bundle
@@ -2002,9 +2815,15 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   // so each mount has its own cache state machine + cache RT.
 
   function dispose() {
-    // Per-handle cache RTs are owned by the handle and freed by its
-    // dispose(); the renderer-level dispose just drops the active
-    // handle (which cascades to its cache cleanup via h.dispose()).
+    // UNREGISTER THE LB HOOKS. They live in a module-level registry (every renderer adds one), and
+    // a disposed renderer's closure captures a dead GL context — leaving it registered means the
+    // next bundle created hands its Loop-Blinn build to a renderer that no longer exists.
+    try {
+      removeLbBuilder(R._lbBuilderFn);
+      removeLbPreparer(R._lbPreparerFn);
+    } catch { /* not registered */ }
+    // Per-handle resources are owned by the bounded bare-draw handle LRU or
+    // by caller-created handles. Dispose every internal resident handle here.
     for (const p of [
       R.fillProg, R.solidProg, R.compProg, R.blurProg, R.boxBlurProg, R.morphProg,
       R.convolveProg, R.colorMatrixProg, R.feCompositeProg, R.feBlendProg,
@@ -2013,13 +2832,18 @@ export function createRenderer(gl, shaderSources, opts = {}) {
       R.paintLinearGradProg, R.paintRadialGradProg, R.paintSweepGradProg,
       R.paintTransformProg, R.paintGlyphProg, R.paintCompositeProg,
       R.maskBakeProg, R.cacheBlitProg, R.drawImageProg, R.drawImageInstProg,
+      R.lbProg, R.lbProgLean, R.lbCompProg, R.morphStrokeProg, R.lbPairProg,
     ]) {
       if (p) gl.deleteProgram(p);
     }
-    if (R._instProg) gl.deleteProgram(R._instProg);
-    for (const v of [solidVao, coverVao, R._instVao, R._instVaoBundle]) if (v) gl.deleteVertexArray(v);
-    for (const b of [solidBuf, coverBuf, R._instBuf, R._instAttrBuf,
-                     R._instCompactVbo, R._instCompactShapeVbo]) if (b) gl.deleteBuffer(b);
+    if (R._disposeInstProgs) R._disposeInstProgs();
+    if (R._disposeFillVariants) R._disposeFillVariants();
+    if (R.disposeOpaquePrepass) R.disposeOpaquePrepass();
+    if (R._disposeLbCovPrograms) R._disposeLbCovPrograms();
+    if (R._clearLbCaches) R._clearLbCaches();
+    for (const v of [solidVao, coverVao, R._instVao]) if (v) gl.deleteVertexArray(v);
+    for (const b of [solidBuf, coverBuf, R._instBuf, R._instAttrBuf]) if (b) gl.deleteBuffer(b);
+    if (R._disposeInstCompacts) R._disposeInstCompacts();
     // Per-handle GL resources (triVao, triBuf, shapeIdxBuf,
     // maskRowToLayerTex) are owned by the handle and freed by its
     // dispose(); the renderer-owned dummies are released here. The mask
@@ -2031,6 +2855,19 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     }
     _rtPool.invalidate();
     _covPool.invalidate();
+    // The filtered-shape targets are canvas-relative too — a resize moves every rect.
+    for (const e of _shapeRtCache.values()) {
+      gl.deleteTexture(e.tex); gl.deleteFramebuffer(e.fbo); gl.deleteRenderbuffer(e.rb);
+    }
+    _shapeRtCache.clear();
+    for (const e of _backdropCache.values()) {
+      gl.deleteTexture(e.tex); gl.deleteFramebuffer(e.fbo);
+    }
+    _backdropCache.clear();
+    for (const e of _pingRtCache.values()) {
+      gl.deleteTexture(e.tex); gl.deleteFramebuffer(e.fbo);
+    }
+    _pingRtCache.clear();
     if (shapeFbo) gl.deleteFramebuffer(shapeFbo);
     if (pingFbo)  gl.deleteFramebuffer(pingFbo);
     if (shapeFboRb) gl.deleteRenderbuffer(shapeFboRb);
@@ -2044,8 +2881,12 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     // feConvolveMatrix lazily caches its kernel texture on the persistent
     // bundle graph node (params._kTex). Nothing else frees it on teardown,
     // so walk the graphs and delete any here.
-    const _fgs = _handle && _handle.bundle && _handle.bundle.filterGraphs;
-    if (_fgs) {
+    const _bundlesToDispose = new Set();
+    if (_handle && _handle.bundle) _bundlesToDispose.add(_handle.bundle);
+    for (const h of _transientHandles.values()) if (h.bundle) _bundlesToDispose.add(h.bundle);
+    for (const b of _bundlesToDispose) {
+      const _fgs = b.filterGraphs;
+      if (!_fgs) continue;
       for (const g of _fgs) {
         if (!g || !g.nodes) continue;
         for (const n of g.nodes) {
@@ -2059,10 +2900,9 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     // External-clip resources (clipDraw.js): the renderClipCoverage FBO, its
     // persistent clip handle, and every per-bundle node-clip coverage texture.
     R._disposeNodeClips();
-    if (_handle) {
-      _handle.dispose();
-      _handle = null;
-    }
+    if (_handle && !_isTransientHandle(_handle)) _handle.dispose();
+    _handle = null;
+    _disposeTransientHandles();
     // Detach context-loss listeners so a disposed renderer doesn't keep
     // the canvas (and this closure) alive.
     if (_canvas) {
@@ -2165,7 +3005,7 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     setBundle, render,
     // createBundleHandle lives in bundleHandle.js (attachBundleHandle); it
     // destructures these at attach time, so they must be on R first.
-    _analyticRoute, computeMaskRegions,
+    _analyticRoute, _lbWouldServe, computeMaskRegions, _cacheSampleCost,
     viewportSize, bindFb, applyBlendMode, arScale,
     paletteChannelToInt, _renderCanvasInner,
     _canvasUnsized, _covPool, _rtPool, _svgDispatch,
@@ -2173,7 +3013,7 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     dummyGradientTex, dummyGradientStops, dummyDashTex,
     coverVao,
     buildLoopBlinnMesh, buildLoopBlinnCDT, refreshLoopBlinnMesh, packLoopBlinnMesh, curveRangeToContours,
-    lbCanonicalFrame, lbCanonicalHash, transformLoopBlinnRaw,
+    lbCanonicalFrame, lbCanonicalHash, lbCanonicalHashes, transformLoopBlinnRaw,
     buildMorphStroke, LB_VERT_FLOATS,
     // Filter subsystem lives in filterDraw.js (attachFilterDraw, below) — it
     // attaches filterRecord / _buildFilterCtx / blurShapeFbo / … onto R. These
@@ -2181,15 +3021,17 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     // MORPH route in morphDraw.js) via R. Per-shape state (shapeFbo/mainCopyTex/
     // pingFbo/…) is exposed as LIVE getters below; _filterCache is a stable Map
     // reference so it rides this Object.assign directly.
-    ensureShapeFbo, ensureMainCopyTex, ensurePingFbo, evaluateGraph, _filterCache,
+    ensureShapeFbo, ensureMainCopyTex, ensurePingFbo, evaluateGraph, releaseRoot, _filterCache,
   });
   attachFilterDraw(R);
   attachMaskBake(R);
   attachFillPass(R);
+  attachOpaquePrepass(R);
   attachFrameLoop(R);
   attachDrawDispatch(R);
   attachBundleHandle(R);   // before attachClipDraw — it destructures R.createBundleHandle
   attachClipDraw(R);
+  attachIncrementalStroke(R);   // dynamic paint-stroke path (reads R.* at draw time)
   // Live views of the per-shape filter state (reassigned during compositing).
   Object.defineProperty(R, 'shapeFbo',    { get: () => shapeFbo,    configurable: true });
   Object.defineProperty(R, 'shapeFboTex', { get: () => shapeFboTex, configurable: true });
@@ -2203,10 +3045,10 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   // _filterEvalCount is bumped by BOTH render() and the morph route → get/set bridge.
   Object.defineProperty(R, '_filterEvalCount', { get: () => _filterEvalCount, set: (v) => { _filterEvalCount = v; }, configurable: true });
   // Ping RT + filter-scissor flag: live views for filterDraw.js (pingFbo/pingTex
-  // are reassigned by ensurePingFbo; _filterScissorEnabled toggled by _setFilterScissor).
+  // are reassigned by ensurePingFbo; _filterBboxEnabled toggled by _setFilterBbox).
   Object.defineProperty(R, 'pingFbo', { get: () => pingFbo, configurable: true });
   Object.defineProperty(R, 'pingTex', { get: () => pingTex, configurable: true });
-  Object.defineProperty(R, '_filterScissorEnabled', { get: () => _filterScissorEnabled, configurable: true });
+  Object.defineProperty(R, '_filterBboxEnabled', { get: () => _filterBboxEnabled, configurable: true });
   // clipDraw.js: renderClipCoverage guards on context loss and resets the
   // fill-pass canvas-size cache around its re-entrant offscreen draw.
   Object.defineProperty(R, '_contextLost', { get: () => _contextLost, configurable: true });
@@ -2225,12 +3067,17 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   // Bypasses the static-scene cache (we're mid-draw); _renderCanvasInner clears
   // only depth/stencil while _inFrame (never color), and the analytic draws run
   // depth-disabled, so the already-drawn shapes survive.
-  R._renderShapeViaSlug = function (bundle, s) {
+  // Render shape s (or the contiguous shape-index range [s, hi]) via the Slug
+  // ubershader. A range batches every shape in it into ONE Slug pass — used to
+  // paint a run of consecutive LB sentinels (loop/cusp shapes) in a single draw
+  // instead of one per shape. Safe only when the index block [s,hi] holds exactly
+  // those shapes (the split caller guarantees a gap-free sentinel block).
+  R._renderShapeViaSlug = function (bundle, s, hi) {
     if (_contextLost) return false;
     if (_handle && _handle.bundle !== bundle) setBundle(bundle);
     if (!_handle || !_handle.bundle) return false;
     const saved = _ds.shapeRange;
-    _ds.shapeRange = [s | 0, s | 0];
+    _ds.shapeRange = [s | 0, (hi == null ? s : hi) | 0];
     try { _renderCanvasInner(); } finally { _ds.shapeRange = saved; }
     return true;
   };
@@ -2240,6 +3087,7 @@ export function createRenderer(gl, shaderSources, opts = {}) {
 
   // Public renderer state object. The factory exposes mutable debug
   // flags here so consumers can toggle them at any time.
+  /** @type {import('./rendererApi.js').MantleRendererApi} */
   const built = {
     showTriOutline: false,
     showBBoxes: false,
@@ -2249,7 +3097,9 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     markGeometryDirty: R.markGeometryDirty,
     // Internal: toggle filter-pass scissoring (default on). Used by the
     // render-diff smoke to compare scissored vs full-canvas output.
-    _setFilterScissor(v) { _filterScissorEnabled = !!v; },
+    _setFilterBbox(v) { _filterBboxEnabled = !!v; },
+    /** @deprecated the per-node scissor became per-node bbox-sized RTs. */
+    _setFilterScissor(v) { _filterBboxEnabled = !!v; },
     // Internal: toggle the drawBundleInstanced GPU fast path (default on).
     // Used by the render-diff smoke to compare it against the loop.
     _setInstancedFast(v) { _instancedFastEnabled = !!v; },
@@ -2261,6 +3111,10 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     get isContextLost() { return _contextLost; },
     // Frame lifecycle.
     setViewport: R.setViewport,
+    /// Render fewer pixels at the same screen size. Fill cost is linear in backing-store
+    /// pixels, so this is a direct dial on frame time. See frameLoop.setResolutionScale.
+    setResolutionScale: (s, o) => R.setResolutionScale(s, o),
+    get resolutionScale() { return R._resScale; },
     beginFrame: R.beginFrame,
     endFrame: R.endFrame,
     // SVG export — serialize the last rendered frame to an SVG string by
@@ -2293,14 +3147,85 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     // Single-bundle draw with optional worldMatrix +
     // overrides. Composes between beginFrame/endFrame.
     drawBundle: R.drawBundle,
+    // Same as drawBundle, but DEFERRED and stacking-ordered: the draw is queued and
+    // painted at endFrame() in (zOrder asc, submission asc) order. Lower zOrder paints
+    // underneath; equal zOrder keeps submission order. Use when stacking must not depend
+    // on the order things happen to mount (async overlays, HUD above gameplay) — it is the
+    // JS counterpart to sortingLayerID/sortingOrder on the C# side.
+    submitBundle: R.submitBundle,
     // Synchronously build a bundle's Loop-Blinn meshes NOW (on the main thread),
     // instead of waiting for the off-thread worker build to land. The runtime
     // never needs this — the draw path uses ready-LB-or-Slug — but eager callers
     // (scene prewarm) and tests that must assert LB routing deterministically do.
     prepareBundle: R.prepareBundle,
+    /// Resolve once a bundle's Loop-Blinn meshes are built and ready to ROUTE.
+    ///
+    /// Static bundles build their LB meshes OFF the main thread (the load-time
+    /// worker in lbWorkerPool); until that lands the draw path renders Slug, so
+    /// the first frame after createBundle is Slug even with LB enabled. Callers
+    /// that need LB on the very first painted frame (avoiding a Slug→LB pop) —
+    /// and tests that assert LB routing deterministically — await this first.
+    ///
+    /// Resolves true when real LB meshes are resident (`_lbMeshes` is a
+    /// non-null array at the current geometry generation), false when automatic
+    /// policy skips construction or on timeout (for example, an all-Slug result).
+    /// Note prepareBundle's synchronous main-thread build can leave `_lbMeshes`
+    /// null for shapes only the worker builds; this waits past that for the
+    /// worker's array, so it stays correct whether or not prepareBundle ran.
+    awaitLbReady(bundle, timeoutMs = 5000) {
+      return new Promise((resolve) => {
+        if (!bundle) { resolve(false); return; }
+        // A shape-morph handle wraps its drawable bundle (where _morphSrc lives);
+        // unwrap so awaitLbReady(morph) waits on the morph-pair build, not a
+        // non-existent static mesh.
+        if (bundle.bundle && typeof bundle.setT === 'function') bundle = bundle.bundle;
+        // Slug-only renderer never builds LB → don't spin until timeout.
+        if (R._lbSlugOnly) { resolve(false); return; }
+        const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+        // MORPH bundles build their pair meshes off-thread too (a re-target sets a
+        // fresh _morphSrc → a fresh build), so readiness is _morphMeshesBuilt, set
+        // once the worker (or its sync fallback) lands via _applyMorphResult. The
+        // build is normally kicked off by the first draw; the poke below starts it
+        // here too, so awaitLbReady resolves even when called before any draw.
+        // A settled Slug decision is also finished work, but it is not LB-ready.
+        // Resolve it immediately as false instead of spinning until timeout or
+        // reporting a successful analytic route.
+        const hasRealMeshes = () => bundle._morphSrc
+          ? (Array.isArray(bundle._morphMeshes) && bundle._morphMeshes.some((m) => !!m))
+          : (Array.isArray(bundle._lbMeshes)
+              && bundle._lbMeshes.some((m) => m && !m.slug && (m.vertexCount | 0) > 0));
+        const settled = () => {
+          if (bundle._morphSrc) return !!bundle._morphMeshesBuilt;
+          if (hasRealMeshes()) return true;
+          const gen = bundle._geomGen | 0;
+          return bundle._lbMeshes !== undefined && (bundle._lbGen | 0) === gen
+            && bundle._lbWorkerPendingGen !== gen;
+        };
+        // The morph build is triggered by the first draw; poke it here so
+        // awaitLbReady works without a prior draw (a game may await before drawing).
+        if (bundle._morphSrc && !bundle._morphMeshesBuilt && R._ensureBundleMorphMeshes) {
+          try { R._ensureBundleMorphMeshes(bundle); } catch { /* draw-time fallback */ }
+        } else if (!bundle._morphSrc && R._requestLbBuild) {
+          try {
+            if (R._requestLbBuild(bundle) === false) { resolve(false); return; }
+          } catch { /* remain on coverage fallback */ }
+        }
+        if (settled()) { resolve(hasRealMeshes()); return; }
+        const start = now();
+        const tick = () => {
+          if (settled()) { resolve(hasRealMeshes()); return; }
+          if (now() - start >= timeoutMs) { resolve(false); return; }
+          setTimeout(tick, 8);
+        };
+        setTimeout(tick, 8);
+      });
+    },
+    /// Non-blocking: start linking the fill program this bundle will use. Call at load.
+    prewarmBundle: (bundle) => { if (R.prewarmFillVariant) R.prewarmFillVariant(bundle); },
     /// Budget for resident Loop-Blinn mesh memory (bytes). Bundles whose
     /// projected footprint would exceed it render via Slug instead.
     setLoopBlinnMemoryBudget: R.setLoopBlinnMemoryBudget,
+    setLoopBlinnMeshOpts: R.setLoopBlinnMeshOpts,
     getLoopBlinnMemoryUse: () => R._lbMemUsed | 0,
     // Per-instance fill pass without entering
     // the frame lifecycle. Caller owns viewport/clear/blend.
@@ -2324,10 +3249,10 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     // one switch (no separate static/morph flags to drift apart):
     //   'off'         · always use the Slug ray-cast.
     //   'auto' (DEFAULT) · route the paths where LB WINS: GPU morphs, streamed
-    //                   bundles, and all-solid static bundles (the one-draw
-    //                   combined route, ~3× faster). Gradient/image/composed
-    //                   static bundles stay on Slug (per-shape LB loses to Slug's
-    //                   single pass) — see _staticPerfOk.
+    //                   bundles, and eligible batched static bundles. Opaque
+    //                   gradients/images and translucent solids use the combined
+    //                   route; clip/mask/filter/stroke compositions stay on the
+    //                   cheaper fill fallback — see _staticPerfOk.
     //   'on'          · additionally force gradient/image/composed static bundles
     //                   through LB (bypass the perf gate); ineligible shapes still
     //                   fall back to Slug.
@@ -2355,7 +3280,8 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     // { dstRect, worldMatrix, tint, alpha }; shared srcRect/blendMode in opts.
     drawImageInstanced,
     // Live-fill instancing — draw one bundle at N per-instance transforms
-    // (worldMatrix + alpha), sharing geometry + a single overrides table.
+    // (worldMatrix + alpha + rgba tint; full colorMatrix/offset via the
+    // per-instance loop), sharing geometry + a single overrides table.
     // The mask/filter bakes run once and are reused across instances; only
     // the fill pass repeats. Counterpart to R.drawImageInstanced for content
     // that must stay live (not a baked texture). See its docstring.
@@ -2373,16 +3299,43 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     // mount calls `handle.draw(opts)` per frame; the bundle stays
     // resident in the handle's VBOs across frames without re-upload.
     createBundleHandle: R.createBundleHandle,
+    // Up-front warm of every loaded bundle's fill pipelines. Call behind a LOADING
+    // SCREEN (bundles created, before gameplay) for games that start animating
+    // immediately and never present an idle window for the background warmer —
+    // gameplay then runs on the lean variants with zero mid-play pipeline stalls.
+    // Blocking by design. Returns the number of bundles warmed.
+    precompileFills: R.precompileFills,
+    // Dynamic incremental stroke — the paint-tool fast path. Returns a handle
+    // whose appendPoints(pts) tessellates ONLY the new segments (O(1) per
+    // point) and whose `.bundle` draws through every entry point (drawBundle /
+    // handle.draw / drawInstance) via the shared GPU stroke-coverage pipeline
+    // (identical caps/joins/AA to the static analytic stroke route).
+    // finalize() freezes it and returns { pathD, svg } for re-hosting.
+    createIncrementalStroke: R.createIncrementalStroke,
     // Debug-only memory estimate (bytes).
     gpuMemoryEstimate,
     // Debug-only cache stats. maskBakeCount / filterEvalCount = number
     // of actual mask bakes / filter-graph evals (cache misses).
     get debugStats() {
       return { maskBakeCount: _maskBakeCount, filterEvalCount: _filterEvalCount,
-               filterScissorActiveCount: _filterScissorActiveCount,
+               filterBboxActiveCount: _filterBboxActiveCount,
+               // # of drawBundleInstanced calls that took the single
+               // drawArraysInstanced GPU fast path (vs the per-instance loop).
+               instancedFastCount: R._instFastCount | 0,
                loopBlinnRouteCount: R._lbRouteCount,
+               lbAutoPx2PerSeg: R._lbAutoPx2PerSeg || 0,
+               lbAutoBytesPerSeg: R._lbAutoBytesPerSeg || 0,
                loopBlinnMorphRouteCount: R._lbMorphRouteCount,
-               loopBlinnMorphComposedCount: R._lbMorphComposedCount };
+               loopBlinnMorphComposedCount: R._lbMorphComposedCount,
+               opaquePrepassCount: R._opaquePrepassCount | 0,
+               // aacFill:'auto' — what the selector saw and chose on the last draw.
+               variantCompiles: R._variantCompiles || 0,
+      variantPolls: R._variantPolls || 0,
+      autoMeanShapePx2: R._autoMeanShapePx2 || 0,
+      autoSegsPerShape: R._autoSegsPerShape || 0,
+      autoPx2PerSeg: R._autoPx2PerSeg || 0,
+               autoEngine: R._autoEngine || null,
+               recolorDraws: R._recolorDrawCount | 0 };
     },
     // Static-scene cache. Opt-in: enable once and the
     // renderer auto-evaluates eligibility every subsequent
@@ -2394,9 +3347,9 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     // setInstanceGroup(key) — RENDERER-INSTANCE method (deliberately NOT a
     // root/package export): it mutates the renderer's ACTIVE handle cache, so it
     // only makes sense on a live renderer after enableStaticCache(). Pairs with
-    // Strategy.ForceA3 so multiple mounts of one asset share a single cache RT
-    // (see a3InstanceGroupSmoke). For multi-handle scenes prefer
-    // createBundleHandle(b, { staticCache: { strategy: ForceA3, instanceGroupKey } }).
+    // Strategy.ForceSharedGroup lets multiple mounts share one cache target
+    // (see sharedGroupCacheSmoke). For multi-handle scenes prefer
+    // createBundleHandle(b, { staticCache: { strategy: ForceSharedGroup, instanceGroupKey } }).
     setInstanceGroup,
     disableStaticCache,
     invalidateStaticCache,

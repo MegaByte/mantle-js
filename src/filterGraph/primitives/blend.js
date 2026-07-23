@@ -1,7 +1,7 @@
 // primitives/blend.js — feBlend (two-input separable/non-separable blend
 // modes).
 import { registerSvgFilter } from '../dispatchRegistry.js';
-import { resolveInputTex, beginFullscreen, passthrough } from '../svgFilterShared.js';
+import { resolveInputTex, beginFullscreen, passthrough, setInMap } from '../svgFilterShared.js';
 
 function feBlend(node, inputs, outRT, ctx) {
   const { gl, pool, feBlendProg, feBlendU, coverVao } = ctx;
@@ -17,6 +17,8 @@ function feBlend(node, inputs, outRT, ctx) {
   gl.useProgram(feBlendProg);
   gl.uniform1i(feBlendU.uIn1, 0);
   gl.uniform1i(feBlendU.uIn2, 1);
+  setInMap(gl, feBlendU.uIn1Map, inputs[0], outRT, ctx);
+  setInMap(gl, feBlendU.uIn2Map, inputs[1], outRT, ctx);
   gl.uniform1i(feBlendU.uMode, mode);
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, aTex);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, bTex);

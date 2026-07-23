@@ -29,25 +29,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 // Three solid shapes, each id'd so overrides can address them.
-const ART = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <rect id="box"   x="10" y="10" width="30" height="30" fill="#e74c3c"/>
-  <circle id="dot" cx="72" cy="25" r="15" fill="#2980b9"/>
-  <rect id="bar"   x="20" y="60" width="60" height="25" fill="#27ae60"/>
-</svg>`;
+const ART = readFileSync(new URL('../examples/smoke/nativeFallback__ART.svg', import.meta.url), 'utf8');
 
 // Two matched-topology sprites in one sheet for the morph (same rect
 // shape, different x + color), plus a non-sprite marker.
-const SHEET = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100" width="300" height="100">
-  <g id="poseA"><rect id="ra" x="20" y="20" width="60" height="60" fill="#ff0000"/></g>
-  <g id="poseB"><rect id="rb" x="220" y="20" width="60" height="60" fill="#0000ff"/></g>
-</svg>`;
+const SHEET = readFileSync(new URL('../examples/smoke/nativeFallback__SHEET.svg', import.meta.url), 'utf8');
 
 // A clipped shape: a wide rect clipped by a small square; moving the
 // clip reveals different parts.
-const CLIPART = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <clipPath id="win"><rect id="winrect" x="0" y="0" width="40" height="100"/></clipPath>
-  <rect id="wide" x="0" y="0" width="100" height="100" fill="#8e44ad" clip-path="url(#win)"/>
-</svg>`;
+const CLIPART = readFileSync(new URL('../examples/smoke/nativeFallback__CLIPART.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <div id="host"></div>

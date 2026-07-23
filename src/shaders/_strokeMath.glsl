@@ -61,7 +61,19 @@ float strokeCapsJoinsDash(
   bool drop = false;
   if (t < 1e-4) {
     if (freeStart) {
-      if (startCap == 0) drop = true;
+      if (startCap == 0) {
+        // BUTT CAP AS AN SDF, NOT A HARD DROP. Dropping makes the cap plane a
+        // binary edge: the pixel the plane bisects gets all or nothing, where the
+        // truth is a partial. The capped stroke is the INTERSECTION of the tube
+        // and the half-space behind the plane, so its SDF is
+        //   max(dist - halfW, aOut)   ==>   dist_eff = max(dist, halfW + aOut)
+        // which is the same idiom the bevel branch below already uses. aOut is
+        // how far the pixel lies BEYOND the plane (positive = outside), so a
+        // pixel one unit inside reports distance halfW-1 and ramps correctly.
+        float tL0 = max(length(dStart), 1e-12);
+        float aOut = dot(-pStart, -(dStart / tL0));
+        thisD = max(thisD, halfW + aOut);
+      }
       else if (startCap == 2) {
         float tL = max(length(dStart), 1e-12);
         vec2 segTan = dStart / tL;
@@ -76,8 +88,13 @@ float strokeCapsJoinsDash(
       vec2 epStart = pStart;
       if (startPrevReach < 1e8 && dot(-epStart, inTan) < 0.0) drop = true;
       float c = dot(-segTan, inTan);
-      float cosHalf = sqrt(max(0.5 * (1.0 + c), 1e-9));
-      float miterLen = halfW / max(cosHalf, 1e-6);
+      // MITER LENGTH IS halfW/sin(theta/2). `c` is the cosine of the INTERIOR
+      // angle between the two segments, so the half-angle identity is
+      // sin(theta/2) = sqrt((1 - c)/2); the (1 + c) form gives cos(theta/2) and is
+      // inverted (too short at sharp corners, unbounded at flat ones — it diverges
+      // at theta=180 where the true miter is exactly halfW). See _coverage.glsl.
+      float sinHalf = sqrt(max(0.5 * (1.0 - c), 1e-9));
+      float miterLen = halfW / max(sinHalf, 1e-6);
       float maxMiter = halfW * miterLimit;
       if (joinStyle == 3) miterLen = min(miterLen, maxMiter);
       else if (miterLen > maxMiter) miterLen = -1.0;
@@ -96,12 +113,17 @@ float strokeCapsJoinsDash(
       // SVG2 arcs: extend each edge's centerline as its osculating circle; the
       // ±halfW band is the extended stroke, and the join wedge is both bands
       // past the vertex. Reduces to miter when curvatures are 0.
-      vec2 segTan = normalize(dStart);
+      vec2 segTan = dStart / max(length(dStart), 1e-12);
       vec2 ep = pStart;
       if (startPrevReach < 1e8 && dot(-ep, inTan) < 0.0) drop = true;
       float c = dot(-segTan, inTan);
-      float cosHalf = sqrt(max(0.5 * (1.0 + c), 1e-9));
-      float miterLen = halfW / max(cosHalf, 1e-6);
+      // MITER LENGTH IS halfW/sin(theta/2). `c` is the cosine of the INTERIOR
+      // angle between the two segments, so the half-angle identity is
+      // sin(theta/2) = sqrt((1 - c)/2); the (1 + c) form gives cos(theta/2) and is
+      // inverted (too short at sharp corners, unbounded at flat ones — it diverges
+      // at theta=180 where the true miter is exactly halfW). See _coverage.glsl.
+      float sinHalf = sqrt(max(0.5 * (1.0 - c), 1e-9));
+      float miterLen = halfW / max(sinHalf, 1e-6);
       if (miterLen > halfW * miterLimit) {
         // Past miterLimit → bevel fallback (same chord as joinStyle 2).
         float cr = inTan.x * segTan.y - inTan.y * segTan.x;
@@ -123,7 +145,7 @@ float strokeCapsJoinsDash(
         // the two segments' outer offset points (hw·nA, hw·nB) — as an AA distance
         // (raise thisD so coverage crosses 0.5 at the chord), leaving the flat
         // bevel triangle. tA = incoming dir (inTan), tB = this seg's start dir.
-        vec2 tB = normalize(dStart);
+        vec2 tB = dStart / max(length(dStart), 1e-12);
         float cr = inTan.x * tB.y - inTan.y * tB.x;       // turn sign → outer side
         float sd = (cr >= 0.0) ? 1.0 : -1.0;
         vec2 nA = sd * vec2(inTan.y, -inTan.x), nB = sd * vec2(tB.y, -tB.x);
@@ -135,7 +157,12 @@ float strokeCapsJoinsDash(
   }
   if (t > 1.0 - 1e-4) {
     if (freeEnd) {
-      if (endCap == 0) drop = true;
+      if (endCap == 0) {
+        // Butt cap as an SDF — see the start twin.
+        float tL1 = max(length(dEnd), 1e-12);
+        float aOut = dot(-pEnd, dEnd / tL1);
+        thisD = max(thisD, halfW + aOut);
+      }
       else if (endCap == 2) {
         float tL = max(length(dEnd), 1e-12);
         vec2 segTan = dEnd / tL;
@@ -150,8 +177,13 @@ float strokeCapsJoinsDash(
       vec2 epEnd = pEnd;
       if (endNextReach < 1e8 && dot(-epEnd, outTan) > 0.0) drop = true;
       float c = dot(segTan, -outTan);
-      float cosHalf = sqrt(max(0.5 * (1.0 + c), 1e-9));
-      float miterLen = halfW / max(cosHalf, 1e-6);
+      // MITER LENGTH IS halfW/sin(theta/2). `c` is the cosine of the INTERIOR
+      // angle between the two segments, so the half-angle identity is
+      // sin(theta/2) = sqrt((1 - c)/2); the (1 + c) form gives cos(theta/2) and is
+      // inverted (too short at sharp corners, unbounded at flat ones — it diverges
+      // at theta=180 where the true miter is exactly halfW). See _coverage.glsl.
+      float sinHalf = sqrt(max(0.5 * (1.0 - c), 1e-9));
+      float miterLen = halfW / max(sinHalf, 1e-6);
       float maxMiter = halfW * miterLimit;
       if (joinStyle == 3) miterLen = min(miterLen, maxMiter);
       else if (miterLen > maxMiter) miterLen = -1.0;
@@ -168,12 +200,17 @@ float strokeCapsJoinsDash(
       }
     } else if (joinStyle == 4) {
       // SVG2 arcs (end-vertex twin of the start-join above).
-      vec2 segTan = normalize(dEnd);
+      vec2 segTan = dEnd / max(length(dEnd), 1e-12);
       vec2 ep = pEnd;
       if (endNextReach < 1e8 && dot(-ep, outTan) > 0.0) drop = true;
       float c = dot(segTan, -outTan);
-      float cosHalf = sqrt(max(0.5 * (1.0 + c), 1e-9));
-      float miterLen = halfW / max(cosHalf, 1e-6);
+      // MITER LENGTH IS halfW/sin(theta/2). `c` is the cosine of the INTERIOR
+      // angle between the two segments, so the half-angle identity is
+      // sin(theta/2) = sqrt((1 - c)/2); the (1 + c) form gives cos(theta/2) and is
+      // inverted (too short at sharp corners, unbounded at flat ones — it diverges
+      // at theta=180 where the true miter is exactly halfW). See _coverage.glsl.
+      float sinHalf = sqrt(max(0.5 * (1.0 - c), 1e-9));
+      float miterLen = halfW / max(sinHalf, 1e-6);
       if (miterLen > halfW * miterLimit) {
         float cr = segTan.x * outTan.y - segTan.y * outTan.x;
         float sd = (cr >= 0.0) ? 1.0 : -1.0;
@@ -192,7 +229,7 @@ float strokeCapsJoinsDash(
       else if (joinStyle == 2) {
         // EXACT BEVEL (see the start-join twin above). tA = this seg's end dir,
         // tB = outgoing dir (outTan); the chord matches the next seg's start-join.
-        vec2 tA = normalize(dEnd);
+        vec2 tA = dEnd / max(length(dEnd), 1e-12);
         float cr = tA.x * outTan.y - tA.y * outTan.x;
         float sd = (cr >= 0.0) ? 1.0 : -1.0;
         vec2 nA = sd * vec2(tA.y, -tA.x), nB = sd * vec2(outTan.y, -outTan.x);
@@ -292,8 +329,95 @@ float quadArcLen(vec2 p1, vec2 p2, vec2 p3, float t) {
   return Ft - F0;
 }
 
+// EXACT closest-point parameter on a quadratic Bezier to the ORIGIN.
+//
+// dot(Q(t), Q'(t)) = 0 is a CUBIC in t, so it has a closed form. This used to be
+// a 5-sample seed (t = 0, 1/4, 1/2, 3/4, 1) plus 3 Newton steps, which leaves an
+// error fixed in EM — a scale-bounded approximation, which is the one thing the
+// geometry is not allowed to be: the stroke mesh is built once and used at any
+// zoom, so a fixed em error grows without bound in PIXELS. Measured on the butt
+// caps of `M20 100 Q64 10 108 100`, the cap boundary sat ~0.22em off, invisible
+// at 1x and 0.9px at 4x.
+//
+// `t` here is not only the distance parameter — the butt cap is implemented as
+// "drop when t < 1e-4", so an inaccurate t moves the CAP PLANE too, which is why
+// the residual clustered entirely at the two caps and not along the curve.
+//
+// Candidates are the in-range roots plus both endpoints; clamping a root outside
+// [0,1] to the endpoint is correct, since the closest point on a segment is
+// either an interior critical point or an end.
+float quadClosestT(vec2 A, vec2 B, vec2 C) {
+  float a3 = 2.0 * dot(A, A);
+  float a2 = 3.0 * dot(A, B);
+  float a1 = dot(B, B) + 2.0 * dot(A, C);
+  float a0 = dot(B, C);
+  float cand[5];
+  int n = 0;
+  cand[0] = 0.0; cand[1] = 1.0; n = 2;
+  if (abs(a3) < 1e-12 * max(abs(a2), max(abs(a1), abs(a0)))) {
+    if (abs(a2) > 1e-30) {                       // degenerates to a quadratic
+      float disc = a1 * a1 - 4.0 * a2 * a0;
+      if (disc >= 0.0) {
+        float sd = sqrt(disc);
+        float qq = -0.5 * (a1 + (a1 >= 0.0 ? sd : -sd));
+        cand[n++] = qq / a2;
+        if (abs(qq) > 1e-30) cand[n++] = a0 / qq;
+      }
+    } else if (abs(a1) > 1e-30) cand[n++] = -a0 / a1;
+  } else {
+    float p = a2 / a3, q2 = a1 / a3, r = a0 / a3;
+    float pp = q2 - p * p / 3.0;                 // depressed cubic y^3 + pp*y + qq
+    float qq = (2.0 * p * p * p) / 27.0 - (p * q2) / 3.0 + r;
+    float shift = -p / 3.0;
+    float disc = qq * qq / 4.0 + pp * pp * pp / 27.0;
+    if (disc > 0.0) {                            // one real root
+      float sd = sqrt(disc);
+      float u = -qq / 2.0 + sd, v = -qq / 2.0 - sd;
+      float uc = sign(u) * pow(abs(u), 1.0 / 3.0);
+      float vc = sign(v) * pow(abs(v), 1.0 / 3.0);
+      cand[n++] = uc + vc + shift;
+    } else {                                     // three real roots (trigonometric)
+      float rr = sqrt(max(-pp * pp * pp / 27.0, 0.0));
+      float phi = acos(clamp(-qq / (2.0 * max(rr, 1e-30)), -1.0, 1.0));
+      float m = 2.0 * sqrt(max(-pp / 3.0, 0.0));
+      cand[n++] = m * cos(phi / 3.0) + shift;
+      cand[n++] = m * cos((phi + 6.2831853071795865) / 3.0) + shift;
+      cand[n++] = m * cos((phi + 12.566370614359172) / 3.0) + shift;
+    }
+  }
+  // ONE Newton polish on the ROOTS (not the endpoints, which are exact bounds).
+  // Cardano is closed-form but loses precision in float32 through the depressed-
+  // cubic transform and the cbrt/acos branches. Measured in simulated float32
+  // against a float64 reference over 3000 random quadratics:
+  //   cardano alone            max 5.05e-4   mean 3.06e-7
+  //   safe-Newton, 20 iters    max 2.90e-5   mean 4.55e-8
+  //   cardano + 1 polish       max 5.59e-6   mean 7.56e-9
+  // A second and third step change nothing — it is converged at one. A pure
+  // bracketed safe-Newton (Yuksel-style, which is what solveCubicBisect does)
+  // is MORE accurate than raw Cardano but only once it runs ~20 iterations; at
+  // 2-8 it is far worse (max 16-56) because the bisection fallback crawls on a
+  // wide bracket, and on SIMD the warp pays the worst-case count. Seeding with
+  // the closed form and polishing once is both cheaper and more accurate.
+  for (int i = 2; i < 5; i++) {
+    if (i >= n) break;
+    float t0 = cand[i];
+    float ft = ((a3 * t0 + a2) * t0 + a1) * t0 + a0;
+    float df = (3.0 * a3 * t0 + 2.0 * a2) * t0 + a1;
+    if (abs(df) > 1e-30) cand[i] = t0 - ft / df;
+  }
+  float bt = 0.0, bs = 1e30;
+  for (int i = 0; i < 5; i++) {
+    if (i >= n) break;
+    float tt = clamp(cand[i], 0.0, 1.0);
+    vec2 qv = (A * tt + B) * tt + C;
+    float d2 = dot(qv, qv);
+    if (d2 < bs) { bs = d2; bt = tt; }
+  }
+  return bt;
+}
+
 // Native quadratic stroke accumulator (NOT degree-elevated). closest-point is a
-// root of Q·Q' (a cubic) — 5-sample seed + Newton; closed-form arc length.
+// root of Q·Q' (a cubic) — solved in CLOSED FORM; closed-form arc length.
 float strokeQuadAccum(vec4 p12, vec2 p3,
                       bool freeStart, bool freeEnd,
                       int startCap, int endCap,
@@ -306,22 +430,7 @@ float strokeQuadAccum(vec4 p12, vec2 p3,
   vec2 A = p1 - 2.0 * p2 + p3;
   vec2 B = 2.0 * (p2 - p1);
   vec2 C = p1;
-  float bT = 0.0, bS = 1e20;
-  for (int k = 0; k <= 4; k++) {
-    float tt = float(k) / 4.0;
-    vec2 q = (A * tt + B) * tt + C;
-    float d2 = dot(q, q);
-    if (d2 < bS) { bS = d2; bT = tt; }
-  }
-  float t = bT;
-  for (int j = 0; j < 3; j++) {
-    vec2 q = (A * t + B) * t + C;
-    vec2 d = 2.0 * A * t + B;
-    float f = dot(q, d);
-    float df = dot(d, d) + dot(q, 2.0 * A);
-    if (abs(df) < 1e-9) break;
-    t = clamp(t - f / df, 0.0, 1.0);
-  }
+  float t = quadClosestT(A, B, C);   // exact: root of the cubic dot(Q, Q')
   vec2 q = (A * t + B) * t + C;
   float thisD = length(q);
   vec2 dStart = B;

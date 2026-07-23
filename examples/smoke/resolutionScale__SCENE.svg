@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">
+  <defs>
+    <filter id="s" x="-25%" y="-25%" width="150%" height="150%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="6" stdDeviation="4" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  <rect x="0" y="0" width="400" height="300" fill="#eef3f8"/>
+  <circle cx="110" cy="150" r="85" fill="#2f7fd4"/>
+  <rect x="230" y="60" width="140" height="180" rx="16" fill="#fff" filter="url(#s)"/>
+</svg>

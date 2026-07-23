@@ -36,26 +36,31 @@ function normalizeAffine(node) {
     case 12: return node.affine.slice();
     case 14: return [1, 0, 0, 1, node.dx, node.dy];
     case 16: return [node.sx, 0, 0, node.sy, 0, 0];
-    case 18: return [node.s,  0, 0, node.s,  0, 0];
-    case 20: {
+    case 18: {
       // scale around center: T(c) · S · T(-c)
       const { sx, sy, cx, cy } = node;
       return [sx, 0, 0, sy, cx - sx * cx, cy - sy * cy];
     }
+    case 20: return [node.s,  0, 0, node.s,  0, 0];
     case 22: {
+      // uniform scale around center: T(c) · S · T(-c)
+      const { s, cx, cy } = node;
+      return [s, 0, 0, s, cx - s * cx, cy - s * cy];
+    }
+    case 24: {
       // pure rotation about origin
       const a = node.angleDeg * Math.PI / 180;
       const c = Math.cos(a), s = Math.sin(a);
       return [c, s, -s, c, 0, 0];
     }
-    case 24: {
+    case 26: {
       // rotate around center: T(c) · R · T(-c)
       const { angleDeg, cx, cy } = node;
       const a = angleDeg * Math.PI / 180;
       const c = Math.cos(a), s = Math.sin(a);
       return [c, s, -s, c, cx - c * cx + s * cy, cy - s * cx - c * cy];
     }
-    case 26: {
+    case 28: {
       // skew about origin: [1, tan(yDeg), tan(xDeg), 1, 0, 0]
       // (note SVG's skew convention: skewXDeg shifts X by tan(deg)·y;
       // matrix column is [1, tan(yDeg); tan(xDeg), 1])
@@ -63,7 +68,7 @@ function normalizeAffine(node) {
       const ty = Math.tan(node.skewYDeg * Math.PI / 180);
       return [1, ty, tx, 1, 0, 0];
     }
-    case 28: {
+    case 30: {
       const { skewXDeg, skewYDeg, cx, cy } = node;
       const tx = Math.tan(skewXDeg * Math.PI / 180);
       const ty = Math.tan(skewYDeg * Math.PI / 180);
@@ -77,7 +82,7 @@ function normalizeAffine(node) {
   }
 }
 
-const TRANSFORM_FORMATS = new Set([12, 14, 16, 18, 20, 22, 24, 26, 28]);
+const TRANSFORM_FORMATS = new Set([12, 14, 16, 18, 20, 22, 24, 26, 28, 30]);
 
 /// Convert a COLR v1 paint tree (or null) into a filter-graph DAG.
 ///

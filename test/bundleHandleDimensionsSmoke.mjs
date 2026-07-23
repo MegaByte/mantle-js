@@ -53,14 +53,8 @@ const url  = `http://127.0.0.1:${port}/mantleDemo.html`;
 // reading. On a square canvas:
 //   Tall (50×100, red):   bbox at canvas centre x ∈ [w/4, 3w/4], y ∈ [0, h]
 //   Wide (100×50, blue):  bbox at canvas centre x ∈ [0, w], y ∈ [h/4, 3h/4]
-const SVG_TALL = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 100">
-  <rect x="0" y="0" width="50" height="100" fill="#ff0000"/>
-</svg>`;
-const SVG_WIDE = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">
-  <rect x="0" y="0" width="100" height="50" fill="#0000ff"/>
-</svg>`;
+const SVG_TALL = readFileSync(new URL('../examples/smoke/bundleHandleDimensions__SVG_TALL.svg', import.meta.url), 'utf8');
+const SVG_WIDE = readFileSync(new URL('../examples/smoke/bundleHandleDimensions__SVG_WIDE.svg', import.meta.url), 'utf8');
 
 let failures = 0;
 const fail = (m) => { failures++; console.error('FAIL', m); };

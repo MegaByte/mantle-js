@@ -56,7 +56,9 @@ function machine(extraField, entryTable, tail) {
   const entry = [...u16(0), ...u16(0), ...u16(0xFFFF),          // e0
                  ...u16(1), ...u16(0x8000), ...u16(0xFFFF),     // e1 Push → state1
                  ...u16(0), ...u16(0), ...u16(0)];              // e2 action @ kernAction[0]
-  const m = machine(u32(84), entry, s16(-150 | 1));            // kernAction offset = 84
+  // kerx kernActions are plain FWORDs popped one per stacked glyph —
+  // no classic-'kern' low-bit list terminator.
+  const m = machine(u32(84), entry, s16(-150));                // kernAction offset = 84
   const sub = [...u32(12 + m.length), ...u32(0x00000001), ...u32(0), ...m];
   const t = parseTtfTables(buildFont([...u32(0x00020000), ...u32(1), ...sub]));
   const k = new AatKerx(t);

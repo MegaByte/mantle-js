@@ -20,10 +20,12 @@ export function handleImageTag(walkCtx, node, tag, ctm, f, s, w) {
   } = walkCtx;
   if (tag !== 'image' || !imageDataMap.has(node)) return false;
       const decoded = imageDataMap.get(node);
-      const ix = parseLengthOr(node.getAttribute('x') || '0', 0);
-      const iy = parseLengthOr(node.getAttribute('y') || '0', 0);
-      const iw = parseLengthOr(node.getAttribute('width') || '0', 0);
-      const ih = parseLengthOr(node.getAttribute('height') || '0', 0);
+      const vpX9 = walkCtx.viewport ? { ...walkCtx.viewport, axis: 'x' } : undefined;
+      const vpY9 = walkCtx.viewport ? { ...walkCtx.viewport, axis: 'y' } : undefined;
+      const ix = parseLengthOr(node.getAttribute('x') || '0', 0, vpX9);
+      const iy = parseLengthOr(node.getAttribute('y') || '0', 0, vpY9);
+      const iw = parseLengthOr(node.getAttribute('width') || '0', 0, vpX9);
+      const ih = parseLengthOr(node.getAttribute('height') || '0', 0, vpY9);
       // SVG-content image: recursively walk the nested SVG with a
       // composed CTM that maps the inner viewBox into (ix, iy, iw, ih).
       // The outer <image>'s preserveAspectRatio governs fitting per
@@ -125,7 +127,8 @@ export function handleImageTag(walkCtx, node, tag, ctm, f, s, w) {
         // and consumes the same currentMaskRef / currentClipRef stack
         // entries as <path>, the same way <text> handles them.
         const _imgStyleMap   = parseStyleString(node.getAttribute('style') || '');
-        const _imgRawClipStr = _imgStyleMap['clip-path'] || node.getAttribute('clip-path') || currentClipRef();
+        // Stack alone: walk() already intersected own vs inherited clip-path.
+        const _imgRawClipStr = currentClipRef();
         const _imgRawMaskStr = _imgStyleMap['mask']      || node.getAttribute('mask')      || currentMaskRef();
         const _imgRawFilterStr = _imgStyleMap['filter']  || node.getAttribute('filter')   || currentFilterRef();
         const _imgClipRef    = resolveIdRef(_imgRawClipStr);

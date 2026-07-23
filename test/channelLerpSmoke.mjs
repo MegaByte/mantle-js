@@ -44,13 +44,7 @@ mkdirSync(OUT, { recursive: true });
 //   rect 1: pure blue   (B-channel encoded → contrast)
 //   rect 2: pure white  (R=G=B=1 → highlight per the Unity formula)
 //   rect 3: light pink  (R=1, G=0.5, B=0.5) → mid lerp
-const SVG_CHANNELS = `
-<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-  <rect x="0"  y="0"  width="25" height="100" fill="#FF0000"/>
-  <rect x="25" y="0"  width="25" height="100" fill="#0000FF"/>
-  <rect x="50" y="0"  width="25" height="100" fill="#FFFFFF"/>
-  <rect x="75" y="0"  width="25" height="100" fill="#FF8080"/>
-</svg>`;
+const SVG_CHANNELS = readFileSync(new URL('../examples/smoke/channelLerp__SVG_CHANNELS.svg', import.meta.url), 'utf8');
 
 // External art fixture. Point TRAIN_SVG at a channel-encoded sprite
 // SVG; the test skips cleanly when it's unset or the file is missing.

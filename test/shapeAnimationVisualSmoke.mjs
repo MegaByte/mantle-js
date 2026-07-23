@@ -49,14 +49,8 @@ const url = `http://127.0.0.1:${port}/mantleDemo.html`;
 // We can't use positional drift as a signal because the Mantle
 // renderer fits each asset's globalBBox to the canvas. Colour drift
 // is the reliable end-to-end test.
-const SRC_SVG = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <rect id="r" x="0" y="0" width="100" height="100" fill="#ff0000"/>
-</svg>`;
-const DST_SVG = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <rect id="r" x="0" y="0" width="100" height="100" fill="#0000ff"/>
-</svg>`;
+const SRC_SVG = readFileSync(new URL('../examples/smoke/shapeAnimationVisual__SRC_SVG.svg', import.meta.url), 'utf8');
+const DST_SVG = readFileSync(new URL('../examples/smoke/shapeAnimationVisual__DST_SVG.svg', import.meta.url), 'utf8');
 
 let failures = 0;
 const fail = (m) => { failures++; console.error('FAIL', m); };

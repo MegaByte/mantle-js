@@ -22,7 +22,8 @@
 precision highp float;
 uniform sampler2D uTex;
 uniform sampler2D uKernelTex;
-uniform vec2  uTexel;     // 1 / textureSize
+uniform vec2  uTexel;     // kernel sample spacing in input uv (world-scaled)
+uniform vec4  uInMap;     // vUV → input uv (see @@FILTER_RECT@@)
 uniform vec2  uOrder;     // (orderX, orderY)
 uniform vec2  uTarget;    // (targetX, targetY)
 uniform float uDivisor;
@@ -32,6 +33,8 @@ uniform int   uEdgeMode;
 uniform int   uPreserveAlpha;
 in vec2 vUV;
 out vec4 fragColor;
+
+@@FILTER_RECT@@
 
 // Fetch kernel[r*orderX + c] from the row-major texture packed layout.
 // 7 RGBA texels per row hold 28 floats; only the first orderX*orderY
@@ -67,6 +70,7 @@ vec4 sampleEdge(vec2 uv) {
 }
 
 void main() {
+  vec2 uv0 = mapIn(vUV, uInMap);
   int orderX = int(uOrder.x + 0.5);
   int orderY = int(uOrder.y + 0.5);
   int targetX = int(uTarget.x + 0.5);
@@ -86,7 +90,7 @@ void main() {
       // mathematical convolution, not a correlation.)
       float k = kernelAt(orderY - 1 - j, orderX - 1 - i, orderX);
       vec2 off = vec2(float(i - targetX), float(j - targetY)) * uTexel;
-      vec4 s = sampleEdge(vUV + off);
+      vec4 s = sampleEdge(uv0 + off);
       acc += k * s;
       accStraight += k * (s.a > 0.0 ? s.rgb / s.a : s.rgb);
     }
@@ -97,7 +101,7 @@ void main() {
     // UN-premultiplied color and the source alpha is preserved. Convolve
     // straight RGB, keep the center alpha, then re-premultiply for the
     // premultiplied filter pipeline.
-    float a = texture(uTex, vUV).a;
+    float a = sampleEdge(uv0).a;
     vec3 rgb = accStraight / max(uDivisor, 1e-6) + vec3(uBias);
     outc = vec4(rgb * a, a);
   } else {

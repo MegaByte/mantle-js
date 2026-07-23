@@ -9,7 +9,7 @@ import { SEG_LINE, SEG_CUBIC, SEG_RQUAD } from '../primitives/seg.js';
 import { bezoutCubicImplicit, cubicKLMN, cubicSignKLMN, splitCubicMulti, partitionCubicSplitTs, uvInHull, cubicSign, cubicPt } from './lbCubicMath.js';
 import { _kox, _koy, _koScale, _setKeyOrigin, rayWinding, calibrateInterior, segTangents, edgeEndMeta, fatArc } from './lbContour.js';
 import { splitInteriorByCurve } from './lbInteriorSplit.js';
-import { selfOrientRows, buildCornerCaps2, interiorEdgesFromTriPoints } from './lbFastMesh.js';
+import { selfOrientRows, interiorEdgesFromTriPoints } from './lbFastMesh.js';
 import { buildLoopBlinnPartition } from './lbPartition.js';
 
 // ── PARTITION MORPH PAIR ──────────────────────────────────────────────────────
@@ -17,13 +17,15 @@ import { buildLoopBlinnPartition } from './lbPartition.js';
 // (the unmodified builder), then derive the DST mesh by PROVENANCE TRANSFORM —
 // every emitted vertex is a seg point (registered under the same quantized
 // key), every frame recomputes against the DST hull with the same helpers
-// (uvInHull / edgeEndMeta / buildCornerCaps2 / interiorEdgesFromTriPoints).
+// (uvInHull / edgeEndMeta / interiorEdgesFromTriPoints).
 // Identical topology by construction, so the pair packs into a dual-stream
 // morph VBO where the VS lerps positions/frames and t=0/1 are byte-identical
-// to the static partition renders. Returns null (caller falls back to the legacy
-// pair or Slug) for: cubic-bearing pairs (v1 scope), structure mismatch,
-// convex↔concave flips, near-flat disagreement, strip-plan divergence,
-// clip-produced (unmapped) vertices, circles/annuli.
+// to the static partition renders. Cubic-bearing pairs transform through the
+// shared partitionCubicSplitTs plan (the caller t-segments when mid-morph
+// drift exceeds the oracle). Returns null (caller falls back to the
+// t-segmented pair or Slug) for: structure mismatch, convex↔concave flips,
+// near-flat disagreement, strip-plan divergence, clip-produced (unmapped)
+// vertices, circles/annuli (kind-7 SDF records have no pair transform).
 export function buildLoopBlinnPartitionPair(srcContours, dstContours, fillRule, opts) {
   if (!srcContours || !dstContours || srcContours.length !== dstContours.length) return null;
   for (let c = 0; c < srcContours.length; c++) {
@@ -36,9 +38,14 @@ export function buildLoopBlinnPartitionPair(srcContours, dstContours, fillRule, 
     }
   }
   const transient9 = !!(opts && opts.plainDstRows);   // segment pairs: plain rows BOTH endpoints
-  const src = buildLoopBlinnPartition(srcContours, { fillRule: fillRule || 'nonzero', plainRows: transient9 });
+  // skipCurveInterior: pair transforms quads by hull `_hi9`; fill-side curveTris
+  // from the static bowl fix have none → pair would return null → Slug morph.
+  const src = buildLoopBlinnPartition(srcContours, {
+    fillRule: fillRule || 'nonzero', plainRows: transient9, skipCurveInterior: !transient9,
+  });
   if (!src || (src.fallback && src.fallback.length)) return null;
-  for (const q of src.quads) if (/** @type {any} */ (q).circle) return null;   // circle SDF transform: follow-up
+  // Circle SDF records do not have a partition-pair transform.
+  for (const q of src.quads) if (/** @type {any} */ (q).circle) return null;
 
   // key(srcPoint) → dstPoint, same quantization the builder registered under
   _setKeyOrigin(srcContours);
@@ -74,7 +81,7 @@ export function buildLoopBlinnPartitionPair(srcContours, dstContours, fillRule, 
   // intersection of the SAME two constraints on the dst endpoint. Parents are
   // seg points (or earlier Steiner points — recorded in insertion order, so
   // resolution cascades). The dst constraints must still PROPERLY cross; a
-  // vanished crossing means the topology changed between endpoints → legacy.
+  // vanished crossing means the topology changed between endpoints → bail.
   for (const st9 of (src.steiner9 || [])) {
     const pa = mapPt(st9.pa[0], st9.pa[1]), pb = mapPt(st9.pb[0], st9.pb[1]);
     const pc = mapPt(st9.pc[0], st9.pc[1]), pd = mapPt(st9.pd[0], st9.pd[1]);
@@ -104,7 +111,7 @@ export function buildLoopBlinnPartitionPair(srcContours, dstContours, fillRule, 
   const si = src.interior, di = new Float32Array(si.length);
   for (let i = 0; i < si.length; i += 2) {
     const mp = mapPt(si[i], si[i + 1]);
-    if (!mp) return null;                       // clip/Steiner vertex → legacy
+    if (!mp) return null;                       // clip/Steiner vertex → bail
     di[i] = mp[0]; di[i + 1] = mp[1];
   }
 
@@ -137,7 +144,7 @@ export function buildLoopBlinnPartitionPair(srcContours, dstContours, fillRule, 
       if (!uv) return null;
       tcD[3 * k] = uv[0]; tcD[3 * k + 1] = uv[1]; tcD[3 * k + 2] = uv[2];
     }
-    quadsD[qi] = { tri: TD, tc: tcD, sign: q.sign, w: q.w, _fat: q._fat };
+    quadsD[qi] = { tri: TD, tc: tcD, sign: q.sign, w: q.w };
   }
 
   // edges: rebuilt from the dst segs with the same emit math + end metadata
@@ -157,6 +164,20 @@ export function buildLoopBlinnPartitionPair(srcContours, dstContours, fillRule, 
       const sag = chL > 1e-12 ? Math.abs((dg.p2[0] - dg.p1[0]) * (chy / chL) - (dg.p2[1] - dg.p1[1]) * (chx / chL)) : 0;
       if (sag >= 0.004 * chL) return null;
       p1d = dg.p1; p2d = dg.p3;
+    } else if (e.flat9 === 'cubic') {
+      // Near-line CUBIC demotion spans p1→p4 — dg.p2 is the first CONTROL
+      // point (~⅓ along the curve); building the dst edge on it misplaced
+      // the straight-edge AA/strips at t→1. Same near-flat re-check as
+      // the arc branch (both control points must hug the chord).
+      const chx = dg.p4[0] - dg.p1[0], chy = dg.p4[1] - dg.p1[1];
+      const chL = Math.hypot(chx, chy);
+      if (chL > 1e-12) {
+        const nx9 = chy / chL, ny9 = -chx / chL;
+        const s2 = Math.abs((dg.p2[0] - dg.p1[0]) * nx9 + (dg.p2[1] - dg.p1[1]) * ny9);
+        const s3 = Math.abs((dg.p3[0] - dg.p1[0]) * nx9 + (dg.p3[1] - dg.p1[1]) * ny9);
+        if (Math.max(s2, s3) >= 0.004 * chL) return null;
+      }
+      p1d = dg.p1; p2d = dg.p4;
     } else { p1d = dg.p1; p2d = dg.p2; }
     const ex = p2d[0] - p1d[0], ey = p2d[1] - p1d[1], L = Math.hypot(ex, ey);
     if (L < 1e-9) return null;
@@ -165,13 +186,18 @@ export function buildLoopBlinnPartitionPair(srcContours, dstContours, fillRule, 
       e2: edgeEndMeta(dc, dtg[e.ci9], e.si9, 1, interiorSignD[e.ci9]) };
   }
 
-  // strips: dst seg control points, same sign/w
+  // strips: dst seg control points + end meta (kind-12 needs e1/e2 on both streams)
   const stripsD = new Array(src.stripArcs.length);
   for (let ti = 0; ti < src.stripArcs.length; ti++) {
     const sa = src.stripArcs[ti];
     if (sa.ci9 == null) return null;
-    const dg = dstContours[sa.ci9][sa.si9];
-    stripsD[ti] = { tri: new Float32Array([dg.p1[0], dg.p1[1], dg.p2[0], dg.p2[1], dg.p3[0], dg.p3[1]]), sign: sa.sign, w: sa.w };
+    const dc = dstContours[sa.ci9], dg = dc[sa.si9];
+    stripsD[ti] = {
+      tri: new Float32Array([dg.p1[0], dg.p1[1], dg.p2[0], dg.p2[1], dg.p3[0], dg.p3[1]]),
+      sign: sa.sign, w: sa.w, ci9: sa.ci9, si9: sa.si9,
+      e1: edgeEndMeta(dc, dtg[sa.ci9], sa.si9, 0, interiorSignD[sa.ci9]),
+      e2: edgeEndMeta(dc, dtg[sa.ci9], sa.si9, 1, interiorSignD[sa.ci9]),
+    };
   }
 
   // cubic pieces: rebuild each rec's frame on the DST endpoint — same split
@@ -243,7 +269,7 @@ export function buildLoopBlinnPartitionPair(srcContours, dstContours, fillRule, 
       let klmnD = null, FD = null;
       if (rec.rows) {
         klmnD = cubicKLMN(cpD);
-        if (!klmnD) return null;   // frame-health divergence → legacy
+        if (!klmnD) return null;   // frame-health divergence → bail
       } else {
         FD = bezoutCubicImplicit(cpD);
         if (!FD) return null;
@@ -251,7 +277,7 @@ export function buildLoopBlinnPartitionPair(srcContours, dstContours, fillRule, 
       // CLASSIFICATION must hold on the dst endpoint: recompute the side-bit
       // with the dst winding and the dst sign with the same classifiers — a
       // convex↔concave flip (or an invisible boundary becoming real) cannot be
-      // expressed by a lerped frame → legacy/Slug (same policy as the old pair).
+      // expressed by a lerped frame → bail to the caller's fallback.
       // GEOMETRIC flip check first: the control-mid's SIDE of the chord must be
       // preserved — the sign classifiers are blind to a flip (the frame mirrors
       // AND the ink side swaps, so the composed sign comes out EQUAL: the flip
@@ -286,7 +312,7 @@ export function buildLoopBlinnPartitionPair(srcContours, dstContours, fillRule, 
         else {
           if (bothD) return null;   // boundary became invisible → structure change
           const signD = klmnD ? cubicSignKLMN(cpD, klmnD, ccxD) : cubicSign(cpD, FD, ccxD);
-          if (signD !== rec.sign) return null;   // classification flip → legacy
+          if (signD !== rec.sign) return null;   // classification flip → bail
         }
       }
       rd = { cpD, klmnD, FD, ptsD, rowsD: null };
@@ -321,7 +347,7 @@ export function buildLoopBlinnPartitionPair(srcContours, dstContours, fillRule, 
     const bary9 = [];
     for (let k = 0; k < 3; k++) {
       const mp = mapPt(H[2 * k], H[2 * k + 1]);
-      if (!mp) return null;                      // clipped sub-verts → legacy
+      if (!mp) return null;                      // clipped sub-verts → bail
       HD[2 * k] = mp[0]; HD[2 * k + 1] = mp[1];
       bary9.push(mp);
     }
@@ -348,11 +374,29 @@ export function buildLoopBlinnPartitionPair(srcContours, dstContours, fillRule, 
     } else {
       cubicsD[ci] = { hull: HD, F: rd.FD, sign: e.sign };
     }
+    // Kind-12 cubic ring end meta on DST (match static / SRC pack layout).
+    {
+      const cpD = rd.cpD;
+      const stubE = { nN: [0, 0], k: 0, type: 0, curve: true, tsign: 1, qn: true, turn: 0 };
+      const u = (x, y) => { const L = Math.hypot(x, y); return L > 1e-12 ? [x / L, y / L] : null; };
+      const tA = u(cpD[1][0] - cpD[0][0], cpD[1][1] - cpD[0][1])
+        || u(cpD[2][0] - cpD[0][0], cpD[2][1] - cpD[0][1])
+        || u(cpD[3][0] - cpD[0][0], cpD[3][1] - cpD[0][1]);
+      const tB = u(cpD[3][0] - cpD[2][0], cpD[3][1] - cpD[2][1])
+        || u(cpD[3][0] - cpD[1][0], cpD[3][1] - cpD[1][1])
+        || u(cpD[3][0] - cpD[0][0], cpD[3][1] - cpD[0][1]);
+      const nPie = (dstPieceOf9.get(rec.ci9 + '|' + rec.si9) || []).length || 1;
+      const dc = dstContours[rec.ci9];
+      cubicsD[ci].a = cpD[0];
+      cubicsD[ci].b = cpD[3];
+      cubicsD[ci].na = tA;
+      cubicsD[ci].nb = tB ? [-tB[0], -tB[1]] : null;
+      cubicsD[ci].e1 = rec.pi9 === 0
+        ? edgeEndMeta(dc, dtg[rec.ci9], rec.si9, 0, interiorSignD[rec.ci9]) : stubE;
+      cubicsD[ci].e2 = rec.pi9 === nPie - 1
+        ? edgeEndMeta(dc, dtg[rec.ci9], rec.si9, 1, interiorSignD[rec.ci9]) : stubE;
+    }
   }
-
-  // caps: same builder on the dst contours; topology must agree
-  const capsD = buildCornerCaps2(dstContours);
-  if ((src.caps ? src.caps.length : 0) !== (capsD ? capsD.length : 0)) return null;
 
   // corner-aware rows for the dst too (the same attachment pass the static
   // build runs); if the pass re-cuts dst faces differently from src the
@@ -373,7 +417,7 @@ export function buildLoopBlinnPartitionPair(srcContours, dstContours, fillRule, 
     interiorEdges2: rowsD9 && rowsD9.solidEdges2 ? new Float32Array(rowsD9.solidEdges2) : null,
     interiorEdges3: rowsD9 && rowsD9.solidEdges3 ? new Float32Array(rowsD9.solidEdges3) : null,
     quads: quadsD, cubics: cubicsD, edges: edgesD, fallback: [],
-    caps: capsD, curveStrips: true, stripArcs: stripsD, _topo: null,
+    stripArcs: stripsD, _topo: null,
   };
   return { src, dst };
 }

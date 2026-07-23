@@ -19,8 +19,11 @@
 precision highp float;
 in vec2 vUV;
 uniform sampler2D uIn;
+uniform vec4 uInMap;          // vUV → uIn uv (see @@FILTER_RECT@@)
 uniform sampler2D uLUT;       // 256×4 RGBA8
 out vec4 fragColor;
+
+@@FILTER_RECT@@
 
 float lookup(int row, float x) {
   // Clamp + scale to texel coordinate.
@@ -29,7 +32,7 @@ float lookup(int row, float x) {
 }
 
 void main() {
-  vec4 srcPre = texture(uIn, vUV);
+  vec4 srcPre = sampleIn(uIn, mapIn(vUV, uInMap));
   vec3 srcRgb = srcPre.a > 0.0 ? srcPre.rgb / srcPre.a : srcPre.rgb;
   float r = lookup(0, srcRgb.r);
   float g = lookup(1, srcRgb.g);

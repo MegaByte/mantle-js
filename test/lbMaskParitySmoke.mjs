@@ -12,10 +12,7 @@ const ROOT = path.resolve(__dirname, '..');
 
 // A diamond PATH masked by a white rect over its RIGHT half (luminance mask:
 // white = visible). The left half must be hidden; the right stays the fill colour.
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <defs><mask id="m"><rect x="50" y="0" width="50" height="100" fill="white"/></mask></defs>
-  <path d="M50 8 L92 50 L50 92 L8 50 Z" fill="#3366cc" mask="url(#m)"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/lbMaskParity__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="100" height="100"></canvas>

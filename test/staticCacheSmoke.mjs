@@ -1,5 +1,4 @@
-// End-to-end proof of the JS static-scene cache at Level A1. Drives a real
-// WebGL2 context, calls `renderer.enableStaticCache()` with ForceA1,
+// End-to-end proof of the whole-asset and viewport-window caches.
 // renders a fixture twice, and asserts:
 //
 //   1. The first render bakes into the cache RT (cache becomes
@@ -43,11 +42,7 @@ const url = `http://127.0.0.1:${port}/mantleDemo.html`;
 
 // One simple SVG fixture — solid red square on white. Big enough
 // that AA edges don't dominate the centre-pixel test.
-const SVG = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <rect x="0" y="0" width="100" height="100" fill="#ffffff"/>
-  <rect x="20" y="20" width="60" height="60" fill="#ff0000"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/staticCache__SVG.svg', import.meta.url), 'utf8');
 
 let failures = 0;
 const fail = (m) => { failures++; console.error('FAIL', m); };
@@ -67,14 +62,62 @@ await page.goto(url, { waitUntil: 'load', timeout: 10000 });
 await page.waitForFunction(() => window.__mantleRenderer && window.__mantleGl, { timeout: 10000 });
 
 const result = await page.evaluate(async (svg) => {
-  const { importSvg, createBundle, CacheStrategy, CacheLevel } =
+  const { importSvg, createBundle, createStaticCache,
+          CacheStrategy, CacheLevel, CacheReason } =
     await import('/src/index.js');
+  const { borrowSharedGroupTarget } = await import('/src/renderer/staticCache.js');
   const gl = window.__mantleGl;
   const renderer = window.__mantleRenderer;
   const cnv = document.getElementById('glcanvas');
 
   const bundle = createBundle(gl, await importSvg(svg));
   renderer.setBundle(bundle);
+
+  const unsupportedWindow = createStaticCache({ strategy: CacheStrategy.ForceViewportWindow });
+  unsupportedWindow.tick({ viewportWindowCompatible: false });
+  const unsupportedExternalClip = createStaticCache({ strategy: CacheStrategy.ForceWholeAsset });
+  unsupportedExternalClip.tick({ cacheCompatible: false });
+
+  // Equal user keys share only inside the same renderer/context scope.
+  const scopeA = {}, scopeB = {};
+  let releasedTargets = 0;
+  const sharedOpts = (scope) => ({
+    strategy: CacheStrategy.ForceSharedGroup,
+    instanceGroupKey: 'same-key',
+    groupScope: scope,
+    releaseSharedTarget: () => { releasedTargets++; },
+  });
+  const scopedA = createStaticCache(sharedOpts(scopeA));
+  const scopedAPeer = createStaticCache(sharedOpts(scopeA));
+  const scopedB = createStaticCache(sharedOpts(scopeB));
+  const allocFake = (w, h) => ({ tex: {}, fbo: {}, rb: {}, rtW: w, rtH: h });
+  const targetA = borrowSharedGroupTarget('same-key', scopedA._cacheState, 64, 64, allocFake);
+  const targetAPeer = borrowSharedGroupTarget('same-key', scopedAPeer._cacheState, 64, 64, allocFake);
+  const targetB = borrowSharedGroupTarget('same-key', scopedB._cacheState, 64, 64, allocFake);
+  scopedA.markBaked(1);
+  const sameScopeShares = targetA.tex === targetAPeer.tex && scopedAPeer.isGroupCacheValid();
+  const crossScopeIsolated = targetA.tex !== targetB.tex && !scopedB.isGroupCacheValid();
+  scopedA.dispose();
+  scopedAPeer.dispose();
+  scopedB.dispose();
+  const scopedTargetsReleased = releasedTargets === 2;
+
+  // Disposed automatic caches return their global promotion-budget slot.
+  const fit = {
+    hasAsset: true, animatorActive: false, morphActive: false,
+    footprintW: 100, footprintH: 100, viewportW: 200, viewportH: 200,
+  };
+  const budgetCaches = Array.from({ length: 7 }, () => createStaticCache({
+    autoBudgeted: true,
+    stabilityPromoteFrames: 1,
+  }));
+  for (const c of budgetCaches) c.tick(fit);
+  const budgetInitiallyFull = budgetCaches.slice(0, 6).every(c => c.resolvedLevel === CacheLevel.WholeAsset)
+    && budgetCaches[6].resolvedLevel === CacheLevel.None;
+  budgetCaches[0].dispose();
+  budgetCaches[6].tick(fit);
+  const budgetSlotReused = budgetCaches[6].resolvedLevel === CacheLevel.WholeAsset;
+  for (const c of budgetCaches) c.dispose();
 
   function snapshot() {
     const w = cnv.width, h = cnv.height;
@@ -85,10 +128,14 @@ const result = await page.evaluate(async (svg) => {
     const ix = (x, y) => (y * w + x) * 4;
     const cIdx = ix(w >> 1, h >> 1);
     const wIdx = ix(5, 5);
+    const lIdx = ix(Math.round(w * 0.22), h >> 1);
+    const rIdx = ix(Math.round(w * 0.28), h >> 1);
     return {
       w, h,
       centre: [px[cIdx], px[cIdx + 1], px[cIdx + 2], px[cIdx + 3]],
       corner: [px[wIdx], px[wIdx + 1], px[wIdx + 2], px[wIdx + 3]],
+      left: [px[lIdx], px[lIdx + 1], px[lIdx + 2], px[lIdx + 3]],
+      right: [px[rIdx], px[rIdx + 1], px[rIdx + 2], px[rIdx + 3]],
     };
   }
 
@@ -96,8 +143,8 @@ const result = await page.evaluate(async (svg) => {
   renderer.render();
   const live = snapshot();
 
-  // ---- Enable cache, force A1 (bypass stability hysteresis) -----
-  renderer.enableStaticCache({ strategy: CacheStrategy.ForceA1 });
+  // ---- Whole-asset cache (bypass stability hysteresis) ----------
+  renderer.enableStaticCache({ strategy: CacheStrategy.ForceWholeAsset });
 
   // Frame 1: should bake-then-blit. After it, cache must be valid
   // and lastBakeFrame should move off -1.
@@ -122,11 +169,57 @@ const result = await page.evaluate(async (svg) => {
   renderer.render();
   const live2 = snapshot();
 
+  // ---- Viewport window: larger target + translation reuse -------
+  renderer.enableStaticCache({
+    strategy: CacheStrategy.ForceViewportWindow,
+    viewportWindowMarginPixels: 64,
+  });
+  renderer.render();
+  const windowInitial = snapshot();
+  const windowLevel = renderer.staticCache.resolvedLevel;
+  const windowValid = renderer.staticCache.isCacheValid;
+  const windowBake1 = renderer.staticCache.lastBakeFrame;
+
+  const pan = new Float32Array([1, 0, 0, 0, 1, 0, 0.1, 0, 1]);
+  renderer.drawBundle(bundle, { worldMatrix: pan });
+  const windowPan = snapshot();
+  const windowBake2 = renderer.staticCache.lastBakeFrame;
+
+  renderer.disableStaticCache();
+  renderer.drawBundle(bundle, { worldMatrix: pan });
+  const livePan = snapshot();
+
+  // ---- Whole-asset resize invalidation --------------------------
+  renderer.enableStaticCache({ strategy: CacheStrategy.ForceWholeAsset });
+  renderer.render();
+  const resizeBake1 = renderer.staticCache.lastBakeFrame;
+  cnv.width = 240;
+  cnv.height = 180;
+  renderer.render();
+  const resizedCached = snapshot();
+  const resizeBake2 = renderer.staticCache.lastBakeFrame;
+  const resizedValid = renderer.staticCache.isCacheValid;
+  renderer.disableStaticCache();
+  renderer.render();
+  const resizedLive = snapshot();
+
   return {
     live, after1, after2, live2,
     valid1, valid2, level1,
     bakeFrame1, bakeFrame2, gen1, gen2,
-    LevelA1: CacheLevel.A1,
+    WholeAsset: CacheLevel.WholeAsset,
+    windowInitial, windowPan, livePan,
+    windowLevel, windowValid, windowBake1, windowBake2,
+    ViewportWindow: CacheLevel.ViewportWindow,
+    resizeBake1, resizeBake2, resizedCached, resizedLive, resizedValid,
+    unsupportedWindowLevel: unsupportedWindow.resolvedLevel,
+    unsupportedWindowReason: unsupportedWindow.resolvedReason,
+    unsupportedClipLevel: unsupportedExternalClip.resolvedLevel,
+    unsupportedClipReason: unsupportedExternalClip.resolvedReason,
+    None: CacheLevel.None,
+    UnsupportedFeatures: CacheReason.UnsupportedFeatures,
+    sameScopeShares, crossScopeIsolated, scopedTargetsReleased,
+    budgetInitiallyFull, budgetSlotReused,
   };
 }, SVG);
 
@@ -145,10 +238,38 @@ function near(a, b, tol = 16, label = '') {
   return true;
 }
 
-if (result.level1 !== result.LevelA1) {
-  fail(`ForceA1 should resolve to Level.A1, got ${result.level1}`);
+if (result.level1 !== result.WholeAsset) {
+  fail(`ForceWholeAsset should resolve to WholeAsset, got ${result.level1}`);
 } else {
-  ok('ForceA1 resolves to Level.A1');
+  ok('ForceWholeAsset resolves to WholeAsset');
+}
+
+if (result.unsupportedWindowLevel !== result.None
+    || result.unsupportedWindowReason !== result.UnsupportedFeatures
+    || result.unsupportedClipLevel !== result.None
+    || result.unsupportedClipReason !== result.UnsupportedFeatures) {
+  fail('unsupported cache dependencies must resolve to live rendering');
+} else {
+  ok('unsupported cache dependencies resolve to live rendering');
+}
+
+if (result.sameScopeShares && result.crossScopeIsolated && result.scopedTargetsReleased) {
+  ok('shared targets are context-scoped and released exactly once');
+} else {
+  fail(`shared-target scope/release failed: ${JSON.stringify({
+    sameScopeShares: result.sameScopeShares,
+    crossScopeIsolated: result.crossScopeIsolated,
+    scopedTargetsReleased: result.scopedTargetsReleased,
+  })}`);
+}
+
+if (result.budgetInitiallyFull && result.budgetSlotReused) {
+  ok('automatic cache budget slot returns on dispose');
+} else {
+  fail(`automatic cache budget lifetime failed: ${JSON.stringify({
+    budgetInitiallyFull: result.budgetInitiallyFull,
+    budgetSlotReused: result.budgetSlotReused,
+  })}`);
 }
 
 if (!result.valid1) {
@@ -192,6 +313,34 @@ ok('cached pixels match live render within tolerance');
 near(result.live.centre, result.live2.centre, 4, 'disabled centre vs live');
 near(result.live.corner, result.live2.corner, 4, 'disabled corner vs live');
 ok('disableStaticCache returns to live render');
+
+if (result.windowLevel !== result.ViewportWindow) {
+  fail(`ForceViewportWindow should resolve to ViewportWindow, got ${result.windowLevel}`);
+} else {
+  ok('ForceViewportWindow resolves to ViewportWindow');
+}
+if (!result.windowValid) fail('viewport-window cache should be valid after its first bake');
+else ok('viewport-window cache valid after first bake');
+if (result.windowBake2 !== result.windowBake1) {
+  fail(`in-margin viewport-window pan re-baked (${result.windowBake1} -> ${result.windowBake2})`);
+} else {
+  ok('in-margin viewport-window pan reused the bake');
+}
+for (const key of ['centre', 'corner', 'left', 'right']) {
+  near(result.live[key], result.windowInitial[key], 16, `window initial ${key} vs live`);
+  near(result.livePan[key], result.windowPan[key], 16, `window pan ${key} vs live`);
+}
+ok('viewport-window initial and panned pixels match live rendering');
+
+if (!(result.resizeBake2 > result.resizeBake1)) {
+  fail(`whole-asset resize did not re-bake (${result.resizeBake1} -> ${result.resizeBake2})`);
+} else {
+  ok('whole-asset resize invalidates and re-bakes');
+}
+if (!result.resizedValid) fail('whole-asset cache invalid after resize');
+for (const key of ['centre', 'corner', 'left', 'right'])
+  near(result.resizedLive[key], result.resizedCached[key], 16, `resized ${key} vs live`);
+ok('resized whole-asset pixels match live rendering');
 
 if (failures) {
   console.error(`\n${failures} assertions failed`);

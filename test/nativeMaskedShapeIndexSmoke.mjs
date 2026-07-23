@@ -26,13 +26,7 @@ const fontB64 = readFileSync(new URL('./font/fixtures/roboto-regular.ttf', impor
 // Full-canvas mask (everything visible) whose rect is the FIRST shape
 // element in document order — the index-shift trigger. Box (blue) +
 // masked text (red).
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50" width="100" height="50">
-  <defs><mask id="m"><rect x="0" y="0" width="100" height="50" fill="#ffffff"/></mask></defs>
-  <g mask="url(#m)">
-    <rect x="4" y="10" width="28" height="28" fill="#0000ff"/>
-    <text x="40" y="36" font-family="Roboto" font-size="30" fill="#ff0000">Hi</text>
-  </g>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/nativeMaskedShapeIndex__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body><div id="host"></div><canvas id="cv" width="100" height="50"></canvas>
 <script type="module">

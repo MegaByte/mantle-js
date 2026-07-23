@@ -1,7 +1,9 @@
 // occupancyImportSmoke — verify the importer emits a correct interior-skip
-// occupancy plane when opts.occupancyGrid is set: bundle.occupancy present,
-// per-shape (cellOffset, G) stamped in meta texel 5 .xy, and the packed bits
-// classify only true-interior cells (checked against analytic circle math).
+// occupancy plane: ON by default for large interior fills (area-gated),
+// disabled by occupancyGrid:false; per-shape (cellOffset, G) stamped in meta
+// texel 5 .xy, and the packed bits classify only true-interior cells (checked
+// against analytic circle math).
+import { readFileSync } from 'fs';
 import { DOMParser as DP } from '@xmldom/xmldom'; globalThis.DOMParser = DP;
 import importSvg from '../src/svg/importer.js';
 
@@ -10,10 +12,7 @@ const check = (c, m) => { if (!c) { console.error('FAIL: ' + m); fails++; } else
 
 // Non-primKind shapes (so they exercise the occupancy path, not the SDF fast
 // path): a diamond <polygon> (L1 ball, exact inside test) + a big <path> blob.
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">
-  <polygon points="50,5 95,50 50,95 5,50" fill="#c00"/>
-  <path d="M110 50 C110 20 190 20 190 50 C190 80 110 80 110 50 Z" fill="#0a0"/>
-</svg>`;
+const svg = readFileSync(new URL('../examples/smoke/occupancyImport__svg.svg', import.meta.url), 'utf8');
 
 const H = 8;       // 32-byte meta header (8 floats)
 // Occupancy bits live in the CURVE buffer, 4 cells per RGBA texel, addressed by
@@ -25,15 +24,23 @@ const cellBit = (curveF, base, G, gx, gy) => {
   return curveF[(base + (cellIdx >> 2)) * 4 + (cellIdx & 3)] > 0.5;
 };
 
-// off by default → no occupancy stamped (texel 5 .y stays 0).
-const off = await importSvg(svg);
+// ON by default now (area-gated): both fills are a large fraction of the content
+// so a descriptor IS stamped without any opts.
 {
+  const def = await importSvg(svg);
+  const f = new Float32Array(def.meta);
+  check(Math.round(f[H + 21]) > 0 || Math.round(f[H + 48 + 21]) > 0,
+        'occupancyGrid ON by default (descriptor stamped for large interior fills)');
+}
+// Explicit false disables it (texel 5 .y stays 0).
+{
+  const off = await importSvg(svg, { occupancyGrid: false });
   const f = new Float32Array(off.meta);
   check(Math.round(f[H + 21]) === 0 && Math.round(f[H + 48 + 21]) === 0,
-        'occupancyGrid off by default (no descriptors stamped)');
+        'occupancyGrid:false disables it (no descriptors stamped)');
 }
 
-// opt-in.
+// explicit opt-in with tuning.
 const b = await importSvg(svg, { occupancyGrid: { grid: 16 } });
 const f = new Float32Array(b.meta);
 const curveF = new Float32Array(b.curves);

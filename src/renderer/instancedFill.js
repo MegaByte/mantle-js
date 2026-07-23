@@ -2,10 +2,14 @@
 
 /** @param {import('./rendererContext.js').RendererContext} R */
 export function attachInstancedFill(R) {
-    let _instProg = null, _instU = null, _instVaoBundle = null;
+    let _instProg = null, _instU = null;
+    const _instProgs = new Map();   // engineKey ('' Slug | 'MANTLE_AAC…') -> { prog, U }; _instProg/_instU point at the selected one
     let _instAttrBuf = null, _instAttrScratch = null, _instAttrCap = 0;
-    // Compacted (header-free) cover-quad geometry for the instanced draw,
-    // cached per handle+generation. The cover-quad buffer interleaves a
+    // Compacted (header-free) cover-quad geometry for the instanced draw.
+    // Keep a small LRU rather than only the last handle: games commonly
+    // alternate several instanced assets (cards, HUD pieces, hazards), and a
+    // one-entry cache re-packed and re-uploaded both meshes every frame.
+    // The cover-quad buffer interleaves a
     // 12-float chunk header between shapes' vertex runs, so a single
     // drawArraysInstanced over the raw buffer would rasterize the headers as
     // garbage triangles. Pack just the vertices (in shape order) + their
@@ -15,15 +19,125 @@ export function attachInstancedFill(R) {
     // order. Depth is disabled: shapes are emitted in shapeIdx = z order, so
     // painter's order already matches the depth test — and depth can't be
     // reset between instances within one instanced draw.
-    let _instCompactHandle = null, _instCompactGen = -1;
-    let _instCompactVbo = null, _instCompactShapeVbo = null, _instCompactCount = 0;
-    const INST_FLOATS = 10;   // 3 vec3 worldM columns + alpha
+    const _instCompacts = new Map();
+    const MAX_INST_COMPACTS = 8;
+    const INST_FLOATS = 18;   // 3 vec3 worldM columns + alpha + rgba tint + rgba bias
     const COVER_STRIDE_F = 12; // floats per cover-quad vertex
-    function _ensureInstProg() {
-      if (_instProg) return _instProg !== false;
+
+    function _dropInstCompact(compact) {
+      if (!compact) return;
+      if (compact.vao) R.gl.deleteVertexArray(compact.vao);
+      if (compact.vbo) R.gl.deleteBuffer(compact.vbo);
+      if (compact.shapeVbo) R.gl.deleteBuffer(compact.shapeVbo);
+    }
+
+    function _createInstCompactVao(compact) {
+      const vao = R.gl.createVertexArray();
+      R.gl.bindVertexArray(vao);
+      R.gl.bindBuffer(R.gl.ARRAY_BUFFER, compact.vbo);
+      const stride = COVER_STRIDE_F * 4;
+      for (let i = 0; i < 7; i++) R.gl.enableVertexAttribArray(i);
+      R.gl.vertexAttribPointer(0, 2, R.gl.FLOAT, false, stride, 0);
+      R.gl.vertexAttribPointer(1, 2, R.gl.FLOAT, false, stride, 8);
+      R.gl.vertexAttribPointer(2, 2, R.gl.FLOAT, false, stride, 16);
+      R.gl.vertexAttribPointer(3, 2, R.gl.FLOAT, false, stride, 24);
+      R.gl.vertexAttribPointer(4, 2, R.gl.FLOAT, false, stride, 32);
+      R.gl.vertexAttribPointer(5, 1, R.gl.FLOAT, false, stride, 40);
+      R.gl.vertexAttribPointer(6, 1, R.gl.FLOAT, false, stride, 44);
+      for (let i = 0; i < 7; i++) R.gl.vertexAttribDivisor(i, 0);
+      R.gl.bindBuffer(R.gl.ARRAY_BUFFER, compact.shapeVbo);
+      R.gl.enableVertexAttribArray(7);
+      R.gl.vertexAttribPointer(7, 1, R.gl.FLOAT, false, 0, 0);
+      R.gl.vertexAttribDivisor(7, 0);
+      R.gl.bindBuffer(R.gl.ARRAY_BUFFER, _instAttrBuf);
+      const instanceStride = INST_FLOATS * 4;
+      R.gl.enableVertexAttribArray(8);  R.gl.vertexAttribPointer(8,  3, R.gl.FLOAT, false, instanceStride, 0);   R.gl.vertexAttribDivisor(8, 1);
+      R.gl.enableVertexAttribArray(9);  R.gl.vertexAttribPointer(9,  3, R.gl.FLOAT, false, instanceStride, 12);  R.gl.vertexAttribDivisor(9, 1);
+      R.gl.enableVertexAttribArray(10); R.gl.vertexAttribPointer(10, 3, R.gl.FLOAT, false, instanceStride, 24);  R.gl.vertexAttribDivisor(10, 1);
+      R.gl.enableVertexAttribArray(11); R.gl.vertexAttribPointer(11, 1, R.gl.FLOAT, false, instanceStride, 36);  R.gl.vertexAttribDivisor(11, 1);
+      R.gl.enableVertexAttribArray(12); R.gl.vertexAttribPointer(12, 4, R.gl.FLOAT, false, instanceStride, 40);  R.gl.vertexAttribDivisor(12, 1);
+      R.gl.enableVertexAttribArray(13); R.gl.vertexAttribPointer(13, 4, R.gl.FLOAT, false, instanceStride, 56);  R.gl.vertexAttribDivisor(13, 1);
+      R.gl.bindVertexArray(null);
+      return vao;
+    }
+
+    function _instCompactFor(handle) {
+      const bundle = handle.bundle;
+      const geomGen = bundle._geomGen | 0;
+      const cullGen = bundle._cullGen | 0;
+      const invalidGen = bundle._instCompactInvalidGen | 0;
+      let compact = _instCompacts.get(bundle);
+      if (compact && compact.geomGen === geomGen && compact.cullGen === cullGen
+          && compact.invalidGen === invalidGen) {
+        // Map insertion order is our LRU order.
+        _instCompacts.delete(bundle);
+        _instCompacts.set(bundle, compact);
+        return compact;
+      }
+
+      if (compact) {
+        _instCompacts.delete(bundle);
+        _dropInstCompact(compact);
+      }
+      const cqf = bundle.coverQuadFloats;
+      const sidx = bundle.hybridShapeIdxFloats;
+      // Build from the draw list so instancing honors shapes removed by the
+      // occlusion cull instead of reintroducing hidden AA edges.
+      const chunks = [];
+      for (const op of bundle.drawList) if (op.kind === 'fillShape' && op.chunk) chunks.push(op.chunk);
+      let total = 0;
+      for (const chunk of chunks) total += chunk.count;
+      const verts = new Float32Array(total * COVER_STRIDE_F);
+      const shapes = new Float32Array(total);
+      let w = 0;
+      for (const chunk of chunks) {
+        const vStart = chunk.start * COVER_STRIDE_F;
+        verts.set(cqf.subarray(vStart, vStart + chunk.count * COVER_STRIDE_F), w * COVER_STRIDE_F);
+        if (sidx) for (let k = 0; k < chunk.count; k++) shapes[w + k] = sidx[chunk.start + k];
+        w += chunk.count;
+      }
+      compact = {
+        geomGen,
+        cullGen,
+        invalidGen,
+        count: total,
+        vbo: R.gl.createBuffer(),
+        shapeVbo: R.gl.createBuffer(),
+        vao: null,
+      };
+      R.gl.bindBuffer(R.gl.ARRAY_BUFFER, compact.vbo);
+      R.gl.bufferData(R.gl.ARRAY_BUFFER, verts, R.gl.STATIC_DRAW);
+      R.gl.bindBuffer(R.gl.ARRAY_BUFFER, compact.shapeVbo);
+      R.gl.bufferData(R.gl.ARRAY_BUFFER, shapes, R.gl.STATIC_DRAW);
+      compact.vao = _createInstCompactVao(compact);
+      while (_instCompacts.size >= MAX_INST_COMPACTS) {
+        const oldest = _instCompacts.keys().next().value;
+        const retired = _instCompacts.get(oldest);
+        _instCompacts.delete(oldest);
+        _dropInstCompact(retired);
+      }
+      _instCompacts.set(bundle, compact);
+      return compact;
+    }
+    // Compile+cache the instanced program for a given ENGINE (extra frag defines: [] = Slug,
+    // ['MANTLE_AAC'…] = AAC). Sets _instProg/_instU to the selected variant. The VERTEX shader is
+    // always MANTLE_INSTANCED (same attrib layout across engines), so the VAO/attr buffer are shared.
+    function _ensureInstProg(extra) {
+      const key = (extra && extra.length) ? extra.slice().sort().join('|') : '';
+      const cached = _instProgs.get(key);
+      if (cached) { if (cached.prog === false) return false; _instProg = cached.prog; _instU = cached.U; return true; }
       // Compile + link synchronously; a lazily-built program validates itself.
+      const _ps0 = R._pendingShaders.length, _pp0 = R._pendingPrograms.length;
       const vs = R.compile(R.withDefines(R.shaderSources.fillVert, ['MANTLE_INSTANCED']), R.gl.VERTEX_SHADER);
-      const fs = R.compile(R.withDefines(R.shaderSources.fillFrag, R.opts.fillDefines), R.gl.FRAGMENT_SHADER);
+      // The FRAGMENT shader needs MANTLE_INSTANCED too. It used not to — it was "shared
+      // verbatim", because the only per-instance colour was a TINT, and a tint is
+      // multiplicative so the vertex shader could fold it into vOverrideTint and the
+      // fragment shader never had to know. A per-instance BIAS (a fog's offset) cannot be
+      // folded into a multiply, so the fragment shader has to read it — and without the
+      // define, its `in vec4 vInstBias` was compiled straight out and every fog silently
+      // rendered as a plain tint.
+      const fragDefs = (R.opts.fillDefines || []).concat(extra || [], ['MANTLE_INSTANCED']);
+      const fs = R.compile(R.withDefines(R.shaderSources.fillFrag, fragDefs), R.gl.FRAGMENT_SHADER);
       const p = R.gl.createProgram();
       R.gl.attachShader(p, vs); R.gl.attachShader(p, fs); R.gl.linkProgram(p);
       if (!R.gl.getShaderParameter(vs, R.gl.COMPILE_STATUS) ||
@@ -31,10 +145,16 @@ export function attachInstancedFill(R) {
           !R.gl.getProgramParameter(p, R.gl.LINK_STATUS)) {
         R.mantleWarn('[Mantle] instanced fill program failed to build; falling back to per-instance loop.',
           R.gl.getShaderInfoLog(vs), R.gl.getShaderInfoLog(fs), R.gl.getProgramInfoLog(p));
-        _instProg = false;
+        R._pendingShaders.length = _ps0; R._pendingPrograms.length = _pp0;
+        R.gl.deleteProgram(p); R.gl.deleteShader(vs); R.gl.deleteShader(fs);
+        _instProgs.set(key, { prog: false, U: null });
         return false;
       }
-      R._pendingShaders.length = 0; R._pendingPrograms.length = 0;   // we validated inline
+      // Drop ONLY our tail entries (validated inline) — zeroing the whole
+      // queue silently dropped the deferred validation of unrelated
+      // in-flight programs (prewarmed fill variants, the LB pair prog).
+      R._pendingShaders.length = _ps0; R._pendingPrograms.length = _pp0;
+      R.gl.deleteShader(vs); R.gl.deleteShader(fs);
       const U = {};
       for (const n of ['uCurveData', 'uBandData', 'uMetaTex', 'uDashTex', 'uGlobalBBox',
         'uShapeIdxOverride', 'uNumShapes', 'uCanvasAR', 'uViewportSize', 'uGradientTex',
@@ -47,9 +167,9 @@ export function attachInstancedFill(R) {
         'uExtClipTex', 'uExtClipMode']) {
         U[n] = R.gl.getUniformLocation(p, n);
       }
+      _instProgs.set(key, { prog: p, U });
       _instProg = p; _instU = U;
-      _instAttrBuf = R.gl.createBuffer();
-      _instVaoBundle = R.gl.createVertexArray();
+      if (!_instAttrBuf) _instAttrBuf = R.gl.createBuffer();
       return true;
     }
     // Strict gate: only the genuinely simple fill case is instanced; anything
@@ -57,8 +177,22 @@ export function attachInstancedFill(R) {
     // correct per-instance loop.
     function _simpleInstanceable(bundle, handle) {
       if (!bundle || !handle) return false;
+      // Pure function of bundle geometry/cull generations + the handle's
+      // mask regions — cached (the O(numShapes) meta walk ran per instanced
+      // call per frame). A cull can remove the only unsupported op and make
+      // the remaining draw list eligible for the compact draw.
+      const gen9 = bundle._geomGen | 0;
+      const cullGen9 = bundle._cullGen | 0;
+      const hasMask9 = !!(handle.maskRegions && handle.maskRegions.length);
+      const c9 = bundle._instSimpleCache;
+      if (c9 && c9.gen === gen9 && c9.cullGen === cullGen9 && c9.hasMask === hasMask9) return c9.ok;
+      const ok9 = _simpleInstanceableUncached(bundle, hasMask9);
+      bundle._instSimpleCache = { gen: gen9, cullGen: cullGen9, hasMask: hasMask9, ok: ok9 };
+      return ok9;
+    }
+    function _simpleInstanceableUncached(bundle, hasMask) {
       if (bundle._nineSliceActive) return false;
-      if (handle.maskRegions && handle.maskRegions.length) return false;
+      if (hasMask) return false;
       if (bundle.filterGraphs && bundle.filterGraphs.length) return false;
       const dl = bundle.drawList;
       if (!dl || !dl.length) return false;
@@ -78,9 +212,13 @@ export function attachInstancedFill(R) {
       }
       return true;
     }
-    function _drawBundleInstancedFast(bundle, instances) {
+    /// `packedColor` (optional, 8 floats per instance): the derived tint+bias
+    /// when a diagonal colour matrix was folded in. It stays in drawDispatch's
+    /// reusable scratch buffer so caller-owned instance objects remain untouched.
+    function _drawBundleInstancedFast(bundle, instances, packedColor) {
       const n = instances.length;
-      // Upload per-instance worldMatrix (col-major mat3) + alpha.
+      R._instFastCount = (R._instFastCount | 0) + 1;   // debugStats.instancedFastCount
+      // Upload per-instance worldMatrix (col-major mat3) + alpha + rgba tint.
       if (n > _instAttrCap) {
         _instAttrCap = Math.max(n, _instAttrCap ? _instAttrCap * 2 : 64);
         _instAttrScratch = new Float32Array(_instAttrCap * INST_FLOATS);
@@ -95,75 +233,41 @@ export function attachInstancedFill(R) {
         if (wm) { for (let k = 0; k < 9; k++) S[o + k] = wm[k]; }
         else { S[o] = 1; S[o+1] = 0; S[o+2] = 0; S[o+3] = 0; S[o+4] = 1; S[o+5] = 0; S[o+6] = 0; S[o+7] = 0; S[o+8] = 1; }
         S[o + 9] = (typeof inst.alpha === 'number') ? Math.max(0, Math.min(1, inst.alpha)) : 1.0;
+        // Multiplicative tint. A DIAGONAL per-instance colour matrix is exactly a tint, so
+        // it lands here too — see _isDiagCm in drawDispatch.
+        const pc = packedColor ? i * 8 : -1;
+        const tn = inst.tint;
+        if (pc >= 0) {
+          S[o + 10] = packedColor[pc]; S[o + 11] = packedColor[pc + 1];
+          S[o + 12] = packedColor[pc + 2]; S[o + 13] = packedColor[pc + 3];
+        } else if (tn) {
+          S[o + 10] = tn[0]; S[o + 11] = tn[1]; S[o + 12] = tn[2];
+          S[o + 13] = (tn.length > 3 && tn[3] != null) ? tn[3] : 1.0;
+        } else {
+          S[o + 10] = 1; S[o + 11] = 1; S[o + 12] = 1; S[o + 13] = 1;
+        }
+        // Additive bias — what a fog needs and a tint cannot express.
+        if (pc >= 0) { S[o + 14] = packedColor[pc + 4]; S[o + 15] = packedColor[pc + 5]; S[o + 16] = packedColor[pc + 6]; S[o + 17] = packedColor[pc + 7]; }
+        else    { S[o + 14] = 0; S[o + 15] = 0; S[o + 16] = 0; S[o + 17] = 0; }
       }
       R.gl.bindBuffer(R.gl.ARRAY_BUFFER, _instAttrBuf);
       R.gl.bufferSubData(R.gl.ARRAY_BUFFER, 0, S.subarray(0, n * INST_FLOATS));
   
       const [cw, ch] = R.viewportSize();
       R.gl.viewport(0, 0, cw, ch);
-      // Frame setup mirrors R._renderCanvasInner's standalone/in-frame clear,
-      // minus depth (disabled below — see _instCompact note).
+      // This path never reads depth or stencil. beginFrame has already cleared
+      // them for an accumulated frame, and the normal fill path clears them
+      // before it needs either resource. Avoid a full-target resource clear
+      // for every simple instanced batch.
       R.gl.disable(R.gl.STENCIL_TEST);
-      R.gl.clearStencil(0);
       if (!R._inFrame) {
         R.gl.clearColor(1, 1, 1, 1);
-        R.gl.clear(R.gl.COLOR_BUFFER_BIT | R.gl.STENCIL_BUFFER_BIT | R.gl.DEPTH_BUFFER_BIT);
-      } else {
-        R.gl.clear(R.gl.STENCIL_BUFFER_BIT | R.gl.DEPTH_BUFFER_BIT);
+        R.gl.clear(R.gl.COLOR_BUFFER_BIT);
       }
   
-      // (Re)build the compacted header-free cover-quad + shapeIdx buffers for
-      // this handle when the geometry changed (generation bumps on invalidate /
-      // markGeometryDirty). We do NOT touch R._handle.hybridMeshDirty — that gates
-      // the non-instanced triBuf re-upload, which this path doesn't use.
-      if (_instCompactHandle !== R._handle || _instCompactGen !== R._handle.generation) {
-        const cqf = R._handle.bundle.coverQuadFloats;
-        const chunks = R._handle.bundle.coverQuadChunks;
-        const sidx = R._handle.bundle.hybridShapeIdxFloats;
-        let total = 0;
-        for (const c of chunks) total += c.count;
-        const verts = new Float32Array(total * COVER_STRIDE_F);
-        const shapes = new Float32Array(total);
-        let w = 0;
-        for (const c of chunks) {
-          const vStart = c.start * COVER_STRIDE_F;
-          verts.set(cqf.subarray(vStart, vStart + c.count * COVER_STRIDE_F), w * COVER_STRIDE_F);
-          if (sidx) for (let k = 0; k < c.count; k++) shapes[w + k] = sidx[c.start + k];
-          w += c.count;
-        }
-        if (!_instCompactVbo) { _instCompactVbo = R.gl.createBuffer(); _instCompactShapeVbo = R.gl.createBuffer(); }
-        R.gl.bindBuffer(R.gl.ARRAY_BUFFER, _instCompactVbo);
-        R.gl.bufferData(R.gl.ARRAY_BUFFER, verts, R.gl.STATIC_DRAW);
-        R.gl.bindBuffer(R.gl.ARRAY_BUFFER, _instCompactShapeVbo);
-        R.gl.bufferData(R.gl.ARRAY_BUFFER, shapes, R.gl.STATIC_DRAW);
-        _instCompactCount = total;
-        _instCompactHandle = R._handle; _instCompactGen = R._handle.generation;
-      }
+      const compact = _instCompactFor(R._handle);
   
-      // Instance VAO: compacted cover-quad attrs (locs 0–6) + shapeIdx (loc 7)
-      // + per-instance worldM/alpha (locs 8–11, divisor 1).
-      R.gl.bindVertexArray(_instVaoBundle);
-      R.gl.bindBuffer(R.gl.ARRAY_BUFFER, _instCompactVbo);
-      const stride = COVER_STRIDE_F * 4;   // 48 bytes per cover-quad vertex
-      for (let i = 0; i < 7; i++) R.gl.enableVertexAttribArray(i);
-      R.gl.vertexAttribPointer(0, 2, R.gl.FLOAT, false, stride, 0);
-      R.gl.vertexAttribPointer(1, 2, R.gl.FLOAT, false, stride, 8);
-      R.gl.vertexAttribPointer(2, 2, R.gl.FLOAT, false, stride, 16);
-      R.gl.vertexAttribPointer(3, 2, R.gl.FLOAT, false, stride, 24);
-      R.gl.vertexAttribPointer(4, 2, R.gl.FLOAT, false, stride, 32);
-      R.gl.vertexAttribPointer(5, 1, R.gl.FLOAT, false, stride, 40);
-      R.gl.vertexAttribPointer(6, 1, R.gl.FLOAT, false, stride, 44);
-      for (let i = 0; i < 7; i++) R.gl.vertexAttribDivisor(i, 0);
-      R.gl.bindBuffer(R.gl.ARRAY_BUFFER, _instCompactShapeVbo);
-      R.gl.enableVertexAttribArray(7);
-      R.gl.vertexAttribPointer(7, 1, R.gl.FLOAT, false, 0, 0);
-      R.gl.vertexAttribDivisor(7, 0);
-      R.gl.bindBuffer(R.gl.ARRAY_BUFFER, _instAttrBuf);
-      const fs = INST_FLOATS * 4;
-      R.gl.enableVertexAttribArray(8);  R.gl.vertexAttribPointer(8,  3, R.gl.FLOAT, false, fs, 0);   R.gl.vertexAttribDivisor(8, 1);
-      R.gl.enableVertexAttribArray(9);  R.gl.vertexAttribPointer(9,  3, R.gl.FLOAT, false, fs, 12);  R.gl.vertexAttribDivisor(9, 1);
-      R.gl.enableVertexAttribArray(10); R.gl.vertexAttribPointer(10, 3, R.gl.FLOAT, false, fs, 24);  R.gl.vertexAttribDivisor(10, 1);
-      R.gl.enableVertexAttribArray(11); R.gl.vertexAttribPointer(11, 1, R.gl.FLOAT, false, fs, 36);  R.gl.vertexAttribDivisor(11, 1);
+      R.gl.bindVertexArray(compact.vao);
   
       // Bind program + state (trimmed beginFillPass for the simple bundle).
       const b = R._handle.bundle, U = _instU;
@@ -243,9 +347,9 @@ export function attachInstancedFill(R) {
       // ONE instanced draw over the whole compacted range. Instance is the
       // outer loop (inst 0's full shape list, then inst 1's, …) → identical
       // painter order to the per-instance render() loop.
-      R.gl.drawArraysInstanced(R.gl.TRIANGLES, 0, _instCompactCount, n);
+      R.gl.drawArraysInstanced(R.gl.TRIANGLES, 0, compact.count, n);
       R.gl.bindVertexArray(null);
-      R._handle.fillPassAssetDirty = true;   // next non-instanced pass rebinds.
+      R._handle.fillPassAssetDirty = true; R._fpUValid = false;   // next non-instanced pass rebinds.
       return n;
     }
     // In the per-instance draw loop, a bundle whose render depends on a SHARED
@@ -258,27 +362,52 @@ export function attachInstancedFill(R) {
     // the loop at all — they take the drawArraysInstanced fast path above.)
     function _instancedPrefersSlug(bundle, handle) {
       if (!bundle) return false;
-      if (handle && handle.maskRegions && handle.maskRegions.length) return true;
-      if (bundle.filterGraphs && bundle.filterGraphs.some(g => g)) return true;
+      // This gate runs before the per-instance fallback loop. Cache its
+      // O(drawList + numShapes) inspection; culling swaps drawList without a
+      // geometry mutation, so its generation is part of the key.
+      const gen = bundle._geomGen | 0;
+      const cullGen = bundle._cullGen | 0;
+      const hasMask = !!(handle && handle.maskRegions && handle.maskRegions.length);
+      const cached = bundle._instSlugPrefersCache;
+      if (cached && cached.gen === gen && cached.cullGen === cullGen && cached.hasMask === hasMask) return cached.ok;
+      if (hasMask) {
+        bundle._instSlugPrefersCache = { gen, cullGen, hasMask, ok: true };
+        return true;
+      }
+      if (bundle.filterGraphs && bundle.filterGraphs.some(g => g)) {
+        bundle._instSlugPrefersCache = { gen, cullGen, hasMask, ok: true };
+        return true;
+      }
       const dl = bundle.drawList;
       if (dl) for (const op of dl) {
-        if (op.filterGraphId || op.filterId || op.colrGraphId || op.blendMode) return true;
+        if (op.filterGraphId || op.filterId || op.colrGraphId || op.blendMode) {
+          bundle._instSlugPrefersCache = { gen, cullGen, hasMask, ok: true };
+          return true;
+        }
       }
       const meta = bundle.metaFloats, st = bundle.metaFloatsPerShape | 0, n = bundle.numShapes | 0;
       if (meta) for (let s = 0; s < n; s++) {
         const b = s * st;
-        if (Math.floor(meta[b + 30] + 0.5) !== 0) return true;   // clipId
-        if (Math.floor(meta[b + 31] + 0.5) !== 0) return true;   // maskId
+        if (Math.floor(meta[b + 30] + 0.5) !== 0 || Math.floor(meta[b + 31] + 0.5) !== 0) {
+          bundle._instSlugPrefersCache = { gen, cullGen, hasMask, ok: true };
+          return true;
+        }
       }
+      bundle._instSlugPrefersCache = { gen, cullGen, hasMask, ok: false };
       return false;
     }
   R._ensureInstProg = _ensureInstProg;
+  R._disposeInstProgs = () => {
+    for (const v of _instProgs.values()) if (v && v.prog) R.gl.deleteProgram(v.prog);
+    _instProgs.clear(); _instProg = null; _instU = null;
+  };
+  R._disposeInstCompacts = () => {
+    for (const compact of _instCompacts.values()) _dropInstCompact(compact);
+    _instCompacts.clear();
+  };
   R._simpleInstanceable = _simpleInstanceable;
   R._instancedPrefersSlug = _instancedPrefersSlug;
   R._drawBundleInstancedFast = _drawBundleInstancedFast;
   Object.defineProperty(R, '_instProg', { get: () => _instProg });
-  Object.defineProperty(R, '_instVaoBundle', { get: () => _instVaoBundle });
   Object.defineProperty(R, '_instAttrBuf', { get: () => _instAttrBuf });
-  Object.defineProperty(R, '_instCompactVbo', { get: () => _instCompactVbo });
-  Object.defineProperty(R, '_instCompactShapeVbo', { get: () => _instCompactShapeVbo });
 }

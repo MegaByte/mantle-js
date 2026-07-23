@@ -39,10 +39,13 @@ export class DeltaSetIndexMap {
     let cursor = this._dataOff + idx * this._entrySize;
     let raw = 0;
     for (let i = 0; i < this._entrySize; i++) {
-      raw = (raw << 8) | this._bytes[cursor + i];
+      // Unsigned accumulation: a signed << overflows to negative for
+      // 4-byte entries with the top bit set, and >> then sign-extends
+      // into a bogus outer index.
+      raw = (raw * 256) + this._bytes[cursor + i];
     }
     const inner = raw & this._innerMask;
-    const outer = raw >> (this._innerBits + 1);
+    const outer = Math.floor(raw / (this._innerMask + 1));
     return { outer, inner };
   }
 }

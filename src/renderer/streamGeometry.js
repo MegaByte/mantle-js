@@ -27,8 +27,8 @@ import { pathBbox } from '../svg/bbox.js';
 import { pickBandsXY, makeBuildContext, emitShape } from '../svg/buildContext.js';
 import { packMetaBody } from '../svg/meta.js';
 import { getCoverQuadMesh } from '../svg/mesh.js';
-import { makeTex } from './bundle.js';
-import { parseCoverQuadChunks, buildShapeIdxFloats } from './coverQuadChunks.js';
+import { makeTex, buildDrawList } from './bundle.js';
+import { parseCoverQuadChunks, buildShapeIdxFloats, buildStrippedCoverQuad } from './coverQuadChunks.js';
 import { refreshLoopBlinnMesh, buildLoopBlinnMesh, packLoopBlinnMesh } from './loopBlinn.js';
 import { SEG_LINE, SEG_QUAD, SEG_ARC } from '../primitives/seg.js';
 import { segsToPathD } from '../svg/segment.js';
@@ -231,6 +231,11 @@ function streamGeometryLightweight(bundle, perShapeSegs) {
 
   const prevRaw = bundle._lbMeshesRaw;
   const prevPacked = bundle._lbMeshes;   // reuse last frame's per-shape VBOs
+  // Full ramp construction heals every interior-to-curve T-junction. That is
+  // required for general/translucent streams, but known opaque convex bands
+  // can opt out at bundle creation: their interior is overlap-idempotent and
+  // paying the generic crack healer every frame defeats streaming entirely.
+  const ramp = bundle._lbStreamRamp !== false;
   // Reuse the prior frame's wrapper arrays in place (fixed n; each slot is
   // overwritten below, and a same-index read-then-write per iteration is safe)
   // — no per-frame Array(n) garbage. They become _lbMeshesRaw/_lbMeshes again.
@@ -256,8 +261,8 @@ function streamGeometryLightweight(bundle, perShapeSegs) {
     // failing the whole bundle would blank (or AA-fragment) the entire road when
     // a single transient section turns unservable mid-scroll.
     // PER-SHAPE FINGERPRINT SKIP: games stream whole bundles when only a few
-    // shapes moved (a road game streams a STATIC track every frame; wave
-    // Treasures' far waves sit still between cycles). An unchanged shape keeps
+    // shapes moved (a road game streams a STATIC track every frame; a wave
+    // game's far waves sit still between cycles). An unchanged shape keeps
     // last frame's mesh + packed VBO outright — the refresh/rebuild (and its
     // healer/split work) runs only for shapes whose coordinates actually moved.
     let fp = 0x811c9dc5;
@@ -298,7 +303,7 @@ function streamGeometryLightweight(bundle, perShapeSegs) {
     if (contours) {
       try {
         mesh = (prevRaw && prevRaw[i] && !prevRaw[i].slug) ? refreshLoopBlinnMesh(prevRaw[i], contours)
-                                                          : buildLoopBlinnMesh(contours);
+                                                          : buildLoopBlinnMesh(contours, ramp);
       } catch { mesh = null; }
       if (mesh && mesh.fallback.length) mesh = null;   // loop/cusp
     }
@@ -314,6 +319,9 @@ function streamGeometryLightweight(bundle, perShapeSegs) {
     // same vertex count → refilled in place, no allocation). Don't reuse a
     // sentinel slot from a frame where this shape was unservable.
     packed[i] = packLoopBlinnMesh(mesh, prevPacked && prevPacked[i] && !prevPacked[i].slug ? prevPacked[i] : undefined);
+    if (!packed[i] || packed[i].overBudget || packed[i].slug) {
+      raw[i] = SLUG; packed[i] = SLUG; hasSlug = true; continue;
+    }
     // Global bbox from the RENDERED shapes only (the original behavior) — drives
     // the bundle's em→NDC mapping.
     if (packed[i].vertexCount) {
@@ -342,6 +350,21 @@ function streamGeometryLightweight(bundle, perShapeSegs) {
   // fresh wrapper object, so the GPU re-upload still fires.
   bundle._geomGen = gen;
   bundle._lbStream = true;          // route LB despite geomGen>0
+  // The occlusion cull (occlusionCull.js) is computed ONCE at import against the
+  // geometry as authored. Streaming moves the shapes, so a shape that was hidden
+  // then need not be hidden now — the road's bands overlap at load and separate as
+  // they scroll, and keeping the cull dropped whole bands mid-road. This path does
+  // not rebuild the drawList (a lightweight stream has no cover quads), so retire
+  // the cull explicitly the first time geometry moves. The full Slug rebuild and
+  // applyNineSlice already rebuild the list without it.
+  if (bundle._culledShapes) {
+    bundle._culledShapes = null;
+    if (Array.isArray(bundle.drawList) && bundle.drawListUnculled)
+      bundle.drawList = bundle.drawListUnculled;
+    // Anything caching a DRAW-LIST derivative has to rebuild — the instanced fast path
+    // compacts its cover-quad VBO from this list, and it keys that cache on _cullGen.
+    bundle._cullGen = (bundle._cullGen | 0) + 1;
+  }
   // A lightweight stream bundle is solid-fill by construction (it rejected
   // stroke/clip/mask/dash above, and buildStreamableSections only carries
   // {segs, fill} — no gradient/image). Flag it so the draw route skips the
@@ -350,6 +373,10 @@ function streamGeometryLightweight(bundle, perShapeSegs) {
   bundle._lbSolidOnly = true;
   bundle._lbOpaque = !anyTrans;     // gates the all-opaque combined-route fast path
   if (inkShapes > 0) bundle.globalBBox = [bx0, by0, bx1 - bx0, by1 - by0];
+  // Shapes moved: imported occupancy cells are no longer valid for the new
+  // positions. Retire the acceleration (correct-but-unaccelerated) rather than
+  // skipping interiors against a stale grid.
+  clearStreamedOccupancy(bundle, meta, n, stride);
   return { ok: true };
 }
 
@@ -378,6 +405,7 @@ function streamGeometryLightweight(bundle, perShapeSegs) {
  *   ok:false → caller should fall back to a full importSvg→createBundle.
  */
 export function updateBundleGeometry(gl, bundle, perShapeSegs, opts = {}) {
+  const pairBands = !!(bundle && bundle.pairBands);
   // Per-shape fills (opts.fills: one straight-alpha rgba per shape) → write
   // straight to the meta fill texel so BOTH the analytic LB combine and the
   // Slug cover-quad path pick them up. This lets a streamed bundle recolor
@@ -451,7 +479,9 @@ export function updateBundleGeometry(gl, bundle, perShapeSegs, opts = {}) {
     // This path already bailed on any stroke geometry above, so every shape's
     // curve buffer is fill-only → skip the stroke metadata (pairing/tangents/
     // arc-length) for a cheaper rebuild on complex shapes.
-    const info = buildTexturesShape(segs, bandsX, bandsY, bb, curveBuf, bandBuf, 0, true);
+    // Rebuilt bands MUST match the layout the bundle was emitted with, or the
+    // AAC walker's stride (b += 2 for pair bands) reads the wrong stripes.
+    const info = buildTexturesShape(segs, bandsX, bandsY, bb, curveBuf, bandBuf, 0, true, false, pairBands);
 
     // Patch meta texel 0 (per-shape bbox) + texel 4 (glyphLoc + bandMax).
     // Everything else in the row (fill / stroke / gradient ids / clip /
@@ -559,12 +589,24 @@ export function updateBundleGeometry(gl, bundle, perShapeSegs, opts = {}) {
   bundle.coverQuadChunks = parseCoverQuadChunks(cqf, bundle.flags);
   bundle.hybridShapeIdxFloats = cqf
     ? buildShapeIdxFloats(cqf, bundle.coverQuadChunks, bundle.gidToShapeIdx) : null;
+  // Repack the header-free VBO planes + restamp vboStart for the new mesh.
+  const strip = cqf
+    ? buildStrippedCoverQuad(cqf, bundle.coverQuadChunks, bundle.hybridShapeIdxFloats) : null;
+  bundle.coverQuadVboFloats = strip ? strip.verts : null;
+  bundle.hybridShapeIdxVboFloats = strip ? strip.shapeIdx : null;
   const chunkByShape = new Array(n);
   for (const c of bundle.coverQuadChunks) {
     const si = bundle.gidToShapeIdx.get(c.gid);
     if (si !== undefined) chunkByShape[si] = c;
   }
   bundle.chunkByShape = chunkByShape;
+  // drawList ops reference chunk OBJECTS ({start, count}); after a re-derive
+  // every later chunk's start can shift (a shape's quad appearing/dropping),
+  // so the ops must be rebuilt too or gl.drawArrays reads stale vertex
+  // ranges (applyNineSlice already does this).
+  bundle.drawList = buildDrawList(
+    bundle.metaFloats, n, bundle.metaFloatsPerShape | 0,
+    chunkByShape, bundle.filterGraphs);
 
   // This is the full (Slug) rebuild — the curve/band textures + cover-quad
   // mesh are now live. Clear any `_lbStream` flag left by a prior lightweight
@@ -573,5 +615,33 @@ export function updateBundleGeometry(gl, bundle, perShapeSegs, opts = {}) {
   bundle._lbStream = false;
   bundle._lbSolidOnly = false;
 
+  // Occupancy grids / cull sets were computed against the previous curve layout.
+  // The new curve plane has no reserved occupancy slots, but meta texel 5 may
+  // still advertise (base, G) — zero those descriptors and retire hasOccupancy
+  // so a late worker callback (guarded by _geomGen / plane identity) cannot
+  // patch bits into live curve texels, and the shader cannot skip on stale G.
+  clearStreamedOccupancy(bundle, meta, n, stride);
+  if (bundle._culledShapes) {
+    bundle._culledShapes = null;
+    bundle._cullGen = (bundle._cullGen | 0) + 1;
+  }
+  bundle._geomGen = (bundle._geomGen | 0) + 1;
+
   return { ok: true, reallocated };
+}
+
+/** Drop occupancy descriptors after a geometry stream (meta + flag only). */
+function clearStreamedOccupancy(bundle, meta, n, stride) {
+  bundle.hasOccupancy = false;
+  if (!meta || !stride) return;
+  const ATLAS_W = 43; // meta texel 10.w — pattern carriers reuse texel 5
+  for (let i = 0; i < n; i++) {
+    const b = i * stride;
+    const atlasW = meta[b + ATLAS_W];
+    if (atlasW >= 1.5) continue; // pattern: texel 5 holds patInvLinear
+    const g = meta[b + 21];
+    if (!(g > 0)) continue;
+    meta[b + 20] = 0;
+    meta[b + 21] = 0;
+  }
 }

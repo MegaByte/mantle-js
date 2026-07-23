@@ -247,3 +247,30 @@ export const cubicPt = (P, t) => { const u = 1 - t; return [
   u*u*u*P[0][0] + 3*u*u*t*P[1][0] + 3*u*t*t*P[2][0] + t*t*t*P[3][0],
   u*u*u*P[0][1] + 3*u*u*t*P[1][1] + 3*u*t*t*P[2][1] + t*t*t*P[3][1]]; };
 
+
+
+/// A cubic whose leading coefficient vanishes IS a quadratic. Loop-Blinn's klmn
+/// classification then reports d1 = d2 = 0 and cubicKLMN() bails to the exact-Bezout
+/// (kind-4) crescent — whose coverage is wrong for this class: a squircle drawn as four
+/// cubics with CORNER control points, e.g.
+///     M 40 100 C 40 60 60 40 100 40 ...
+/// has C3 = -P0 + 3P1 - 3P2 + P3 = (0,0) exactly, and rendered only its interior diamond
+/// (ink 0.595 vs Slug). Degree-reduce it to a true quadratic instead: the kind-1 crescent
+/// is exact, cheaper, and carries the tangent/corner partition that cubics lack.
+///
+/// Returns the quadratic control point Q, or null when the cubic is a genuine cubic.
+/// (Both P0 + 1.5(P1-P0) and P3 + 1.5(P2-P3) give Q when C3 == 0; average them so a
+/// near-degenerate cubic reduces to the least-squares quadratic rather than one endpoint's.)
+export function cubicDegreeReduce(P) {
+  const b0 = P[0], b1 = P[1], b2 = P[2], b3 = P[3];
+  const c3x = -b0[0] + 3 * b1[0] - 3 * b2[0] + b3[0];
+  const c3y = -b0[1] + 3 * b1[1] - 3 * b2[1] + b3[1];
+  // scale: the control polygon's total length — |C3| is a length in the same units
+  const scale = Math.hypot(b1[0] - b0[0], b1[1] - b0[1])
+              + Math.hypot(b2[0] - b1[0], b2[1] - b1[1])
+              + Math.hypot(b3[0] - b2[0], b3[1] - b2[1]) + 1e-12;
+  if (Math.hypot(c3x, c3y) > 1e-6 * scale) return null;
+  const qa = [(3 * b1[0] - b0[0]) / 2, (3 * b1[1] - b0[1]) / 2];
+  const qb = [(3 * b2[0] - b3[0]) / 2, (3 * b2[1] - b3[1]) / 2];
+  return [(qa[0] + qb[0]) / 2, (qa[1] + qb[1]) / 2];
+}

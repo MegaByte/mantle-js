@@ -17,11 +17,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 // Three poses, each a single rect (matched topology), at distinct x + colour.
-const SHEET = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100" width="300" height="100">
-  <g id="a"><rect x="20"  y="30" width="60" height="40" fill="#ff0000"/></g>
-  <g id="b"><rect x="120" y="30" width="60" height="40" fill="#00ff00"/></g>
-  <g id="c"><rect x="220" y="30" width="60" height="40" fill="#0000ff"/></g>
-</svg>`;
+const SHEET = readFileSync(new URL('../examples/smoke/spriteTimeline__SHEET.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="300" height="100"></canvas>

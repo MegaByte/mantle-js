@@ -41,13 +41,7 @@ mkdirSync(OUT, { recursive: true });
 //   shape 1: R=64  → index 1 (with paletteSize=4: 64/255 * 4 ≈ 1.003 → 1)
 //   shape 2: R=128 → index 2
 //   shape 3: R=192 → index 3
-const SVG = `
-<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-  <rect x="0"  y="0"  width="25" height="100" fill="#000000"/>
-  <rect x="25" y="0"  width="25" height="100" fill="#400000"/>
-  <rect x="50" y="0"  width="25" height="100" fill="#800000"/>
-  <rect x="75" y="0"  width="25" height="100" fill="#C00000"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/colorPalette__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body style="margin:0;background:#000">
 <canvas id="c" width="100" height="100"></canvas>

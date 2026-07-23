@@ -505,6 +505,74 @@ function lastClearColor(gl) {
   assert(boundLUT, 'feComponentTransfer bound the LUT texture');
 }
 
+// === 17: disconnected graph outputs are recycled ======================
+{
+  const gl = makeGL();
+  const pool = createRTPool(gl);
+  const graph = {
+    nodes: [
+      { type: 'unused', inputs: [], params: null },
+      { type: 'root', inputs: [], params: null },
+    ],
+    rootOut: 1,
+  };
+  const dispatch = { unused() {}, root() {} };
+  evaluateGraph(gl, graph, pool, dispatch, {}, CW, CH);
+  const allocations = gl.calls.filter(c => c[0] === 'texImage2D').length;
+  assert(allocations === 1,
+         `disconnected output was recycled before root allocation, got ${allocations} textures`);
+}
+
+// === 18: dispatch failures restore pool state ==========================
+{
+  const gl = makeGL();
+  const pool = createRTPool(gl);
+  const graph = {
+    nodes: [
+      { type: 'source', inputs: [], params: null },
+      { type: 'fail', inputs: [0], params: null },
+    ],
+    rootOut: 1,
+  };
+  const dispatch = {
+    source() {},
+    fail() { throw new Error('expected test failure'); },
+  };
+  let threw = false;
+  try {
+    evaluateGraph(gl, graph, pool, dispatch, {}, CW, CH,
+                  [[0, 0, CW, CH], [0, 0, CW, CH]]);
+  } catch { threw = true; }
+  const allocations = gl.calls.filter(c => c[0] === 'texImage2D').length;
+  const clears = gl.calls.filter(c => c[0] === 'clear').length;
+  pool.acquire(CW, CH);
+  const allocationsAfter = gl.calls.filter(c => c[0] === 'texImage2D').length;
+  const clearsAfter = gl.calls.filter(c => c[0] === 'clear').length;
+  assert(threw, 'dispatch exception propagated to the caller');
+  assert(allocationsAfter === allocations,
+         'dispatch exception returned acquired render targets to the pool');
+  assert(clearsAfter === clears,
+         'dispatch exception restored clear-on-acquire state');
+}
+
+// === 19: nested evaluations preserve outer clear state =================
+{
+  const gl = makeGL();
+  const pool = createRTPool(gl);
+  pool.setClearOnAcquire(true);
+  const graph = {
+    nodes: [{ type: 'inner', inputs: [], params: null }],
+    rootOut: 0,
+  };
+  evaluateGraph(gl, graph, pool, { inner() {} }, {}, CW, CH,
+                [[0, 0, CW, CH]]);
+  const clears = gl.calls.filter(c => c[0] === 'clear').length;
+  pool.acquire(CW, CH);
+  const clearsAfter = gl.calls.filter(c => c[0] === 'clear').length;
+  assert(clearsAfter === clears + 1,
+         'nested evaluation restored the outer clear-on-acquire state');
+}
+
 console.log('---');
 if (failures) console.error(`FILTER-GRAPH-COLR FAIL (${failures})`);
 else          console.log('FILTER-GRAPH-COLR PASS');

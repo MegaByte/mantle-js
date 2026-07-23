@@ -184,9 +184,9 @@ export function polygonContour(points) {
 /// the chord so the path traces a straight line. Convenience for
 /// callers building contours manually.
 export function linearSeg(p0, p1) {
-  // Cubic with C1 = C2 = midpoint(p0, p1) is a degenerate straight
-  // line. We place the controls at p0; the curve is collinear so it
-  // renders as a straight line through the fill walker (ray-cast).
+  // Controls coincident with the endpoints (C1 = p0, C2 = p1) lie on
+  // the chord, so the curve is collinear with it and renders as a
+  // straight line through the fill walker (ray-cast).
   return { p0: [p0[0], p0[1]], p1: [p0[0], p0[1]], p2: [p1[0], p1[1]] };
 }
 
@@ -347,7 +347,14 @@ function walkSceneDirect(node, parentM, ctx, gidBox, bb) {
       const out = [];
       if (Array.isArray(s.contours)) for (const c of s.contours) contourToSegs(c, m, out);
       if (!out.length) continue;
-      emitShapeToCtx(ctx, out, { fillRgba: fill, shapeId: s.id || '' }, gidBox, bb);
+      emitShapeToCtx(ctx, out, {
+        fillRgba: fill,
+        shapeId: s.id || '',
+        // Forward the fill rule — eligibility admits evenodd solids, and
+        // defaulting to nonzero here made the direct path disagree with the
+        // sceneToBundle round-trip on self-intersecting shapes.
+        fillRule: (s.fill && s.fill.mode) || 'nonzero',
+      }, gidBox, bb);
     }
   }
   if (Array.isArray(node.children)) for (const ch of node.children) walkSceneDirect(ch, m, ctx, gidBox, bb);
@@ -597,15 +604,17 @@ function emitPathData(contours, m) {
         // the local space — non-uniform CTM scaling of an arc would
         // emit a wrong path, so error out loudly if we see one.
         let ep = endpoint;
+        let rScale = 1;
         if (useM) {
           if (Math.abs(m[0] - m[3]) > 1e-7 || Math.abs(m[1]) > 1e-7 || Math.abs(m[2]) > 1e-7) {
             throw new Error('sceneToSvg: arc segments inside a non-uniform-scaled <g> transform are not supported (decompose the arc to multiple sub-arcs at author time).');
           }
           ep = applyMat(m, ep[0], ep[1]);
+          rScale = Math.abs(m[0]);   // uniform by the guard above — radii scale with the endpoints
         }
         const lA = cur.largeArc ? 1 : 0;
         const sw = (cur.sweep === false) ? 0 : 1;
-        out += 'A' + F(cur.rx) + ' ' + F(cur.ry) + ' ' + F(cur.rotation || 0)
+        out += 'A' + F(cur.rx * rScale) + ' ' + F(cur.ry * rScale) + ' ' + F(cur.rotation || 0)
              + ' ' + lA + ' ' + sw + ' '
              + F(ep[0]) + ' ' + F(ep[1]);
       } else {

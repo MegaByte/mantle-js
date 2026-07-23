@@ -93,7 +93,7 @@ export {
   getCoverQuadMesh,
   COVER_QUAD_STRIDE,
 } from './svg/importer.js';
-export { setDiagnostics, mantleWarn, mantleError, mantleDebugFlag } from './core/diagnostics.js';
+export { setDiagnostics, clearDiagnosticTraces, diagnosticTraces, mantleWarn, mantleError, mantleDebugFlag } from './core/diagnostics.js';
 export { MAX_DECOMPRESS_BYTES } from './core/decompress.js';
 export {
   loadShaders,       // async runtime fetch (browser, no bundler)
@@ -111,6 +111,11 @@ export {
   Constants,
 } from './renderer/bundle.js';
 export { createRenderer } from './renderer/renderer.js';
+// Nine-slice: bundle.applyNineSlice(opts) rewrites a bundle IN PLACE (one
+// nine-slice state per bundle); bundle.nineSliceInstance(opts) returns a
+// cheap per-DRAW view carrying its own rewritten mesh + globalBBox while
+// sharing the base's GL textures — draw ONE chrome asset at several sizes
+// simultaneously. buildNineSliceMesh is the underlying pure rewrite.
 export { buildNineSliceMesh } from './renderer/nineSlice.js';
 // Additive Loop-Blinn hybrid fill — resolution-independent solid-fill mesh
 // builder + packer. Pair with renderer.drawLoopBlinnMesh().
@@ -145,7 +150,7 @@ import './filterGraph/primitives/all.js';
 import './filterGraph/colr/paints.js';
 // Static-scene cache. Strategy/Level/Reason
 // constants are needed by consumers driving the cache from code
-// (e.g. enableStaticCache({ strategy: CacheStrategy.ForceA1 })).
+// (e.g. enableStaticCache({ strategy: CacheStrategy.ForceWholeAsset })).
 // The createStaticCache factory is exposed for advanced consumers
 // that want to drive the state machine independently of a renderer.
 export {
@@ -211,7 +216,8 @@ export { HitMode, fillHitShape, fillHits, fillHitId } from './hitTest/hitTest.js
 // package root ALSO statically exports the WebGL renderer, so a root
 // import can't tree-shake the GL pipeline away. For a NATIVE-ONLY build
 // (no WebGL renderer shipped), import from the `@kontek/mantle/fallback`
-// subpath instead — it reaches none of renderer.js (~107KB vs ~1.6MB).
+// subpath instead — it reaches none of renderer.js, so the bundle is a
+// small fraction of the full package.
 export { createNativeScene } from './fallback/nativeSvgFallback.js';
 export { createNativeOverrideTable } from './fallback/nativeOverrideTable.js';
 export { createNativeMorph, createNativeTimeline } from './fallback/nativeMorph.js';

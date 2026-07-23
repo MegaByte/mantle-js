@@ -59,14 +59,8 @@ const opts = { fonts: { Arial: arial }, svgTextLayout: buildSvgTextGlyphs };
 
 // ---- T1: italic shear changes the glyph bbox ----------------------
 {
-  const plain = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <text x="10" y="50" font-family="Arial" font-size="20" fill="#000">Hi</text>
-</svg>`;
-  const italic = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <text x="10" y="50" font-family="Arial" font-size="20" font-style="italic" fill="#000">Hi</text>
-</svg>`;
+  const plain = readFileSync(new URL('../examples/smoke/svgTextSynthVertical__plain.svg', import.meta.url), 'utf8');
+  const italic = readFileSync(new URL('../examples/smoke/svgTextSynthVertical__italic.svg', import.meta.url), 'utf8');
   const rPlain  = visibleRows(await importSvg(plain,  opts));
   const rItalic = visibleRows(await importSvg(italic, opts));
   if (rPlain.length === 0 || rItalic.length === 0) {
@@ -82,14 +76,8 @@ const opts = { fonts: { Arial: arial }, svgTextLayout: buildSvgTextGlyphs };
 
 // ---- T2: bold synthesis adds stroke to glyphs ---------------------
 {
-  const plain = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <text x="10" y="50" font-family="Arial" font-size="20" fill="#000">Hi</text>
-</svg>`;
-  const bold = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <text x="10" y="50" font-family="Arial" font-size="20" font-weight="bold" fill="#000">Hi</text>
-</svg>`;
+  const plain = readFileSync(new URL('../examples/smoke/svgTextSynthVertical__plain.svg', import.meta.url), 'utf8');
+  const bold = readFileSync(new URL('../examples/smoke/svgTextSynthVertical__bold.svg', import.meta.url), 'utf8');
   const rPlain = visibleRows(await importSvg(plain, opts));
   const rBold  = visibleRows(await importSvg(bold,  opts));
   // Plain glyphs have sw=0; bold-synthesised glyphs have sw>0 AND
@@ -115,10 +103,7 @@ const opts = { fonts: { Arial: arial }, svgTextLayout: buildSvgTextGlyphs };
     return buildSvgTextGlyphs(text, font, x, y, fontSize, fallbacks, maxWidthEm, styleOptsX);
   };
   const optsVar = { fonts: { Arial: arial }, svgTextLayout: adapter };
-  const bold = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <text x="10" y="50" font-family="Arial" font-size="20" font-weight="bold" fill="#000">Hi</text>
-</svg>`;
+  const bold = readFileSync(new URL('../examples/smoke/svgTextSynthVertical__bold.svg', import.meta.url), 'utf8');
   const rBold = visibleRows(await importSvg(bold, optsVar));
   // With variantFonts.boldFont wired, synth-bold should NOT fire — sw=0.
   const noSynthStroke = rBold.every(r => r.sw === 0);
@@ -128,14 +113,8 @@ const opts = { fonts: { Arial: arial }, svgTextLayout: buildSvgTextGlyphs };
 
 // ---- T4: vertical writing-mode advances pen DOWN ----------------
 {
-  const horizontal = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <text x="50" y="20" font-family="Arial" font-size="12" fill="#000">ABCD</text>
-</svg>`;
-  const vertical = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <text x="50" y="20" font-family="Arial" font-size="12" writing-mode="vertical-rl" fill="#000">ABCD</text>
-</svg>`;
+  const horizontal = readFileSync(new URL('../examples/smoke/svgTextSynthVertical__horizontal.svg', import.meta.url), 'utf8');
+  const vertical = readFileSync(new URL('../examples/smoke/svgTextSynthVertical__vertical.svg', import.meta.url), 'utf8');
   const rH = visibleRows(await importSvg(horizontal, opts));
   const rV = visibleRows(await importSvg(vertical, opts));
   // Horizontal: glyphs spread along X, bbox.x increases monotonically.
@@ -161,10 +140,7 @@ const opts = { fonts: { Arial: arial }, svgTextLayout: buildSvgTextGlyphs };
     return buildSvgTextGlyphs(text, font, x, y, fontSize, fallbacks, maxWidthEm, styleOptsX);
   };
   const o = { fonts: { Arial: arial }, svgTextLayout: adapter };
-  const bold = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <text x="10" y="50" font-family="Arial" font-size="20" font-weight="bold" fill="#000">Hi</text>
-</svg>`;
+  const bold = readFileSync(new URL('../examples/smoke/svgTextSynthVertical__bold.svg', import.meta.url), 'utf8');
   const rBold = visibleRows(await importSvg(bold, o));
   const noStroke = rBold.every(r => r.sw === 0);
   if (noStroke) ok(`T5 synthesizeBold=false suppresses synth (font-synthesis: none parity)`);

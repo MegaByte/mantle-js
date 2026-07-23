@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <path d="M0,150 Q100,110 200,140 Q300,170 400,130 L400,300 L0,300 Z"   fill="#ff0000"/>
+  <path d="M0,150 Q100,110 200,140 Q300,170 400,130 L400,400 L0,400 Z" fill="#DEBD4F"/>
+  <path d="M0,150 Q100,110 200,140 Q300,170 400,130 L400,400 L0,400 Z" fill="#B2F2D9" fill-opacity="0.6"/>
+</svg>

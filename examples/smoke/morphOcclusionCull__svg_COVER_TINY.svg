@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <path id="hidden" d="M120,120 L280,120 L280,240 L120,240 Z" fill="#ff0000"/>
+  <path id="cover"  d="M100,100 L140,100 L140,140 L100,140 Z" fill="#DEBD4F"/>
+</svg>

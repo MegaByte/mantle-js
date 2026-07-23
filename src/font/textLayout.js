@@ -12,6 +12,20 @@ import {
 import { isDefaultIgnorable } from './defaultIgnorable.js';
 
 import { isCjkOpening, isCjkBreakBefore, planKashida, resolveGlyph, resolveGlyphWithSelector, isVariationSelector } from './textBreak.js';
+
+/// Replace dst's contents with src's, element by element. Spread-push
+/// (`dst.push(...src)`) passes every element as a call argument and
+/// throws RangeError past the engine's argument limit (~64k in V8) —
+/// a single long span would kill layout mid-paragraph.
+function _replaceInPlace(dst, src) {
+  dst.length = src.length;
+  for (let i = 0; i < src.length; i++) dst[i] = src[i];
+}
+
+// Lazy Intl.Segmenter singleton (word granularity) — see the wrap-hint
+// pass; construction is expensive relative to a span's layout.
+let _wordSegmenter = null;
+
 export function layoutSlots(spans, font, layout) {
   font.getMetrics(0x20);
   const naturalLineHeight = font.ascent - font.descent + font.lineGap;
@@ -171,7 +185,9 @@ export function layoutSlots(spans, font, layout) {
     // Word boundaries are a wrap HINT only (non-output-critical); keep them on
     // the platform segmenter and degrade gracefully if it is absent.
     if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
-      const wseg = new Intl.Segmenter(undefined, { granularity: 'word' });
+      // Module-level singleton — Segmenter construction is expensive and
+      // this runs per span of every layout.
+      const wseg = _wordSegmenter || (_wordSegmenter = new Intl.Segmenter(undefined, { granularity: 'word' }));
       for (const w of wseg.segment(normalized)) {
         // We only care about word-LIKE boundaries — punctuation
         // segments (e.g. the period between sentences) shouldn't
@@ -258,11 +274,11 @@ export function layoutSlots(spans, font, layout) {
         }
         ri = rj;
       }
-      cps.length = 0; cps.push(...nCps);
-      gids.length = 0; gids.push(...nGids);
-      clusterStarts.length = 0; clusterStarts.push(...nClusterStarts);
-      wordStarts.length = 0; wordStarts.push(...nWordStarts);
-      fonts.length = 0; fonts.push(...nFonts);
+      _replaceInPlace(cps, nCps);
+      _replaceInPlace(gids, nGids);
+      _replaceInPlace(clusterStarts, nClusterStarts);
+      _replaceInPlace(wordStarts, nWordStarts);
+      _replaceInPlace(fonts, nFonts);
     }
 
     // SmallCaps substitution (GSUB lookup 1). Runs BEFORE ligatures so
@@ -312,11 +328,11 @@ export function layoutSlots(spans, font, layout) {
           newFonts.push(fonts[i]);
         }
       }
-      cps.length = 0; cps.push(...newCps);
-      gids.length = 0; gids.push(...newGids);
-      clusterStarts.length = 0; clusterStarts.push(...newClusterStarts);
-      wordStarts.length = 0; wordStarts.push(...newWordStarts);
-      fonts.length = 0; fonts.push(...newFonts);
+      _replaceInPlace(cps, newCps);
+      _replaceInPlace(gids, newGids);
+      _replaceInPlace(clusterStarts, newClusterStarts);
+      _replaceInPlace(wordStarts, newWordStarts);
+      _replaceInPlace(fonts, newFonts);
     }
 
     // Arabic positional form substitution (init/medi/fina/isol).
@@ -473,25 +489,21 @@ export function layoutSlots(spans, font, layout) {
           newFonts.push(sFonts[k]);
         }
       }
-      cps.length = 0; cps.push(...newCps);
-      gids.length = 0; gids.push(...newGids);
-      clusterStarts.length = 0; clusterStarts.push(...newClusterStarts);
-      wordStarts.length = 0; wordStarts.push(...newWordStarts);
-      fonts.length = 0; fonts.push(...newFonts);
+      _replaceInPlace(cps, newCps);
+      _replaceInPlace(gids, newGids);
+      _replaceInPlace(clusterStarts, newClusterStarts);
+      _replaceInPlace(wordStarts, newWordStarts);
+      _replaceInPlace(fonts, newFonts);
     }
 
-    // Thai/Lao shaping. Two passes:
-    //   1. SARA AM decomposition (U+0E33 → U+0E32 + U+0E4D for Thai,
-    //      U+0EB3 → U+0EB2 + U+0ECD for Lao). NFC keeps SARA AM
-    //      composed, but some fonts only glyph the decomposed pair —
-    //      this mirrors what OT 'ccmp' would do.
-    //   2. Pre-base vowel reorder: 5 Thai vowels (U+0E40..U+0E44) and
-    //      5 Lao vowels (U+0EC0..U+0EC4) appear AFTER the consonant in
-    //      memory but render visually BEFORE. We swap each
-    //      (consonant, pre-vowel) pair in the parallel arrays.
-    //   GPOS mark attachment for Thai/Lao tone marks + above/below
-    //   vowels rides the mark-attachment slot loop via the isMarkAt()
-    //   predicate.
+    // Thai/Lao shaping: SARA AM decomposition (U+0E33 → U+0E4D + U+0E32
+    // for Thai, U+0EB3 → U+0ECD + U+0EB2 for Lao — mark first, matching
+    // Unicode's canonical decomposition and HarfBuzz). NFC keeps SARA AM
+    // composed, but some fonts only glyph the decomposed pair — this
+    // mirrors what OT 'ccmp' would do. Thai/Lao are encoded in VISUAL
+    // order, so there is no reorder pass. GPOS mark attachment for tone
+    // marks + above/below vowels rides the mark-attachment slot loop via
+    // the isMarkAt() predicate.
     const _thai = getThaiShaping();
     if (_thai && cps.some(_thai.isThaiLaoCodepoint)) {
       // Decompose SARA AM. The decomposed halves re-resolve their gid
@@ -519,35 +531,18 @@ export function layoutSlots(spans, font, layout) {
           newWordStarts.push(firstHalf ? wordStarts[src] : false);
           newFonts.push(fonts[src]);
         }
-        cps.length = 0; cps.push(...newCps);
-        gids.length = 0; gids.push(...newGids);
-        clusterStarts.length = 0; clusterStarts.push(...newClusterStarts);
-        wordStarts.length = 0; wordStarts.push(...newWordStarts);
-        fonts.length = 0; fonts.push(...newFonts);
+        _replaceInPlace(cps, newCps);
+        _replaceInPlace(gids, newGids);
+        _replaceInPlace(clusterStarts, newClusterStarts);
+        _replaceInPlace(wordStarts, newWordStarts);
+        _replaceInPlace(fonts, newFonts);
       }
 
-      // Pre-base vowel reorder. Operates on the (now-decomposed) cps
-      // array; permutes all parallel arrays.
-      const ord = _thai.reorderThaiLao(cps);
-      // Skip rebuild when identity (no pre-base vowels found).
-      let identity = true;
-      for (let i = 0; i < ord.length; i++) if (ord[i] !== i) { identity = false; break; }
-      if (!identity) {
-        const newCps = [], newGids = [], newClusterStarts = [], newWordStarts = [], newFonts = [];
-        for (let i = 0; i < ord.length; i++) {
-          const src = ord[i];
-          newCps.push(cps[src]);
-          newGids.push(gids[src]);
-          newClusterStarts.push(clusterStarts[src]);
-          newWordStarts.push(wordStarts[src]);
-          newFonts.push(fonts[src]);
-        }
-        cps.length = 0; cps.push(...newCps);
-        gids.length = 0; gids.push(...newGids);
-        clusterStarts.length = 0; clusterStarts.push(...newClusterStarts);
-        wordStarts.length = 0; wordStarts.push(...newWordStarts);
-        fonts.length = 0; fonts.push(...newFonts);
-      }
+      // No pre-base vowel reorder: Thai/Lao are encoded in VISUAL order
+      // (TUS §16.1) — pre-base vowels are already stored before their
+      // consonant, and HarfBuzz performs no reorder either. The old swap
+      // here displaced every mid-string เ/แ/โ/ใ/ไ in correctly-encoded
+      // text.
     }
 
     // USE shaping (Khmer + Myanmar + Tibetan + other USE scripts).
@@ -570,11 +565,11 @@ export function layoutSlots(spans, font, layout) {
           newFonts.push(fonts[absIdx]);
         }
       }
-      cps.length = 0; cps.push(...newCps);
-      gids.length = 0; gids.push(...newGids);
-      clusterStarts.length = 0; clusterStarts.push(...newClusterStarts);
-      wordStarts.length = 0; wordStarts.push(...newWordStarts);
-      fonts.length = 0; fonts.push(...newFonts);
+      _replaceInPlace(cps, newCps);
+      _replaceInPlace(gids, newGids);
+      _replaceInPlace(clusterStarts, newClusterStarts);
+      _replaceInPlace(wordStarts, newWordStarts);
+      _replaceInPlace(fonts, newFonts);
     }
 
     // Ligature pass — only within runs of same-font glyphs.
@@ -590,43 +585,44 @@ export function layoutSlots(spans, font, layout) {
       const newCps = [], newGids = [], newClusterStarts = [], newWordStarts = [], newFonts = [], newLigComps = [];
       let i = 0;
       while (i < gids.length) {
-        const fGsub = fonts[i].gsub;
-        const tryLiga = fGsub && fGsub.hasLigatures && gids[i] !== 0;
-        // Find longest run of same-font glyphs starting at i.
+        // Same-font run boundary + slice computed ONCE per run — the
+        // per-glyph rescan-to-end was O(n²) on single-font text (~N²/2
+        // comparisons per span per layout).
         let runEnd = i + 1;
         while (runEnd < gids.length && fonts[runEnd] === fonts[i]) runEnd++;
-        // Slice gids to that run so liga lookup can't straddle fonts.
-        let runSlice = gids;
-        let runOffset = i;
-        if (runEnd !== gids.length) {
-          runSlice = gids.slice(i, runEnd);
-          runOffset = 0;
-        }
-        const hit = tryLiga ? fGsub.tryMatchLigature(runSlice, runOffset) : null;
-        if (hit && hit.consumed > 0 && i + hit.consumed <= runEnd) {
-          newGids.push(hit.replacement);
-          newCps.push(cps[i]);
-          newClusterStarts.push(clusterStarts[i]);
-          newWordStarts.push(wordStarts[i]);
-          newFonts.push(fonts[i]);
-          newLigComps.push(hit.consumed);
-          i += hit.consumed;
-        } else {
-          newGids.push(gids[i]);
-          newCps.push(cps[i]);
-          newClusterStarts.push(clusterStarts[i]);
-          newWordStarts.push(wordStarts[i]);
-          newFonts.push(fonts[i]);
-          newLigComps.push(1);
-          i++;
+        const fGsub = fonts[i].gsub;
+        const wholeArr = i === 0 && runEnd === gids.length;
+        const runSlice = wholeArr ? gids : gids.slice(i, runEnd);
+        const runBase = wholeArr ? 0 : i;
+        const runHasLiga = fGsub && fGsub.hasLigatures;
+        while (i < runEnd) {
+          const hit = (runHasLiga && gids[i] !== 0)
+            ? fGsub.tryMatchLigature(runSlice, i - runBase) : null;
+          if (hit && hit.consumed > 0 && i + hit.consumed <= runEnd) {
+            newGids.push(hit.replacement);
+            newCps.push(cps[i]);
+            newClusterStarts.push(clusterStarts[i]);
+            newWordStarts.push(wordStarts[i]);
+            newFonts.push(fonts[i]);
+            newLigComps.push(hit.consumed);
+            i += hit.consumed;
+          } else {
+            newGids.push(gids[i]);
+            newCps.push(cps[i]);
+            newClusterStarts.push(clusterStarts[i]);
+            newWordStarts.push(wordStarts[i]);
+            newFonts.push(fonts[i]);
+            newLigComps.push(1);
+            i++;
+          }
         }
       }
-      ligComponents.length = 0; ligComponents.push(...newLigComps);
-      cps.length = 0; cps.push(...newCps);
-      gids.length = 0; gids.push(...newGids);
-      clusterStarts.length = 0; clusterStarts.push(...newClusterStarts);
-      wordStarts.length = 0; wordStarts.push(...newWordStarts);
-      fonts.length = 0; fonts.push(...newFonts);
+      _replaceInPlace(ligComponents, newLigComps);
+      _replaceInPlace(cps, newCps);
+      _replaceInPlace(gids, newGids);
+      _replaceInPlace(clusterStarts, newClusterStarts);
+      _replaceInPlace(wordStarts, newWordStarts);
+      _replaceInPlace(fonts, newFonts);
     }
 
     // Caller-opted-in GSUB features (tnum, lnum, ss01, salt, etc.).
@@ -675,7 +671,14 @@ export function layoutSlots(spans, font, layout) {
       const cp = cps[idx];
       let gid = gids[idx];
       const slotFont = fonts[idx];
-      if (cp === 0x0A) { endLine(); prevGid = 0; prevCp = 0; prevFont = null; continue; }
+      if (cp === 0x0A) {
+        endLine();
+        // Explicit break = paragraph boundary (UAX #9 P1): the bidi pass
+        // resolves each paragraph independently.
+        if (lines.length) lines[lines.length - 1]._paraEnd = true;
+        prevGid = 0; prevCp = 0; prevFont = null;
+        continue;
+      }
 
       // Unicode Default_Ignorable_Code_Point hiding (HarfBuzz parity).
       // Variation selectors (FE00–FE0F, E0100–E01EF), ZWJ/ZWNJ, ZWSP,
@@ -710,17 +713,29 @@ export function layoutSlots(spans, font, layout) {
         if (target > 0) {
           const axis = _math.isAlwaysStretchy(cp, 'h') ? 'h' : 'v';
           // First try pre-built variants — fastest path, single gid.
+          const baseGid9 = gid;
           const variantGid = slotFont.math.pickVariantForSize(gid, target, axis);
           gid = variantGid;
           // If the picked variant still isn't big enough, AND the font
           // ships an assembly recipe, switch to assembly emit.
           // pickVariantForSize falls back to the largest pre-built when
-          // none cover — so we re-check its advance.
-          const variantAdv = slotFont.getMetricsByGid(variantGid).advance
-                             * slotFont.unitsPerEm;
+          // none cover — so we re-check its advance. The check must use
+          // the MathGlyphVariantRecord's AXIS advance (a height on the
+          // v-axis, from the MATH table) — the hmtx width is always far
+          // below displayOperatorMinHeight, so comparing it forced the
+          // assembly path even when a pre-built variant covered.
+          let variantAdv = 0;
+          const mv9 = slotFont.math.getMathVariants(baseGid9, axis);
+          if (mv9) {
+            for (const rec9 of mv9.variants) {
+              if (rec9.glyphID === variantGid) { variantAdv = rec9.advance; break; }
+            }
+          }
           const targetAxisAdv = target;  // already in font units (height for the v-axis)
           if (variantAdv < targetAxisAdv) {
-            const asm = slotFont.math.buildAssembly(gid, target, axis);
+            // The assembly recipe lives on the BASE glyph's
+            // MathGlyphConstruction (gid was reassigned to the variant).
+            const asm = slotFont.math.buildAssembly(baseGid9, target, axis);
             if (asm && asm.parts.length > 1) {
               slotMathAssembly = { axis, asm };
             }
@@ -766,11 +781,14 @@ export function layoutSlots(spans, font, layout) {
       const italicCorrEm = italicCorrFu * slotInvUpem;
       const mspace = span.style.mspaceEm || 0;
       const cspace = span.style.cspaceEm || 0;
+      // Word-spacing (SVG/CSS): extra advance on word separators only.
+      const wspace = (span.style.wspaceEm || 0) && (cp === 0x20 || cp === 0xA0)
+        ? span.style.wspaceEm : 0;
       const adv = isIgnorable
         ? 0
         : mspace > 0
         ? mspace * sizeScale
-        : ((natAdv + singlePosDelta + italicCorrEm) * widthScale + cspace) * sizeScale;
+        : ((natAdv + singlePosDelta + italicCorrEm) * widthScale + cspace + wspace) * sizeScale;
 
       // Pair kerning — only between same-font adjacent slots (kerning
       // pairs are font-local; no cross-font kern).
@@ -1014,7 +1032,13 @@ export function layoutSlots(spans, font, layout) {
             const kFu = sFont.getPairKerningFu(lastGid, s.glyphId);
             if (kFu !== 0) penX += kFu * sInvUpem * cw * s.style.sizeScale;
           }
-          curLine.push({ ...s, penX });
+          // attachToIdx indexes INTO THE LINE; the carried run starts a
+          // new line at 0, so anchors shift by carryStart. An anchor
+          // that stayed on the previous line is unreachable — drop the
+          // attachment (unremapped indices bound marks to whatever slot
+          // now sat at that index, or dropped them silently).
+          const at9 = s.attachToIdx >= carryStart ? s.attachToIdx - carryStart : -1;
+          curLine.push({ ...s, penX, attachToIdx: at9 });
           penX += s.advance;
           lastGid = s.glyphId;
           lastFont = sFont;
@@ -1053,31 +1077,48 @@ function reorderLinesBidi(lines, layout, fallbacks) {
   const rawBase = layout.baseDirection != null
     ? layout.baseDirection
     : BaseDirection.Auto;
-  const allCps = [];
-  for (const line of lines) for (const s of line) allCps.push(s.codepoint);
   const bidi = getBidi();
-  const paraDir   = bidi.resolveBaseDirection(rawBase, allCps);
-  const paraLevels = bidi.resolveLevels(allCps, paraDir);
+  // UAX #9 P1: rules apply per PARAGRAPH. Explicit '\n' breaks (marked
+  // `_paraEnd` by the layout pass) delimit paragraphs; wrap-created
+  // lines share their paragraph's resolution. Resolving the whole text
+  // as one paragraph leaked RTL/LTR context across explicit breaks and,
+  // under BaseDirection.Auto, gave later paragraphs the FIRST line's
+  // base direction.
+  const lineLevels = new Array(lines.length);   // per line: Uint8Array slice
+  let firstParaDir = null;
+  for (let p0 = 0; p0 < lines.length; ) {
+    let p1 = p0;
+    while (p1 < lines.length - 1 && !lines[p1]._paraEnd) p1++;
+    const cps = [];
+    for (let li = p0; li <= p1; li++) for (const s of lines[li]) cps.push(s.codepoint);
+    const dir = bidi.resolveBaseDirection(rawBase, cps);
+    if (firstParaDir === null) firstParaDir = dir;
+    const levels = bidi.resolveLevels(cps, dir);
+    let cur = 0;
+    for (let li = p0; li <= p1; li++) {
+      lineLevels[li] = levels.subarray(cur, cur + lines[li].length);
+      cur += lines[li].length;
+    }
+    p0 = p1 + 1;
+  }
+  const paraDir = firstParaDir != null ? firstParaDir : bidi.resolveBaseDirection(rawBase, []);
   // UAX #9 L4: a mirrorable character at an odd (RTL) level is drawn with its
   // mirrored glyph (e.g. '(' shows as ')').
-  {
-    let mi = 0;
-    for (const line of lines) {
-      for (const s of line) {
-        if ((paraLevels[mi] & 1) && hasMirror(s.codepoint)) {
-          const [mfont, mgid] = resolveGlyph(mirror(s.codepoint), s.font, fallbacks);
-          if (mgid) { s.glyphId = mgid; s.font = mfont; }
-        }
-        mi++;
+  for (let li = 0; li < lines.length; li++) {
+    const lv = lineLevels[li];
+    const line = lines[li];
+    for (let k = 0; k < line.length; k++) {
+      const s = line[k];
+      if ((lv[k] & 1) && hasMirror(s.codepoint)) {
+        const [mfont, mgid] = resolveGlyph(mirror(s.codepoint), s.font, fallbacks);
+        if (mgid) { s.glyphId = mgid; s.font = mfont; }
       }
     }
   }
-  let cpCursor = 0;
   for (let li = 0; li < lines.length; li++) {
     const lineLen = lines[li].length;
     if (lineLen === 0) continue;
-    const lvSlice = paraLevels.subarray(cpCursor, cpCursor + lineLen);
-    cpCursor += lineLen;
+    const lvSlice = lineLevels[li];
     const order = bidi.reorderLine(lvSlice);
     // Reassign penX so visually-ordered slots are left-to-right.
     // Build a logical→visual index map so per-slot attach pointers
@@ -1193,7 +1234,12 @@ function emitAlignedSlots(lines, { lineAdvances, lineAlignOverride, lineHeights,
     let extraAcc = 0;
     for (let si = 0; si < lines[li].length; si++) {
       const s = lines[li][si];
-      slots.push({ ...s, penX: s.penX + xOff + ox + extraAcc, penY: baselineY + oy });
+      // penY is ADDITIVE: phase 2 stored GPOS mark-attach dy / cursive
+      // chain dy in s.penY (0 for plain glyphs), so the baseline must be
+      // ADDED here, not assigned, or harakat / tone marks lose their
+      // attachment offsets. lineY carries the line identity for
+      // downstream line-splitters (they must not infer it from penY).
+      slots.push({ ...s, penX: s.penX + xOff + ox + extraAcc, penY: s.penY + baselineY + oy, lineY: baselineY + oy });
       // Inject extra after each space (the gap visually grows to the
       // right of the space character, before the next word).
       if (perSpaceExtra > 0 && s.breakKind === 1) extraAcc += perSpaceExtra;
@@ -1206,7 +1252,7 @@ function emitAlignedSlots(lines, { lineAdvances, lineAlignOverride, lineHeights,
           const kx = s.penX + s.advance + xOff + ox + extraAcc;
           slots.push({
             codepoint: 0x0640, glyphId: kashidaPlan.gid, font: kashidaPlan.font,
-            style: s.style, penX: kx, penY: baselineY + oy, advance: kashidaPlan.advEm,
+            style: s.style, penX: kx, penY: baselineY + oy, lineY: baselineY + oy, advance: kashidaPlan.advEm,
             breakKind: 0, clusterStart: true,
             synthBold: s.synthBold, synthItalic: s.synthItalic,
             attachToIdx: -1, attachDxEm: 0, attachDyEm: 0,
@@ -1228,10 +1274,11 @@ function emitAlignedSlots(lines, { lineAdvances, lineAlignOverride, lineHeights,
 /// pen loop, so they're excluded here.
 function applyAatContextualKerning(slots) {
   if (slots.length === 0) return;
-  // Split into lines (constant penY), preserving order.
+  // Split into lines (constant lineY; penY varies per mark), preserving order.
   let lineStart = 0;
+  const lnY = (s) => (s.lineY !== undefined ? s.lineY : s.penY);
   for (let end = 1; end <= slots.length; end++) {
-    if (end === slots.length || slots[end].penY !== slots[lineStart].penY) {
+    if (end === slots.length || lnY(slots[end]) !== lnY(slots[lineStart])) {
       _kerxLine(slots, lineStart, end);
       lineStart = end;
     }

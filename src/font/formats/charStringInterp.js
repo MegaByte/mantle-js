@@ -116,22 +116,19 @@ export class CharStringInterp {
         if (b0 === 12) op = 12 * 256 + this._b[o++];
         const st = this._stack;
         switch (op) {
-          case 0x17:  // CFF1: vstem3; CFF2: blend (opcode 23)
+          case 0x10:  // blend (16) — CFF2 only; reserved in CFF1
             if (this._isCff2) { this._doBlend(); break; }
+            st.length = 0;
+            break;
+          // Hint operators: hstem(1) / vstem(3) / hstemhm(18) / vstemhm(23).
+          // CFF2 RETAINS all of them (the spec removes width + endchar, not
+          // hints) — every hinted CFF2 font (most real ones) carries these.
+          case 0x01: case 0x03: case 0x12: case 0x17:
             this._consumeMaybeWidthHint();
             this._hintCount += (st.length >> 1);
             st.length = 0;
             break;
-          case 0x01: case 0x03: case 0x12:
-            if (this._isCff2)
-              throw new Error('CFF2 charstring uses hint operator 0x' + op.toString(16) + ' — malformed');
-            this._consumeMaybeWidthHint();
-            this._hintCount += (st.length >> 1);
-            st.length = 0;
-            break;
-          case 0x13: case 0x14: {
-            if (this._isCff2)
-              throw new Error('CFF2 charstring uses hintmask/cntrmask — malformed');
+          case 0x13: case 0x14: {  // hintmask / cntrmask (CFF1 + CFF2)
             this._consumeMaybeWidthHint();
             this._hintCount += (st.length >> 1);
             st.length = 0;
@@ -218,14 +215,14 @@ export class CharStringInterp {
             const idx = st[st.length - 1] + this._lsubrBias;
             st.pop();
             if (this._lsubrIndexOff < 0) throw new Error('callsubr without local subrs');
-            const r = readCffIndexEntry(this._b, this._lsubrIndexOff, idx);
+            const r = readCffIndexEntry(this._b, this._lsubrIndexOff, idx, this._isCff2);
             this._exec(r.off, r.len);
             break;
           }
           case 0x1D: { // callgsubr
             const idx = st[st.length - 1] + this._gsubrBias;
             st.pop();
-            const r = readCffIndexEntry(this._b, this._gsubrIndexOff, idx);
+            const r = readCffIndexEntry(this._b, this._gsubrIndexOff, idx, this._isCff2);
             this._exec(r.off, r.len);
             break;
           }
@@ -262,14 +259,18 @@ export class CharStringInterp {
     this._depth--;
   }
 
+  // CFF2 charstrings have NO width operand (the spec removed it) — the
+  // maybe-width heuristics must never eat a real coordinate there.
   _consumeMaybeWidth(nominalArgs) {
     if (this._gotWidth) return;
     this._gotWidth = true;
+    if (this._isCff2) return;
     if (this._stack.length > nominalArgs) this._stack.shift();
   }
   _consumeMaybeWidthHint() {
     if (this._gotWidth) return;
     this._gotWidth = true;
+    if (this._isCff2) return;
     if (this._stack.length & 1) this._stack.shift();
   }
 

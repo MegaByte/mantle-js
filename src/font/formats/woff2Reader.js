@@ -233,10 +233,18 @@ function parseCollectionDir(b, cursor) {
 
 // 255UInt16 (WOFF2 §6): 253 → next u16; 254 → next byte + 506; 255 → next byte + 253; else literal.
 function read255U16(b, cursor) {
+  // Bounds-checked: a past-end read returned undefined and NaN-poisoned
+  // every downstream count/offset instead of failing loudly.
+  if (cursor >= b.length) throw new Error('WOFF2 255UInt16 read past end');
   const first = b[cursor++];
-  if (first === 253) return { value: (b[cursor] << 8) | b[cursor + 1], cursor: cursor + 2 };
-  if (first === 254) return { value: b[cursor] + 506, cursor: cursor + 1 };
-  if (first === 255) return { value: b[cursor] + 253, cursor: cursor + 1 };
+  if (first === 253) {
+    if (cursor + 1 >= b.length) throw new Error('WOFF2 255UInt16 read past end');
+    return { value: (b[cursor] << 8) | b[cursor + 1], cursor: cursor + 2 };
+  }
+  if (first === 254 || first === 255) {
+    if (cursor >= b.length) throw new Error('WOFF2 255UInt16 read past end');
+    return { value: b[cursor] + (first === 254 ? 506 : 253), cursor: cursor + 1 };
+  }
   return { value: first, cursor };
 }
 
@@ -317,6 +325,7 @@ async function brotliDecompress(compressed) {
 function readUIntBase128(b, cursor) {
   let result = 0;
   for (let i = 0; i < 5; i++) {
+    if (cursor >= b.length) throw new Error('UIntBase128 read past end');
     const v = b[cursor++];
     if (i === 0 && v === 0x80) throw new Error('UIntBase128 leading zero');
     if (result & 0xFE000000) throw new Error('UIntBase128 overflow');

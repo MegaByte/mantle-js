@@ -449,6 +449,11 @@ function _cmapFmt2(t, cp) {
     testByte = low;
   } else {
     subIdxByteOff = v.getUint16(subKeysOff + high * 2, false); // already ×8
+    // subHeaderKeys[high] == 0 means `high` is NOT a lead byte — a
+    // two-byte code with it is invalid (FreeType rejects). Falling
+    // through would decode via subheader 0, which is reserved for
+    // single-byte codes.
+    if (subIdxByteOff === 0) return 0;
     testByte = low;
   }
   const sh = subHeadersBase + subIdxByteOff;
@@ -543,18 +548,25 @@ function _cmapFmt4(t, cp) {
   const startOff    = endOff + 2 + segCountX2;
   const idDeltaOff  = startOff + segCountX2;
   const idRangeOffOff = idDeltaOff + segCountX2;
-  for (let i = 0; i < segCount; i++) {
-    const end = v.getUint16(endOff + i * 2, false);
-    if (cp <= end) {
-      const start = v.getUint16(startOff + i * 2, false);
-      if (cp < start) return 0;
-      const idDelta    = v.getInt16(idDeltaOff + i * 2, false);
-      const idRangeOff = v.getUint16(idRangeOffOff + i * 2, false);
-      if (idRangeOff === 0) return ((cp + idDelta) & 0xFFFF);
-      const glyphIdAddr = idRangeOffOff + i * 2 + idRangeOff + 2 * (cp - start);
-      const gid = v.getUint16(glyphIdAddr, false);
-      return gid === 0 ? 0 : ((gid + idDelta) & 0xFFFF);
-    }
+  // Binary search on endCode (spec: sorted ascending) — this runs per
+  // codepoint per layout and CJK cmaps carry thousands of segments, so
+  // the front-to-back scan was the per-glyph hot spot on large fonts.
+  let lo = 0, hi = segCount - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (v.getUint16(endOff + mid * 2, false) < cp) lo = mid + 1;
+    else hi = mid;
+  }
+  if (lo < segCount && cp <= v.getUint16(endOff + lo * 2, false)) {
+    const i = lo;
+    const start = v.getUint16(startOff + i * 2, false);
+    if (cp < start) return 0;
+    const idDelta    = v.getInt16(idDeltaOff + i * 2, false);
+    const idRangeOff = v.getUint16(idRangeOffOff + i * 2, false);
+    if (idRangeOff === 0) return ((cp + idDelta) & 0xFFFF);
+    const glyphIdAddr = idRangeOffOff + i * 2 + idRangeOff + 2 * (cp - start);
+    const gid = v.getUint16(glyphIdAddr, false);
+    return gid === 0 ? 0 : ((gid + idDelta) & 0xFFFF);
   }
   return 0;
 }

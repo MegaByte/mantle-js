@@ -106,9 +106,24 @@ export function switchChildMatches(el) {
   return true;
 }
 
-/// Resolve a fill="url(#foo)" / fill="#foo" attribute to its bare id.
+/// Resolve a paint-server reference to its bare id — url(#foo) ONLY.
+/// The SVG paint grammar requires the url() functional form; a bare
+/// "#abc" in fill/stroke is a hex COLOR, and treating it as a ref lets
+/// a gradient/pattern with id "abc" hijack the paint.
+export function resolvePaintRef(val) {
+  if (!val) return null;
+  const s = val.trim();
+  if (s.startsWith('url(') && s.endsWith(')')) {
+    let inner = s.slice(4, -1).trim();
+    inner = inner.replace(/^["']|["']$/g, '');
+    if (inner.startsWith('#')) return inner.slice(1);
+  }
+  return null;
+}
+
+/// Resolve a href="url(#foo)" / href="#foo" attribute to its bare id.
 /// Returns null when the value is empty, a literal color, or otherwise
-/// doesn't reference a doc-local id.
+/// doesn't reference a doc-local id. For fill/stroke use resolvePaintRef.
 export function resolveIdRef(val) {
   if (!val) return null;
   const s = val.trim();

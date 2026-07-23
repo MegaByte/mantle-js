@@ -17,15 +17,6 @@ import { segBbox, segBboxInto, polygonSignedArea } from './bbox.js';
 
 const COVER_QUAD_STRIDE = 12;
 
-// Classify a curve segment's bulge direction relative to the subpath's
-// interior. `interiorSign` = sign(polygonSignedArea(subpathChordRing)):
-// positive = path interior is on the LEFT of each segment's chord (in
-// SVG y-down screen space), negative = on the RIGHT.
-//
-// Returns +1 for CONVEX (curve bulges away from interior — crescent
-// ADDS detail outside the polygon), -1 for CONCAVE (curve bulges into
-// interior — crescent ERASES the polygon's overshoot), 0 for flat
-// (line / degenerate curve).
 // De Casteljau cubic split at parameter t. Returns [leftSub, rightSub]
 // where each sub is { p1, p2, p3, p4 }.
 export function splitCubicAt(seg, t) {

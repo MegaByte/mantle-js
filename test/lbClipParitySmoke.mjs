@@ -16,10 +16,7 @@ const ROOT = path.resolve(__dirname, '..');
 
 // A diamond PATH clipped to a rect covering only its RIGHT half (x>=50). The
 // left half must be cropped away; the right half stays the fill colour.
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <defs><clipPath id="cp"><rect x="50" y="0" width="50" height="100"/></clipPath></defs>
-  <path d="M50 8 L92 50 L50 92 L8 50 Z" fill="#3366cc" clip-path="url(#cp)"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/lbClipParity__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="100" height="100"></canvas>

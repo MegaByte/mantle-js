@@ -70,8 +70,9 @@ export function isStrong(cls) {
 /// L → LTR, R/AL → RTL. When no strong char is found, defaults to
 /// LTR (the same fallback the Unicode spec uses for ambiguous text).
 ///
-/// Explicit override characters (LRE/RLE/LRI/RLI etc.) are recognized
-/// at the bidi-class level but not yet consumed here.
+/// Characters inside an isolate (initiator through matching PDI) are
+/// skipped per P2; embedding/override codes (LRE/RLE/LRO/RLO/PDF) are
+/// not strong, so they never terminate the scan.
 export function detectParagraphDirection(codepoints) {
   // P2: first L/R/AL, skipping characters between an isolate initiator and its
   // matching PDI. P3: L → LTR, R/AL → RTL, else LTR.
@@ -98,11 +99,11 @@ export function resolveBaseDirection(baseDir, codepoints) {
 // ---------------------------------------------------------------------
 // Slice 3: level resolution.
 //
-// Implements UAX #9 W/N/I rules + N0 paired brackets over a single
-// isolating-run sequence equal to the whole paragraph. Explicit
-// overrides/isolates are recognized at the class level but treated
-// as ON for level resolution (full isolate consumption deferred —
-// see resolveLevelsWithIsolates for the in-progress impl).
+// Implements UAX #9 W/N/I rules + N0 paired brackets. Text without
+// explicit isolate/override characters is a single isolating-run
+// sequence handled by _resolveLevelsRaw; text with them routes through
+// _resolveLevelsWithIsolates, which segments per isolate and treats
+// the deprecated embedding/override codes as ON.
 //
 // Input: codepoints + paragraph base direction.
 // Output: per-codepoint embedding level (0..125). Even = LTR, odd = RTL.
@@ -329,8 +330,13 @@ function _resolveLevelsRaw(codepoints, baseDir, forcedTypes, sosOverride, eosOve
       if (pairDir !== null) {
         types[openIdx] = pairDir;
         types[closeIdx] = pairDir;
-        // NSMs immediately following the closing bracket adopt its type
-        // per N0 closing remark (UAX #9 rule N0 step 4).
+        // NSMs immediately following EITHER retyped bracket adopt its
+        // type (UAX #9 rule N0 step 4 applies to both paired brackets).
+        for (let k = openIdx + 1; k < n; k++) {
+          if (isBN[k]) continue;
+          if (!wasNSM[k]) break;
+          types[k] = pairDir;
+        }
         for (let k = closeIdx + 1; k < n; k++) {
           if (isBN[k]) continue;
           if (!wasNSM[k]) break;
@@ -560,17 +566,14 @@ function _strongLikeOf(cls) {
 }
 
 // ---------------------------------------------------------------------
-// UAX #9 N0 paired brackets. Data is BidiBrackets.txt — each entry is
-// either (open, close, "o" or "c") with a paired bracket. Canonical
-// closer mapping (close → matching open codepoint) plus the closer-set.
-// Coverage: ASCII + common Unicode pairs covering the punctuation that
-// real text uses; exhaustive UCD bracket pairs (121 entries) are
-// embedded so a non-typed Unicode bracket still works.
+// UAX #9 N0 paired brackets. Data from UCD BidiBrackets.txt, embedded
+// as 64 [open, close] pairs; from them we derive the closer → open
+// map plus the open/close sets used by the BD16 matcher below.
 // ---------------------------------------------------------------------
 const BIDI_BRACKETS = (() => {
   // Each entry: [openCp, closeCp]. Sorted by openCp; closer is unique
-  // per opener (per UAX #9 BD16). Canonical-equivalent collapses
-  // U+3008/U+2329 to its equivalent (both → ⟨⟩ form).
+  // per opener (per UAX #9 BD16). U+2329/U+3008 canonical equivalence
+  // is handled at match time by _canonBracket (both map to U+3008/9).
   const pairs = [
     [0x0028, 0x0029],   // ( )
     [0x005B, 0x005D],   // [ ]

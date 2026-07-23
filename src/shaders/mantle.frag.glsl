@@ -10,17 +10,16 @@ uniform sampler2D uMetaTex;
 uniform sampler2D uDashTex;        // 16 wide × N tall; row = dashId-1
 #ifndef MANTLE_NO_GRADIENT
 uniform sampler2D uGradientTex;    // RGBA32F, 4 texels wide × N gradients
-uniform sampler2D uGradientStops;  // RGBA8, M × 1 packed stops LUT
-                                   //   rgb = PREMULTIPLIED stop color
-                                   //   a   = stop offset in [0,1]
-                                   // Each gradient's stops are at
-                                   // [g.stopsOffset, g.stopsOffset+g.stopsCount)
-                                   // where (stopsOffset, stopsCount) live in
-                                   // the gradient record at texel 10's xy.
+uniform sampler2D uGradientStops;  // RGBA8 packed stops LUT, 1 or 2 texels/stop
+                                   // (see _gradientHelpers.glsl): 2-texel layout
+                                   // = STRAIGHT RGBA + a separate offset texel;
+                                   // 1-texel opaque fast path = (rgb, offset),
+                                   // implicit alpha 1. stopsOffset is a TEXEL
+                                   // offset; stopsCount's sign picks the layout
+                                   // ((stopsOffset, stopsCount) live in the
+                                   // gradient record at texel 10's xy).
                                    // Exact stops, no banding,
                                    // shared format with the COLRv1 dispatch.
-uniform int       uGradientCount;
-uniform int       uGradientStopsCount;
 #endif
 #ifndef MANTLE_NO_IMAGE
 uniform sampler2D uImageTex;       // RGBA8 image atlas (pattern children + top-level <image>)
@@ -56,6 +55,14 @@ uniform highp isampler2D uMaskRowToLayerTex;
 uniform int uHasOffscreenMask;
 #endif
 uniform vec2 uViewportSize;        // canvas pixels (w, h) — for mask UV mapping (also ext-clip)
+// Canvas position of THIS framebuffer's (0,0). Every screen-space texture below
+// (mask, external clip, the LB/stroke coverage RTs) is in CANVAS space, but
+// gl_FragCoord is in the bound framebuffer's space — the two coincide only when
+// we are rendering the whole canvas. A filtered shape renders into a small RT
+// covering just its own rect (viewport shifted to -rect.origin), and there
+// gl_FragCoord is rect-local; add this to get back to canvas pixels.
+// (0,0) — the default — for every full-canvas pass.
+uniform vec2 uFragOrigin;
 // External screen-space clip mask (`setNodeClip`). A fixed R8/RGBA
 // coverage texture sampled in FRAMEBUFFER space, applied to the whole draw:
 //   uExtClipMode 0 = off (default), 1 = clip-IN (keep where mask), 2 = clip-OUT
@@ -81,7 +88,7 @@ uniform int uExtClipMode;
 // can compose: bilinear lerp first (consumes the original channel
 // encoding), then optional palette substitution, then optional matrix
 // transform. uChannelLerpEnabled is coherent → free when disabled.
-#ifndef MANTLE_NO_RECOLOR
+#if !defined(MANTLE_NO_RECOLOR) && !defined(MANTLE_NO_CHANNEL_LERP)
 uniform vec4 uChannelLerpPrimary;
 uniform vec4 uChannelLerpContrast;
 uniform vec4 uChannelLerpHighlight;
@@ -99,7 +106,7 @@ uniform int  uChannelLerpEnabled;
 // uColorMatrixEnabled is a coherent (per-draw) uniform int; the
 // branch is uniform across the whole draw → free on every modern GPU
 // when disabled. Defaults: identity matrix + zero offset, enabled=0.
-#ifndef MANTLE_NO_RECOLOR
+#if !defined(MANTLE_NO_RECOLOR) && !defined(MANTLE_NO_COLOR_MATRIX)
 uniform mat4 uColorMatrix;
 uniform vec4 uColorMatrixOffset;
 uniform int  uColorMatrixEnabled;
@@ -122,7 +129,7 @@ uniform int  uColorMatrixEnabled;
 // linear interpolation between them would be a bug.
 //
 // uPaletteEnabled coherent uniform-int → zero cost when disabled.
-#ifndef MANTLE_NO_RECOLOR
+#if !defined(MANTLE_NO_RECOLOR) && !defined(MANTLE_NO_PALETTE)
 uniform sampler2D uPalette;
 uniform int uPaletteEnabled;
 uniform int uPaletteChannel;
@@ -160,6 +167,9 @@ uniform vec4 uLBImageRect;          // lerped image rect (texel 9) — fill/stro
 flat in int vInst;
 in vec2 vEmCoord;
 in vec4 vOverrideTint;     // multiplied into fill+stroke colour
+#ifdef MANTLE_INSTANCED
+in vec4 vInstBias;         // per-instance additive bias, applied after the tint
+#endif
 // Per-attribute absolute overrides (animation drivers). When the
 // corresponding mask bit is set, the override replaces the meta value
 // at draw time. Mask bits:
@@ -215,7 +225,7 @@ vec4 applyFilterPre(int filterId, vec4 pre) {
 // (0=pad, 1=repeat, 2=reflect) inline at the call site.
 @@GRADIENT_HELPERS@@
 
-@@SLUG_COVERAGE@@
+@@COVERAGE@@
 // Read the clip-row's override transform (2D affine M = mat2 + translate
 // t) and INVERT-apply it to the visible shape's sample coord. Returns
 // the coord in the clip's local frame. When the override is identity
@@ -317,6 +327,13 @@ void main() {
   // applied BEFORE coverage / premultiply. Identity (vec4(1)) when
   // no override is active, so the non-override paths see no change.
   vFill *= vOverrideTint;
+#ifdef MANTLE_INSTANCED
+  // out = clamp(in*tint + bias). A pure tint has bias 0, so this is the tint's own
+  // behaviour plus a clamp — which is what the per-instance LOOP path already did (it
+  // composes the tint into a colour matrix, and that path clamps). The fast path did not,
+  // so a tint above 1 disagreed between the two. It no longer does.
+  vFill = clamp(vFill + vInstBias, 0.0, 1.0);
+#endif
 #ifndef MANTLE_NO_RECOLOR
   // recolor uniforms. The lean fill variant omits this whole block (and its
   // uPalette sampler); an app that uses per-draw recolor selects the full frag.
@@ -327,16 +344,19 @@ void main() {
   // (it's the final tint), so downstream palette / matrix would
   // re-process this as if it were a fresh color — composable but
   // each stage is taking a different semantic input.
+#ifndef MANTLE_NO_CHANNEL_LERP
   if (uChannelLerpEnabled != 0) {
     vec3 tint = vFill.r * uChannelLerpPrimary.rgb
               + vFill.b * uChannelLerpContrast.rgb;
     float k = clamp(vFill.g + (1.0 - vFill.a), 0.0, 1.0);
     vFill = vec4(mix(tint, uChannelLerpHighlight.rgb, k), vFill.a);
   }
+#endif
   // Per-draw palette LUT (dual-tint fill recolor).
   // Indexed discrete color substitution: pick a channel,
   // use it as an index into the 256×1 LUT, replace RGB. Applied
   // BEFORE the color matrix so caller can stack palette → matrix.
+#ifndef MANTLE_NO_PALETTE
   if (uPaletteEnabled != 0) {
     float ch =
         uPaletteChannel == 0 ? vFill.r :
@@ -351,13 +371,16 @@ void main() {
     // caller's `opts.alpha` + meta fill alpha + override tint alpha
     // continue to drive AA edge falloff.)
   }
+#endif
   // Per-draw color-matrix recolor (dual-tint fill recolor).
   // Applied AFTER per-shape override + tint + palette substitution,
   // BEFORE coverage. Acts on the unpremultiplied fill so the matrix is
   // expressed in straight RGBA space (matches feColorMatrix convention).
+#ifndef MANTLE_NO_COLOR_MATRIX
   if (uColorMatrixEnabled != 0) {
     vFill = clamp(uColorMatrix * vFill + uColorMatrixOffset, 0.0, 1.0);
   }
+#endif
 #endif
 #ifdef MANTLE_LB_COV
   vec4 vStroke    = uLBStroke;
@@ -366,13 +389,19 @@ void main() {
 #endif
   if ((vOverrideMask & 2) != 0) vStroke = vOverrideStroke;
   vStroke *= vOverrideTint;
+#ifdef MANTLE_INSTANCED
+  vStroke = clamp(vStroke + vInstBias, 0.0, 1.0);
+#endif
 #ifndef MANTLE_NO_RECOLOR
+#ifndef MANTLE_NO_CHANNEL_LERP
   if (uChannelLerpEnabled != 0) {
     vec3 tint = vStroke.r * uChannelLerpPrimary.rgb
               + vStroke.b * uChannelLerpContrast.rgb;
     float k = clamp(vStroke.g + (1.0 - vStroke.a), 0.0, 1.0);
     vStroke = vec4(mix(tint, uChannelLerpHighlight.rgb, k), vStroke.a);
   }
+#endif
+#ifndef MANTLE_NO_PALETTE
   if (uPaletteEnabled != 0) {
     float ch =
         uPaletteChannel == 0 ? vStroke.r :
@@ -384,16 +413,17 @@ void main() {
     vec4 looked = texelFetch(uPalette, ivec2(idx, 0), 0);
     vStroke.rgb = looked.rgb;
   }
+#endif
+#ifndef MANTLE_NO_COLOR_MATRIX
   if (uColorMatrixEnabled != 0) {
     vStroke = clamp(uColorMatrix * vStroke + uColorMatrixOffset, 0.0, 1.0);
   }
 #endif
+#endif
   vec4 vStrokePad = texelFetch(uMetaTex, ivec2(MT_STROKE_PARAMS, y), 0);
   vec4 vGlyphBand = texelFetch(uMetaTex, ivec2(MT_GLYPH_BAND, y), 0);
-  // v3 bundles have two additional meta texels (6 and 7). v2 and older leave
-  // them unread — texelFetch past texture height wraps to row 0 in WebGL2's
-  // NEAREST/CLAMP mode, so we instead check the bundle's stride via a uniform
-  // that the renderer sets based on bundle version.
+  // Cap/join meta texel — always allocated by the current bundle layout
+  // (MT_CAP_JOIN), so it is fetched unconditionally.
   vec4 vCapJoin   = texelFetch(uMetaTex, ivec2(MT_CAP_JOIN, y), 0);
   // vCapJoin.x = startCap (0 butt, 1 round, 2 square; "capStyle")
   // vCapJoin.y = joinStyle (0 miter, 1 round, 2 bevel)
@@ -518,11 +548,40 @@ void main() {
   // SKIP the whole Slug ray-cast / primFast / occupancy machinery for the fill —
   // stroke/clip/mask/filter below are untouched, so they compose with the LB
   // fill. (occSkip/primFast above are dead under this define and compiler-stripped.)
-  float fCov = doFill ? texture(uLBCovTex, gl_FragCoord.xy / uLBCovTexSize).r : 0.0;
+  float fCov = doFill ? texture(uLBCovTex, (gl_FragCoord.xy + uFragOrigin) / uLBCovTexSize).r : 0.0;
 #else
   float fCov = occSkip ? 1.0
     : !primFast
+// Per-shape engine bits are spatially coherent because each shape occupies its
+// own cover quad. Hard-tree is 3, hard-band is 2, and other values use AA.
+#if defined(MANTLE_HARD_MIXED)
+    ? (doFill ? (
+#ifdef MANTLE_HARD_TREE
+        ((flagsShape >> 15) & 3) == 3 ? renderFillGWNSDF(emCoord, 1.0/max(ePx,vec2(1e-6)), GD, evenOddFill, vShapeBBox) :
+#endif
+        ((flagsShape >> 15) & 3) == 2 ? renderFillHardBand(emCoord, GD, evenOddFill, vShapeBBox)
+#ifdef MANTLE_AAC
+      : renderFillAAC(emCoord, 1.0/max(ePx,vec2(1e-6)), GD, evenOddFill, vShapeBBox)
+#else
+      : renderFill(emCoord, 1.0/max(ePx,vec2(1e-6)), GD, evenOddFill, vShapeBBox)
+#endif
+      ) : 0.0)
+#elif defined(MANTLE_HARD) && defined(MANTLE_HARD_TREE)
+    ? (doFill ? renderFillGWNSDF(emCoord, 1.0/max(ePx,vec2(1e-6)), GD, evenOddFill, vShapeBBox) : 0.0)
+#elif defined(MANTLE_HARD)
+    // Slug-based hard: a crossing count → 0/1. Measured 10-30% faster than thresholding AAC's
+    // area (probes/_hardAlgo) — a hard inside/outside test needs only the winding sign, not the
+    // exact area AAC integrates. So band-hard stays on the crossing algorithm, never AAC's.
+    ? (doFill ? renderFillHardBand(emCoord, GD, evenOddFill, vShapeBBox) : 0.0)
+#elif defined(MANTLE_GWN) && defined(MANTLE_GWN_SDF)
+    ? (doFill ? renderFillGWNSDF(emCoord, 1.0/max(ePx,vec2(1e-6)), GD, evenOddFill, vShapeBBox) : 0.0)
+#elif defined(MANTLE_GWN)
+    ? (doFill ? renderFillGWNSDF(emCoord, 1.0/max(ePx,vec2(1e-6)), GD, evenOddFill, vShapeBBox) : 0.0)
+#elif defined(MANTLE_AAC)
+    ? (doFill ? renderFillAAC(emCoord, 1.0/max(ePx,vec2(1e-6)), GD, evenOddFill, vShapeBBox) : 0.0)
+#else
     ? (doFill ? renderFill(emCoord, 1.0/max(ePx,vec2(1e-6)), GD, evenOddFill, vShapeBBox) : 0.0)
+#endif
     : primFillCoverage(primKind, emCoord, vShapeBBox, (primKind == 3) ? t11.z : 0.0);
 #endif
   // Fill paint: gradient ramp sample when fillGradId > 0, otherwise the
@@ -569,8 +628,8 @@ void main() {
   // of the pattern's child layer meta rows. Texel 9 (imageRect) =
   // (originX, originY, +tileEmW, +tileEmH). Tile-wrap emPos, loop each
   // child row, sample its coverage via the existing renderFill helper,
-  // composite premultiplied source-over. Capped at 8 children to match
-  // the Mantle shader's unroll budget.
+  // composite premultiplied source-over. Capped at 16 children to bound
+  // the loop unroll.
   vec4 vAtlasSlot = texelFetch(uMetaTex, ivec2(MT_ATLAS, y), 0);
   if (abs(vAtlasSlot.w - 2.0) < 0.5 && fCov > 0.0) {
     vec4 vImageRect = texelFetch(uMetaTex, ivec2(MT_IMAGE_RECT, y), 0);
@@ -704,8 +763,7 @@ void main() {
   }
 #endif
   // Stroke pass: compute distance to closest point on path; AA-band
-  // against halfW. Direct port of MantleStrokeMinDist + the
-  // AA falloff from MantleUnified.shader (lines 608-617).
+  // against halfW.
   // MANTLE_NO_STROKE drops the per-shape stroke band-walk for a fill-only
   // variant. strokeMinDist (the helper) is NOT guarded — mask / pattern stroke
   // children still call it; it dead-strips when those are also omitted.
@@ -718,7 +776,7 @@ void main() {
     // own curves — stale under skipUploads). The strokePaint logic below is
     // untouched, so bitmap/gradient/solid stroke + clip/mask/filter all compose
     // over the morphed stroke.
-    float strokeCov = texture(uStrokeCovTex, gl_FragCoord.xy / uLBCovTexSize).r;
+    float strokeCov = texture(uStrokeCovTex, (gl_FragCoord.xy + uFragOrigin) / uLBCovTexSize).r;
 #else
     int joinStyle = int(vCapJoin.y + 0.5);
     float miterLimit = vCapJoin.z;
@@ -793,8 +851,9 @@ void main() {
   //      via premultiplied source-over. isolation field (texel 8 .z)
   //      = 1 → luminance weighting; 0 → alpha-only.
   //
-  // Tile-loop is bounded at 8 children to keep shader compile times
-  // sane on weak GPUs (matches the Mantle pattern unroll cap).
+  // The clip-union walk below is capped at 16 children (kMaxClipChildren)
+  // and the mask walk at 8 (kMaxMaskChildren) to keep shader compile
+  // times sane on weak GPUs.
   vec4 vMeta7m = texelFetch(uMetaTex, ivec2(MT_PAINT_ID, y), 0);
 #ifndef MANTLE_NO_CLIP
   int clipId = int(vMeta7m.z + 0.5);
@@ -910,7 +969,7 @@ void main() {
       // is the right UV.
       int layer = texelFetch(uMaskRowToLayerTex, ivec2(MRL_ROW, firstRow), 0).r;
       if (layer >= 0) {
-        vec2 muv = gl_FragCoord.xy / uViewportSize;
+        vec2 muv = (gl_FragCoord.xy + uFragOrigin) / uViewportSize;
         float maskA = texture(uMaskRTArray, vec3(muv, float(layer))).r;
         color *= clamp(maskA, 0.0, 1.0);
       }
@@ -946,7 +1005,10 @@ void main() {
         vec2 cLocal = transformClipCoord(emCoord, cRow);
         float cCov;
         vec4 cPaint;
-        if (cSW > 0.0 && cStroke.a > 0.0) {
+        // Stroke present when a width AND either a stroke color or a
+        // stroke gradient exists (matches the pattern-child walker) —
+        // gating on color alpha alone dropped gradient-stroked children.
+        if (cSW > 0.0 && (cStroke.a > 0.0 || cStrokeGradId > 0)) {
           // Stroke-only mask child (e.g. <line stroke-dasharray=...>):
           // use stroke-coverage helper, honoring per-row DashId.
           int cDashId = int(cStrokePad.w + 0.5);
@@ -1016,7 +1078,7 @@ void main() {
   // External screen-space clip mask (setNodeClip): destination-out / -in
   // by a fixed mask texture, sampled in framebuffer space. Default off.
   if (uExtClipMode > 0) {
-    float em = texture(uExtClipTex, gl_FragCoord.xy / uViewportSize).a;
+    float em = texture(uExtClipTex, (gl_FragCoord.xy + uFragOrigin) / uViewportSize).a;
     color *= (uExtClipMode == 2) ? (1.0 - em) : em;  // premultiplied → scalar OK
   }
 #endif

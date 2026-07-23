@@ -95,11 +95,13 @@ export function solveCubicInUnit(A, B, C, D) {
   for (let i = 0; i + 1 < bds.length; i++) {
     const lo = bds[i], hi = bds[i + 1];
     if ((f(lo) > 0) === (f(hi) > 0)) continue;   // no sign change ⇒ no root here
-    let xr = 0.5 * (lo + hi);                     // interval-clamped Newton, 8 iters
+    let xr = 0.5 * (lo + hi);                     // interval-clamped Newton, ≤8 iters
     for (let k = 0; k < 8; k++) {
       const fdy = fp(xr);
       if (Math.abs(fdy) < 1e-12) break;
-      xr = Math.min(hi, Math.max(lo, xr - f(xr) / fdy));
+      const nx = Math.min(hi, Math.max(lo, xr - f(xr) / fdy));
+      if (nx === xr) break;   // fixed point reached — the remaining iterations recompute
+      xr = nx;                //   the identical xr, so this early-out is byte-for-byte exact
     }
     out.push(xr);
   }

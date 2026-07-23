@@ -33,8 +33,13 @@ export function attachDrawSprites(R) {
     if (!range) return false;
     R.draw.shapeRange = range;
     R.draw.spriteKey = typeof sprite === 'string' ? sprite : null;
+    // The analytic route slices the combined VBO by assuming a sprite's shapes are a CONTIGUOUS
+    // run. When the importer flagged this sprite as non-contiguous (a vector pattern or clip
+    // child interleaved) that assumption fails, so the route falls back to Slug.
+    const ncList = bundle.spriteRangesNonContiguous;
+    R.draw.spriteNonContig = !!(ncList && typeof sprite === 'string' && ncList.indexOf(sprite) >= 0);
     try { R.drawBundle(target, opts); }
-    finally { R.draw.shapeRange = null; R.draw.spriteKey = null; }
+    finally { R.draw.shapeRange = null; R.draw.spriteKey = null; R.draw.spriteNonContig = false; }
     return true;
   }
 

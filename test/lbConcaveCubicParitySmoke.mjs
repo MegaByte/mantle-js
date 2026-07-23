@@ -1,6 +1,6 @@
 // lbConcaveCubicParitySmoke — CONCAVE / holed CUBIC shapes render on LB matching
-// Slug. Guards the fixes for the reported corruption (pause-menu icons, MuseoSans
-// text): (1) a 'C'/notch shape whose concave cubic edges the EARCUT rim mis-
+// Slug. Guards the fixes for the reported corruption in icons and font text:
+// (1) a 'C'/notch shape whose concave cubic edges the EARCUT rim mis-
 // threaded (filled the mouth) now routes to the CDT partition; (2) a cubic-ring
 // (holed) whose crescent hulls the CDT SUBDIVIDES — the sub-triangles are now
 // ADOPTED into the crescent (buildLoopBlinnCDT) instead of dropped (under-fill);
@@ -36,7 +36,9 @@ const CASES = {
   // polygon), matching Slug.
   thinArcRing: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="#3366cc" fill-rule="evenodd" d="M50 10 a40 40 0 1 0 0.1 0 Z M50 20 a30 30 0 1 0 0.1 0 Z"/></svg>`,
 };
-const NO_ROUTE = new Set();   // all cases now route through LB
+// The strict cubic audit declines cShape because one analytic piece paints air.
+// The Slug fallback is exact; routing it would trade a visible overpaint for speed.
+const NO_ROUTE = new Set(['cShape']);
 
 const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="220" height="220"></canvas>
 <script type="module">
@@ -52,7 +54,7 @@ function measure(b){ renderer.setLoopBlinnFill('off'); renderer.beginFrame([1,1,
   const c1=renderer.debugStats.loopBlinnRouteCount; renderer.setLoopBlinnFill('on'); renderer.beginFrame([1,1,1,1]); renderer.drawBundle(b); renderer.endFrame(); const lb=read();
   return {slugInk:ink(slug),lbInk:ink(lb),diffPx:diff(slug,lb),lbRouted:renderer.debugStats.loopBlinnRouteCount>c1}; }
 const out={}; const CASES=${JSON.stringify(CASES)};
-try{ for(const [k,svg] of Object.entries(CASES)){ const b=createBundle(gl,await importSvg(svg)); renderer.prepareBundle(b); out[k]=measure(b); } out.ok=true; }
+try{ for(const [k,svg] of Object.entries(CASES)){ const b=createBundle(gl,await importSvg(svg)); renderer.prepareBundle(b); await renderer.awaitLbReady(b); out[k]=measure(b); } out.ok=true; }
 catch(e){ out.err=String(e&&e.stack||e); }
 window.__r=out; window.__done=true;
 </script></body></html>`;

@@ -17,15 +17,19 @@
 
 precision highp float;
 uniform sampler2D uTex;
-uniform vec2  uTexel;
+uniform vec2  uTexel;     // 1 / inRect.size — one CANVAS pixel, in input uv
+uniform vec4  uInMap;     // vUV → input uv (see @@FILTER_RECT@@)
 uniform vec2  uDir;
 uniform int   uRadius;     // box radius in pixels (per Kovacs σ→r formula)
 in vec2 vUV;
 out vec4 fragColor;
 
+@@FILTER_RECT@@
+
 void main() {
-  if (uRadius <= 0) { fragColor = texture(uTex, vUV); return; }
-  vec4 acc = texture(uTex, vUV);
+  vec2 uv = mapIn(vUV, uInMap);
+  if (uRadius <= 0) { fragColor = sampleIn(uTex, uv); return; }
+  vec4 acc = sampleIn(uTex, uv);
   // Pair fetches: sample at (k + 0.5) averages texels k and k+1.
   // Cover offsets 1..radius via pair fetches at 1.5, 3.5, ..., (k+0.5).
   // 32-fetch cap → supports radius up to 64.
@@ -47,8 +51,8 @@ void main() {
     vec2 d = uDir * uTexel * fOff;
     // Bilinear sample averages the two texels; multiply by 2 to get
     // their sum, then we divide by total count at the end.
-    acc += texture(uTex, vUV + d) * pairCount;
-    acc += texture(uTex, vUV - d) * pairCount;
+    acc += sampleIn(uTex, uv + d) * pairCount;
+    acc += sampleIn(uTex, uv - d) * pairCount;
     n += 2.0 * pairCount;
   }
   fragColor = acc / n;

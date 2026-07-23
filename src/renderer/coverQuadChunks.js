@@ -46,6 +46,45 @@ export function parseCoverQuadChunks(f32, flags) {
   return chunks;
 }
 
+/// Build a header-free cover-quad VBO from the parsed chunks.
+///
+/// `coverQuadFloats` interleaves a one-vertex chunk header (nv/gid/color)
+/// before each chunk's body verts. The header is CPU-only bookkeeping —
+/// drawArrays starts *past* it (chunk.start skips the header) and per-shape
+/// color/gid arrive via the meta texture, so the header slot is dead weight
+/// in the VBO. Worse, it sits between adjacent chunks' vert runs, so the
+/// draw-batching test `chunk.start === pendingEnd` is always off by exactly
+/// one header slot and NEVER matches — every shape flushes as its own
+/// drawArrays (measured: 99% non-contiguous, ~4500 draws/frame in a busy
+/// scene that should issue ~50).
+///
+/// This packs the body verts contiguously (headers dropped) and stamps each
+/// chunk with `vboStart` — its offset in the stripped buffer. Consecutive
+/// chunks then satisfy `vboStart === pendingEnd`, so the renderer collapses
+/// them into one drawArrays. The parallel shapeIdx attribute is repacked to
+/// match. Returns { verts, shapeIdx } aligned to the stamped vboStart values.
+export function buildStrippedCoverQuad(coverQuadFloats, chunks, shapeIdxFloats) {
+  let total = 0;
+  for (let ci = 0; ci < chunks.length; ci++) total += chunks[ci].count;
+  const verts = new Float32Array(total * COVER_QUAD_STRIDE);
+  // Always emit a shapeIdx plane matching `verts` length. Cover VAOs keep
+  // attrib 7 enabled; a missing/short shapeIdx buffer is what trips
+  // `GL_INVALID_OPERATION: Vertex buffer is not big enough for the draw call`
+  // when Slug draws the stripped mesh (heavy-asset LB→Slug fallback).
+  const sidx = new Float32Array(total);
+  let out = 0;
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const c = chunks[ci];
+    const srcStart = c.start * COVER_QUAD_STRIDE;
+    const n = c.count * COVER_QUAD_STRIDE;
+    verts.set(coverQuadFloats.subarray(srcStart, srcStart + n), out * COVER_QUAD_STRIDE);
+    if (shapeIdxFloats) sidx.set(shapeIdxFloats.subarray(c.start, c.start + c.count), out);
+    c.vboStart = out;
+    out += c.count;
+  }
+  return { verts, shapeIdx: sidx };
+}
+
 /// Build the per-vert shapeIdx buffer: every vert in a chunk gets the
 /// chunk's gid → shapeIdx mapping.
 export function buildShapeIdxFloats(coverQuadFloats, chunks, gidToShapeIdx) {

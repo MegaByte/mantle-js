@@ -145,7 +145,7 @@ export function parseFilters(root, imageResolver) {
         inputs = [];  // feFlood is a source primitive — no inputs
       } else if (kt === 'fecolormatrix') {
         nodeType = 'feColorMatrix';
-        const type = (k.getAttribute('type') || 'matrix').trim();
+        const type = (k.getAttribute('type') || 'matrix').trim().toLowerCase();
         const valStr = (k.getAttribute('values') || '').trim();
         const vals = valStr.split(/[\s,]+/).map(parseFloat).filter(Number.isFinite);
         let mat;
@@ -435,16 +435,28 @@ export function parseFilters(root, imageResolver) {
         // matrix at render time. SVG allows arbitrary primitive ordering;
         // the common case is a single feGaussianBlur (optionally followed
         // by an feColorMatrix), which we handle. A blur then a color
-        // matrix is fine; a color matrix then a blur is also fine because
-        // matrix-then-blur ≡ blur-then-matrix when the matrix is linear,
-        // which our supported matrices all are.
+        // matrix is fine. A color matrix then a blur gets reordered to
+        // blur-then-matrix — exactly equivalent only when the matrix is
+        // LINEAR, but type="matrix" carries a 5th offset column (affine,
+        // not linear), so a nonzero offset makes the reorder an
+        // approximation (the offset would be blurred into the transparent
+        // surround rather than applied after the blur).
         let blurSigmaX = 0, blurSigmaY = 0;
         const kids = elementChildren(el);
+        // The single-kind shorthands (feDropShadow / feConvolveMatrix /
+        // feMorphology) may only claim filters[id] when they are the SOLE
+        // primitive — writing it mid-loop silently discards every sibling
+        // primitive. With siblings, route the whole chain to the graph
+        // builder instead.
+        let feCount = 0;
+        for (const k9 of kids) {
+          if (((k9.tagName || '').toLowerCase()).startsWith('fe')) feCount++;
+        }
         for (let i = 0; i < kids.length; i++) {
           const k = kids[i];
           const kt = (k.tagName || '').toLowerCase();
           if (kt === 'fecolormatrix') {
-            const type = (k.getAttribute('type') || 'matrix').trim();
+            const type = (k.getAttribute('type') || 'matrix').trim().toLowerCase();
             const valStr = (k.getAttribute('values') || '').trim();
             const vals = valStr.split(/[\s,]+/).map(parseFloat).filter(Number.isFinite);
             if (type === 'matrix' && vals.length >= 20) {
@@ -571,6 +583,7 @@ export function parseFilters(root, imageResolver) {
             blurSigmaX = Math.sqrt(blurSigmaX * blurSigmaX + sx * sx);
             blurSigmaY = Math.sqrt(blurSigmaY * blurSigmaY + sy * sy);
           } else if (kt === 'fedropshadow') {
+            if (feCount > 1) { supported = false; continue; }  // chain → graph builder
             // SVG 1.2 <feDropShadow> is shorthand for the graph:
             //   feGaussianBlur(SourceAlpha, stdDeviation) →
             //   feOffset(dx, dy) → feFlood(flood-color/opacity) →
@@ -595,6 +608,7 @@ export function parseFilters(root, imageResolver) {
             supported = null;  // Already wrote filters[id]; skip the
                                //  generic colorMatrix/blur record below.
           } else if (kt === 'feconvolvematrix') {
+            if (feCount > 1) { supported = false; continue; }  // chain → graph builder
             // feConvolveMatrix — general N×M convolution kernel.
             // Production-class kernels are typically 3×3 (emboss,
             // sharpen, edge); the renderer caps support at 5×5 so the
@@ -643,6 +657,7 @@ export function parseFilters(root, imageResolver) {
             };
             supported = null;
           } else if (kt === 'femorphology') {
+            if (feCount > 1) { supported = false; continue; }  // chain → graph builder
             // feMorphology: per-pixel max (dilate) or min (erode) over a
             // rectangular neighborhood of radius (rx, ry) in user space.
             // Spec: SVG Filter Effects § feMorphology.

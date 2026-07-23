@@ -169,6 +169,7 @@ export function attachMaskBake(R) {
 
     gl.useProgram(R.maskBakeProg);
     // Bind the bake program's bundle textures (same set as mantle.frag).
+    R._fpUValid = false;
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, b.curveTex); gl.uniform1i(mbUCurve, 0);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, b.bandTex);  gl.uniform1i(mbUBand, 1);
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, b.metaTex);  gl.uniform1i(mbUMeta, 2);
@@ -325,8 +326,10 @@ export function attachMaskBake(R) {
   }
 
   // Context-loss forget: drop RT-array/FBO refs WITHOUT deleting (post-loss
-  // they're dangling). ensureMaskRTArray rebuilds on the next bake. The bake
-  // quad VAO/VBO + dummies are recreated lazily too; null them so they rebuild.
+  // they're dangling). ensureMaskRTArray rebuilds on the next bake, and the
+  // nulled dummy samplers are recreated lazily by their accessors. The bake
+  // quad VAO/VBO are created once at attach and are NOT nulled here — a truly
+  // lost context needs the consumer to dispose() + recreate the renderer.
   function _forgetMaskBake() {
     _maskRTArray = null; _maskBakeFbo = null;
     _maskRTArrayPong = null; _maskBakeCopyFbo = null;

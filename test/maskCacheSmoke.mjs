@@ -19,15 +19,7 @@ const ROOT = path.resolve(__dirname, '..');
 // Multi-shape mask: two white rects in the mask → a real mask region.
 // Masked blue square; mask reveals the left+right thirds (a gap in the
 // middle), so centre is hidden, sides shown.
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <defs>
-    <mask id="m">
-      <rect x="0"   y="0" width="60" height="200" fill="white"/>
-      <rect x="140" y="0" width="60" height="200" fill="white"/>
-    </mask>
-  </defs>
-  <rect x="0" y="0" width="200" height="200" fill="#0000ff" mask="url(#m)"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/maskCache__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="200" height="200"></canvas>

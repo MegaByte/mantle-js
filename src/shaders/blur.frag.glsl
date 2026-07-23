@@ -25,19 +25,23 @@
 // For σ > 10 the implementation falls back on truncation.
 precision highp float;
 uniform sampler2D uTex;
-uniform vec2  uTexel;     // 1 / textureSize
+uniform vec2  uTexel;     // 1 / inRect.size — one CANVAS pixel, in input uv
+uniform vec4  uInMap;     // vUV → input uv (see @@FILTER_RECT@@)
 uniform vec2  uDir;       // (1,0) horizontal, (0,1) vertical
 uniform float uSigma;     // pixels along current axis; <=0.5 → identity
 in vec2 vUV;
 out vec4 fragColor;
 
+@@FILTER_RECT@@
+
 void main() {
-  if (uSigma <= 0.5) { fragColor = texture(uTex, vUV); return; }
+  vec2 uv = mapIn(vUV, uInMap);
+  if (uSigma <= 0.5) { fragColor = sampleIn(uTex, uv); return; }
   float twoS2 = 2.0 * uSigma * uSigma;
   // Naive radius in integer-tap units, ±3σ truncation, ≤32.
   int radius = int(min(ceil(uSigma * 3.0), 32.0));
   // Center tap.
-  vec4 acc = texture(uTex, vUV);
+  vec4 acc = sampleIn(uTex, uv);
   float wsum = 1.0;
   // Iterate pairs (1,2), (3,4), ..., up to (radius-1, radius) or
   // (radius, radius+1) depending on parity. Hard cap at 16 pairs.
@@ -54,8 +58,8 @@ void main() {
     // contributions. When w1=0 this collapses to exactly i0.
     float offset = (float(i0) * w0 + float(i1) * w1) / wPair;
     vec2 d = uDir * uTexel * offset;
-    acc += texture(uTex, vUV + d) * wPair;
-    acc += texture(uTex, vUV - d) * wPair;
+    acc += sampleIn(uTex, uv + d) * wPair;
+    acc += sampleIn(uTex, uv - d) * wPair;
     wsum += 2.0 * wPair;
   }
   fragColor = acc / wsum;

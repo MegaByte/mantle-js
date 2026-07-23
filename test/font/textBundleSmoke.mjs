@@ -89,6 +89,23 @@ const gl = makeGlStub();
   tb.dispose();
 }
 
+// === T3b: repeated text is allocation-free =========================
+{
+  const tb = await createTextBundle(gl, {
+    font, text: 'same', style: { fill: [1, 0, 0, 1] },
+  });
+  const beforeBundle = tb.bundle;
+  const beforeGen = tb.bundle._geomGen | 0;
+  const beforeTextures = gl.textureCount;
+  const result = await tb.setText('same');
+  if (result === beforeBundle && tb.bundle === beforeBundle && (tb.bundle._geomGen | 0) === beforeGen
+      && gl.textureCount === beforeTextures)
+    ok('T3b repeated setText avoids rebuild and texture allocation');
+  else
+    fail('T3b repeated setText rebuilt unchanged glyphs');
+  tb.dispose();
+}
+
 // === T4: setStyle alone keeps text =================================
 {
   const tb = await createTextBundle(gl, {

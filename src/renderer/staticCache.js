@@ -2,73 +2,146 @@
 //
 // The state machine maps each per-frame `tick(inputs)` call to one of:
 //   - None: full coverage pipeline runs every frame.
-//   - A1:   whole asset rasterized into an RT sized to on-screen pixel
-//           footprint. Per-frame cost: one textured-quad draw.
-//   - A3:   multiple handles with the same instance-group key share one
+//   - WholeAsset: whole asset rasterized into a viewport-sized target.
+//   - ViewportWindow: viewport-plus-slack window for large pannable assets.
+//           This tier is available only through ForceViewportWindow because it did not improve the
+//           measured JS workloads enough to justify automatic promotion.
+//   - SharedGroup: multiple handles with the same instance-group key share one
 //           cache RT; bake runs once per invalidation event.
-//
-// A2 (viewport-clamped for giant pannable assets) is intentionally a
-// no-op: the cache RT is already viewport-sized, so clamping a projected
-// world footprint to the viewport has nothing to reduce here.
 //
 // Pure JS — no GL, no DOM. WebGL bake / blit lives in the renderer's
 // enableStaticCache hookup.
 
 /// Cache strategy selector exposed via renderer.enableStaticCache().
 export const Strategy = Object.freeze({
-  Auto:       0,
-  AlwaysLive: 1,
-  ForceA1:    2,
-  ForceA2:    3,  // Intentional no-op: the cache RT is already viewport-sized.
-  ForceA3:    4,  // Instance-group sharing; pair with setInstanceGroup().
+  Auto:                0,
+  AlwaysLive:          1,
+  ForceWholeAsset:     2,
+  ForceViewportWindow: 3,
+  ForceSharedGroup:    4,
+  // Deprecated aliases retained for 1.x source compatibility.
+  ForceA1: 2,
+  ForceA3: 4,
 });
 
 /// Resolved level for the current frame.
 export const Level = Object.freeze({
-  None: 0,
-  A1:   1,
-  A2:   2,  // No-op; tick always demotes A2 → None.
-  A3:   3,
+  None:           0,
+  WholeAsset:     1,
+  ViewportWindow: 2,
+  SharedGroup:    3,
+  // Deprecated aliases retained for 1.x source compatibility.
+  A1: 1,
+  A3: 3,
 });
 
 /// Diagnostic reason for the current ResolvedLevel.
 // Global auto-promotion budget (viewport-sized RTs are expensive; explicit opts bypass).
-const AUTO_A1_BUDGET = 6;
+const AUTO_WHOLE_ASSET_BUDGET = 6;
 let _autoPromotedCount = 0;
 export const Reason = Object.freeze({
   Uninitialized:        0,
   UserOverride:         1,
-  AnimatorActive:         2,
+  AnimatorActive:       2,
   MorphActive:          3,
   SizeUnstable:         4,
   AssetTransition:      5,
   GiantAssetPanning:    6,
   AssetFitsViewport:    7,
   InstanceGroupMember:  8,
-  /// Engine-side feature gate: A2 not wired on this runtime.
-  LevelNotImplemented:  9,
+  UnsupportedFeatures: 9,
 });
 
-// -------- A3 instance-group registry -----------------------------------------
-// When multiple handles share an asset and opt into Strategy=ForceA3 with a
+/** @typedef {object} StaticCacheOptions
+ * @property {number} [strategy]
+ * @property {boolean} [autoBudgeted]
+ * @property {number} [stabilityEpsilon]
+ * @property {number} [stabilityPromoteFrames]
+ * @property {number} [stabilityDemoteFrames]
+ * @property {number} [viewportWindowGiantAssetFactor]
+ * @property {number} [viewportWindowMarginPixels]
+ * @property {string|null} [instanceGroupKey]
+ * @property {object} [groupScope] Internal resource-owner scope.
+ * @property {(group: SharedGroup) => void} [releaseSharedTarget] Internal resource cleanup.
+ */
+
+/** @typedef {object} StaticCacheInputs
+ * @property {boolean} [hasAsset]
+ * @property {boolean} [animatorActive]
+ * @property {boolean} [morphActive]
+ * @property {number} [footprintW]
+ * @property {number} [footprintH]
+ * @property {number} [viewportW]
+ * @property {number} [viewportH]
+ * @property {boolean} [cacheCompatible]
+ * @property {boolean} [viewportWindowCompatible]
+ * @property {boolean} [sharedGroupCompatible]
+ */
+
+/** @typedef {object} StaticCache
+ * @property {number} resolvedLevel
+ * @property {number} resolvedReason
+ * @property {number} lastBakeFrame
+ * @property {number} lastFootprintW
+ * @property {number} lastFootprintH
+ * @property {boolean} isCacheValid
+ * @property {number} cacheGeneration
+ * @property {number} strategy
+ * @property {string|null} instanceGroupKey
+ * @property {number} viewportWindowMarginPixels
+ * @property {(strategy: number) => void} setStrategy
+ * @property {(key: string|null) => void} setInstanceGroup
+ * @property {() => boolean} isGroupCacheValid
+ * @property {() => void} invalidate
+ * @property {() => void} invalidateLocal
+ * @property {(frameNumber: number, bakeWm?: Float32Array|number[]|null) => void} markBaked
+ * @property {(inputs: StaticCacheInputs) => void} tick
+ * @property {() => void} dispose
+ * @property {object} _cacheState Internal registry identity.
+ */
+
+// -------- Shared instance-group registry ------------------------------------
+// When multiple handles share an asset and opt into ForceSharedGroup with a
 // matching group key, the registry hands out a SINGLE GL cache RT per key.
 // The first member to bake becomes the owner; siblings borrow the same RT.
 
 /** @typedef {{ sharedTex: WebGLTexture|null, sharedFbo: WebGLFramebuffer|null,
+ *             sharedRb: WebGLRenderbuffer|null,
  *             rtW: number, rtH: number, owner: object|null,
  *             ownerLastBakeFrame: number, bakeWm?: Float32Array|number[]|null,
- *             members: Set<object> }} A3Group */
+ *             retired?: {tex: WebGLTexture|null, fbo: WebGLFramebuffer|null,
+ *                       rb: WebGLRenderbuffer|null}|null,
+ *             members: Set<object> }} SharedGroup */
 
-/** @type {Map<string, A3Group>} */
-const _a3Groups = new Map();
+/** Unscoped registry used by direct state-machine consumers. */
+const _sharedGroups = new Map();
+/** Renderer-created caches are isolated by WebGL context. */
+const _scopedSharedGroups = new WeakMap();
 
-function _acquireA3Group(key, member) {
+function _groupsFor(scope) {
+  if ((typeof scope !== 'object' && typeof scope !== 'function') || scope === null)
+    return _sharedGroups;
+  let groups = _scopedSharedGroups.get(scope);
+  if (!groups) {
+    groups = new Map();
+    _scopedSharedGroups.set(scope, groups);
+  }
+  return groups;
+}
+
+function _groupsForMember(member) {
+  return _groupsFor(member && member._groupScope);
+}
+
+function _acquireSharedGroup(key, member) {
   if (!key) return null;
-  let g = _a3Groups.get(key);
+  const groups = _groupsForMember(member);
+  let g = groups.get(key);
   if (!g) {
     g = {
       sharedTex: null,
       sharedFbo: null,
+      sharedRb: null,
       rtW: 0,
       rtH: 0,
       owner: null,
@@ -76,58 +149,65 @@ function _acquireA3Group(key, member) {
       bakeWm: null,
       members: new Set(),
     };
-    _a3Groups.set(key, g);
+    groups.set(key, g);
   }
   g.members.add(member);
   if (!g.owner) g.owner = member;
   return g;
 }
 
-function _releaseA3Group(key, member) {
-  if (!key) return;
-  const g = _a3Groups.get(key);
-  if (!g || !g.members.delete(member)) return;
+function _releaseSharedGroup(key, member) {
+  if (!key) return null;
+  const groups = _groupsForMember(member);
+  const g = groups.get(key);
+  if (!g || !g.members.delete(member)) return null;
   if (g.owner === member) {
     g.owner = g.members.size > 0 ? g.members.values().next().value : null;
   }
   if (g.members.size === 0) {
-    _a3Groups.delete(key);
+    groups.delete(key);
+    return g;
   }
-}
-
-export function releaseA3GroupMember(key, member, onEmpty) {
-  if (!key) return;
-  const g = _a3Groups.get(key);
-  if (!g || !g.members.has(member)) return;
-  const emptying = g.members.size === 1;
-  _releaseA3Group(key, member);
-  if (emptying && onEmpty) onEmpty(g);
+  return null;
 }
 
 /// Borrow or allocate a group-shared cache RT. Returns null when not in a
 /// group. `ensureFbo(rtW, rtH, alloc)` is called by the renderer to create
 /// GL resources when the group needs a new/larger RT.
-export function borrowA3GroupRt(key, member, rtW, rtH, ensureFbo) {
-  const g = _acquireA3Group(key, member);
+export function borrowSharedGroupTarget(key, member, rtW, rtH, ensureFbo) {
+  const g = _acquireSharedGroup(key, member);
   if (!g) return null;
   const w = Math.max(16, rtW | 0);
   const h = Math.max(16, rtH | 0);
-  if (g.sharedTex && g.rtW >= w && g.rtH >= h) {
-    return { tex: g.sharedTex, fbo: g.sharedFbo, rtW: g.rtW, rtH: g.rtH, group: g, bakeWm: g.bakeWm || null };
+  if (g.sharedTex && g.rtW === w && g.rtH === h) {
+    return { tex: g.sharedTex, fbo: g.sharedFbo, rb: g.sharedRb,
+             rtW: g.rtW, rtH: g.rtH, group: g, bakeWm: g.bakeWm || null };
   }
+  // Growing the shared RT: hand the old GL handles back so the caller
+  // can free them (this registry is GL-free by design) — silently
+  // overwriting leaked one texture+FBO per regrow.
+  const retired = g.sharedTex
+    ? { tex: g.sharedTex, fbo: g.sharedFbo, rb: g.sharedRb }
+    : null;
   const created = ensureFbo(w, h);
   if (!created) return null;
+  if (retired) {
+    g.retired = retired;
+    g.ownerLastBakeFrame = -1;   // the old bake lives in the retired RT
+  }
   g.sharedTex = created.tex;
   g.sharedFbo = created.fbo;
+  g.sharedRb = created.rb;
   g.rtW = created.rtW;
   g.rtH = created.rtH;
   g.owner = member;
   g.ownerLastBakeFrame = -1;
-  return { tex: g.sharedTex, fbo: g.sharedFbo, rtW: g.rtW, rtH: g.rtH, group: g };
+  return { tex: g.sharedTex, fbo: g.sharedFbo, rb: g.sharedRb,
+           rtW: g.rtW, rtH: g.rtH, group: g };
 }
 
-export function markA3GroupBaked(key, frameNumber, bakeWm) {
-  const g = key ? _a3Groups.get(key) : null;
+function markSharedGroupBaked(key, frameNumber, bakeWm, member) {
+  const g = key ? _groupsForMember(member).get(key) : null;
   if (g) {
     g.ownerLastBakeFrame = frameNumber;
     // The worldMatrix the shared RT was baked at. Borrowing members offset
@@ -138,15 +218,17 @@ export function markA3GroupBaked(key, frameNumber, bakeWm) {
   }
 }
 
-export function isA3GroupCacheValid(key) {
+function isSharedGroupCacheValid(key, member) {
   if (!key) return false;
-  const g = _a3Groups.get(key);
+  const g = _groupsForMember(member).get(key);
   return !!(g && g.sharedTex && g.ownerLastBakeFrame >= 0);
 }
 
 /// Construct a fresh per-renderer cache state. The renderer owns one
 /// of these; pass it to `tick({...})` once per frame to drive the
 /// state machine.
+/** @param {StaticCacheOptions} [opts]
+ * @returns {StaticCache} */
 export function createStaticCache(opts = {}) {
   // -------- Configuration --------
   const cfg = {
@@ -155,15 +237,19 @@ export function createStaticCache(opts = {}) {
     stabilityEpsilon:       opts.stabilityEpsilon     ?? 0.05,
     stabilityPromoteFrames: opts.stabilityPromoteFrames ?? 15,
     stabilityDemoteFrames:  opts.stabilityDemoteFrames  ?? 3,
-    a2GiantAssetFactor:     opts.a2GiantAssetFactor   ?? 1.5,
-    a2MarginPixels:         opts.a2MarginPixels       ?? 256,
+    viewportWindowGiantAssetFactor:
+      opts.viewportWindowGiantAssetFactor ?? 1.5,
+    viewportWindowMarginPixels:
+      opts.viewportWindowMarginPixels ?? 256,
+    releaseSharedTarget:
+      typeof opts.releaseSharedTarget === 'function' ? opts.releaseSharedTarget : null,
   };
 
   // -------- Read-only diagnostics (state.* fields) --------
   const state = {
     // Mutable; reset by tick() each frame.
     resolvedLevel:         /** @type {number} */ (Level.None),
-    resolvedReason:        Reason.Uninitialized,
+    resolvedReason:        /** @type {number} */ (Reason.Uninitialized),
     // Frame counter set by markBaked. -1 = never.
     lastBakeFrame:         -1,
     // Last footprint measured by tick().
@@ -173,10 +259,13 @@ export function createStaticCache(opts = {}) {
     isCacheValid:          false,
     // Bumped on every invalidate() — engine compares against the RT's
     // baked generation to detect "RT contents are stale but level is
-    // still A1" (e.g. content-change while level holds).
+    // still WholeAsset" (e.g. content change while the level holds).
     cacheGeneration:       0,
-    // A3 instance-group key. Null = not in a group.
+    // Shared-group key. Null = not in a group.
     instanceGroupKey:      opts.instanceGroupKey ?? null,
+    // Internal registry scope. Renderers pass their WebGL context so equal
+    // user keys in separate contexts can never alias GL resources.
+    _groupScope:           opts.groupScope ?? null,
   };
 
   // -------- Private hysteresis state --------
@@ -192,9 +281,17 @@ export function createStaticCache(opts = {}) {
     state.isCacheValid = false;
     state.cacheGeneration++;
     if (state.instanceGroupKey) {
-      const g = _a3Groups.get(state.instanceGroupKey);
+      const g = _groupsForMember(state).get(state.instanceGroupKey);
       if (g) g.ownerLastBakeFrame = -1;
     }
+  }
+
+  // Invalidate only this member's view of the target. SharedGroup uses this on canvas
+  // resize: one member may already have rebuilt the group RT at the new size,
+  // so a stale sibling must adopt that bake instead of invalidating it globally.
+  function invalidateLocal() {
+    state.isCacheValid = false;
+    state.cacheGeneration++;
   }
 
   /// Set the user strategy override.
@@ -206,23 +303,25 @@ export function createStaticCache(opts = {}) {
     invalidate();
   }
 
-  /// Opt into A3 instancing as a member of a named group. Pass null to leave.
+  /// Opt into target sharing as a member of a named group. Pass null to leave.
   function setInstanceGroup(key) {
+    if (_disposed) return;
     if (state.instanceGroupKey === key) return;
     if (state.instanceGroupKey) {
-      _releaseA3Group(state.instanceGroupKey, state);
+      const released = _releaseSharedGroup(state.instanceGroupKey, state);
+      if (released && cfg.releaseSharedTarget) cfg.releaseSharedTarget(released);
       state.isCacheValid = false;
     }
     state.instanceGroupKey = key || null;
-    if (state.instanceGroupKey) _acquireA3Group(state.instanceGroupKey, state);
+    if (state.instanceGroupKey) _acquireSharedGroup(state.instanceGroupKey, state);
     invalidate();
   }
 
-  /// True when this cache is an A3 group member AND the group's shared RT
+  /// True when this cache is a shared-group member AND the group's target
   /// has been baked at least once since the last invalidation.
   function isGroupCacheValid() {
     if (!state.instanceGroupKey) return state.isCacheValid;
-    return isA3GroupCacheValid(state.instanceGroupKey);
+    return isSharedGroupCacheValid(state.instanceGroupKey, state);
   }
 
   /// Mark cache as freshly baked. Engine calls this after the RT bake
@@ -231,7 +330,23 @@ export function createStaticCache(opts = {}) {
   function markBaked(frameNumber, bakeWm) {
     state.isCacheValid = true;
     state.lastBakeFrame = frameNumber;
-    if (state.instanceGroupKey) markA3GroupBaked(state.instanceGroupKey, frameNumber, bakeWm);
+    if (state.instanceGroupKey) markSharedGroupBaked(state.instanceGroupKey, frameNumber, bakeWm, state);
+  }
+
+  let _disposed = false;
+  function dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    if (state._budgetHeld) {
+      _autoPromotedCount = Math.max(0, _autoPromotedCount - 1);
+      state._budgetHeld = false;
+    }
+    if (state.instanceGroupKey) {
+      const released = _releaseSharedGroup(state.instanceGroupKey, state);
+      if (released && cfg.releaseSharedTarget) cfg.releaseSharedTarget(released);
+      state.instanceGroupKey = null;
+    }
+    state.isCacheValid = false;
   }
 
   /// Run one frame of eligibility detection. Updates resolvedLevel +
@@ -243,8 +358,12 @@ export function createStaticCache(opts = {}) {
   ///   morphActive:     bool — shape morph t is not at an endpoint
   ///   footprintW/H:    int  — projected on-screen pixel size of the asset
   ///   viewportW/H:     int  — current viewport size in pixels
+  ///   cacheCompatible: bool — false for mutable screen-space dependencies
+  ///   viewportWindowCompatible/sharedGroupCompatible: per-level feature gates
   /// }
+  /** @param {StaticCacheInputs} inputs */
   function tick(inputs) {
+    if (_disposed) return setResolved(Level.None, Reason.AssetTransition);
     state.lastFootprintW = inputs.footprintW | 0;
     state.lastFootprintH = inputs.footprintH | 0;
 
@@ -252,14 +371,18 @@ export function createStaticCache(opts = {}) {
     switch (cfg.strategy) {
       case Strategy.AlwaysLive:
         return setResolved(Level.None, Reason.UserOverride);
-      case Strategy.ForceA1:
-        return setResolved(Level.A1, Reason.UserOverride);
-      case Strategy.ForceA2:
-        // A2 is intentionally absent: renderer.js caches the viewport
-        // already, so an A2 viewport clamp would not reduce RT size.
-        return setResolved(Level.None, Reason.LevelNotImplemented);
-      case Strategy.ForceA3:
-        return setResolved(Level.A3, Reason.UserOverride);
+      case Strategy.ForceWholeAsset:
+        if (inputs.cacheCompatible === false)
+          return setResolved(Level.None, Reason.UnsupportedFeatures);
+        return setResolved(Level.WholeAsset, Reason.UserOverride);
+      case Strategy.ForceViewportWindow:
+        if (inputs.cacheCompatible === false || inputs.viewportWindowCompatible === false)
+          return setResolved(Level.None, Reason.UnsupportedFeatures);
+        return setResolved(Level.ViewportWindow, Reason.UserOverride);
+      case Strategy.ForceSharedGroup:
+        if (inputs.cacheCompatible === false || inputs.sharedGroupCompatible === false)
+          return setResolved(Level.None, Reason.UnsupportedFeatures);
+        return setResolved(Level.SharedGroup, Reason.UserOverride);
       // case Strategy.Auto: fall through.
     }
 
@@ -277,6 +400,9 @@ export function createStaticCache(opts = {}) {
       _stableFrames = 0;
       invalidate();
       return setResolved(Level.None, Reason.MorphActive);
+    }
+    if (inputs.cacheCompatible === false) {
+      return setResolved(Level.None, Reason.UnsupportedFeatures);
     }
 
     // -------- Size-stability check --------
@@ -312,29 +438,32 @@ export function createStaticCache(opts = {}) {
       return setResolved(Level.None, Reason.SizeUnstable);
     }
 
-    // -------- A1 vs giant-asset selection --------
+    // -------- Whole-asset vs giant-asset selection --------
     const giantX = inputs.viewportW > 0
-                && fw > inputs.viewportW * cfg.a2GiantAssetFactor;
+                && fw > inputs.viewportW * cfg.viewportWindowGiantAssetFactor;
     const giantY = inputs.viewportH > 0
-                && fh > inputs.viewportH * cfg.a2GiantAssetFactor;
+                && fh > inputs.viewportH * cfg.viewportWindowGiantAssetFactor;
     if (giantX || giantY) {
-      return setResolved(Level.None, Reason.LevelNotImplemented);
+      // Keep Auto conservative. The larger window RT adds memory and bake work,
+      // and did not win on the measured JS scenes. ForceViewportWindow remains available for
+      // applications whose fill cost and pan cadence make the tradeoff worthwhile.
+      return setResolved(Level.None, Reason.GiantAssetPanning);
     }
 
     // AUTO-DEFAULT BUDGET: auto-created caches (no explicit opts) hold a global
-    // promotion budget — each A1 costs a viewport-sized RT, so unbounded promotion
+    // promotion budget — each whole-asset cache costs a viewport-sized target, so unbounded promotion
     // on many-handle scenes would blow GPU memory. Explicitly configured handles
     // bypass the budget (the caller opted in deliberately).
-    if (cfg.autoBudgeted && state.resolvedLevel !== Level.A1) {
-      if (_autoPromotedCount >= AUTO_A1_BUDGET) return setResolved(Level.None, Reason.SizeUnstable);
+    if (cfg.autoBudgeted && state.resolvedLevel !== Level.WholeAsset) {
+      if (_autoPromotedCount >= AUTO_WHOLE_ASSET_BUDGET) return setResolved(Level.None, Reason.SizeUnstable);
       _autoPromotedCount++;
       state._budgetHeld = true;
     }
-    setResolved(Level.A1, Reason.AssetFitsViewport);
+    setResolved(Level.WholeAsset, Reason.AssetFitsViewport);
   }
 
   function setResolved(level, reason) {
-      if (state._budgetHeld && level !== Level.A1) { _autoPromotedCount = Math.max(0, _autoPromotedCount - 1); state._budgetHeld = false; }
+      if (state._budgetHeld && level !== Level.WholeAsset) { _autoPromotedCount = Math.max(0, _autoPromotedCount - 1); state._budgetHeld = false; }
     // If we dropped out of a cached level, the cache RT is logically
     // invalid until the next bake at the new level.
     if (state.resolvedLevel !== Level.None && level === Level.None) {
@@ -349,7 +478,7 @@ export function createStaticCache(opts = {}) {
     state.resolvedReason = reason;
   }
 
-  if (state.instanceGroupKey) _acquireA3Group(state.instanceGroupKey, state);
+  if (state.instanceGroupKey) _acquireSharedGroup(state.instanceGroupKey, state);
 
   return {
     // State (read-only by convention)
@@ -362,14 +491,17 @@ export function createStaticCache(opts = {}) {
     get cacheGeneration() { return state.cacheGeneration; },
     get strategy()        { return cfg.strategy; },
     get instanceGroupKey(){ return state.instanceGroupKey; },
+    get viewportWindowMarginPixels() { return cfg.viewportWindowMarginPixels; },
     // Mutators
     setStrategy,
     setInstanceGroup,
     isGroupCacheValid,
     invalidate,
+    invalidateLocal,
     markBaked,
     tick,
-    // Internal identity for A3 registry membership.
+    dispose,
+    // Internal identity for shared-group registry membership.
     _cacheState: state,
   };
 }

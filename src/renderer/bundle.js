@@ -29,8 +29,18 @@
 import {
   COVER_QUAD_STRIDE, BUNDLE_FLAG_HYBRID_MESH_CHUNKED,
   parseCoverQuadChunks, buildShapeIdxFloats, buildGidToShapeIdx,
+  buildStrippedCoverQuad,
 } from './coverQuadChunks.js';
+
+let _bundleUidSeq = 0;
 import { buildNineSliceMesh } from './nineSlice.js';
+import { computeOccludedShapes } from './occlusionCull.js';
+import { requestOcclusionCull } from './occlusionWorkerPool.js';
+// Interior-skip occupancy grids + GWN tier-3 cells are reserved (zeroed) at import
+// and built OFF the main thread by the occupancy worker; the results are applied
+// (float-plane write + texSubImage2D) when they arrive — see _applyOccupancyGrids
+// / _applyTreeGrids. The grids come online mid-play with no main-thread build cost.
+import { requestOccupancyBuild } from './occupancyWorkerPool.js';
 // parseMetaBin lives in the gl-free core so the no-WebGL fallback can use
 // it without pulling this GL module. Re-exported below.
 import { parseMetaBin, META_STRIDE_V2 } from '../core/metaBin.js';
@@ -122,9 +132,12 @@ function buildMetaPlane(metaFloats, numShapes, stride) {
 /// index, 1-based; 0 = none) for COLRv1 color glyphs; the COLR dispatch
 /// evaluates colrGraphs[colrGraphId-1] using the coverage-rendered shape
 /// silhouette as PaintGlyph's alpha mask.
-function buildDrawList(metaFloats, numShapes, stride, chunkByShape, filterGraphs) {
+export function buildDrawList(metaFloats, numShapes, stride, chunkByShape, filterGraphs, culled) {
   const list = [];
   for (let s = 0; s < numShapes; s++) {
+    // Fully occluded by a later opaque shape (occlusionCull.js): drawing it adds
+    // nothing but a conflated AA edge under the occluder's boundary.
+    if (culled && culled.has(s)) continue;
     const b = s * stride;
     const fillA   = metaFloats[b + 7];
     const strokeA = metaFloats[b + 11];
@@ -181,12 +194,58 @@ function buildDrawList(metaFloats, numShapes, stride, chunkByShape, filterGraphs
 /// Build a MantleBundle from the importer's in-memory section dict.
 /// The bundle owns its GL textures + ArrayBuffers (mesh + shapeIdx
 /// floats) and must be `.dispose()`d to free GPU memory.
-export function createBundle(gl, sections) {
+// Newly created bundles awaiting fill-program warm-up, partitioned by WebGL
+// context so one canvas never consumes another canvas's GL resources.
+const _newBundlesByGl = new WeakMap();
+
+export function enqueueFillPrewarm(gl, bundle) {
+  let q = _newBundlesByGl.get(gl);
+  if (!q) { q = []; _newBundlesByGl.set(gl, q); }
+  if (q.length < 4096) q.push(bundle);
+}
+
+export function takeFillPrewarm(gl) {
+  const q = _newBundlesByGl.get(gl);
+  while (q && q.length) {
+    const bundle = q.pop();
+    if (bundle && !bundle._disposed) return bundle;
+  }
+  return null;
+}
+
+/**
+ * @param {object} [opts]
+ * @param {boolean} [opts.occlusionCull=true] Drop shapes a later opaque shape fully
+ *   covers. They add nothing but a conflated AA edge (see occlusionCull.js). Set
+ *   false to draw every shape exactly as authored.
+ */
+export function createBundle(gl, sections, opts) {
   const flags = sections.flags || 0;
+  const pairBands = (flags & 8) !== 0;   // BUNDLE_FLAG_PAIR_BANDS
+  const noVBands  = (flags & 16) !== 0;  // BUNDLE_FLAG_NO_VBANDS
+  // 0 = unknown (older bundles) ⇒ assume every type is present.
+  const segTypeMask = (sections.segTypeMask | 0) || 0xF;
   const parsed = parseMetaBin(sections.meta, sections.metaFloatsPerShape);
   const stride = parsed.floatsPerShape;
   const numShapes = parsed.numShapes;
   const metaFloats = parsed.metaFloats;
+
+  // Mean per-shape bbox area, in the bundle's own units. AAC's cost on small shapes
+  // is register pressure paid PER FRAGMENT, so its win is governed by how many
+  // fragments a shape covers — see fillPass's `aacFill: 'auto'`.
+  let meanShapeArea = 0;
+  for (let i = 0; i < numShapes; i++) {
+    const b = i * stride;
+    const w = metaFloats[b + 2] - metaFloats[b + 0];
+    const h = metaFloats[b + 3] - metaFloats[b + 1];
+    if (w > 0 && h > 0) meanShapeArea += w * h;
+  }
+  if (numShapes) meanShapeArea /= numShapes;
+
+  // Mean segments per shape is used by the LB size gate, whose mesh cost scales
+  // with geometry while its benefit scales with covered fragments.
+  const meanSegsPerShape = numShapes ? (sections.totalSegments | 0) / numShapes : 0;
+
 
   // --- CPU-side per-shape state ---
   const gidToShapeIdx = buildGidToShapeIdx(metaFloats, numShapes, stride);
@@ -195,12 +254,21 @@ export function createBundle(gl, sections) {
   const coverQuadChunks = parseCoverQuadChunks(coverQuadFloats, flags);
   const hybridShapeIdxFloats = coverQuadFloats
     ? buildShapeIdxFloats(coverQuadFloats, coverQuadChunks, gidToShapeIdx) : null;
+  // Header-free VBO: pack chunk body verts contiguously (drops the dead
+  // one-vertex chunk headers) and stamp each chunk's `vboStart` so the
+  // renderer can batch adjacent chunks into a single drawArrays. See
+  // buildStrippedCoverQuad for why the interleaved headers break batching.
+  const strippedCover = coverQuadFloats
+    ? buildStrippedCoverQuad(coverQuadFloats, coverQuadChunks, hybridShapeIdxFloats) : null;
+  const coverQuadVboFloats = strippedCover ? strippedCover.verts : null;
+  const hybridShapeIdxVboFloats = strippedCover ? strippedCover.shapeIdx : null;
   const chunkByShape = new Array(numShapes);
   for (const c of coverQuadChunks) {
     const si = gidToShapeIdx.get(c.gid);
     if (si !== undefined) chunkByShape[si] = c;
   }
-  const drawList = buildDrawList(metaFloats, numShapes, stride, chunkByShape, sections.filterGraphs);
+  // drawList is built AFTER curveRangesByShape below — the occlusion cull needs the
+  // authoritative per-shape curve slices to test containment.
 
   // --- GL textures ---
   const mh = Math.max(1, numShapes);
@@ -225,8 +293,8 @@ export function createBundle(gl, sections) {
     // Exact-stop LUT — TWO RGBA8 texels per stop: texel A = straight
     // (R,G,B,alpha), texel B = (offset,…). Texture width = total texels
     // = 2 × stop count. The shader premultiplies after sampling so
-    // per-stop alpha survives compositing (the old premult-rgb/offset-in-
-    // alpha layout dropped it). Shared format with the COLRv1 dispatch —
+    // per-stop alpha survives compositing (a premultiplied-at-encode
+    // layout would drop it). Shared format with the COLRv1 dispatch —
     // both halves read via _gradientHelpers.glsl.
     if (sections.gradientStops && sections.gradientStops.byteLength) {
       const stopsBytes = new Uint8Array(sections.gradientStops);
@@ -308,6 +376,41 @@ export function createBundle(gl, sections) {
     ? sections.curveRangesByShape.map(r => ({ begin: r.begin | 0, end: r.end | 0 }))
     : buildCurveRangesByShape(metaFloats, numShapes, stride, cFR.length);
 
+  // OCCLUSION CULL. A shape a later OPAQUE shape completely covers adds nothing to
+  // the image — except its ANTIALIASED EDGE, which painter compositing blends in a
+  // SECOND time underneath the occluder's own edge, painting a 1px fringe of the
+  // hidden shape's colour along every shared boundary (the classic CONFLATION
+  // artifact — Chrome shows the same fringe on a straight shared edge; see
+  // occlusionCull.js). Art that stacks coincident layers — a duplicate ridge under a
+  // translucent one — therefore grew a coloured, too-dark AA edge. Culling removes
+  // the artifact by removing a draw that was invisible anyway: it costs less than
+  // nothing at render time.
+  //
+  // TWO HALVES, TWO SCHEDULES. The CORRECTNESS half — shapes that touch their
+  // occluder's boundary, which are the ones that conflate — is cheap and runs INLINE:
+  // it must hold on the very first frame or the fringe is visible. The PERF half —
+  // hidden shapes that keep clear of the boundary — buys draws and nothing else, so
+  // it is handed to a WORKER and applied when it lands. Nothing looks wrong while it
+  // is in flight, and off the load path it can afford to be thorough.
+  // Opt out with opts.occlusionCull === false.
+  let culled = null;
+  const cullEnabled = !(opts && opts.occlusionCull === false);
+  if (cullEnabled) {
+    try {
+      const set = computeOccludedShapes(cFR, curveRangesByShape, metaFloats, numShapes,
+                                        stride, 'coincident');
+      if (set && set.size) culled = set;
+    } catch { culled = null; }   // a cull is an optimisation — never fail the build over it
+  }
+  const drawList = buildDrawList(metaFloats, numShapes, stride, chunkByShape,
+                                 sections.filterGraphs, culled);
+  // Keep the UNCULLED list: the cull is only valid for the geometry as authored, and
+  // a bundle whose shapes later MOVE (a streamed road, a morph) must fall back to
+  // drawing everything — a shape hidden at load is not hidden once it slides out.
+  const drawListUnculled = culled
+    ? buildDrawList(metaFloats, numShapes, stride, chunkByShape, sections.filterGraphs, null)
+    : drawList;
+
   const bFR = new Float32Array(sections.bands);
   const bH = Math.max(1, Math.ceil(bFR.length / (4 * TEX_W)));
   const bF = new Float32Array(bH * 4 * TEX_W);
@@ -316,7 +419,25 @@ export function createBundle(gl, sections) {
 
   const bundle = {
     // CPU-side state
+    // Unique per bundle, for renderer-side caches keyed by bundle. filterGraphId and
+    // filterId are BUNDLE-LOCAL (every bundle's first filter is 1), so a cache keyed on
+    // those alone silently shares one entry between unrelated bundles.
+    uid: ++_bundleUidSeq,
+    // `opts.recolor` is ACCEPTED AND IGNORED. Recolour was briefly a declared bundle
+    // property, because it was a shader-variant axis and the variant could otherwise only
+    // be discovered mid-play. It is not an axis any more: measured, compiling the recolour
+    // block in costs ~2% — inside the noise floor — so it is always compiled in and there
+    // is nothing to declare. Kept in the signature so callers that added it still work.
     flags,
+    pairBands,   // BUNDLE_FLAG_PAIR_BANDS: each H band covers a stripe PAIR
+    noVBands,    // BUNDLE_FLAG_NO_VBANDS: Slug's V ray would degenerate — AAC only
+    meanSegsPerShape,
+    segTypeMask, // which of LINE/QUAD/CUBIC/ARC this bundle actually contains
+    meanShapeArea, // mean per-shape bbox area, bundle units (for aacFill:'auto')
+    noAaFill: !!sections.noAaFill,      // every drawn fill is opaque-stroke-covered ⇒ no-AA fill OK
+    noAaTree: !!sections.noAaTree,      // …and cubic/arc-bearing ⇒ GWN tree baked ⇒ route tree-hard (not band-hard)
+    gwnTree: !!sections.gwnTree,        // importSvg({gwnTree:true}) — required by every GWN kernel
+    minStrokeEmW: sections.minStrokeEmW || 0, // min covering-stroke width (em); draw gate needs ≥2 device px
     numShapes,
     globalBBox: parsed.globalBBox,
     // Optional font-wide + per-run typographic metrics. Populated for
@@ -347,6 +468,9 @@ export function createBundle(gl, sections) {
     coverQuadFloats,
     coverQuadChunks,
     hybridShapeIdxFloats,
+    // Header-free, batch-friendly VBO planes (chunks carry `vboStart`).
+    coverQuadVboFloats,
+    hybridShapeIdxVboFloats,
     chunkByShape,
     // CPU-side curve float plane (UNPADDED). Kept so shape morph can lerp
     // curves between bundles without re-reading from GL. `curveFloats.length`
@@ -364,6 +488,12 @@ export function createBundle(gl, sections) {
     curveRangesByShape,
     gidToShapeIdx,
     drawList,
+    drawListUnculled,
+    _culledShapes: culled,
+    // Bumped whenever the CULL swaps drawList. The cull runs off-thread and lands without
+    // touching _geomGen (the geometry did not move), so anything caching a draw-list
+    // derivative against the geometry gen would keep a pre-cull copy forever.
+    _cullGen: 0,
     // GL handles
     curveTex,
     bandTex,
@@ -393,6 +523,11 @@ export function createBundle(gl, sections) {
     // (opt-in). Gates the fill shader's occupancy branch so the default path is
     // untouched. Bits live in the curve buffer; descriptors in meta texel 5.
     hasOccupancy: !!sections.hasOccupancy,
+    // Private worker-completion markers used by deterministic prewarm/tests.
+    // Rendering remains correct while either is true; the worker only adds
+    // acceleration data or removes conservatively hidden draws.
+    _occupancyBuildPending: false,
+    _occlusionCullPending: false,
     // CPU-only COLRv1 paint-graph table — one entry per text-run color
     // glyph that ships a v1 paint tree. The COLR dispatch evaluates
     // colrGraphs[colrGraphId-1] using the coverage-rendered glyph
@@ -441,6 +576,8 @@ export function createBundle(gl, sections) {
           coverQuadFloats:    this.coverQuadFloats,
           coverQuadChunks:    this.coverQuadChunks,
           hybridShapeIdxFloats:this.hybridShapeIdxFloats,
+          coverQuadVboFloats:   this.coverQuadVboFloats,
+          hybridShapeIdxVboFloats: this.hybridShapeIdxVboFloats,
           chunkByShape:        this.chunkByShape,
           drawList:            this.drawList,
           globalBBox:          this.globalBBox.slice(),
@@ -461,6 +598,12 @@ export function createBundle(gl, sections) {
       this.coverQuadFloats     = meshFloats;
       this.coverQuadChunks     = chunks;
       this.hybridShapeIdxFloats = shapeIdxFloats || baseline.hybridShapeIdxFloats;
+      // Repack the header-free VBO planes + restamp chunk vboStart for the
+      // new mesh (batching depends on vboStart tracking the current chunks).
+      const strip = meshFloats
+        ? buildStrippedCoverQuad(meshFloats, chunks, this.hybridShapeIdxFloats) : null;
+      this.coverQuadVboFloats     = strip ? strip.verts : null;
+      this.hybridShapeIdxVboFloats = strip ? strip.shapeIdx : baseline.hybridShapeIdxVboFloats;
       // Rebuild chunkByShape so per-shape lookups land in the new chunk array.
       const cbs = new Array(this.numShapes);
       for (const c of chunks) {
@@ -504,14 +647,90 @@ export function createBundle(gl, sections) {
         this.globalBBox = baseline.globalBBox.slice();
         this._nineSliceActive = false;
       }
-      // Callers that already have the bundle bound should re-call
-      // renderer.setBundle(bundle) to mark the changed coverQuadFloats
-      // buffer dirty for the next draw.
+      // Bump the geometry generation so a same-bundle setBundle (or the
+      // analytic-route gates) sees the rewritten coverQuadFloats —
+      // without the bump the documented "re-call setBundle" contract
+      // hits the same-bundle fast path, which never re-uploads the mesh.
+      this._geomGen = (this._geomGen | 0) + 1;
       return this;
+    },
+    /// Create a lightweight PER-DRAW nine-slice view of this bundle.
+    ///
+    /// Unlike applyNineSlice (which rewrites THIS bundle's mesh in
+    /// place — one nine-slice state per bundle), the returned instance
+    /// carries its own rewritten cover-quad mesh + drawList + globalBBox
+    /// while SHARING every heavy resource with the base bundle by
+    /// prototype: curve/band/meta/gradient/atlas textures, CPU float
+    /// planes, hit-test tables. Cost per instance ≈ the rewritten mesh
+    /// floats (a few KB), so one chrome asset can be drawn at N sizes
+    /// simultaneously — bind each instance to its own draw handle
+    /// (renderer.createBundleHandle(inst) / setBundle(inst)).
+    ///
+    /// Re-size an instance by calling inst.applyNineSlice({...}) again;
+    /// it rebuilds from the base's un-sliced mesh and bumps the
+    /// instance's own _geomGen so bound handles re-upload.
+    ///
+    /// Lifetime: the BASE owns all GPU resources. inst.dispose() only
+    /// invalidates the instance (and frees any draw-route state stamped
+    /// on it); disposing the base invalidates every instance.
+    ///
+    /// @param {object} opts  same contract as applyNineSlice:
+    ///   { border: [L,B,R,T], worldSize: [W,H], nativeBBox?: [x0,y0,x1,y1] }
+    /// @returns {object} a bundle-shaped instance, drawable anywhere a
+    ///   bundle is accepted.
+    nineSliceInstance(opts) {
+      const inst = Object.create(this);
+      inst._nineSliceBase = this;
+      // Never inherit gen-keyed route caches or LB draw-route state —
+      // they are keyed on _geomGen values from ANOTHER object's
+      // timeline. Start the instance clean; the nine-slice route gates
+      // (_nineSliceActive) keep it off the LB/instanced fast paths.
+      inst._instSimpleCache = null;
+      inst._lbEligCache = null;
+      inst._lbMeshes = null;
+      inst._lbGen = -1;
+      inst._lbHasSlug = false;
+      inst._lbPaintTexGl = null;
+      inst._lbRouteGl = null;
+      // Baseline = the base's UN-SLICED mesh (shared by reference; the
+      // arrays are immutable). If the base was itself applyNineSlice'd,
+      // its stashed baseline is the true native mesh.
+      inst._nineSliceBaseline = this._nineSliceBaseline || {
+        coverQuadFloats:      this.coverQuadFloats,
+        coverQuadChunks:      this.coverQuadChunks,
+        hybridShapeIdxFloats: this.hybridShapeIdxFloats,
+        coverQuadVboFloats:   this.coverQuadVboFloats,
+        hybridShapeIdxVboFloats: this.hybridShapeIdxVboFloats,
+        chunkByShape:         this.chunkByShape,
+        drawList:             this.drawList,
+        globalBBox:           this.globalBBox.slice(),
+      };
+      // Own generation counter (starts at the base's current value;
+      // applyNineSlice below bumps it, so a handle freshly bound to the
+      // base never confuses the two).
+      inst._geomGen = (this._geomGen | 0);
+      inst.dispose = function () {
+        this._disposed = true;
+        // Free only draw-route GL state stamped on the INSTANCE itself;
+        // everything inherited belongs to the base.
+        if (Object.prototype.hasOwnProperty.call(this, '_lbPaintTexGl') && this._lbPaintTexGl) {
+          gl.deleteTexture(this._lbPaintTexGl); this._lbPaintTexGl = null;
+        }
+        const route = /** @type {{vao?: WebGLVertexArrayObject, buf?: WebGLBuffer}|null} */ (
+          Object.prototype.hasOwnProperty.call(this, '_lbRouteGl') ? this._lbRouteGl : null);
+        if (route) {
+          if (route.vao) gl.deleteVertexArray(route.vao);
+          if (route.buf) gl.deleteBuffer(route.buf);
+          this._lbRouteGl = null;
+        }
+      };
+      inst.applyNineSlice(opts || {});
+      return inst;
     },
     /// Release all GL resources owned by this bundle. After dispose
     /// the bundle is invalid; create a new one for the next asset.
     dispose() {
+      this._disposed = true;
       for (const tex of [this.curveTex, this.bandTex, this.metaTex, this.dashTex,
                          this.gradientTex, this.gradientStopsTex,
                          this.imageAtlasTex, this.filterTex, this.kernelTex]) {
@@ -520,6 +739,14 @@ export function createBundle(gl, sections) {
       this.curveTex = this.bandTex = this.metaTex = this.dashTex =
       this.gradientTex = this.gradientStopsTex =
       this.imageAtlasTex = this.filterTex = this.kernelTex = null;
+      // LB route resources are lazily stamped onto the bundle by the draw
+      // path (morphDraw) — free them here or they outlive the bundle.
+      if (this._lbPaintTexGl) { gl.deleteTexture(this._lbPaintTexGl); this._lbPaintTexGl = null; }
+      if (this._lbRouteGl) {
+        if (this._lbRouteGl.vao) gl.deleteVertexArray(this._lbRouteGl.vao);
+        if (this._lbRouteGl.buf) gl.deleteBuffer(this._lbRouteGl.buf);
+        this._lbRouteGl = null;
+      }
     },
   };
   // AUTOMATIC mesh construction — OFF THE MAIN THREAD. The whole Loop-Blinn
@@ -527,23 +754,188 @@ export function createBundle(gl, sections) {
   // lbWorkerPool); when it returns, the renderer stores the packed meshes and the
   // draw path upgrades from Slug to LB. The draw path itself NEVER builds. Where
   // no builder is registered (older init order / no-WebGL), fall back to the
-  // legacy idle-drain prepare so behaviour degrades rather than breaking.
-  if (!sections.streamable) {
-    if (_lbBuilder) _lbBuilder(bundle);
-    else if (_lbPreparer) _enqueuePrepare(bundle);
+  // idle-drain prepare so behaviour degrades rather than breaking.
+  // sections.deferAutoLb: opt-out for callers that immediately TRANSPLANT the
+  // fresh bundle's fields into an existing bundle object (textBundle's
+  // identity-stable setText) — the worker result would land on the abandoned
+  // temporary. Such bundles carry _geomGen > 0 after transplant, which keeps
+  // them off the LB-static route anyway (same policy as streamed geometry).
+  if (!sections.streamable && !sections.deferAutoLb) {
+    // `false` means registered builders deliberately declined (all renderers
+    // are Slug-only). Only `null` means no builder exists and needs the legacy
+    // idle-preparer fallback.
+    if (_runLbBuilders(bundle) === null && _lbPreparers.length) _enqueuePrepare(bundle);
   }
+  // Interior-skip grids reserved (zeroed) at import fill in AFTER first draw:
+  // the region is additive (occSkip only collapses a walk that returns 1.0), so
+  // the first frame is correct-but-unaccelerated and hasOccupancy flips on once
+  // bits land. curveFloats IS cFR, so writes patch the CPU copy in place.
+  // GWN tier-3 grids reserved (zeroed) during the tree bake fill the same way,
+  // into bandTex. Zeroed cells are already dormant (margin 0), so there is no
+  // activation flag — the descriptor is live and the grid accelerates interior
+  // pixels the moment real cells land.
+  //
+  // Both grid builds are pure O(G²·segs) math, so they run OFF the main thread in
+  // the occupancy worker; when the bits/cells come back we only write the float
+  // planes + texSubImage2D (cheap). "Come online when ready": the first frames are
+  // correct-but-unaccelerated (occSkip only collapses a walk that returns 1.0;
+  // zeroed tier-3 cells are dormant), and the grids activate the moment they land.
+  const _occPend = sections.pendingOccupancy, _tierPend = sections.pendingTier3;
+  if ((_occPend && _occPend.length) || (_tierPend && _tierPend.length)) {
+    // Capture the curve/band planes + geometry generation at schedule time.
+    // updateBundleGeometry / setText transplant replace those planes; applying
+    // a late worker result into the live texture would patch occupancy bits
+    // over real curve texels (wrong interiors / corrupted fills).
+    const occGen = bundle._geomGen | 0;
+    const occCurves = cFR;
+    const occBands = bFR;
+    bundle._occupancyBuildPending = true;
+    requestOccupancyBuild(_occPend || [], _tierPend || [], (out) => {
+      bundle._occupancyBuildPending = false;
+      if (bundle._disposed) return;
+      if ((bundle._geomGen | 0) !== occGen) return;
+      if (bundle.curveFloats !== occCurves) return;
+      if (out.occ && out.occ.length) _applyOccupancyGrids(gl, bundle, out.occ, occCurves);
+      if (out.tier3 && out.tier3.length) {
+        if (bundle.bandFloats !== occBands) return;
+        _applyTreeGrids(gl, bundle, out.tier3, occBands);
+      }
+    });
+  }
+  // The PERF half of the occlusion cull, off the main thread. createBundle already
+  // applied the cheap 'coincident' pass inline (that one is the correctness fix and
+  // has to hold on frame one); this hunts the rest — shapes hidden well clear of
+  // their occluder's boundary — and simply drops them from the draw list when it
+  // lands. Arriving late costs nothing: the first frames just draw a few shapes that
+  // nobody can see. Skipped once geometry has moved, for the same reason the stream
+  // path retires the cull: a shape hidden as authored is not hidden once it slides.
+  if (cullEnabled && numShapes > 1) {
+    bundle._occlusionCullPending = true;
+    requestOcclusionCull(
+      { cv: cFR, meta: metaFloats, n: numShapes, stride, ranges: curveRangesByShape },
+      (extra) => {
+        bundle._occlusionCullPending = false;
+        if (bundle._disposed || !extra || !extra.length) return;
+        if ((bundle._geomGen | 0) !== 0) return;          // geometry moved — cull is stale
+        const set = new Set(bundle._culledShapes || []);
+        const before = set.size;
+        for (const i of extra) set.add(i);
+        if (set.size === before) return;
+        bundle._culledShapes = set;
+        bundle.drawList = buildDrawList(bundle.metaFloats, bundle.numShapes,
+                                        bundle.metaFloatsPerShape, bundle.chunkByShape,
+                                        bundle.filterGraphs, set);
+        bundle._cullGen = (bundle._cullGen | 0) + 1;   // draw-list derivatives must rebuild
+        // The analytic route assembles ONE combined VBO from the draw list and caches
+        // it against the geometry gen — which hasn't changed — so retire that cache to
+        // make it re-read the now-shorter list. Do NOT touch _lbMeshes: the per-shape
+        // meshes are still valid, and `null` there is the memory-budget gate's "denied"
+        // marker (clearing it silently un-denied a bundle the gate had refused).
+        bundle._lbCombined = null;
+      },
+    );
+  }
+  enqueueFillPrewarm(gl, bundle);
   return bundle;
 }
 
-// Module-level preparer registration (set by the renderer's morphDraw attach).
-let _lbPreparer = null;
-export function setLbPreparer(fn) { _lbPreparer = fn; }
-// Off-thread whole-bundle LB builder (set by morphDraw). Given a freshly created
-// bundle, it kicks off the worker build and applies the result when ready.
-let _lbBuilder = null;
-export function setLbBuilder(fn) { _lbBuilder = fn; }
+// Apply worker-built interior-occupancy bits into cFR (the curve float plane) and
+// upload the affected rows, then flip bundle.hasOccupancy on. The heavy
+// O(G²·segs) build already ran off-thread; this is the cheap write + texSubImage2D.
+function _applyOccupancyGrids(gl, bundle, built, cFR) {
+  if (!bundle.curveTex) return;                           // disposed
+  let minRow = Infinity, maxRow = -1, changed = false;
+  for (const g of built) {
+    if (!g.bits) continue;                                // low interior → cells stay zero (dormant, correct)
+    const bits = g.bits;
+    for (let i = 0; i < bits.length; i += 4) {
+      const t = (g.base + (i >> 2)) * 4;
+      cFR[t] = bits[i] || 0; cFR[t + 1] = bits[i + 1] || 0;
+      cFR[t + 2] = bits[i + 2] || 0; cFR[t + 3] = bits[i + 3] || 0;
+    }
+    const nTexels = Math.ceil(g.G * g.G / 4);
+    const r0 = Math.floor(g.base / TEX_W), r1 = Math.floor((g.base + nTexels - 1) / TEX_W);
+    if (r0 < minRow) minRow = r0; if (r1 > maxRow) maxRow = r1;
+    changed = true;
+  }
+  if (changed) {
+    // Re-upload the affected full rows from cFR (row-padded to TEX_W; the tail
+    // beyond cFR.length stays zero, matching the texture's original padding).
+    const rows = maxRow - minRow + 1;
+    const buf = new Float32Array(rows * TEX_W * 4);
+    const srcStart = minRow * TEX_W * 4;
+    const srcLen = Math.max(0, Math.min(rows * TEX_W * 4, cFR.length - srcStart));
+    if (srcLen > 0) buf.set(cFR.subarray(srcStart, srcStart + srcLen));
+    gl.bindTexture(gl.TEXTURE_2D, bundle.curveTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, minRow, TEX_W, rows, gl.RGBA, gl.FLOAT, buf);
+    bundle.hasOccupancy = true;                            // patched grids now skip; unbuilt ones stay zero (correct)
+  }
+}
+
+// Apply worker-built GWN tier-3 cells into bFR (band plane) + upload. Packs 2
+// cells/texel; no activation flag — zeroed cells were already dormant.
+function _applyTreeGrids(gl, bundle, built, bFR) {
+  if (!bundle.bandTex) return;                            // disposed
+  let minRow = Infinity, maxRow = -1, changed = false;
+  for (const g of built) {
+    if (!g.cells) continue;
+    const cells = g.cells, nCells = g.gridW * g.gridH;
+    for (let i = 0, ti = g.absTexel; i < nCells; i += 2, ti++) {
+      const t = ti * 4;
+      bFR[t] = cells[i * 2]; bFR[t + 1] = cells[i * 2 + 1];
+      bFR[t + 2] = i + 1 < nCells ? cells[i * 2 + 2] : 0;
+      bFR[t + 3] = i + 1 < nCells ? cells[i * 2 + 3] : 0;
+    }
+    const nTexels = Math.ceil(nCells / 2);
+    const r0 = Math.floor(g.absTexel / TEX_W), r1 = Math.floor((g.absTexel + nTexels - 1) / TEX_W);
+    if (r0 < minRow) minRow = r0; if (r1 > maxRow) maxRow = r1;
+    changed = true;
+  }
+  if (changed) {
+    const rows = maxRow - minRow + 1;
+    const buf = new Float32Array(rows * TEX_W * 4);
+    const srcStart = minRow * TEX_W * 4;
+    const srcLen = Math.max(0, Math.min(rows * TEX_W * 4, bFR.length - srcStart));
+    if (srcLen > 0) buf.set(bFR.subarray(srcStart, srcStart + srcLen));
+    gl.bindTexture(gl.TEXTURE_2D, bundle.bandTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, minRow, TEX_W, rows, gl.RGBA, gl.FLOAT, buf);
+  }
+}
+
+// Every renderer registers its preparer and unregisters it on disposal.
+const _lbPreparers = [];
+export function setLbPreparer(fn) {
+  if (typeof fn === 'function' && !_lbPreparers.includes(fn)) _lbPreparers.push(fn);
+}
+export function removeLbPreparer(fn) {
+  const i = _lbPreparers.indexOf(fn);
+  if (i >= 0) _lbPreparers.splice(i, 1);
+}
+function _lbPreparer(b) {                       // the newest live preparer
+  const fn = _lbPreparers[_lbPreparers.length - 1];
+  return fn ? fn(b) : undefined;
+}
+// Off-thread whole-bundle LB builders. The newest renderer is asked first;
+// returning false lets another live renderer accept the shared bundle.
+const _lbBuilders = [];
+export function setLbBuilder(fn) {
+  if (typeof fn === 'function' && !_lbBuilders.includes(fn)) _lbBuilders.push(fn);
+}
+export function removeLbBuilder(fn) {
+  const i = _lbBuilders.indexOf(fn);
+  if (i >= 0) _lbBuilders.splice(i, 1);
+}
+function _runLbBuilders(bundle) {
+  if (!_lbBuilders.length) return null;
+  for (let i = _lbBuilders.length - 1; i >= 0; i--) {
+    if (_lbBuilders[i](bundle) !== false) return true;   // handled (or built)
+  }
+  return false;
+}
 
 const _prepQ = [];
+const _prepQueued = new WeakSet();
+let _prepHead = 0;
 let _prepScheduled = false;
 function _schedulePrepDrain() {
   if (_prepScheduled) return;
@@ -551,29 +943,36 @@ function _schedulePrepDrain() {
   const drain = (deadline) => {
     _prepScheduled = false;
     const t0 = Date.now();
-    // On busy screens rIC rarely fires with real idle — the 200ms timeout + 6ms
-    // fallback slice drained loads at ~5-15 shapes/s (a level select trickled
-    // first-sighting builds for tens of seconds). 50ms timeout + 10ms fallback
-    // finishes ~5-8× sooner; the draw-side pool still caps in-frame stalls.
+    // On busy screens rIC rarely fires with real idle — a 200ms timeout + 6ms
+    // fallback slice drained loads at only ~5-15 shapes/s. 50ms timeout + 10ms
+    // fallback finishes ~5-8× sooner; the draw-side pool still caps in-frame
+    // stalls.
     const budget = () => (deadline && deadline.timeRemaining ? deadline.timeRemaining() > 1 : (Date.now() - t0) < 10);
-    while (_prepQ.length && budget()) {
-      const b = _prepQ.shift();
-      // The preparer itself is time-budgeted and self-re-enqueues partial builds, so
-      // one monster bundle can no longer own a whole idle slice (the drain was the
-      // residual crash freeze: it ran the UNBUDGETED ensure).
-      try { if (_lbPreparer) _lbPreparer(b); } catch { /* draw-time fallback */ }
+    while (_prepHead < _prepQ.length && budget()) {
+      const b = _prepQ[_prepHead++];
+      _prepQueued.delete(b);
+      // The preparer itself is time-budgeted and self-re-enqueues partial builds,
+      // so one monster bundle cannot own a whole idle slice.
+      try { if (!b._disposed && _lbPreparers.length) _lbPreparer(b); } catch { /* draw-time fallback */ }
     }
-    if (_prepQ.length) _schedulePrepDrain();
+    if (_prepHead === _prepQ.length) { _prepQ.length = 0; _prepHead = 0; }
+    else if (_prepHead > 1024 && _prepHead * 2 > _prepQ.length) {
+      _prepQ.splice(0, _prepHead);
+      _prepHead = 0;
+    }
+    if (_prepHead < _prepQ.length) _schedulePrepDrain();
   };
   if (typeof requestIdleCallback === 'function') requestIdleCallback(drain, { timeout: 50 });
   else setTimeout(drain, 0);
 }
 function _enqueuePrepare(bundle) {
+  if (!bundle || bundle._disposed || _prepQueued.has(bundle)) return;
+  _prepQueued.add(bundle);
   _prepQ.push(bundle);
   _schedulePrepDrain();
 }
 // Draw paths defer missing meshes here (render Slug now, flip to LB when built).
-export function enqueueLbPrepare(bundle) { if (_lbPreparer) _enqueuePrepare(bundle); }
+export function enqueueLbPrepare(bundle) { if (_lbPreparers.length) _enqueuePrepare(bundle); }
 
 /// Exported constants — useful for consumers that want to roll their
 /// own bundle parsing or build a custom mesh layout.

@@ -66,7 +66,13 @@ function getGL(canvas, opts) {
   if (!canvas || typeof canvas.getContext !== 'function') return null;
   try {
     return canvas.getContext('webgl2', opts.glAttribs || {
-      antialias: true, premultipliedAlpha: true, preserveDrawingBuffer: true,
+      depth: false,
+      stencil: true,
+      antialias: false,
+      premultipliedAlpha: true,
+      preserveDrawingBuffer: false,
+      desynchronized: true,
+      powerPreference: 'high-performance',
     });
   } catch { return null; }
 }
@@ -158,8 +164,11 @@ function wrapWebgl(renderer, gl, createBundle, bind) {
   renderer.gl = gl;
   renderer.renderer = renderer;   // self-ref, mirrors scene.renderer on native
   renderer.nativeScene = null;
+  // opts forwards to createBundle — notably { recolor: true }, which fixes the
+  // fill variant at creation. Dropping it here would strand every consumer that
+  // builds bundles through toScene on the mid-play self-heal path.
   if (typeof renderer.toScene !== 'function')
-    renderer.toScene = (sections) => createBundle(gl, sections);
+    renderer.toScene = (sections, opts) => createBundle(gl, sections, opts);
   // The GL path is ALWAYS pixel-viewport (the vertex shader maps em→clip
   // via the canvas viewport). setCoordinateSpace exists for parity but is
   // a no-op here — worldMatrix is clip-space by the shader contract.
@@ -207,7 +216,10 @@ function wrapNative(scene, bind) {
   scene.gl = null;
   scene.renderer = null;
   scene.nativeScene = scene;
-  scene.toScene = (sections) => {
+  // `opts` (e.g. { recolor: true }) is accepted for signature parity with the
+  // WebGL path and ignored: recolour on native is applied by the SVG renderer
+  // at draw time, so there is no shader variant to fix at creation.
+  scene.toScene = (sections, _opts) => {
     if (!sections.svgSource) {
       mantleWarn('[Mantle] native fallback: sections lack svgSource — ' +
         'import with { retainSource: true } so the fallback can render ' +

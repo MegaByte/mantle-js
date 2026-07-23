@@ -79,16 +79,17 @@ export const SRC_STROKE_PAINT = -6;
 /// size. pool.invalidate() drops everything (call on canvas resize so
 /// the pool's RTs don't outlive the GL viewport).
 ///
-/// Free RTs are bucketed by quantized size so a 47×93 bbox and a
-/// 49×91 bbox share the same bucket (both round up to 64×128). The
-/// quantization step is 32 — small enough that the over-allocation
-/// is negligible (worst case +31 pixels per axis) while keeping
-/// bucket fragmentation low. Bucket key fits in 32 bits (w|h<<16),
+/// Free RTs are bucketed by exact size, so callers are expected to hand in sizes
+/// already rounded to a grid (renderer._filterNodeRects quantizes each node's
+/// RECT to 32px before asking for it). Bucket key fits in 32 bits (w|h<<16),
 /// supporting canvases up to 65535 × 65535.
 ///
 /// `pool.ensureSize(w, h)` is a no-op kept for API stability; the bucketed
 /// pool needs no global current size.
-const POOL_QUANT = 32;
+// Allocation is exact because filter shaders address inputs through canvas-space
+// rects and require one texture pixel per canvas pixel. Callers quantize the rect
+// before acquisition when they want size-bucket reuse.
+const POOL_QUANT = 1;
 function quantize(v) {
   return Math.max(POOL_QUANT, Math.ceil(v / POOL_QUANT) * POOL_QUANT);
 }
@@ -106,15 +107,20 @@ export function createRTPool(gl, opts) {
   const texType = opts.type || gl.UNSIGNED_BYTE;
   const all = [];          // [{ fbo, tex, size: [w,h] }]
   const free = new Map();  // sizeKey → indices into `all`
-  // When true, acquire() returns a fully transparent RT (clearing any
-  // recycled content). Set by evaluateGraph only while node scissoring is
-  // active, so EVERY acquired RT — node outputs AND handler intermediates
-  // (blur tmp / box ping-pong / merge accumulator) — is stale-free.
-  // Scissored passes then write only their bbox and leave the rest at 0,
-  // which is byte-exact because spec-bounded primitives are 0 outside
-  // their bbox. Off by default → the non-scissored COLR path pays nothing.
+  // When true, acquire() returns a fully transparent RT (clearing any recycled
+  // content). evaluateGraph turns it on whenever it is allocating per-node rects,
+  // so EVERY acquired RT — node outputs AND handler intermediates (blur tmp / box
+  // ping-pong / merge accumulator) — is stale-free. A handler that doesn't write
+  // its whole rect (feOffset blits a translated crop; passthrough copies only the
+  // overlap with its input) then leaves transparent black, which is what a
+  // primitive is outside its subregion. Off by default → the canvas-sized COLR
+  // path pays nothing.
   let clearOnAcquire = false;
-  function setClearOnAcquire(v) { clearOnAcquire = !!v; }
+  function setClearOnAcquire(v) {
+    const previous = clearOnAcquire;
+    clearOnAcquire = !!v;
+    return previous;
+  }
   function ensureSize(_w, _h) {
     // No-op. Bucketed pool doesn't need a global current size.
     void _w; void _h;
@@ -144,7 +150,12 @@ export function createRTPool(gl, opts) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     return { fbo, tex, size: [w, h] };
   }
-  function acquire(w, h) {
+  // `rect` = the RT's canvas rect [x, y, w, h] in GL framebuffer px (origin
+  // bottom-left). Filter RTs are 1:1 with canvas pixels, so a rect is a crop +
+  // translation, never a scale; consumers remap uv through it (see
+  // svgFilterShared.mapFor). Defaults to [0,0,w,h] — the canvas rect for a
+  // canvas-sized RT — so a caller that doesn't care gets the right thing.
+  function acquire(w, h, rect) {
     const qw = quantize(w | 0);
     const qh = quantize(h | 0);
     const key = sizeKey(qw, qh);
@@ -156,19 +167,17 @@ export function createRTPool(gl, opts) {
       all.push(alloc(qw, qh));
       idx = all.length - 1;
     }
+    // Stamp every acquire — `all[idx]` is recycled, so a stale rect from a
+    // previous tenant would silently offset every sample taken from it.
+    all[idx].rect = rect || [0, 0, w | 0, h | 0];
     if (clearOnAcquire) {
-      // Clear the full RT transparent, scissor-safe: a node scissor may be
-      // active (we're mid-handler for a multi-pass primitive), so disable
-      // it around the clear and restore it so the handler's own draws stay
-      // scissored.
+      // The caller pauses any user scissor for the whole graph evaluation, so
+      // this clear reaches the entire RT.
       const r = all[idx];
-      const scOn = gl.isEnabled(gl.SCISSOR_TEST);
-      if (scOn) gl.disable(gl.SCISSOR_TEST);
       gl.bindFramebuffer(gl.FRAMEBUFFER, r.fbo);
       gl.viewport(0, 0, r.size[0], r.size[1]);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
-      if (scOn) gl.enable(gl.SCISSOR_TEST);
     }
     return idx;
   }
@@ -188,7 +197,8 @@ export function createRTPool(gl, opts) {
   // a screen-space consumer that sampled by viewport size would read past the
   // rendered region. Callers feeding gl_FragCoord-based UVs must divide by THIS.
   function sizeFor(w, h) { return [quantize(w | 0), quantize(h | 0)]; }
-  return { ensureSize, acquire, release, get, sizeFor, invalidate, forget, setClearOnAcquire };
+  const api = { ensureSize, acquire, release, get, sizeFor, invalidate, forget, setClearOnAcquire, _scissorOn: false };
+  return api;
 }
 
 /// Walk a graph DAG end-to-end. `dispatch` is the node-type registry:
@@ -201,20 +211,22 @@ export function createRTPool(gl, opts) {
 /// passes in (e.g., the SVG-side ctx carries sourceRT, mainCopyTex, etc.).
 ///
 /// Returns the root output's RT shape (caller composites it).
-// `nodeScissors` (optional): an array aligned with graph.nodes. Each
-// entry is a GL scissor rect {x,y,w,h} in bottom-left framebuffer pixels
-// restricting that node's pass to the region where its output can be
-// non-zero, or null/absent to draw the full canvas for that node. When
-// provided, the node's RT is pre-cleared to transparent across the full
-// canvas and the handler's draw is scissored — output-identical to a
-// full pass for spec-bounded primitives while skipping out-of-bbox
-// fragment work. See renderer._filterNodeScissors.
-export function evaluateGraph(gl, graph, pool, dispatch, ctx, w, h, nodeScissors) {
+// `nodeRects` (optional): an array aligned with graph.nodes, each entry the
+// canvas rect [x, y, w, h] (GL px, origin bottom-left) where that node's output
+// can be non-zero. Given them, each node's RT is allocated at ITS OWN rect
+// rather than at the full canvas — the memory and the fragment work both drop
+// to the region that matters. Output-identical: a primitive is transparent
+// black outside its subregion by spec, which is what a consumer reads off the
+// edge of a rect (svgFilterShared.sampleIn returns 0 there, not the clamped
+// texel). Omit for a canvas-sized graph. See renderer._filterNodeRects.
+export function evaluateGraph(gl, graph, pool, dispatch, ctx, w, h, nodeRects) {
   pool.ensureSize(w, h);
-  // With scissoring active, every acquired RT must start transparent so a
-  // scissored pass leaves stale-free zeros outside its bbox (byte-exact for
-  // spec-bounded primitives, incl. multi-pass blur intermediates).
-  if (nodeScissors && pool.setClearOnAcquire) pool.setClearOnAcquire(true);
+  // Every acquired RT must start transparent: a handler that doesn't write its
+  // whole rect (feOffset blits a translated crop; passthrough copies only the
+  // overlap) leaves the rest, and the rest must read as 0.
+  const previousClear = nodeRects && pool.setClearOnAcquire
+    ? pool.setClearOnAcquire(true)
+    : false;
   const n = graph.nodes.length;
   // Refcount each node by how many later nodes (or the root) consume it.
   const refs = new Array(n).fill(0);
@@ -225,70 +237,70 @@ export function evaluateGraph(gl, graph, pool, dispatch, ctx, w, h, nodeScissors
   }
   if (graph.rootOut >= 0 && graph.rootOut < n) refs[graph.rootOut]++;
   const outRT = new Array(n).fill(-1);
-  for (let i = 0; i < n; i++) {
-    const node = graph.nodes[i];
-    // Resolve inputs.
-    const inputs = node.inputs.map(inp => {
-      if (inp >= 0) return { kind: 'rt', idx: outRT[inp] };
-      return { kind: 'source', tag: inp };
-    });
-    // Allocate this node's output RT at canvas size. Bbox-sized RTs would
-    // require per-shader UV remapping uniforms — the SVG handlers assume
-    // input.uv == output.uv at vUV=[0,1], which only holds when both RTs
-    // cover the same canvas region. The COLRv1 dispatch sidesteps this by
-    // passing bboxOrigin/bboxSize as explicit uniforms.
-    const myRT = pool.acquire(w, h);
-    outRT[i] = myRT;
-    const handler = dispatch[node.type];
-    // Hand the current node index to dispatch handlers that need it
-    // (e.g., COLRv1 dispatch reads per-node bbox via ctx._curIdx). The
-    // SVG dispatch ignores this field; passthrough handlers ignore it.
-    ctx._curIdx = i;
-    // myRT was just cleared transparent by acquire (clearOnAcquire is on
-    // whenever nodeScissors is set). Restrict the handler's draw + its own
-    // clear to the node's bbox; everything outside stays at the cleared 0,
-    // which is byte-exact for spec-bounded primitives.
-    const sc = nodeScissors ? nodeScissors[i] : null;
-    if (sc) {
-      gl.enable(gl.SCISSOR_TEST);
-      gl.scissor(sc.x, sc.y, sc.w, sc.h);
-    }
-    if (!handler) {
-      // Unknown node type: emit a passthrough of input[0] if present,
-      // else transparent black. Keeps the walker robust against partial
-      // dispatch tables (e.g., COLRv1 nodes when running an SVG graph).
-      passthrough(gl, inputs[0], pool.get(myRT), ctx);
-    } else {
-      handler(node, inputs, pool.get(myRT), ctx);
-    }
-    if (sc) gl.disable(gl.SCISSOR_TEST);
-    // Optional per-node trace for COLR filter-graph tests
-    // (`setDiagnostics({ colrTrace: [] })`). No-op when unset.
-    const _trace = colrTraceSink();
-    if (_trace) {
-      const err = gl.getError();
-      let rgba = null;
-      try {
-        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, pool.get(myRT).fbo);
-        const px = new Uint8Array(4);
-        gl.readPixels(w >>> 1, h >>> 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-        rgba = [px[0], px[1], px[2], px[3]];
-      } catch {}
-      _trace.push({ i, type: node.type, err, rgba });
-    }
-    // Drop refs on inputs; free any RTs whose refcount hits 0 (and
-    // they were RT-backed, not source sentinels).
-    for (const inp of node.inputs) {
-      if (inp >= 0 && --refs[inp] === 0) {
-        pool.release(outRT[inp]);
+  let activeRT = -1;
+  try {
+    for (let i = 0; i < n; i++) {
+      const node = graph.nodes[i];
+      const inputs = node.inputs.map(inp => {
+        if (inp >= 0) return { kind: 'rt', idx: outRT[inp] };
+        return { kind: 'source', tag: inp };
+      });
+      // Each output carries its canvas-space rect so consumers can map inputs
+      // at a different origin without resampling them.
+      const rect = nodeRects ? nodeRects[i] : null;
+      const myRT = rect ? pool.acquire(rect[2], rect[3], rect) : pool.acquire(w, h);
+      activeRT = myRT;
+      outRT[i] = myRT;
+      const handler = dispatch[node.type];
+      ctx._curIdx = i;
+      if (!handler) passthrough(gl, inputs[0], pool.get(myRT), ctx);
+      else handler(node, inputs, pool.get(myRT), ctx);
+
+      const _trace = colrTraceSink();
+      if (_trace) {
+        const err = gl.getError();
+        let rgba = null;
+        try {
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER, pool.get(myRT).fbo);
+          const px = new Uint8Array(4);
+          const [tw, th] = pool.get(myRT).size;
+          gl.readPixels(tw >>> 1, th >>> 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+          rgba = [px[0], px[1], px[2], px[3]];
+        } catch {}
+        _trace.push({ i, type: node.type, err, rgba });
       }
+      for (const inp of node.inputs) {
+        if (inp >= 0 && --refs[inp] === 0) pool.release(outRT[inp]);
+      }
+      // Disconnected nodes are legal input but have no future consumer.
+      if (refs[i] === 0) pool.release(myRT);
+      activeRT = -1;
     }
+    const root = pool.get(outRT[graph.rootOut]);
+    root.poolIdx = outRT[graph.rootOut];
+    return root;
+  } catch (error) {
+    // Release only live outputs. Zero-ref outputs were already returned and may
+    // have been reused by a later node.
+    const live = new Set();
+    if (activeRT >= 0) live.add(activeRT);
+    for (let i = 0; i < n; i++) {
+      if (outRT[i] >= 0 && refs[i] > 0) live.add(outRT[i]);
+    }
+    for (const idx of live) pool.release(idx);
+    throw error;
+  } finally {
+    if (nodeRects && pool.setClearOnAcquire) pool.setClearOnAcquire(previousClear);
   }
-  // Restore the pool's default (no clear-on-acquire) so a later
-  // non-scissored evaluation (e.g. COLR) pays nothing.
-  if (nodeScissors && pool.setClearOnAcquire) pool.setClearOnAcquire(false);
-  return pool.get(outRT[graph.rootOut]);
+}
+
+/// Return an evaluateGraph root to the pool once the caller has consumed it.
+export function releaseRoot(pool, rootRT) {
+  if (rootRT && rootRT.poolIdx !== undefined && rootRT.poolIdx >= 0) {
+    pool.release(rootRT.poolIdx);
+    rootRT.poolIdx = -1;
+  }
 }
 
 // Passthrough helper for unknown nodes (or no-op nodes). Not exported;

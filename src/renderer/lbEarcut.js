@@ -293,6 +293,44 @@ export function earcut(coords, holeStarts) {
   return tris;
 }
 
+// Twice the signed area of the ring coords[start..end) (shoelace, buildRing form).
+function ringArea2(coords, start, end) {
+  let sum = 0;
+  for (let i = start, j = end - 1; i < end; j = i++) {
+    sum += (coords[j][0] - coords[i][0]) * (coords[i][1] + coords[j][1]);
+  }
+  return sum;
+}
+
+// Area-based correctness metric (mapbox/earcut `deviation`): the relative
+// difference between the input polygon's area (outer minus holes) and the total
+// area of the emitted triangles. 0 ⇒ the triangulation exactly tiles the polygon;
+// a large value flags overlaps / gaps / triangles outside the polygon — i.e. the
+// "wrong wedges" mis-threading class. Cheap O(n); usable as a runtime validity
+// gate on the fast path (fall back to CDT/Slug when the deviation is non-trivial).
+//   coords      Array<[x,y]>          — same input passed to earcut()
+//   holeStarts  number[] | null       — same hole start indices
+//   tris        number[]              — the flat triangle index array earcut() returned
+export function deviation(coords, holeStarts, tris) {
+  const hasHoles = holeStarts && holeStarts.length;
+  const outerEnd = hasHoles ? holeStarts[0] : coords.length;
+  let polygonArea = Math.abs(ringArea2(coords, 0, outerEnd));
+  if (hasHoles) {
+    for (let i = 0; i < holeStarts.length; i++) {
+      const start = holeStarts[i];
+      const end = i < holeStarts.length - 1 ? holeStarts[i + 1] : coords.length;
+      polygonArea -= Math.abs(ringArea2(coords, start, end));
+    }
+  }
+  let trisArea = 0;
+  for (let i = 0; i < tris.length; i += 3) {
+    const a = coords[tris[i]], b = coords[tris[i + 1]], c = coords[tris[i + 2]];
+    // twice the triangle area about base c: (ax-cx)(by-cy) − (bx-cx)(ay-cy).
+    trisArea += Math.abs((a[0] - c[0]) * (b[1] - c[1]) - (b[0] - c[0]) * (a[1] - c[1]));
+  }
+  return polygonArea === 0 && trisArea === 0 ? 0 : Math.abs((trisArea - polygonArea) / polygonArea);
+}
+
 export function pointInTri(p, a, b, c) {
   const d1 = cross3(p, a, b), d2 = cross3(p, b, c), d3 = cross3(p, c, a);
   const neg = (d1 < 0) || (d2 < 0) || (d3 < 0), pos = (d1 > 0) || (d2 > 0) || (d3 > 0);

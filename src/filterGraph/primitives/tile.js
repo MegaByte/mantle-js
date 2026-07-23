@@ -1,7 +1,7 @@
 // primitives/tile.js — feTile (repeat the input region across the filter
 // region).
 import { registerSvgFilter } from '../dispatchRegistry.js';
-import { resolveInputTex, beginFullscreen, passthrough } from '../svgFilterShared.js';
+import { resolveInputTex, beginFullscreen, passthrough, setInMap } from '../svgFilterShared.js';
 
 function feTile(node, inputs, outRT, ctx) {
   const { gl, pool, feTileProg, feTileU, coverVao } = ctx;
@@ -14,6 +14,7 @@ function feTile(node, inputs, outRT, ctx) {
   }
   gl.useProgram(feTileProg);
   gl.uniform1i(feTileU.uTex, 0);
+  setInMap(gl, feTileU.uInMap, inputs[0], outRT, ctx);
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, srcTex);
   beginFullscreen(gl, outRT);
   gl.bindVertexArray(coverVao);

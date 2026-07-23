@@ -11,12 +11,14 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer';
+import { emitFixture } from './_fixtures.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const W = 93, H = 143;
 // De-obfuscated real asset (folded-corner page outline): outer CCW page + inner CW inset.
 const SVG = `<svg viewBox="0 0 186 286" xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><path d="M135.2 10 L176 51 V276 H10 V10 Z  M139.4 0 H0 V286 H186 V46.9 L183.1 44 L142.3 3 Z" fill="#000"/></svg>`;
+emitFixture('lbDiagonalFrameParity__SVG', SVG);
 
 const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="${W}" height="${H}"></canvas>
 <script type="module">

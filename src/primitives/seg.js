@@ -29,6 +29,6 @@ export function mkQuad(p1, p2, p3)      { return { type: SEG_QUAD,  p1, p2, p3 }
 export function mkCubic(p1, p2, p3, p4) { return { type: SEG_CUBIC, p1, p2, p3, p4 }; }
 // Rational-quadratic Bézier (arc): control triangle p1,p2,p3 with middle weight w.
 // `circle` (optional) = {cx,cy,r} when the arc is CIRCULAR (rx==ry, no rotation) —
-// lets the Loop-Blinn builders render it as an exact circular-SDF sector (kind 6),
+// lets the Loop-Blinn builders render it as an exact circular-SDF sector (kind 7),
 // which tiles seam-free across arc joins, instead of a per-piece rquad crescent.
 export function mkRQuad(p1, p2, p3, w, circle)  { return { type: SEG_RQUAD, p1, p2, p3, w, circle: circle || null }; }

@@ -25,7 +25,9 @@
 //   t8: (filterId, blendMode, isolation, imageId)
 //   t9: imageRect (ix, iy, iw, ih)                          — origin + size
 //  t10: atlasSlot (yOffPx, w, h, isPattern)                 — w==2 sentinel: vector pattern
-//  t11: (primKind, colrGraphId, endCap/rx, strokeImageId)    — primKind reserved (Tier 1 fast paths)
+//  t11: (primKind, colrGraphId, endCap/rx, strokeImageId)    — primKind: simple-shape
+//       fast-path selector (0 = none, 1 = circle, 2 = rect, 3 = roundRect); see
+//       hitTest/fillCoverage.js
 
 export const META_FLOATS_PER_SHAPE = 48;
 export const META_TEXELS_PER_SHAPE = 12;
@@ -75,7 +77,7 @@ export const META_ATLAS_Y       = 40;
 export const META_ATLAS_W       = 41;
 export const META_ATLAS_H       = 42;
 export const META_ATLAS_IS_PATTERN = 43;
-export const META_PRIM_KIND     = 44;   // reserved for Tier 1 simple-shape fast paths
+export const META_PRIM_KIND     = 44;   // simple-shape fast-path selector (0=none, 1=circle, 2=rect, 3=roundRect)
 export const META_COLR_GRAPH    = 45;
 export const META_END_CAP_OR_RX  = 46;
 export const META_STROKE_IMAGE_ID = 47;

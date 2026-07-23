@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -12 267 156">
+  <defs>
+    <filter id="s" x="-25%" y="-25%" width="150%" height="150%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="8" stdDeviation="4" flood-color="#403329" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+  <path d="M267 14.65q0-14.65-12.15-14.65h-242.75q-12.1 0-12.1 14.65v108.65q0 14.7 12.1 14.7h242.75q12.15 0 12.15-14.7z"
+        fill="#fff" filter="url(#s)"/>
+</svg>

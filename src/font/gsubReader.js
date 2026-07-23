@@ -316,15 +316,10 @@ export class GsubReader {
   _scanLigatureLookups(lookups, seq, start) {
     const first = seq[start];
     for (const lookupOff of lookups) {
-      const type = this._view.getUint16(lookupOff, false);
-      if (type !== 4) continue;
-      const subCount = this._view.getUint16(lookupOff + 4, false);
       const filter = this._filterForLookup(lookupOff);
-      for (let s = 0; s < subCount; s++) {
-        const subOff = lookupOff + this._view.getUint16(lookupOff + 6 + s * 2, false);
-        const hit = this._tryLiga4(subOff, seq, start, first, filter);
-        if (hit) return hit;
-      }
+      const hit = this._eachSubtable(lookupOff, (effType, subOff) =>
+        (effType === 4 ? this._tryLiga4(subOff, seq, start, first, filter) : null));
+      if (hit) return hit;
     }
     return null;
   }
@@ -341,20 +336,18 @@ export class GsubReader {
   tryMatchCcmp(seq, start) {
     if (!this._ccmpLookups || start >= seq.length) return null;
     const first = seq[start];
-    const v = this._view;
     for (const lookupOff of this._ccmpLookups) {
-      const type = v.getUint16(lookupOff, false);
-      const subCount = v.getUint16(lookupOff + 4, false);
-      for (let s = 0; s < subCount; s++) {
-        const subOff = lookupOff + v.getUint16(lookupOff + 6 + s * 2, false);
-        if (type === 1) {
+      const hit = this._eachSubtable(lookupOff, (effType, subOff) => {
+        if (effType === 1) {
           const out = this._trySingleSub1(subOff, first);
           if (out !== first) return { replacements: [out], consumed: 1 };
-        } else if (type === 2) {
+        } else if (effType === 2) {
           const out = this._tryMultipleSub2(subOff, first);
           if (out) return { replacements: out, consumed: 1 };
         }
-      }
+        return null;
+      });
+      if (hit) return hit;
     }
     return null;
   }
@@ -427,16 +420,13 @@ export class GsubReader {
   }
 
   _applyType1Lookups(lookups, gid) {
-    const v = this._view;
     for (const lookupOff of lookups) {
-      const type = v.getUint16(lookupOff, false);
-      if (type !== 1) continue;
-      const subCount = v.getUint16(lookupOff + 4, false);
-      for (let s = 0; s < subCount; s++) {
-        const subOff = lookupOff + v.getUint16(lookupOff + 6 + s * 2, false);
-        const hit = this._trySingleSub1(subOff, gid);
-        if (hit !== gid) return hit;
-      }
+      const hit = this._eachSubtable(lookupOff, (effType, subOff) => {
+        if (effType !== 1) return null;
+        const out = this._trySingleSub1(subOff, gid);
+        return out !== gid ? out : null;
+      });
+      if (hit) return hit;
     }
     return gid;
   }
@@ -463,21 +453,13 @@ export class GsubReader {
   /**
    * Multiple-substitution under the 'liga' feature. Returns an array
    * of replacement gids, or null when no substitution applies.
-   * Currently only used by tests; no production feature pipeline
-   * triggers it.
    */
   tryMultipleSubstitute(gid) {
     if (!this._ligaLookups) return null;
-    const v = this._view;
     for (const lookupOff of this._ligaLookups) {
-      const type = v.getUint16(lookupOff, false);
-      if (type !== 2) continue;
-      const subCount = v.getUint16(lookupOff + 4, false);
-      for (let s = 0; s < subCount; s++) {
-        const subOff = lookupOff + v.getUint16(lookupOff + 6 + s * 2, false);
-        const hit = this._tryMultipleSub2(subOff, gid);
-        if (hit) return hit;
-      }
+      const hit = this._eachSubtable(lookupOff, (effType, subOff) =>
+        (effType === 2 ? this._tryMultipleSub2(subOff, gid) : null));
+      if (hit) return hit;
     }
     return null;
   }
@@ -550,6 +532,30 @@ export class GsubReader {
     return { innerType, innerOff };
   }
 
+  /// Enumerate a lookup's subtables with Extension (type 7) auto-deref'd:
+  /// calls fn(effType, subOff) per subtable, returns fn's first truthy
+  /// result. Large fonts (Noto CJK/Arabic) wrap lookups in Extension when
+  /// the table outgrows 16-bit offsets — a scanner that gates on the OUTER
+  /// lookup type silently no-ops on them.
+  _eachSubtable(lookupOff, fn) {
+    const v = this._view;
+    const type = v.getUint16(lookupOff, false);
+    const subCount = v.getUint16(lookupOff + 4, false);
+    for (let s = 0; s < subCount; s++) {
+      let subOff = lookupOff + v.getUint16(lookupOff + 6 + s * 2, false);
+      let effType = type;
+      if (effType === 7) {
+        const inner = this._derefExt7(subOff);
+        if (!inner) continue;
+        effType = inner.innerType;
+        subOff = inner.innerOff;
+      }
+      const r = fn(effType, subOff);
+      if (r) return r;
+    }
+    return null;
+  }
+
   // ====================================================================
   // Context-matching engine — shared by types 5 (context), 6 (chaining
   // context), and 8 (reverse chaining context).
@@ -612,7 +618,10 @@ export class GsubReader {
         const out = this._tryAlternate3(subOff, gid, 0);
         if (out !== gid) { const ns = seq.slice(); ns[pos] = out; return { newSeq: ns, advance: 1 }; }
       } else if (effType === 4) {
-        const hit = this._tryLiga4(subOff, seq, pos, gid);
+        // Pass the NESTED lookup's own filter — the top-level ligature
+        // path threads it, and without it a nested liga under
+        // IgnoreMarks failed to skip marks between components.
+        const hit = this._tryLiga4(subOff, seq, pos, gid, filter);
         if (hit) {
           const ns = seq.slice(0, pos).concat([hit.replacement], seq.slice(pos + hit.consumed));
           return { newSeq: ns, advance: 1 };
@@ -725,6 +734,16 @@ export class GsubReader {
     let changed = false;
     const isArr = Array.isArray(inputPos);
     const inputLen = isArr ? inputPos.length : 1; // caller passes inputLen elsewhere when not arr
+    // Length-changing nested subs (multiple grows, ligature shrinks)
+    // shift every later position — records were spec'd against the
+    // ORIGINAL sequence, so remap each subsequent target through the
+    // deltas applied so far.
+    const applied = [];   // { pos, delta } in application order
+    const shiftFor = (p) => {
+      let s = 0;
+      for (const a of applied) if (a.pos < p) s += a.delta;
+      return s;
+    };
     for (let i = 0; i < lookupCount; i++) {
       const recOff = recordsBase + i * 4;
       const seqIdx = v.getUint16(recOff, false);
@@ -736,24 +755,29 @@ export class GsubReader {
       } else {
         absPos = inputPos + seqIdx;
       }
+      absPos += shiftFor(absPos);
       if (absPos < 0 || absPos >= cur.length) continue;
+      const beforeLen = cur.length;
       const out = this._applyNestedLookup(cur, absPos, lookupListIdx, depth);
       if (out) {
+        const d = out.newSeq.length - beforeLen;
+        if (d !== 0) applied.push({ pos: absPos, delta: d });
         cur = out.newSeq;
         changed = true;
       }
     }
     if (!changed) return null;
-    // Advance covers the whole input span in the ORIGINAL sequence
-    // (last position - start + 1) so the outer loop advances past
-    // the matched input including skipped intermediate glyphs.
+    // Advance covers the whole input span (original extent + the net
+    // length change the nested subs applied inside it) so the outer
+    // loop lands just past the matched input in the NEW sequence.
     let advance;
     if (isArr) {
       advance = inputPos[inputPos.length - 1] - inputPos[0] + 1;
     } else {
       advance = inputLen;
     }
-    return { newSeq: cur, advance };
+    for (const a of applied) advance += a.delta;
+    return { newSeq: cur, advance: Math.max(1, advance) };
   }
 
   // -- Type 6 ChainContextSubst -------------------------------------
@@ -946,6 +970,10 @@ export class GsubReader {
     let i = 0;
     while (i < cur.length) {
       let advance = 1;
+      // Per OTL, a lookup does not apply AT a position its lookupFlag
+      // skips (IgnoreMarks etc.) — skipped glyphs may only be jumped
+      // over inside context/ligature matches, never start one.
+      if (filter && filter.skip(cur[i])) { i++; continue; }
       for (let s = 0; s < subCount; s++) {
         let subOff = lookupOff + v.getUint16(lookupOff + 6 + s * 2, false);
         let effType = type;
@@ -980,16 +1008,25 @@ export class GsubReader {
       }
       i += advance;
     }
-    // Type 8 reverse-chain pass.
-    if (type === 8) {
+    // Type 8 reverse-chain pass (right-to-left). Collect effective type-8
+    // subtables first — an Extension (type 7) wrapper hides type 8 from
+    // the outer-type gate.
+    const revSubs = [];
+    for (let s = 0; s < subCount; s++) {
+      let subOff = lookupOff + v.getUint16(lookupOff + 6 + s * 2, false);
+      let effType = type;
+      if (effType === 7) {
+        const inner = this._derefExt7(subOff);
+        if (!inner) continue;
+        effType = inner.innerType;
+        subOff = inner.innerOff;
+      }
+      if (effType === 8) revSubs.push(subOff);
+    }
+    if (revSubs.length) {
       cur = cur.slice();
       for (let j = cur.length - 1; j >= 0; j--) {
-        for (let s = 0; s < subCount; s++) {
-          let subOff = lookupOff + v.getUint16(lookupOff + 6 + s * 2, false);
-          // Extension wrap could apply here; uncommon for type 8.
-          if (v.getUint16(subOff, false) !== 1) {
-            // The extension subtable would have format=1 too — distinguish by lookup type 7 outer wrap.
-          }
+        for (const subOff of revSubs) {
           const out = this._tryReverseChainSingle8(subOff, cur, j, filter);
           if (out !== null && out !== cur[j]) { cur[j] = out; break; }
         }

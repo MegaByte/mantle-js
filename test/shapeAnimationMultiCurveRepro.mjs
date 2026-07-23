@@ -34,12 +34,8 @@ const url = `http://127.0.0.1:${port}/mantleDemo.html`;
 // dst's control points can wander far from the card silhouette so the
 // interpolated curves at arbitrary t look right — the kind of payload a
 // shape-morph exporter produces.
-const SRC_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0.000 -9.850 267.000 153.950">
-  <path id="card" fill="#ff0000" d="M 0.000 14.650 Q 0.000 0.200 11.700 0.000 Q 75.050 0.000 138.000 0.000 Q 196.450 0.000 254.850 0.000 Q 257.850 0.000 260.100 0.900 Q 267.000 3.650 267.000 14.650 Q 267.000 17.200 267.000 19.750 L 267.000 123.050 Q 267.000 129.450 264.900 133.000 Q 262.150 137.650 255.850 138.000 Q 193.800 138.000 132.700 138.000 Q 72.400 138.000 12.100 138.000 Q 8.600 138.000 6.100 136.750 Q 1.700 134.600 0.450 128.550 Q 0.000 126.250 0.000 123.350 Q 0.000 120.650 0.000 117.950 L 0.000 14.650 Z"/>
-</svg>`;
-const DST_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0.000 -9.850 267.000 153.950">
-  <path id="card" fill="#0000ff" d="M 0.000 18.650 Q 0.000 5.000 12.150 5.000 Q 66.950 12.450 136.550 12.450 Q 202.550 12.450 0.975 5.800 Q 252.250 5.400 254.850 5.000 Q 264.450 5.000 266.450 13.550 Q 267.000 15.800 267.000 18.650 L 267.000 119.900 Q 266.950 126.750 264.350 129.650 Q 261.750 132.600 254.850 8.350 Q 196.300 141.900 0.525 142.850 Q 4.050 9.000 18.150 134.850 Q 15.100 134.250 12.150 8.350 Q 5.900 132.250 0.013 129.550 Q 1.500 127.850 0.700 125.200 Q 0.000 122.900 0.000 119.900 L 0.000 18.650 Z"/>
-</svg>`;
+const SRC_SVG = readFileSync(new URL('../examples/smoke/shapeAnimationMultiCurveRepro__SRC_SVG.svg', import.meta.url), 'utf8');
+const DST_SVG = readFileSync(new URL('../examples/smoke/shapeAnimationMultiCurveRepro__DST_SVG.svg', import.meta.url), 'utf8');
 
 let failures = 0;
 const fail = (m) => { failures++; console.error('FAIL', m); };

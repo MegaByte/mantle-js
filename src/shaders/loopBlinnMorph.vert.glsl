@@ -47,7 +47,6 @@ flat out vec2  cCen;
 flat out float cScale;
 flat out float cHalf;   // kind-7 annulus half-width — static-only, unused by morph
 flat out float vEmPerPx; // em per device pixel — analytic ∇f for the interior/strip line-edge ramps
-flat out float vTP;      // kind-8 corner cap payload — unused by morph (no caps), keep for shared frag
 flat out float vSeam;    // kind-1 tangent-clip payload — unused by morph, keep for shared frag
 flat out vec2  vNa;      // kind-1 crescent clip normals for the shared frag; morph derives them
 flat out vec2  vNb;      // per-frame from the lerped control points (arc tangents, no neighbour data)
@@ -94,7 +93,6 @@ vec3 cubicKLMN(vec2 P0, vec2 P1, vec2 P2, vec2 P3, int idx) {
 
 void main() {
   vColor = uColor;
-  vTP = 0.0;
   vSeam = 0.0;
   vNa = vec2(0.0);
   vNb = vec2(0.0);

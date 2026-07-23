@@ -5,6 +5,7 @@
 // a missing cross-module import surfaces here as a swallowed ReferenceError
 // (the browser render smokes see only the silent Slug fallback).
 import { buildLoopBlinnCDT } from '../src/renderer/loopBlinn.js';
+import { buildLbShape } from '../src/renderer/lbBuildCore.js';
 import { mkLine, mkQuad, mkCubic, mkRQuad } from '../src/primitives/seg.js';
 
 let failures = 0;
@@ -30,10 +31,17 @@ const FIXTURES = [
   ['convex quad shape (partition fast route)', [[
     Q(20, 20, 100, 0, 180, 20), L(180, 20, 180, 180), Q(180, 180, 100, 200, 20, 180), L(20, 180, 20, 20),
   ]]],
+  // A thick concave-cubic "C": stresses the winding-calibration route (concave cubics
+  // on both walls) and BUILDS an LB mesh, which is what this route-coverage smoke asserts.
+  // NOTE: a THINNER C (walls close enough that the two concave cubics' crescents over-paint
+  // the gap) correctly DECLINES to Slug via the cubic self-audit — Slug renders it exactly,
+  // so that decline is right, not a route loss. A route that swallows a ReferenceError and
+  // declines silently still fails here via __lbPartitionErr; a legitimate audit decline must
+  // not masquerade as one, so this fixture uses a C the audit passes.
   ['concave cubic C-shape (winding calibration route)', [[
-    C(150, 50, 80, 20, 40, 60, 40, 100), C(40, 100, 40, 140, 80, 180, 150, 150),
-    L(150, 150, 150, 120), C(150, 120, 100, 145, 70, 130, 70, 100),
-    C(70, 100, 70, 70, 100, 55, 150, 80), L(150, 80, 150, 50),
+    C(150, 40, 70, 20, 30, 70, 30, 100), C(30, 100, 30, 130, 70, 180, 150, 160),
+    L(150, 160, 150, 130), C(150, 130, 90, 150, 60, 130, 60, 100),
+    C(60, 100, 60, 70, 90, 50, 150, 70), L(150, 70, 150, 40),
   ]]],
   ['holed shape — square with quad-lens hole (CDT + inside-removal)', [[
     L(10, 10, 190, 10), L(190, 10, 190, 190), L(190, 190, 10, 190), L(10, 190, 10, 10),
@@ -58,6 +66,44 @@ for (const [name, contours] of FIXTURES) {
   else if (!mesh) fail(`${name}: builder returned null (route lost to Slug fallback)`);
   else ok(`${name}`);
 }
+
+const hasInteriorChain = (built) => {
+  const rows = built && built.raw && built.raw.interiorChainA;
+  return !!rows && rows.some((v) => v !== 0);
+};
+const hasConicMode = (built) => {
+  const rows = built && built.raw && built.raw.interiorChainC;
+  if (!rows) return false;
+  for (let i = 2; i < rows.length; i += 4) if (rows[i] > 2.5) return true;
+  return false;
+};
+
+// Translucent fills need a non-overlapping partition. A simple convex quadratic
+// can still use its normal curve bands without paying the interior PART-chain
+// fragment kernel; concave and holed outlines need their local chains.
+const convexTrans = buildLbShape(FIXTURES[0][1], true, false);
+if (convexTrans && !hasInteriorChain(convexTrans)) ok('convex translucent quadratic skips PART chains');
+else fail('convex translucent quadratic unexpectedly carries PART chains');
+
+const concaveQuad = [[
+  L(20, 20, 180, 20), L(180, 20, 180, 180),
+  Q(180, 180, 100, 100, 20, 180), L(20, 180, 20, 20),
+]];
+const concaveTrans = buildLbShape(concaveQuad, true, false);
+if (concaveTrans && hasInteriorChain(concaveTrans)) ok('concave translucent quadratic retains PART chains');
+else fail('concave translucent quadratic lost required PART chains');
+
+const holedTrans = buildLbShape(FIXTURES[2][1], true, false);
+if (holedTrans && hasInteriorChain(holedTrans)) ok('holed translucent quadratic retains PART chains');
+else fail('holed translucent quadratic lost required PART chains');
+
+if (!hasConicMode(concaveTrans)) ok('CONIC chains are disabled by default');
+else fail('CONIC chains unexpectedly enabled by default');
+globalThis.__LB_CONIC = true;
+const conicProbe = buildLbShape(concaveQuad, true, false);
+delete globalThis.__LB_CONIC;
+if (conicProbe && hasConicMode(conicProbe)) ok('CONIC chains remain available as an explicit probe');
+else fail('CONIC probe opt-in did not produce conic chains');
 
 console.log(failures ? `\nLB-BUILD-ROUTES FAIL (${failures})` : '\nLB-BUILD-ROUTES PASS');
 process.exit(failures ? 1 : 0);

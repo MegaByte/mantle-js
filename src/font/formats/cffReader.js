@@ -104,6 +104,15 @@ export class CffReader {
       // FD 0). Then parse each Font DICT's Private DICT.
       this._parseFdArray();
       if (this._fdSelectOff > 0) this._parseFdSelect();
+    } else if (this._fdArrayOff > 0) {
+      // CID-keyed CFF1 (FDArray in the Top DICT — nearly every CJK
+      // .otf): Private DICTs + local subrs live PER Font DICT, selected
+      // per glyph by FDSelect. The INDEX readers are version-aware, so
+      // the CFF2 parse machinery applies directly. Falling back to the
+      // (absent) top-level Private DICT threw 'callsubr without local
+      // subrs' / used the wrong bias — broken or blank glyphs.
+      this._parseFdArray();
+      if (this._fdSelectOff > 0) this._parseFdSelect();
     } else {
       // CFF1: single Private DICT per font.
       this._parsePrivateDict(this._privateOff, this._privateLen);
@@ -152,8 +161,9 @@ export class CffReader {
     const r = this._readIndexEntry(this._charStringsOff, gid);
     if (r.len === 0) return null;
     let lsubrIndexOff, nLocalSubrs;
-    if (this._version === 2 && this._fds) {
-      // Per-glyph FD picks the Private DICT (and its local Subrs).
+    if (this._fds) {
+      // Per-glyph FD picks the Private DICT (and its local Subrs) —
+      // CFF2 always; CFF1 when CID-keyed.
       const fdIdx = this._gidToFdIdx ? this._gidToFdIdx[gid] : 0;
       const fd = this._fds[fdIdx] || this._fds[0];
       lsubrIndexOff = fd.lsubrIndexOff;
@@ -506,11 +516,17 @@ function stdEncToSid(code) {
 }
 
 // Used by CharStringInterp for callsubr/callgsubr indexing.
-export function readCffIndexEntry(b, indexOff, idx) {
-  const count = readU16(b, indexOff);
+// CFF2 INDEXes have a uint32 count (header is 5 bytes: u32 count + u8
+// offSize); CFF1 uses u16 count (3-byte header). Reading a CFF2 INDEX
+// with the CFF1 layout misreads count as 0 for <65536 subrs — every
+// callsubr/callgsubr silently no-ops (missing contours).
+export function readCffIndexEntry(b, indexOff, idx, isCff2 = false) {
+  const count = isCff2
+    ? (((b[indexOff] << 24) | (b[indexOff + 1] << 16) | (b[indexOff + 2] << 8) | b[indexOff + 3]) >>> 0)
+    : readU16(b, indexOff);
   if (count === 0) return { off: 0, len: 0 };
-  const offSize = b[indexOff + 2];
-  const offTableOff = indexOff + 3;
+  const offSize = b[indexOff + (isCff2 ? 4 : 2)];
+  const offTableOff = indexOff + (isCff2 ? 5 : 3);
   const dataOff = offTableOff + (count + 1) * offSize;
   const a = readOffN(b, offTableOff + idx * offSize, offSize);
   const bo = readOffN(b, offTableOff + (idx + 1) * offSize, offSize);

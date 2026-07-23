@@ -1,18 +1,18 @@
 #version 300 es
 // feTurbulence — procedural Perlin noise per SVG Filter Effects §11.
 //
-// The spec mandates a *specific* algorithm (improved Perlin + a Park-
-// Miller "minimal standard" RNG to derive 4 per-channel permutation
-// tables from the seed). Renderers MUST match for spec conformance.
-// This is a faithful port of the spec's C reference implementation.
-//
-// Permutation gradients are emitted inline. With BSize=256 and
-// numOctaves<=6 the loop bound is fixed and the GLSL compiler unrolls.
+// The spec's reference implementation derives 4 per-channel permutation
+// tables from the seed with a Park-Miller RNG. This shader keeps the
+// spec's noise STRUCTURE (2D gradient lattice, s-curve interpolation,
+// octave accumulation) but replaces the seeded permutation tables with
+// an on-the-fly sin-hash gradient (see latticeGradient), so output is
+// deterministic per seed but not bit-identical to the spec's reference
+// renderer.
 //
 // Uniforms:
 //   uBaseFreq    — (fx, fy) per-axis base frequency in 1/userSpace
 //   uNumOctaves  — int, 1..6
-//   uSeed        — float seed (spec: Park-Miller, modulo 2^31 - 1)
+//   uSeed        — float seed, mixed into the lattice-gradient hash
 //   uKind        — 0 = turbulence (Σ |noise|), 1 = fractalNoise
 //                  (Σ noise, then 0.5 + 0.5*x)
 //   uTilePos     — (originX, originY) of the filter primitive subregion
@@ -34,22 +34,6 @@ uniform int   uStitch;
 in vec2 vUV;
 out vec4 fragColor;
 
-// Spec constants (SVG Filter Effects §11.16). BSize = 256.
-const int   RAND_m  = 2147483647;        // 2^31 - 1
-const int   RAND_a  = 16807;
-const int   RAND_q  = 127773;
-const int   RAND_r  = 2836;
-const int   BSize   = 256;
-
-// One step of the Park-Miller PRNG (Lewis et al. 1969 / Park-Miller
-// 1988, the "minimal standard"). Operates on an int seed and returns
-// the next seed.
-int prngNext(int seed) {
-  int result = RAND_a * (seed % RAND_q) - RAND_r * (seed / RAND_q);
-  if (result <= 0) result += RAND_m;
-  return result;
-}
-
 // Compute the 4-channel noise at point P with grid frequency. The
 // spec's algorithm:
 //   For each octave (1..numOctaves):
@@ -58,9 +42,7 @@ int prngNext(int seed) {
 //     - Double frequency, halve weight
 //
 // SVG's Perlin uses bilinear interpolation in a 2D grid of 2D gradient
-// vectors. Gradient = (rand mod (2*BSize) - BSize) / BSize ∈ [-1,1].
-// We derive 4 separate gradient sets — one per RGBA channel — by
-// running the PRNG for 4*BSize iterations.
+// vectors, with 4 separate gradient sets — one per RGBA channel.
 //
 // To avoid a 1024-element constant array (which can blow the shader's
 // uniform / constant budget on lower-end GL drivers), we recompute the

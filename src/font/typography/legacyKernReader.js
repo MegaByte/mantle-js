@@ -22,10 +22,14 @@ export class LegacyKernReader {
     let cursor = subtableBase;
     for (let i = 0; i < numSubtables; i++) {
       if (appleHeader) {
+        // Apple 'kern' coverage layout is INVERTED vs the Windows one:
+        // format lives in the LOW byte, and bit 15 = kernVertical
+        // (horizontal when CLEAR — a typical horizontal fmt-0 subtable
+        // has coverage 0x0000).
         const len = v.getUint32(cursor, false);
         const coverage = v.getUint16(cursor + 4, false);
-        const format = coverage >> 8;
-        const horizontal = (coverage & 0x80) !== 0;
+        const format = coverage & 0xff;
+        const horizontal = (coverage & 0x8000) === 0;
         if (format === 0 && horizontal) this._parseFmt0(cursor + 8);
         cursor += len;
       } else {

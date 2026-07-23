@@ -10,14 +10,30 @@
 // ramps at sharp corners don't double-count). A later `loopBlinnComposite`
 // pass multiplies the shape's paint by this coverage.
 //
-// The curve implicits:
-//   quad:  f = u²−v over the control triangle (texcoords 0,0 / ½,0 / 1,1).
-//   cubic: exact Bezout resultant — a 3×3 symmetric determinant of linear
-//          forms in the per-curve normalized frame (cen/scale). Machine-exact.
-// Coverage = clamp(½ − f/fwidth(f)) gives a ½-pixel analytic AA ramp across
-// the zero set, resolution-independent.
+// Piece kinds (vKind, dispatched in main):
+//   0  interior triangle (carries up to three straight boundary lines whose
+//      inner AA ramps meet the outward strips at ½ on the edge)
+//   2  cubic (Loop-Blinn klmn)       f = k³−l·m
+//   4  cubic Bezout fallback (cusp / d1≈0): exact 3×3 symmetric determinant
+//      of linear forms in the per-curve normalized frame (cen/scale)
+//   5  quad / rational-quad crescent  f = Ũ²−Ṽ·R  (integral ⇒ R≡1; aC3=0 ⇒
+//      fill-side only — kind-12 owns the exterior band)
+//   7  circular / annulus / elliptical SDF
+//                                     cHalf < −1.5 → ellipse f = |R(φ)(p−C)/(rx,ry)| − 1
+//                                     −1.5 ≤ cHalf < 0 → disc f = |p−C| − r
+//                                     cHalf ≥ 0 → ring f = ||p−C| − rMid| − halfW
+//   10 edge cap-strip (straight-edge exterior band + end wedges)
+//   12 unified curve band (quad/rquad/cubic exterior)
+// Straight/SDF kinds take the EXACT pixel-box coverage of the half-plane
+// (exactBoxCov); curve kinds take the same box area of the tangent plane
+// (curveCov). Both give a resolution-independent analytic AA ramp across
+// the zero set.
 
 precision highp float;
+// GLSL ES 3.0 predeclares lowp sampler2D; the gradient/paint textures are
+// RGBA32F em-space data — lowp lookup precision crushes them on
+// precision-honouring GPUs (Mali).
+precision highp sampler2D;
 
 in vec2 vEm;
 in vec3 vTC;
@@ -31,15 +47,21 @@ flat in vec3  cM02;
 flat in float cM11a;
 flat in float cM12;
 flat in float cM22;
+flat in vec4  vCh2A;   // kind-0 chain mode: 2nd outline arc Q0,Q1 (shares the kind-4 aC1 slot)
+flat in vec4  vCh2B;   // kind-0 chain mode: 2nd outline arc Q2,Q3 (aC2)
 #endif
 flat in vec2  cCen;
 flat in float cScale;
 flat in float cHalf;   // kind 7 annulus half-width
 flat in float vEmPerPx; // em per device pixel — analytic ∇f for the line-edge ramps
-flat in float vTP;      // kind-8 corner cap: T·p
-flat in float vSeam;    // kind-1 crescent tangent-clip: ctrl.x (ctrl.y rides vTC.z)
-flat in vec2  vNa;      // kind-1 crescent clip normal at endpoint a (bisector of arc+neighbor tangents)
-flat in vec2  vNb;      // kind-1 crescent clip normal at endpoint b
+flat in float vSeam;    // cubic morph clip / kind-10 end codes
+flat in float vGradId;   // batched route: per-shape gradient id (0 = solid)
+flat in float vImageId;  // batched route: per-shape image id (0 = none)
+flat in vec4 vImgRect;   // batched route: per-shape image rect (em)
+flat in vec4 vAtlasSlot; // batched route: per-shape atlas slot
+flat in vec4  vShapeBB;
+flat in vec2  vNa;      // kind-10 neighbour normal A / cubic morph clip normal A
+flat in vec2  vNb;      // kind-10 neighbour normal B / cubic morph clip normal B
 flat in vec3  vLine2;   // kind-0 second boundary line (thin strokes / corners)
 flat in float vLineT;   // kind-0 corner type: +1 convex/stroke · −1 reflex · 0 none
 flat in vec4  vColor;
@@ -91,11 +113,11 @@ vec4 lbRecolor(vec4 c) {
 int gradientSpreadToExtend(int spread) { return spread == 1 ? 2 : spread == 2 ? 1 : 0; }
 
 // Premultiplied gradient color at em position — sampleGradient is shared verbatim
-// with _slugCoverage via @@PAINT_SAMPLE@@ (so the two can't drift). Needs the local
+// with _coverage via @@PAINT_SAMPLE@@ (so the two can't drift). Needs the local
 // gradientSpreadToExtend (above) + sampleStops (@@GRADIENT_HELPERS@@) declared first.
 @@PAINT_SAMPLE@@
 
-// straight RGBA atlas sample for a top-level <image> (mirrors _slugCoverage's
+// straight RGBA atlas sample for a top-level <image> (mirrors _coverage's
 // sampleTopLevelImage: clamp/repeat/mirror wrap, optional nearest snap).
 vec4 sampleImageLB(vec2 emPos, vec4 imageRect, vec4 atlasSlot) {
   float u = (emPos.x - imageRect.x) / max(imageRect.z, 1e-6);
@@ -121,7 +143,20 @@ vec4 emit(float cov) {
       vec4 t = sampleImageLB(vEm, uImgRect, uAtlasSlot) * vColor;          // tint by fill (1,1,1,opacity)
       paint = vec4(t.rgb * t.a, t.a);
     } else if (uGradId > 0) {
-      paint = sampleGradient(uGradId, vEm, uShapeBBox);                  // already premultiplied
+      vec4 g = sampleGradient(uGradId, vEm, uShapeBBox);                 // STRAIGHT (rgb, a) — premultiply here
+      paint = vec4(g.rgb * g.a, g.a);
+    } else if (vImageId > 0.5) {
+      // BATCHED image: rect + atlas slot came from the per-shape paint texture, so a bundle
+      // of many DIFFERENT images still draws in ONE call. Same sampleImageLB as the
+      // per-shape path, tinted by the fill colour exactly as it is there.
+      vec4 t = sampleImageLB(vEm, vImgRect, vAtlasSlot) * vColor;
+      paint = vec4(t.rgb * t.a, t.a);
+    } else if (vGradId > 0.5) {
+      // BATCHED gradient: id + bbox came from the per-shape paint texture, so a bundle of
+      // many DIFFERENT gradients still draws in ONE call. Same sampleGradient, so the
+      // batched and per-shape paths cannot drift.
+      vec4 g = sampleGradient(int(vGradId + 0.5), vEm, vShapeBB);
+      paint = vec4(g.rgb * g.a, g.a);
     } else {
       vec4 f = lbRecolor(vColor);                                          // per-draw recolor (free when off)
       paint = vec4(f.rgb * f.a, f.a);                                      // premultiply solid
@@ -132,116 +167,48 @@ vec4 emit(float cov) {
 }
 
 // Slug-identical straight-edge coverage from a local implicit f and its screen
-// gradient. Slug (renderFill in _slugCoverage) casts a horizontal AND a vertical
+// gradient. Slug (renderFill in _coverage) casts a horizontal AND a vertical
 // ray through the pixel, takes a 1D box coverage on each — clamp(½ − c/|n|) at
 // ray-crossing distance c/|n| — and blends them by a centre-proximity weight,
 // with a min() floor. A single perpendicular clamp(½ − c) only reproduces the
 // axis-aligned case; this reproduces every angle (slope √2 at 45°), so LB's AA
 // ramp matches Slug's byte-for-byte on straight edges instead of the too-soft,
 // angle-independent perpendicular ramp. f>0 = outside the fill.
+@@BOX_COV@@
+
+// Coverage of a locally-straight edge, from the implicit f and its screen gradient.
+// f > 0 is OUTSIDE the fill, so the fill is {p : f + ∇f·p <= 0} = {n·p <= -f/|∇f|}.
+// The exact box area (~10 flops) is near-exact at every angle; a blended pair of 1D
+// axis-ray coverages is exact only for axis-aligned edges (mean 10.6/255 error at 45°).
 float slugCov(float f, vec2 grad) {
-  float g  = max(length(grad), 1e-6);
-  float nx = max(abs(grad.x) / g, 1e-6);   // |normal.x|, |normal.y| (nx²+ny²≈1)
-  float ny = max(abs(grad.y) / g, 1e-6);
-  float c  = f / g;                          // signed perpendicular distance (px)
-  float xc = clamp(0.5 - c / nx, 0.0, 1.0);  // horizontal-ray 1D box coverage
-  float yc = clamp(0.5 - c / ny, 0.0, 1.0);  // vertical-ray 1D box coverage
-  float xw = clamp(1.0 - 2.0 * abs(c) / nx, 0.0, 1.0);  // centre-proximity weights
-  float yw = clamp(1.0 - 2.0 * abs(c) / ny, 0.0, 1.0);
-  float wsum = max(xw + yw, 1e-6);
-  return clamp(max((xc * xw + yc * yw) / wsum, min(xc, yc)), 0.0, 1.0);
+  float g = max(length(grad), 1e-6);
+  return exactBoxCov(grad / g, -f / g);
 }
 
-// CURVATURE-AWARE 1D coverage along ONE axis. slugCov treats a curved edge as
-// its tangent line (crossing = f/|∂f|), which over-covers on the convex side and
-// under-covers on the flat/concave side — the "overcoverage on curves" residual.
-// For LB's implicits the texcoords are AFFINE in screen space, so f is exactly
-// quadratic along any axis: f(t) = C + B·t + A·t² with A=½·∂²f/∂axis². This
-// returns the true length of the kept region {t∈[−½,½] : f(t)<0} — i.e. how much
-// of the 1-px ray Slug's ray-cast would find inside — exact for quad/rquad and a
-// second-order (curvature-correct) fit for cubic. Degrades cleanly to the linear
-// box when A→0, so straight edges are unchanged.
-float negLen(float A, float B, float C) {
-  if (abs(A) < 1e-7) {                       // ~linear: C + B·t < 0 over [−½,½]
-    if (abs(B) < 1e-9) return C < 0.0 ? 1.0 : 0.0;
-    float r = -C / B, lo = -0.5, hi = 0.5;
-    if (B > 0.0) hi = min(hi, r); else lo = max(lo, r);
-    return clamp(hi - lo, 0.0, 1.0);
-  }
-  float disc = B * B - 4.0 * A * C;
-  if (disc <= 0.0) return A < 0.0 ? 1.0 : 0.0;   // no crossing: constant sign = sign(A)
-  float sq = sqrt(disc);
-  float r1 = (-B - sq) / (2.0 * A), r2 = (-B + sq) / (2.0 * A);
-  float rlo = min(r1, r2), rhi = max(r1, r2);
-  if (A > 0.0) {                             // f<0 BETWEEN the roots
-    return clamp(min(0.5, rhi) - max(-0.5, rlo), 0.0, 1.0);
-  }
-  float a1 = clamp(rlo, -0.5, 0.5) + 0.5;    // f<0 OUTSIDE the roots: [−½,rlo]∪[rhi,½]
-  float a2 = 0.5 - clamp(rhi, -0.5, 0.5);
-  return clamp(a1 + a2, 0.0, 1.0);
+// Curve coverage: exact box area of the tangent half-plane, plus a mean
+// curvature bias (κ/24) so convex bowls don't solid-fill the inner AA fringe.
+// κ is the screen-space level-set curvature (∇²f projected); for an outward
+// gradient (f>0 outside) a convex outline has κ>0 and the correction pulls
+// coverage back toward the true arc. Cubic circles use the kind-7 SDF path;
+// general quadratic outlines still use this correction.
+float curveCov(float f, float fx, float fy, float fxx, float fyy, float fxy) {
+  vec2 grad = vec2(fx, fy);
+  float g = max(length(grad), 1e-6);
+  float kPx = (fxx * fy * fy - 2.0 * fxy * fx * fy + fyy * fx * fx) / (g * g * g);
+  // Clamp: huge κ at degenerate gradients is noise, not geometry.
+  kPx = clamp(kPx, -2.0, 2.0);
+  return exactBoxCov(grad / g, -f / g - kPx / 24.0);
 }
 
-// Slug-blend of the two curvature-aware axis coverages (same H/V centre-proximity
-// weighting slugCov uses, so straight/curved AA compose identically at seams).
-float curveCov(float f, float fx, float fy, float fxx, float fyy) {
-  float covH = negLen(0.5 * fxx, fx, f);
-  float covV = negLen(0.5 * fyy, fy, f);
-  float wH = clamp(1.0 - 2.0 * abs(f) / max(abs(fx), 1e-6), 0.0, 1.0);
-  float wV = clamp(1.0 - 2.0 * abs(f) / max(abs(fy), 1e-6), 0.0, 1.0);
-  float wsum = max(wH + wV, 1e-6);
-  return clamp(max((covH * wH + covV * wV) / wsum, min(covH, covV)), 0.0, 1.0);
-}
+
 
 void main() {
-  // CONVEX-corner cap (kind 8): owns the exterior wedge beyond BOTH tangent spans at a
-  // convex junction (cCen/cScale = tangent line A, vLine2 = tangent line B). Centres
-  // inside either half-plane belong to the interior/strips/crescents — discard keeps the
-  // pixel partition exact under the direct-OVER route. In the wedge, the true coverage is
-  // the two-line box model: intersection covA+covB−1 for genuinely-crossing tangents,
-  // sliding to min(covA,covB) as the lines become parallel (nested cuts).
-  if (vKind > 7.5 && vKind < 8.5) {
-    // Ownership by SPAN planes, not tangent half-planes: strips own within-span fragments,
-    // the interior owns deep-inside ones — the cap owns what remains at the corner:
-    // fragments BEYOND both span planes that aren't deep inside the fill. (The old fA<0
-    // discard also dropped the dead zone between a strip's end-plane and the neighbour
-    // tangent — a boundary pixel there rendered 0.) V = the corner point (intersection of
-    // the two tangent lines); dA/dB = each edge's span direction away from V, signed into
-    // the other's inner half-plane.
-    // Corner point passed exactly (aSeamM=p.x, aTC.z=p.y): solving the two tangent lines'
-    // intersection is ill-conditioned at shallow joints (near-parallel normals) and fp32
-    // error scattered V far from the joint, firing the span discards spuriously.
-    vec2 V8 = vec2(vSeam, vTC.z);
-    vec2 dA8 = vec2(-cCen.y, cCen.x);
-    if (dot(dA8, vLine2.xy) > 0.0) dA8 = -dA8;
-    vec2 dB8 = vec2(-vLine2.y, vLine2.x);
-    if (dot(dB8, cCen) > 0.0) dB8 = -dB8;
-    vec2 rel8 = vEm - V8;
-    // Osculating correction: f_arc ≈ f_tan − (κ/2)·t² (κ fitted in the builder; 0 for
-    // lines). Without it, a tight arc peels off its tangent inside the cap and arc-outside
-    // pixels read tangent-inside → wrongly discarded as interior turf.
-    float tA8 = dot(rel8, dA8), tB8 = dot(rel8, dB8);
-    float fA = dot(cCen, vEm) - cScale - 0.5 * vLineT * tA8 * tA8;
-    float fB = dot(vLine2.xy, vEm) - vLine2.z - 0.5 * cHalf * tB8 * tB8;
-    // A strip's turf is its span half-plane AND its ~1.25px outward band — a pixel within
-    // the span direction but beyond the band (a fill corner poking into a box near a SHORT
-    // edge) is painted by nobody else, so the cap keeps it.
-    float band8 = 1.3 * vEmPerPx;
-    bool inA8 = dot(rel8, dA8) > 0.0 && fA >= 0.0 && fA < band8;
-    bool inB8 = dot(rel8, dB8) > 0.0 && fB >= 0.0 && fB < band8;
-    if (inA8 || inB8) discard;                                    // a strip paints there
-    if (max(fA, fB) <= 0.0) discard;                              // deep inside both → interior's turf
-    float cA2 = slugCov(fA, cCen * vEmPerPx);
-    float cB2 = slugCov(fB, vLine2.xy * vEmPerPx);
-    float k8 = max(0.0, dot(cCen, vLine2.xy));
-    o = emit(mix(max(0.0, cA2 + cB2 - 1.0), min(cA2, cB2), k8));
-    return;
-  }
   // Edge cap-strip (kind 10): the exterior band + BOTH end wedges of one straight edge,
   // with three-feature chained box coverage (prev tangent+κ · own line · next tangent+κ).
   // End partitions are watertight: a LINE neighbour shares the bisector plane
   // w = perp(n̂N + n̂Own) (canonicalized along the edge; START keeps ≥0, END keeps <0 — the
   // neighbour computes the identical plane with the complementary rule); a CURVE neighbour
-  // partitions at the arc's tangent plane, complementary to the kind-9 strip's span clip.
+  // partitions at the arc's tangent plane, complementary to the kind-12 band's span clip.
   // Fragments whose CENTER is inside the fill (chained step test) are the interior mesh's
   // turf. Pixels cut by several features (short edges, acute tips, shallow joints) get the
   // exact combined coverage no single-feature owner could produce.
@@ -258,18 +225,46 @@ void main() {
     vec2 rA = vEm - p1k, rB = vEm - p2k;
     vec2 wA, wB;
     if (curveA) { wA = vec2(-vNa.y, vNa.x) * (tsA > 0.5 ? 1.0 : -1.0);   // exact into-arc dir
-      // cede to the arc's kind-9 only NEAR the corner: a concave arc's tangent points back
-      // over this very edge, and an unbounded cession discarded the whole strip (d75 dots).
+      // cede to the arc's kind-12 only NEAR the corner: a concave arc's tangent points
+      // back over this very edge, and an unbounded cession would discard the whole strip.
       // But NEVER cede our own ½-coverage row (|fOwn| within the working band): the arc's
-      // kind-9 f-discards its fill side, so a raster-tie pixel ON our edge line ceded here
-      // has no painter left (2@0.6's dead 0.50 ties at the edge→curve junction).
+      // band f-discards its fill side, so a raster-tie pixel ON our edge line ceded here
+      // has no painter left (dead 0.50 ties at the edge→curve junction).
       if (dot(rA, wA) >= 0.0 && length(rA) < 2.5 * vEmPerPx && fOwn > 0.35 * vEmPerPx) discard; }
-    else { wA = vec2(-(vNa.y + nOwn.y), vNa.x + nOwn.x); if (dot(wA, tdk) < 0.0) wA = -wA;
-      if (dot(rA, wA) < 0.0) discard; }
+    else {
+      // Line neighbour. Acute tips (nOwn·nN < −0.35): bisector |nOwn+nN| collapses —
+      // START owns the exterior tip bulb (no bisector cull there); END cedes it.
+      float nDotA = dot(nOwn, vNa);
+      bool acuteA = tyA > 0.5 && nDotA < -0.35;
+      vec2 sumA = nOwn + vNa;
+      bool degenA = dot(sumA, sumA) < 0.08;
+      bool tipA = acuteA && fOwn > 0.0 && length(rA) < 2.2 * vEmPerPx;
+      if (!(tipA && (acuteA || degenA))) {
+        wA = degenA ? vec2(-nOwn.y, nOwn.x) : vec2(-sumA.y, sumA.x);
+        if (dot(wA, tdk) < 0.0) wA = -wA;
+        if (dot(rA, wA) < 0.0) discard;
+      }
+    }
     if (curveB) { wB = vec2(-vNb.y, vNb.x) * (tsB > 0.5 ? 1.0 : -1.0);
       if (dot(rB, wB) >= 0.0 && length(rB) < 2.5 * vEmPerPx && fOwn > 0.35 * vEmPerPx) discard; }
-    else { wB = vec2(-(vNb.y + nOwn.y), vNb.x + nOwn.x); if (dot(wB, tdk) < 0.0) wB = -wB;
-      if (dot(rB, wB) >= 0.0) discard; }
+    else {
+      float nDotB = dot(nOwn, vNb);
+      bool acuteB = tyB > 0.5 && nDotB < -0.35;
+      // END yields the acute tip bulb to the neighbour edge's START — but ONLY
+      // fragments on the NEIGHBOUR'S exterior side. The neighbour's tip handler
+      // claims fOwn>0 (its own exterior), so the sliver that is outside OUR
+      // line yet inside the neighbour's (fOwn>0 here, dot(vNb,rB)<0) had no
+      // painter left: one dead 46%-coverage pixel at every sufficiently acute
+      // line-line corner (y's arm top-left, ref 139 vs LB 255).
+      if (acuteB && fOwn > 0.0 && dot(vNb, rB) > 0.0 && length(rB) < 2.2 * vEmPerPx) discard;
+      else {
+        vec2 sumB = nOwn + vNb;
+        bool degenB = dot(sumB, sumB) < 0.08;
+        wB = degenB ? vec2(-nOwn.y, nOwn.x) : vec2(-sumB.y, sumB.x);
+        if (dot(wB, tdk) < 0.0) wB = -wB;
+        if (dot(rB, wB) >= 0.0) discard;
+      }
+    }
     float fA = dot(vNa, rA) - 0.5 * vTC.y * dot(rA, rA);
     float fB = dot(vNb, rB) - 0.5 * vTC.z * dot(rB, rB);
     // PROXIMITY GATE: a neighbour's boundary exists only from its corner onward (along the
@@ -278,12 +273,11 @@ void main() {
     // saturated mid-edge pixels to 1 and the inside-test discarded them wholesale. Fade in
     // over ~0.8px around the corner; when gated out, convex ends read inert-1 (intersection
     // identity) and reflex ends inert-0 (union identity).
-    // RADIAL gate: projection along the into-direction stays large along the WHOLE edge
-    // when the neighbour is nearly parallel (an acute apex) — the neighbour's line then
-    // zeroed mid-edge coverage via the intersection formula (dotted under-runs). Distance
-    // to the corner is scale-correct and orientation-free.
-    float gA = clamp((2.2 - length(rA) / vEmPerPx) / 1.5, 0.0, 1.0);
-    float gB = clamp((2.2 - length(rB) / vEmPerPx) / 1.5, 0.0, 1.0);
+    // Acute tips keep the neighbour field live farther so intersecting-lines covers the bulb.
+    float tipGateA = (tyA > 0.5 && !curveA && dot(nOwn, vNa) < -0.35) ? 2.2 : 2.0;
+    float tipGateB = (tyB > 0.5 && !curveB && dot(nOwn, vNb) < -0.35) ? 2.2 : 2.0;
+    float gA = clamp((tipGateA - length(rA) / vEmPerPx) / 1.5, 0.0, 1.0);
+    float gB = clamp((tipGateB - length(rB) / vEmPerPx) / 1.5, 0.0, 1.0);
     // Deep inside own line is ALWAYS the interior mesh's turf — the corner chain below may
     // misclassify real fill as "outside the corner intersection" (a convex end's tangent
     // half-plane doesn't bound the fill mid-stem) and double-paint over the interior ramp.
@@ -296,20 +290,41 @@ void main() {
     insid = tyA > 0.5 ? min(insid, sAe) : (tyA < -0.5 ? max(insid, sAe) : insid);
     insid = tyB > 0.5 ? min(insid, sBe) : (tyB < -0.5 ? max(insid, sBe) : insid);
     if (insid > 0.5) discard;
-    float c10 = slugCov(fOwn, nOwn * vEmPerPx);
+    // Corner coverage via the EXACT two-plane box area (exactBoxCov2), the same
+    // kernel kind-0 uses: intersection (convex/tip) and union (reflex) of the own
+    // and neighbour half-planes are computed directly, so acute tips, near-parallel
+    // continuations and nested cuts all fall out of one formula — no per-case
+    // covA+covB−1 / min / kp-mix interpolation. The gA/gB proximity gate keeps its
+    // original coverage-space semantics: the exact combined result blends back to
+    // the ungated own coverage away from the corner, where the neighbour's
+    // boundary does not exist. Chained ends compose by inclusion–exclusion
+    // against the pristine own coverage (exact when only one end is near, the
+    // common case).
+    float invPx10 = 1.0 / max(vEmPerPx, 1e-12);
+    float dOwn10 = -fOwn * invPx10;
+    float c10 = exactBoxCov(nOwn, dOwn10);
+    float cOwnP10 = c10;
     if (abs(tyA) > 0.5) {
-      float cA10 = slugCov(fA, vNa * vEmPerPx);
-      cA10 = tyA > 0.0 ? mix(1.0, cA10, gA) : mix(0.0, cA10, gA);
+      vec2 nA10 = vNa / max(length(vNa), 1e-9);
+      float dA10 = -fA * invPx10;
+      float cA10 = exactBoxCov(nA10, dA10);
+      float interA = exactBoxCov2(nOwn, dOwn10, nA10, dA10);
       float kpA = max(0.0, dot(nOwn, vNa));
-      c10 = tyA > 0.0 ? mix(max(0.0, c10 + cA10 - 1.0), min(c10, cA10), kpA)
-                      : mix(c10 + cA10 - c10 * cA10, max(c10, cA10), kpA * gA);
+      float exA = tyA > 0.0
+        ? mix(clamp(c10 + interA - cOwnP10, 0.0, 1.0), min(c10, cA10), kpA)
+        : mix(clamp(c10 + cA10 - interA, 0.0, 1.0), max(c10, cA10), kpA);
+      c10 = mix(c10, exA, gA);
     }
     if (abs(tyB) > 0.5) {
-      float cB10 = slugCov(fB, vNb * vEmPerPx);
-      cB10 = tyB > 0.0 ? mix(1.0, cB10, gB) : mix(0.0, cB10, gB);
+      vec2 nB10 = vNb / max(length(vNb), 1e-9);
+      float dB10 = -fB * invPx10;
+      float cB10 = exactBoxCov(nB10, dB10);
+      float interB = exactBoxCov2(nOwn, dOwn10, nB10, dB10);
       float kpB = max(0.0, dot(nOwn, vNb));
-      c10 = tyB > 0.0 ? mix(max(0.0, c10 + cB10 - 1.0), min(c10, cB10), kpB)
-                      : mix(c10 + cB10 - c10 * cB10, max(c10, cB10), kpB * gB);
+      float exB = tyB > 0.0
+        ? mix(clamp(c10 + interB - cOwnP10, 0.0, 1.0), min(c10, cB10), kpB)
+        : mix(clamp(c10 + cB10 - interB, 0.0, 1.0), max(c10, cB10), kpB);
+      c10 = mix(c10, exB, gB);
     }
     // KIND-10 CLAIM RULE (the depth-claim contract): an edge strip fragment
     // that emits ~nothing must not WRITE DEPTH — its zero-coverage zones (the
@@ -317,7 +332,225 @@ void main() {
     // junction pixels at the piece tier and reject the interior's full
     // coverage beneath, punching holes at stem junctions.
     if (c10 < 0.004) discard;
+    // Exterior-band contract (same as Loop strip vs interior split):
+    // fill-side partials are the interior mesh's turf (kind-0 inner ramp). Painting
+    // them here WRITES DEPTH and rejects solid interior — acute tips (N/V/Z) and
+    // stem junctions read as hard underfills (Slug/legacy solid ink, band empty).
+    // Deep fill-side (cov≈1) stays: 1-over-1 is exact either way.
+    if (fOwn < 0.0 && c10 < 0.999) discard;
     o = emit(c10);
+    return;
+  }
+#ifndef MANTLE_NO_BEZOUT
+  // Unified curve band (kind 12): quads/rquads and cubic exterior rings.
+  // Quad: aTC=(Ũ,Ṽ,R). Cubic (|vSign|≥8192): aTC=(k,l,m), Δklm via aC0 packHalf;
+  // optional end chaining when aC3=(a,b) is packed.
+  if (vKind > 11.5 && vKind < 12.5) {
+    float mag12 = abs(vSign);
+    float s12 = vSign >= 0.0 ? 1.0 : -1.0;
+    bool cubic12 = false;
+    if (mag12 >= 8192.0) { cubic12 = true; mag12 -= 8192.0; }
+    if (mag12 >= 4096.0) mag12 -= 4096.0;
+    float spanB12 = 0.0, spanA12 = 0.0;
+    if (mag12 >= 2048.0) { spanB12 = 1.0; mag12 -= 2048.0; }
+    if (mag12 >= 1024.0) { spanA12 = 1.0; mag12 -= 1024.0; }
+    float codeA = floor((mag12 + 0.5) / 16.0), codeB = mag12 - codeA * 16.0;
+    float tyA = floor((codeA + 0.5) / 4.0) - 1.0; bool curveA = mod(codeA, 4.0) >= 1.5;
+    float tyB = floor((codeB + 0.5) / 4.0) - 1.0; bool curveB = mod(codeB, 4.0) >= 1.5;
+    vec2 a12 = cCen, b12 = vec2(cScale, cHalf);
+    vec2 rA = vEm - a12, rB = vEm - b12;
+    vec2 nA12 = cM01.yz, nB12 = cM02.xy;
+    // aC2 = (packHalf(nOwnA), packHalf(nOwnB), κA, κB) — κ mixed for morph pairs.
+    vec2 nOA = unpackHalf2x16(floatBitsToUint(cM02.z));
+    vec2 nOB = unpackHalf2x16(floatBitsToUint(cM11a));
+    float kA12 = cM12, kB12 = cM22;
+    bool ends12 = cubic12 && dot(a12, a12) + dot(b12, b12) > 0.0;
+    if (cubic12 && !ends12) {
+      float k12 = vTC.x, l12 = vTC.y, m12 = vTC.z;
+      float f12c = s12 * (k12 * k12 * k12 - l12 * m12);
+      vec3 tx12c = dFdx(vTC), ty12c = dFdy(vTC);
+      float fx12c = s12 * (3.0 * k12 * k12 * tx12c.x - (tx12c.y * m12 + l12 * tx12c.z));
+      float fy12c = s12 * (3.0 * k12 * k12 * ty12c.x - (ty12c.y * m12 + l12 * ty12c.z));
+      float fxx12c = s12 * (6.0 * k12 * tx12c.x * tx12c.x - 2.0 * tx12c.y * tx12c.z);
+      float fyy12c = s12 * (6.0 * k12 * ty12c.x * ty12c.x - 2.0 * ty12c.y * ty12c.z);
+      float fxy12c = s12 * (6.0 * k12 * tx12c.x * ty12c.x - (tx12c.y * ty12c.z + ty12c.y * tx12c.z));
+      float c12c = curveCov(f12c, fx12c, fy12c, fxx12c, fyy12c, fxy12c);
+      if (c12c < 0.999 && f12c < 0.0) discard;
+      if (c12c < 0.004) discard;
+      o = emit(c12c);
+      return;
+    }
+    // Hull turf (integral R≡1): UV image of the control triangle is FIXED —
+    // (0,0),(½,0),(1,1) — inside test is pure uv barycentrics. Rational bands skip
+    // this (homogeneous image ≠ that triangle); footprint + claim rules trim instead.
+    float u12 = vTC.x, v12 = vTC.y, r12 = vTC.z;
+    if (!cubic12 && abs(r12 - 1.0) < 1e-3 && v12 >= 0.0 && u12 >= v12 && 1.0 - 2.0 * u12 + v12 >= 0.0) discard;
+    vec2 sA12 = vec2(-nOA.y, nOA.x) * (spanA12 > 0.5 ? 1.0 : -1.0);   // into-arc tangent at a
+    vec2 sB12 = vec2(-nOB.y, nOB.x) * (spanB12 > 0.5 ? 1.0 : -1.0);   // into-arc tangent at b
+    // Own field: quad f = Ũ²−Ṽ·R; cubic f = k³−lm. Curvature-aware coverage.
+    float f12, fx12, fy12, fxx12, fyy12, fxy12;
+    if (cubic12) {
+      float k12 = u12, l12 = v12, m12 = r12;
+      f12 = s12 * (k12 * k12 * k12 - l12 * m12);
+      vec3 tx12 = dFdx(vTC), ty12 = dFdy(vTC);
+      fx12 = s12 * (3.0 * k12 * k12 * tx12.x - (tx12.y * m12 + l12 * tx12.z));
+      fy12 = s12 * (3.0 * k12 * k12 * ty12.x - (ty12.y * m12 + l12 * ty12.z));
+      fxx12 = s12 * (6.0 * k12 * tx12.x * tx12.x - 2.0 * tx12.y * tx12.z);
+      fyy12 = s12 * (6.0 * k12 * ty12.x * ty12.x - 2.0 * ty12.y * ty12.z);
+      fxy12 = s12 * (6.0 * k12 * tx12.x * ty12.x - (tx12.y * ty12.z + ty12.y * tx12.z));
+    } else {
+      f12 = s12 * (u12 * u12 - v12 * r12);
+      vec3 tx12 = dFdx(vTC), ty12 = dFdy(vTC);
+      fx12 = s12 * (2.0 * u12 * tx12.x - (tx12.y * r12 + v12 * tx12.z));
+      fy12 = s12 * (2.0 * u12 * ty12.x - (ty12.y * r12 + v12 * ty12.z));
+      fxx12 = s12 * (2.0 * tx12.x * tx12.x - 2.0 * tx12.y * tx12.z);
+      fyy12 = s12 * (2.0 * ty12.x * ty12.x - 2.0 * ty12.y * ty12.z);
+      fxy12 = s12 * (2.0 * tx12.x * ty12.x - (tx12.y * ty12.z + ty12.y * tx12.z));
+    }
+    float dpx12 = f12 / max(length(vec2(fx12, fy12)), 1e-6);   // signed px distance to the arc
+    // END PARTITIONS + CORNER COVERAGE (Loop §5.1 geometry, Mantle exactBoxCov AA).
+    //
+    // Packer sets |type|>0 only for sharp banded-curve neighbours (chain). Line ends
+    // stay type 0 → span-clip, matching kind-12 and complementary to kind-10's cession
+    // at the arc tangent plane. Chaining line ends through a bisector∩line combine
+    // under-covered tip bulbs outside the line half-plane but on the arc exterior.
+    //
+    // Partition: watertight bisector perp(nOwn+nN) when normals are not antiparallel
+    // (|nOwn+nN|²→0); else own span. In-span own model: Loop f → curveCov.
+    // Wedge own model: osculating line (quadratic extrapolation wraps).
+    // Corner coverage: intersecting-lines combine (kind-10/12) via slugCov.
+    bool chainA = abs(tyA) > 0.5, chainB = abs(tyB) > 0.5;
+    if (!chainA) { if (dot(rA, sA12) < 0.0) discard; }
+    else {
+      vec2 bisA = nOA + nA12;
+      if (dot(bisA, bisA) > 1e-6) {
+        vec2 wA12 = vec2(-bisA.y, bisA.x);
+        if (dot(rA, wA12) * dot(wA12, sA12) < 0.0) discard;
+      } else if (dot(rA, sA12) < 0.0) discard;
+    }
+    if (!chainB) { if (dot(rB, sB12) < 0.0) discard; }
+    else {
+      vec2 bisB = nOB + nB12;
+      if (dot(bisB, bisB) > 1e-6) {
+        vec2 wB12 = vec2(-bisB.y, bisB.x);
+        if (dot(rB, wB12) * dot(wB12, sB12) <= 0.0) discard;
+      } else if (dot(rB, sB12) < 0.0) discard;
+    }
+    bool wgA = chainA && dot(rA, sA12) < 0.0;
+    bool wgB = chainB && dot(rB, sB12) < 0.0;
+    // Own boundary as a box-coverage PLANE (normal + pixel offset): in-span, the
+    // curvature-adjusted tangent curveCov integrates (same offset −f/|∇f| − κ/24);
+    // in a wedge, the osculating line. Keeping the plane form (not just its
+    // coverage) lets the end combine below use the exact two-plane box area.
+    float fA12 = dot(nA12, rA) - 0.5 * kA12 * dot(rA, rA);
+    float fB12 = dot(nB12, rB) - 0.5 * kB12 * dot(rB, rB);
+    float gL12 = max(length(vec2(fx12, fy12)), 1e-6);
+    float kOwnS12 = (fxx12 * fy12 * fy12 - 2.0 * fxy12 * fx12 * fy12 + fyy12 * fx12 * fx12) / (gL12 * gL12 * gL12);
+    float kOwnPx = abs(kOwnS12);
+    float invPx12 = 1.0 / max(vEmPerPx, 1e-12);
+    float fOwn12;
+    vec2 nOwn12;
+    float dOwn12;
+    if (wgA || wgB) {
+      vec2 nOw = wgA ? nOA : nOB;
+      vec2 rw = wgA ? rA : rB;
+      float nOwL = max(length(nOw), 1e-9);
+      fOwn12 = dot(nOw, rw);
+      nOwn12 = nOw / nOwL;
+      dOwn12 = -fOwn12 / (nOwL * max(vEmPerPx, 1e-12));
+    } else {
+      fOwn12 = f12;
+      nOwn12 = vec2(fx12, fy12) / gL12;
+      dOwn12 = -f12 / gL12 - clamp(kOwnS12, -2.0, 2.0) / 24.0;
+    }
+    float cOwn12 = exactBoxCov(nOwn12, dOwn12);
+    float rgA12 = 0.5 / max(max(abs(kA12), 1e-6) * vEmPerPx, max(kOwnPx, 1e-6));
+    float rgB12 = 0.5 / max(max(abs(kB12), 1e-6) * vEmPerPx, max(kOwnPx, 1e-6));
+    float gA12 = clamp(rgA12 - length(rA) / vEmPerPx, 0.0, 1.0);
+    float gB12 = clamp(rgB12 - length(rB) / vEmPerPx, 0.0, 1.0);
+    bool cnA = abs(tyA) > 0.5, cnB = abs(tyB) > 0.5;
+    float sOwn12 = fOwn12 < 0.0 ? 1.0 : 0.0;
+    float sA12i = fA12 < 0.0 ? 1.0 : 0.0, sB12i = fB12 < 0.0 ? 1.0 : 0.0;
+    float sAe12 = tyA > 0.5 ? (gA12 > 0.0 ? sA12i : 1.0) : (gA12 > 0.0 ? sA12i : 0.0);
+    float sBe12 = tyB > 0.5 ? (gB12 > 0.0 ? sB12i : 1.0) : (gB12 > 0.0 ? sB12i : 0.0);
+    float insid12 = sOwn12;
+    if (cnA) insid12 = tyA > 0.5 ? min(insid12, sAe12) : max(insid12, sAe12);
+    if (cnB) insid12 = tyB > 0.5 ? min(insid12, sBe12) : max(insid12, sBe12);
+    if (insid12 > 0.5) discard;
+    // End combine: exact two-plane box area (see kind-10) — intersection for
+    // convex chains, union for reflex, neighbour plane gated to its inert
+    // identity away from the corner, inclusion–exclusion for chained ends.
+    // End combine. Two models per end, selected by normal parallelism kp:
+    // nearly-parallel normals mean the neighbour plane is the SAME boundary the
+    // own field already integrates (a tangent-continuous continuation) — min /
+    // max is the one-boundary answer, and intersecting the two planes would
+    // double-cut the pixel. Genuinely distinct normals mean a real corner —
+    // there the EXACT two-plane box area (exactBoxCov2) replaces the old
+    // covA+covB−1 approximation, which overcounts acute tips. The gA/gB
+    // proximity gate blends the whole result back to the own coverage away
+    // from the corner; chained ends compose by inclusion–exclusion against the
+    // pristine own coverage.
+    float c12 = cOwn12;
+    if (cnA) {
+      vec2 nAn12 = nA12 / max(length(nA12), 1e-9);
+      float dA12 = -fA12 * invPx12;
+      float cA12 = exactBoxCov(nAn12, dA12);
+      float interA12 = exactBoxCov2(nOwn12, dOwn12, nAn12, dA12);
+      float kpA12 = max(0.0, dot(nOA, nA12));
+      float exA12 = tyA > 0.0
+        ? mix(clamp(c12 + interA12 - cOwn12, 0.0, 1.0), min(c12, cA12), kpA12)
+        : mix(clamp(c12 + cA12 - interA12, 0.0, 1.0), max(c12, cA12), kpA12);
+      c12 = mix(c12, exA12, gA12);
+    }
+    if (cnB) {
+      vec2 nBn12 = nB12 / max(length(nB12), 1e-9);
+      float dB12 = -fB12 * invPx12;
+      float cB12 = exactBoxCov(nBn12, dB12);
+      float interB12 = exactBoxCov2(nOwn12, dOwn12, nBn12, dB12);
+      float kpB12 = max(0.0, dot(nOB, nB12));
+      float exB12 = tyB > 0.0
+        ? mix(clamp(c12 + interB12 - cOwn12, 0.0, 1.0), min(c12, cB12), kpB12)
+        : mix(clamp(c12 + cB12 - interB12, 0.0, 1.0), max(c12, cB12), kpB12);
+      c12 = mix(c12, exB12, gB12);
+    }
+    if (c12 <= 0.0) discard;
+    /* In-span exterior-band contract: fill-side partials are interior turf.
+       Wedges use the two-plane ownership test above instead. */
+    if (!wgA && !wgB && f12 < 0.0 && c12 < 0.999) discard;
+    /* Counter-hole chord ribbons extrude into the empty region; UV
+       extrapolation can then paint mid-gray far past the arc while dpx still
+       reads "near". Gate on s12<0: nested counters use sign -1 when ink sits
+       on the control side; outer bowls keep their bulge AA past the chord. */
+    if (!wgA && !wgB && fOwn12 >= 0.0 && s12 < 0.0) {
+      vec2 ab = b12 - a12;
+      float abL2 = max(dot(ab, ab), 1e-12);
+      float t = clamp(dot(rA, ab) / abL2, 0.0, 1.0);
+      float dChord = length(rA - ab * t) / max(vEmPerPx, 1e-9);
+      if (dChord > 1.5 && abs(dpx12) < 1.0) discard;
+      if (dChord > 1.2 && abs(dpx12) < 0.7 && c12 < 0.95) discard;
+    }
+    /* Near-zero exterior coverage that conflicts with a neighboring linear
+       interior can still reject solid interior. Keep this threshold below the
+       AA midpoint so ordinary exterior ramps continue to paint. */
+    if (!wgA && !wgB && fOwn12 >= 0.0 && c12 < 0.12) {
+      if (gA12 > 0.0 && dot(nA12, rA) < 0.0) discard;
+      if (gB12 > 0.0 && dot(nB12, rB) < 0.0) discard;
+    }
+    o = emit(c12);
+    return;
+  }
+#endif
+  // KIND 13 — THIN CHAIN STRIP: a ±band quad hugging one outline edge, carrying
+  // that edge's local chain (P0=cCen, P1=(cScale,cHalf), P2=vLine2.xy,
+  // P3=(vLine2.z,vLineT)). Analytic poly-clip coverage, exact per-edge; piece tier
+  // rejects the solid coarse interior where it draws. (probes/_polyClipAB.mjs)
+  if (vKind > 12.5 && vKind < 13.5) {
+    float invE = 1.0 / max(vEmPerPx, 1e-12);
+    vec2 c0 = (cCen - vEm) * invE;
+    vec2 c1 = (vec2(cScale, cHalf) - vEm) * invE;
+    vec2 c2 = (vLine2.xy - vEm) * invE;
+    vec2 c3 = (vec2(vLine2.z, vLineT) - vEm) * invE;
+    o = emit(chainBoxCov(c0, c1, c2, c3, c3, 0.0));   // strips: 4 pts, exterior-aware miss
     return;
   }
   // Interior triangle: solid, unless it carries a straight boundary-edge line
@@ -325,6 +558,46 @@ void main() {
   // Slug dual-ray coverage the outward strip uses for the outer half (f>0 outside).
   // They meet at ½ on the edge → a centered analytic ramp with no interior inset.
   if (vKind < 0.5) {
+    // ANALYTIC POLY-CLIP (vTC.x = 2 sentinel): the four flat slots carry the
+    // triangle's local outline chain as POINTS (P0=cCen, P1=(cScale,cHalf),
+    // P2=vLine2.xy, P3=(vLine2.z,vLineT)). Map each into the pixel cell with an
+    // ISOTROPIC em→px scale (length of the screen-x derivative of vEm) — matches
+    // the baseline slugCov's isotropic model and avoids the Jacobian cross-terms.
+    // Then clip: exact coverage, no corner-type combos.
+    if (vTC.x > 1.5) {
+      float invE = 1.0 / max(vEmPerPx, 1e-12);   // ANALYTIC scale — dFdx blows up on thin CDT faces
+      vec2 c0 = (cCen - vEm) * invE;
+      vec2 c1 = (vec2(cScale, cHalf) - vEm) * invE;
+      vec2 c2 = (vLine2.xy - vEm) * invE;
+      vec2 c3 = (vec2(vLine2.z, vLineT) - vEm) * invE;
+      vec2 c4 = (vTC.yz - vEm) * invE;                      // P4 (aTC.yz)
+      // CONIC mode (sentinel 3): the same five slots are TWO quadratic Bézier
+      // segments p0–c1→p2 –c3→p4 rather than four straight ones, so a whole
+      // glyph arc is represented EXACTLY — no sagitta to trade against reach.
+      // The builder picks per face: conic where the face's boundary is ≤2
+      // pieces and any is curved, straight-chain otherwise (a straight-heavy
+      // face keeps all four of its segments).
+      float cov = vTC.x > 2.5
+        ? conicChainBoxCov(c0, c1, c2, c3, c4, 2.0)
+        : chainBoxCov(c0, c1, c2, c3, c4, 2.0);   // own chain: linear-miss mode
+#ifndef MANTLE_NO_BEZOUT
+      // A coarse face can reach a SECOND, disconnected outline arc that chain 1
+      // cannot represent; without this its fragments miss and fill solid. Chain 2
+      // bounds the fill from that side, so the local fill is the INTERSECTION of
+      // the two — min() is exact when only one arc crosses the box (the common
+      // case, the other returning 1) and a tight upper bound when both do.
+      // All-zero chain 2 ⇒ degenerate segments ⇒ 1.0 ⇒ min() changes nothing.
+      if (any(notEqual(vCh2A, vec4(0.0))) || any(notEqual(vCh2B, vec4(0.0)))) {
+        vec2 d0 = (vCh2A.xy - vEm) * invE;
+        vec2 d1 = (vCh2A.zw - vEm) * invE;
+        vec2 d2 = (vCh2B.xy - vEm) * invE;
+        vec2 d3 = (vCh2B.zw - vEm) * invE;
+        cov = min(cov, chainBoxCov(d0, d1, d2, d3, d3, 1.0));
+      }
+#endif
+      o = emit(cov);
+      return;
+    }
     if (dot(cCen, cCen) > 1e-9) {
       float fi = dot(cCen, vEm) - cScale;
       // ∇fi ANALYTICALLY, not dFdx(fi). cCen is the flat unit edge normal, so ∇fi is
@@ -332,20 +605,24 @@ void main() {
       // 2×2 derivative quad — and at a sharp corner the CDT fans thin SLIVER
       // triangles whose helper pixels extrapolate garbage, blowing up the gradient
       // so slugCov collapses to ~0. That erodes the fill along the sliver: a "linear
-      // cut" / diagonal slash across the letter (MuseoSans 'v' base) on real GPUs;
+      // cut" / diagonal slash across the glyph on real GPUs;
       // SwiftShader masks it. Analytic ∇fi is identical inside a triangle but immune.
       float cA = slugCov(fi, cCen * vEmPerPx);
       // SECOND boundary line (vLine2 = nx,ny,c; vLineT = corner type). A pixel box cut by
       // TWO lines — a thin stroke (both stroke edges in one box) or a corner — needs the
-      // combined coverage, not one line's: convex/stroke (fill = intersection locally):
-      // covA+covB−1; reflex (fill = union): covA+covB−covA·covB. covB saturates to 1 more
-      // than a pixel from line B, so far pixels reduce to plain covA — scale-invariant.
+      // combined coverage, not one line's. Use exact two-plane box area (exactBoxCov2):
+      // covA+covB−1 overcounts acute tips where the true box area is partial.
+      // Convex/stroke (fill = intersection): area(A∩B); reflex (fill = union): A∪B.
       if (abs(vLineT) > 0.5) {
-        float cB = slugCov(dot(vLine2.xy, vEm) - vLine2.z, vLine2.xy * vEmPerPx);
-        cA = vLineT > 0.0 ? max(0.0, cA + cB - 1.0) : cA + cB - cA * cB;
+        float fiB = dot(vLine2.xy, vEm) - vLine2.z;
+        float cB = slugCov(fiB, vLine2.xy * vEmPerPx);
+        float invPx = 1.0 / max(vEmPerPx, 1e-12);
+        float inter = exactBoxCov2(cCen, -fi * invPx, vLine2.xy, -fiB * invPx);
+        cA = vLineT > 0.0 ? inter : (cA + cB - inter);
       }
       // THIRD line (vTC.xyz; type in cHalf): sliver faces can be cut by three edges. Far →
-      // saturates → inert under the same chain.
+      // saturates → inert under the same chain. Approximate chain with the cheap formula
+      // once the dominant pair is exact (third edges are usually near-orthogonal stems).
       if (abs(cHalf) > 0.5 && dot(vTC.xy, vTC.xy) > 1e-9) {
         float cC = slugCov(dot(vTC.xy, vEm) - vTC.z, vTC.xy * vEmPerPx);
         cA = cHalf > 0.0 ? max(0.0, cA + cC - 1.0) : cA + cC - cA * cC;
@@ -358,17 +635,11 @@ void main() {
   float f;
   vec2 f4gEm = vec2(0.0);
   bool f4has = false;
-  if (vKind < 1.5 || vKind > 8.5) {   // kinds 9/11 (curve strip / static crescent) share the quad implicit
-    // Quadratic control-tri: f = u²−v, signed so the kept side is exterior.
-    f = vSign * (vTC.x * vTC.x - vTC.y);
-  } else if (vKind < 2.5) {
+  if (vKind < 2.5) {
     // Cubic (Loop-Blinn klmn, p1000-loop §4.4): k,l,m interpolated in vTC;
     // implicit f = k³ − l·m (n≡1 for integral cubics). ~3 mul + 1 sub.
+    // (kind 0 returned above, so vKind < 2.5 here means kind 2.)
     f = vSign * (vTC.x * vTC.x * vTC.x - vTC.y * vTC.z);
-  } else if (vKind < 3.5) {
-    // Straight-edge AA strip: signed distance to the edge line N·em − c (em).
-    // f>0 outside the fill; the fwidth ramp centers ½-coverage on the edge.
-    f = dot(cCen, vEm) - cScale;
   } else if (vKind < 4.5) {
 #ifndef MANTLE_NO_BEZOUT
     // Cubic-bezout fallback (cusp / d1≈0): exact 3×3 Bezout determinant.
@@ -400,115 +671,134 @@ void main() {
     // Rational quadratic (arc, Loop-Blinn §3.2): homogeneous texcoords
     // vTC = (Ũ,Ṽ,R); implicit f = Ũ²−Ṽ·R (integral quad is the R≡1 case). Exact
     // for elliptical arcs — no cubic approximation. Cheap: 2 mul + 1 sub.
-    f = vSign * (vTC.x * vTC.x - vTC.y * vTC.z);
-  } else if (vKind < 6.5) {
-    // Circular arc SDF (kind 6): cCen = circle centre (em), cScale = radius.
-    // f = signed distance to the circle. Unlike the per-piece rquad implicit,
-    // EVERY co-circular arc sector evaluates the IDENTICAL field, so adjacent
-    // sectors MAX-blend with no seam undercount (the notch the ≤90° splits gave
-    // at the axis tangents). ∇f is the true radial direction everywhere, so the
-    // slugCov AA is correct at every angle including the horizontal/vertical tips.
-    f = vSign * (length(vEm - cCen) - cScale);
+    // |vSign| == 3 flags a LONE CRESCENT (no kind-0 interior in this mesh) — the
+    // sign-magnitude idiom kind 12 uses; take only its sign for the implicit.
+    f = (vSign > 0.0 ? 1.0 : -1.0) * (vTC.x * vTC.x - vTC.y * vTC.z);
+  } else if (vKind < 7.5) {
+    // Circular / annulus / elliptical SDF (kind 7; legacy kind 6 still accepted).
+    // Ellipse (cHalf < −1.5): aC0=(ry,cosφ,sinφ), cScale=rx — unit-circle pullback.
+    // Disc (−1.5 ≤ cHalf < 0, or legacy kind 6): f = |p−C| − r.
+    // Ring (cHalf ≥ 0): f = ||p−C| − rMid| − halfW; one primitive, no wedges.
+    //
+    // ANALYTIC gradient + curvature (no dFdx of f): every level set here is a
+    // circle/ellipse through the fragment, so ∇f and the (rank-1) Hessian
+    // H = w·WWᵀ are closed-form. Feeding them into the same curvature-aware
+    // coverage the curve kinds use removes the tangent-line over-coverage on
+    // the inner fringe of small/high-curvature discs — the correction the
+    // first-order slugCov path could not express.
+    vec2 d7 = vEm - cCen;
+    vec2 G7, W7;
+    float w7;
+    if (cHalf < -1.5) {
+      float rx7 = max(cScale, 1e-9), ry7 = max(vNa.x, 1e-9);
+      float c7 = vNa.y, s7 = vNb.x;
+      vec2 q7 = vec2((d7.x * c7 + d7.y * s7) / rx7, (-d7.x * s7 + d7.y * c7) / ry7);
+      float Lq7 = max(length(q7), 1e-9);
+      f = vSign * (Lq7 - 1.0);
+      vec2 qh7 = q7 / Lq7, th7 = vec2(-qh7.y, qh7.x);
+      G7 = vSign * vec2(qh7.x * c7 / rx7 - qh7.y * s7 / ry7, qh7.x * s7 / rx7 + qh7.y * c7 / ry7);
+      W7 = vec2(th7.x * c7 / rx7 - th7.y * s7 / ry7, th7.x * s7 / rx7 + th7.y * c7 / ry7);
+      w7 = vSign / Lq7;
+    } else {
+      float L7 = max(length(d7), 1e-9);
+      vec2 dh7 = d7 / L7;
+      float sig7 = 1.0, halfW7 = 0.0;
+      if (vKind > 6.5 && cHalf >= 0.0) { sig7 = L7 >= cScale ? 1.0 : -1.0; halfW7 = cHalf; }
+      f = vSign * (sig7 * (L7 - cScale) - halfW7);
+      G7 = (vSign * sig7) * dh7;
+      W7 = vec2(-dh7.y, dh7.x);
+      w7 = vSign * sig7 / L7;
+    }
+    // Chain rule through the affine em→px map: dFdx(vEm) is the exact
+    // per-primitive Jacobian column (vEm is affine in screen space).
+    vec2 emx7 = dFdx(vEm), emy7 = dFdy(vEm);
+    float fx7 = dot(G7, emx7), fy7 = dot(G7, emy7);
+    float wx7 = dot(W7, emx7), wy7 = dot(W7, emy7);
+    float cov7 = curveCov(f, fx7, fy7, w7 * wx7 * wx7, w7 * wy7 * wy7, w7 * wx7 * wy7);
+    // Near-zero claims write depth at the piece tier and reject solid interior
+    // beneath (same contract as the shared tail's cov < 0.004 gate).
+    if (cov7 < 0.004) discard;
+    o = emit(cov7);
+    return;
   } else {
-    // Concentric annulus / ring SDF (kind 7): cCen = centre, cScale = mid-radius
-    // (rOut+rIn)/2, cHalf = half-width (rOut−rIn)/2. f = signed distance to the ring
-    // band = ||p−C| − rMid| − halfW; f<0 inside the band. ONE primitive renders a
-    // whole ring exactly — no crescents, no arc-split seams, no small-scale wedge.
-    f = vSign * (abs(length(vEm - cCen) - cScale) - cHalf);
+    // Unreachable: kinds 0/7/10/12 return early above, and the packer emits no
+    // other kind (legacy 1/3/8/9/11 handlers were removed with their emitters).
+    f = 0.0;
   }
-  // Coverage. Curve kinds (1 quad · 2 cubic · 5 rquad) use the CURVATURE-AWARE
-  // per-axis coverage: their texcoords are affine in screen space, so f is exactly
-  // quadratic along each axis and curveCov measures the true kept length within the
-  // pixel — removing the tangent-line over-coverage on convex arcs. The needed
-  // derivatives come from the texcoord screen gradients (exact for affine tc; the
-  // crescent hull triangles aren't slivers, so dFdx is clean here). Straight kinds
-  // (0/3) and the SDF kinds (6/7) keep slugCov — kind-3's ∇f is the exact flat
-  // normal cCen·(1/emPerPx), not dFdx(f) which corrupts on sliver-adjacent quads.
+  // Coverage. Curve kinds (2 cubic · 5 rquad) use the CURVATURE-AWARE per-axis
+  // coverage: their texcoords are affine in screen space, so f is exactly
+  // quadratic along each axis and curveCov measures the true kept length within
+  // the pixel — removing the tangent-line over-coverage on convex arcs. The
+  // needed derivatives come from the texcoord screen gradients (exact for
+  // affine tc; the crescent hull triangles aren't slivers, so dFdx is clean here).
   float cov;
-  bool deferFill = false;
-  bool isQuad = vKind > 0.5 && vKind < 1.5;
   bool isCubic = vKind > 1.5 && vKind < 2.5;
   bool isRquad = vKind > 4.5 && vKind < 5.5;
-  bool isQuad9 = vKind > 8.5 && vKind < 9.5;
-  bool isQuad11 = vKind > 10.5;
-  // TILING CLIP: each quad/rquad crescent is generously DILATED (packer) so it reaches
-  // past the arc AA band at both endpoints — no pinch. Here we confine it back to its own
-  // arc's chord span [a,b] (a = aC3.xy, b = aC3.zw), discarding the excess. Adjacent
-  // crescents share an endpoint, so they PARTITION the boundary — every pixel is covered
-  // by exactly one crescent reporting its exact curveCov → MAX is trivially correct, with
-  // no seam notch (scalloping) and no seam over-coverage.
-  if (isQuad) {
-    // EXACT tangent/corner partition. Clip each endpoint by its BISECTOR normal (vNa at a,
-    // vNb at b): the bisector of THIS arc's tangent and the NEIGHBOUR segment's tangent at
-    // the shared on-curve point. At a tangent-continuous seam the neighbour tangent is
-    // collinear, so vNa ∝ the arc tangent — adjacent crescents' clip planes COINCIDE and
-    // they tile edge-to-edge (no seam over/notch). At a CORNER (curve meets a straight edge
-    // or another curve at an angle) the bisector is the shared corner-partition plane, so the
-    // generously-dilated crescent is clipped exactly at the corner instead of spilling past
-    // it (the concave-corner over-coverage). a=aC3.xy, b=aC3.zw; a==b ⇒ adopted sub-tri (no clip).
+  if (isCubic && vSeam > 0.5 && vSeam < 5.0) {
+    // Cubic crescent: the packer dilated the hull so the exterior AA ramp is not clipped by the
+    // hull edge (measured: -14.6/255 under-coverage at the piece midpoint without it). Clip back
+    // here to the piece's own END TANGENT planes, or the dilated neighbours overlap and the
+    // route's OVER accumulates them into over-coverage (+6.4/255). Sub-pieces of a cubic are
+    // tangent-continuous, so adjacent planes coincide and the crescents tile edge to edge.
+    // ½px slack: an fp-tilted plane must never discard true crescent body.
     vec2 a = cCen, b = vec2(cScale, cHalf);
-    if (dot(b - a, b - a) > 1e-9) {
-      // ½px slack: an fp-tilted bisector plane must never discard true crescent body —
-      // at large scales a hairline plane error becomes a hundreds-of-px crack along the
-      // clip (the e@5.3 diagonal). The neighbour may double-paint ≤half the AA ramp
-      // in the overlap hair — invisible against a full crack.
-      vec2 cp = vec2(vSeam, vTC.z);
-      float s1 = (cp.x - a.x) * (vEm.y - a.y) - (cp.y - a.y) * (vEm.x - a.x);
-      float s2 = (b.x - cp.x) * (vEm.y - cp.y) - (b.y - cp.y) * (vEm.x - cp.x);
-      float s3 = (a.x - b.x) * (vEm.y - b.y) - (a.y - b.y) * (vEm.x - b.x);
-      bool ownTri = min(min(s1, s2), s3) >= 0.0 || max(max(s1, s2), s3) <= 0.0;
-      float clipEps = 0.5 * vEmPerPx;
-      if (!ownTri && (dot(vEm - a, vNa) < -clipEps || dot(vEm - b, vNb) < -clipEps)) discard;
-      // fill-side deferral outside the control tri assumes the interior mesh covers the
-      // pixel — at tight spiral bowls (6/8/9/e) it can miss, tearing glyph-locked holes.
-      // DEEP fill (cov≈1) is always safe to paint: 1-over-1 composites to 1 exactly.
-      // Only the PARTIAL fill-side zone defers (the interior ramp's turf).
-      deferFill = !ownTri && vSign * (vTC.x * vTC.x - vTC.y) < 0.0;
-    }
+    // Reached only by RING-LESS cubic pieces (morph meshes); static pieces carry an exterior
+    // ring and never set vSeam. Slack, but SMALL: neighbouring pieces are tangent-continuous, so
+    // their clip planes COINCIDE, and a generous slack makes both paint the seam band while the
+    // route's OVER double-counts it (a 4-cubic circle read 0.981/255 with 8 bad pixels at 0.5px
+    // vs 0.556 with none at <= 0.10). 0.05 keeps a margin against an fp-tilted plane.
+    float clipEpsC = 0.05 * vEmPerPx;
+    if (dot(vEm - a, vNa) < -clipEpsC || dot(vEm - b, vNb) < -clipEpsC) discard;
   } else if (isRquad) {
     // rquad (ellipse/arc) keeps the chord-span clip — control point not threaded (rare).
     vec2 a = cCen, b = vec2(cScale, cHalf), ch = b - a;
     if (dot(ch, ch) > 1e-9 && (dot(vEm - a, ch) < 0.0 || dot(vEm - b, ch) > 0.0)) discard;
-  } else if (isQuad9) {
-    // Curve strip: owns the EXTERIOR side (f-sign partition — the kind-11 crescent owns the
-    // fill side of the same implicit) within its span. Discards keep direct-OVER exact.
-    // KNOWN LIMIT: 9 and 11 evaluate f in different interpolation frames, so a pixel
-    // centered exactly on the arc can read opposite epsilon signs and lose both painters
-    // (a 0.5 tie hole, ~1px/glyph at one phase). Overlap windows trade holes for doubles
-    // statistically (measured: no δ fits both n and u) — the real fix is a raster-domain
-    // partition (ring strips sharing hull verts), ledgered.
-    vec2 a = cCen, b = vec2(cScale, cHalf), cp = vec2(vSeam, vTC.z);
-    if (dot(vEm - a, cp - a) < 0.0 || dot(vEm - b, cp - b) < 0.0) discard;
-    if (vSign * (vTC.x * vTC.x - vTC.y) <= 0.0) discard;
-  } else if (isQuad11) {
-    // Static crescent: |vSign|=2 marks a FAT arc paired with a RING strip — the ring
-    // never overlaps the hull (shared inner verts partition by rasterization), so the
-    // hull face paints BOTH sides of its arc: no f-sign discard, no tie fragility.
-    // |vSign|=1 (shallow arc / earcut path) keeps the bbox-strip f-sign partition.
-    // curveCov is homogeneous in (f, fx, fy, fxx, fyy), so the ×2 sign is harmless.
-    if (abs(vSign) < 1.5 && vSign * (vTC.x * vTC.x - vTC.y) > 0.0) discard;
   }
-  if (isQuad || isCubic || isRquad || isQuad9 || isQuad11) {
+  if (isCubic || isRquad) {
     vec3 tx = dFdx(vTC), ty = dFdy(vTC);   // ∂(texcoords)/∂(screen px) — exact (affine)
-    float fx, fy, fxx, fyy;
-    if (isQuad || isQuad9 || isQuad11) {   // f = s·(u²−v)
-      float u = vTC.x;
-      fx = vSign * (2.0 * u * tx.x - tx.y); fy = vSign * (2.0 * u * ty.x - ty.y);
-      fxx = vSign * 2.0 * tx.x * tx.x;      fyy = vSign * 2.0 * ty.x * ty.x;
-    } else if (isCubic) {                  // f = s·(k³−l·m); 2nd-order fit (drop t³)
+    float fx, fy, fxx, fyy, fxy;
+    if (isCubic) {                         // f = s·(k³−l·m); 2nd-order fit (drop t³)
       float k = vTC.x, l = vTC.y, m = vTC.z;
       fx = vSign * (3.0 * k * k * tx.x - (tx.y * m + l * tx.z));
       fy = vSign * (3.0 * k * k * ty.x - (ty.y * m + l * ty.z));
       fxx = vSign * (6.0 * k * tx.x * tx.x - 2.0 * tx.y * tx.z);
       fyy = vSign * (6.0 * k * ty.x * ty.x - 2.0 * ty.y * ty.z);
+      fxy = vSign * (6.0 * k * tx.x * ty.x - (tx.y * ty.z + ty.y * tx.z));
     } else {                               // f = s·(Ũ²−Ṽ·R)
+      float s5 = vSign > 0.0 ? 1.0 : -1.0;   // magnitude is the lone-crescent flag
       float U = vTC.x, V = vTC.y, Rr = vTC.z;
-      fx = vSign * (2.0 * U * tx.x - (tx.y * Rr + V * tx.z));
-      fy = vSign * (2.0 * U * ty.x - (ty.y * Rr + V * ty.z));
-      fxx = vSign * (2.0 * tx.x * tx.x - 2.0 * tx.y * tx.z);
-      fyy = vSign * (2.0 * ty.x * ty.x - 2.0 * ty.y * ty.z);
+      fx = s5 * (2.0 * U * tx.x - (tx.y * Rr + V * tx.z));
+      fy = s5 * (2.0 * U * ty.x - (ty.y * Rr + V * ty.z));
+      fxx = s5 * (2.0 * tx.x * tx.x - 2.0 * tx.y * tx.z);
+      fyy = s5 * (2.0 * ty.x * ty.x - 2.0 * ty.y * ty.z);
+      fxy = s5 * (2.0 * tx.x * ty.x - (tx.y * ty.z + ty.y * tx.z));
     }
-    cov = curveCov(f, fx, fy, fxx, fyy);
+    cov = curveCov(f, fx, fy, fxx, fyy, fxy);
+    if (isRquad && abs(vSign) > 2.0) {
+      // CHORD EDGE OF A LONE CRESCENT — the missing half of the straight-edge AA.
+      //
+      // Straight-edge AA is a PAIR: an inner ramp on the kind-0 interior mesh plus
+      // the outward kind-10 strip, meeting at 1/2 on the edge. The strip cedes the
+      // inner half (`fOwn < 0 && c10 < 0.999 -> discard`) because "fill-side
+      // partials are the interior mesh's turf". When a shape's ENTIRE fill is one
+      // crescent — a curve plus its closing chord: a lens, a leaf, an arch, a pie
+      // slice — there is no kind-0 interior to cede to, so the crescent painted
+      // solid and won the MAX composite, rendering the chord as a HARD edge
+      // (measured: got 1.000 where the truth is 0.750).
+      //
+      // No new vertex data is needed: in canonical Loop-Blinn texcoords the arc
+      // endpoints are (0,0) and (1,1), so the chord is exactly V = U, and that
+      // holds homogeneously for rational quads (u=U/R, v=V/R). The crescent
+      // interior has g < 0, the same sense as f, so it min()s straight in.
+      //
+      // GATED, and it must be: applying it unconditionally fails 13/97 smokes
+      // (road IoU 0.46, curved-band "wrong wedges" IoU 0.77) — those rely on the
+      // crescent painting solid across a chord that is NOT a shape boundary.
+      float s5 = vSign > 0.0 ? 1.0 : -1.0;
+      float gC = s5 * (vTC.y - vTC.x);
+      vec2  gG = s5 * vec2(tx.y - tx.x, ty.y - ty.x);
+      cov = min(cov, slugCov(gC, gG));
+    }
   } else {
     if (f4has) {
       // kind-4: exact analytic gradient (cofactor) + curvature from the gradient
@@ -517,26 +807,29 @@ void main() {
       vec2 emx = dFdx(vEm), emy = dFdy(vEm);
       float fx4 = dot(f4gEm, emx), fy4 = dot(f4gEm, emy);
       float fxx4 = dot(dFdx(f4gEm), emx), fyy4 = dot(dFdy(f4gEm), emy);
-      cov = curveCov(f, fx4, fy4, fxx4, fyy4);
+      float fxy4 = dot(dFdy(f4gEm), emx);
+      cov = curveCov(f, fx4, fy4, fxx4, fyy4, fxy4);
 #ifdef MANTLE_DEBUG_K4
       float dpx = f / max(length(vec2(fx4, fy4)), 1e-12);
       o = vec4(clamp(0.5 + dpx * 0.25, 0.0, 1.0), clamp(0.5 + fxx4 * 2.0, 0.0, 1.0), cov, 1.0);
       return;
 #endif
     } else {
-      vec2 fgrad = (vKind > 2.5 && vKind < 3.5) ? cCen * vEmPerPx : vec2(dFdx(f), dFdy(f));
-      cov = slugCov(f, fgrad);
+      // No live kind reaches this fallback (kept for robustness against an
+      // unexpected vertex): first-order tangent-line coverage.
+      cov = slugCov(f, vec2(dFdx(f), dFdy(f)));
     }
   }
-  // KIND-9 CLAIM RULE (the depth-claim contract): a curve strip's job is the
-  // OUTSIDE AA band — its FILL-side partial fragments are the interior's turf
-  // (at junction zones their arc-frame partial is not the pixel's truth: the
-  // pixel is deep ink via the OTHER feature). Under blending they merely
-  // double-blend; under the cascade they would claim the pixel at partial
-  // coverage and reject the interior's full coverage beneath.
-  // Deep fill-side (cov≈1) stays: 1-over-1 is exact either way.
-  if (vKind > 8.5 && vKind < 9.5 && cov < 0.999 && vSign * (vTC.x * vTC.x - vTC.y) < 0.0) discard;
-  if (deferFill && cov < 0.999) discard;
-  if (cov <= 0.0) discard;
+  // CUBIC EXTERIOR-RING CLAIM RULE (for kind-2 cubic rings): a ring spans
+  // the arc's OUTSIDE AA band that a sub-pixel-thin hull cannot. Its FILL-side (f<0) partial
+  // fragments are the hull crescent's turf — under the direct-OVER route painting them
+  // double-counts the fill-side ramp (measured +10.6/255 over-coverage on a 4-cubic circle,
+  // a diagonal band along each arc midpoint). Deep fill (cov≈1) stays: 1-over-1 is exact.
+  // vSeam>5 marks a ring vertex (hull crescents carry vSeam=0; the vSeam∈(0.5,5) tangent-clip
+  // is the ring-less dilated morph path). f already carries the signed klmn implicit (line ~534).
+  if (isCubic && vSeam > 5.0 && cov < 0.999 && f < 0.0) discard;
+  // Near-zero claims write depth at the piece tier and reject solid interior
+  // beneath (same contract as kind-10's c10 < 0.004 gate).
+  if (cov < 0.004) discard;
   o = emit(cov);
 }

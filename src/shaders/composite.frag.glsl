@@ -2,6 +2,8 @@
 precision highp float;
 uniform sampler2D uShapeTex;  // shape's output (premultiplied RGBA)
 uniform sampler2D uDstTex;    // main framebuffer copy (premultiplied RGBA)
+uniform vec4 uShapeMap;       // vUV → uShapeTex uv (see @@FILTER_RECT@@)
+uniform vec4 uDstMap;         // vUV → uDstTex uv — a DIFFERENT rect
 uniform int uBlendMode;
 uniform float uOpacity;       // multiplier on src alpha (group opacity)
 in vec2 vUV;
@@ -11,9 +13,14 @@ out vec4 fragColor;
 // by src/shaders/index.js.
 @@BLEND_HELPERS@@
 
+@@FILTER_RECT@@
+
 void main() {
-  vec4 srcPre = texture(uShapeTex, vUV);
-  vec4 dstPre = texture(uDstTex,   vUV);
+  // The shape may be a bbox-sized filter output while the backdrop is the whole
+  // canvas, so each gets its own map. sampleIn returns 0 off the shape's rect,
+  // which is what "transparent outside the filter region" means.
+  vec4 srcPre = sampleIn(uShapeTex, mapIn(vUV, uShapeMap));
+  vec4 dstPre = sampleIn(uDstTex,   mapIn(vUV, uDstMap));
   // Apply group opacity: scale the source's premultiplied (rgb, a) by
   // uOpacity. Multiplying both rgb and alpha keeps the premultiplied
   // invariant. uOpacity defaults to 1 when not set by the caller.

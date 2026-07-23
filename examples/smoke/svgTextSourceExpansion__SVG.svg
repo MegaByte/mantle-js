@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">
+    <path d="M10 10 H60 V60 H10 Z" fill="#0000ff"/>
+    <text x="70" y="50" font-family="Roboto" font-size="40" fill="#ff0000">Hi</text>
+  </svg>

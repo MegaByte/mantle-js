@@ -7,6 +7,7 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer';
+import { emitFixture } from './_fixtures.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -28,19 +29,28 @@ function circlePath(cx, cy, r, ccw) {
 }
 const R = 44;   // small render size — where the wedge shows
 const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 44" width="44" height="44"><path fill="#000000" d="${circlePath(22, 22, 18, true)} ${circlePath(22, 22, 12, false)}"/></svg>`;
+emitFixture('lbAnnulusSdf__SVG', SVG);
 
 const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="${R}" height="${R}"></canvas>
 <script type="module">
 import { importSvg, createBundle, createRenderer, loadShaders } from '/src/index.js';
 const gl = document.getElementById('c').getContext('webgl2', { antialias: false, premultipliedAlpha: true, preserveDrawingBuffer: true });
 const shaders = await loadShaders(new URL('/src/shaders/', location.href).href);
+// REFERENCE = AAC (exact signed-area coverage). Slug and LB now share the same exactBoxCov
+// kernel, so "LB matches Slug" no longer proves either is right.
+// Create the AAC reference FIRST: the LAST-created renderer owns the global off-thread
+// LB builder, and a Slug-only renderer would suppress the worker build (leaving the
+// bundle Slug forever). Keep the LB renderer created last so createBundle kicks the LB build.
+const refR = createRenderer(gl, shaders, { aacFill: true }); refR.setViewport(${R}, ${R}); refR.setLoopBlinnFill('off');
 const renderer = createRenderer(gl, shaders); renderer.setViewport(${R}, ${R});
 const bundle = createBundle(gl, await importSvg(${JSON.stringify(SVG)})); renderer.prepareBundle(bundle);
+await renderer.awaitLbReady(bundle);   // LB builds off-thread; wait before asserting the route
 const read = () => { const px = new Uint8Array(${R}*${R}*4); gl.readPixels(0,0,${R},${R},gl.RGBA,gl.UNSIGNED_BYTE,px); return px; };
 const cov = (px,x,y) => { const q = ((${R}-1-y)*${R}+x)*4; return (255-px[q])/255; };
 const draw = (m) => { renderer.setLoopBlinnFill(m); const r = renderer.debugStats.loopBlinnRouteCount;
   renderer.beginFrame([1,1,1,1]); renderer.drawBundle(bundle); renderer.endFrame(); return { px: read(), routed: renderer.debugStats.loopBlinnRouteCount - r }; };
-const slug = draw('off'), lb = draw('on');
+const drawRef = () => { refR.beginFrame([1,1,1,1]); refR.drawBundle(bundle); refR.endFrame(); return { px: read(), routed: 1 }; };
+const slug = drawRef(), lb = draw('on');
 let worst=0, sum=0, n=0, hole=1;
 for (let y=0;y<${R};y++) for (let x=0;x<${R};x++){ const s=cov(slug.px,x,y), l=cov(lb.px,x,y);
   if ((s>0.02&&s<0.98)||(l>0.02&&l<0.98)){ const e=Math.abs(s-l); if(e>worst)worst=e; sum+=e; n++; } }
@@ -76,8 +86,8 @@ const o = await page.evaluate(() => window.__out);
 console.log('  ', JSON.stringify(o));
 if (o.lbRouted) ok('ring routes through LB'); else fail('ring did NOT route to LB');
 if (o.hole < 0.05) ok('ring hole stays empty (' + o.hole + ')'); else fail('ring hole filled (' + o.hole + ')');
-if (o.worst <= 0.06) ok('ring matches Slug at every boundary pixel (worst ' + o.worst + ') — annulus SDF, no wedge/seam');
-else fail('ring boundary diverges from Slug (worst ' + o.worst + ') — crescent wedge/seam?');
+if (o.worst <= 0.06) ok('ring matches the exact reference at every boundary pixel (worst ' + o.worst + ') — annulus SDF, no wedge/seam');
+else fail('ring boundary diverges from the exact reference (worst ' + o.worst + ') — crescent wedge/seam?');
 if (o.mean <= 0.015) ok('mean boundary error ' + o.mean); else fail('mean boundary error too high (' + o.mean + ')');
 
 await browser.close();

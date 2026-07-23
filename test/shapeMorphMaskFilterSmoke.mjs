@@ -52,30 +52,8 @@ const url  = `http://127.0.0.1:${port}/mantleDemo.html`;
 // has the corner masked out, so corner pixel is empty there. The centre
 // pixel is the signal: if the morph renders nothing it falls back to
 // canvas-clear white.
-const POSE_A = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <defs>
-    <mask id="m1"><circle cx="50" cy="50" r="40" fill="#fff"/></mask>
-    <filter id="f1" x="-50%" y="-50%" width="200%" height="200%">
-      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#333" flood-opacity="0.85"/>
-    </filter>
-  </defs>
-  <g mask="url(#m1)">
-    <rect filter="url(#f1)" x="10" y="10" width="80" height="80" fill="#58B92D"/>
-  </g>
-</svg>`;
-const POSE_B = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <defs>
-    <mask id="m1"><circle cx="50" cy="50" r="20" fill="#fff"/></mask>
-    <filter id="f1" x="-50%" y="-50%" width="200%" height="200%">
-      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#333" flood-opacity="0.85"/>
-    </filter>
-  </defs>
-  <g mask="url(#m1)">
-    <rect filter="url(#f1)" x="10" y="10" width="80" height="80" fill="#58B92D"/>
-  </g>
-</svg>`;
+const POSE_A = readFileSync(new URL('../examples/smoke/shapeMorphMaskFilter__POSE_A.svg', import.meta.url), 'utf8');
+const POSE_B = readFileSync(new URL('../examples/smoke/shapeMorphMaskFilter__POSE_B.svg', import.meta.url), 'utf8');
 
 let failures = 0;
 const fail = (m) => { failures++; console.error('FAIL', m); };

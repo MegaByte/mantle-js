@@ -14,10 +14,7 @@ const ROOT = path.resolve(__dirname, '..');
 
 // A thick ring: outer circle + concentric inner circle (the hole), one path with
 // two subpaths (nonzero winding → annulus). Cubic-arc curves throughout.
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <path fill="#3366cc" d="M50 6 A44 44 0 1 0 50 94 A44 44 0 1 0 50 6 Z
-                          M50 30 A20 20 0 1 1 50 70 A20 20 0 1 1 50 30 Z"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/lbHoleParity__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="100" height="100"></canvas>
@@ -28,11 +25,13 @@ const shaders = await loadShaders(new URL('/src/shaders/', location.href).href);
 const renderer = createRenderer(gl, shaders);
 renderer.setViewport(100, 100);
 const bundle = createBundle(gl, await importSvg(${JSON.stringify(SVG)}));
-renderer.prepareBundle(bundle);   // LB build is off-thread at load; prewarm synchronously so the route asserts deterministically
+renderer.prepareBundle(bundle);
+await renderer.awaitLbReady(bundle);   // LB build is off-thread at load; wait for the worker before asserting the route
 // Self-morph (a single-pose timeline, as games mount static art) → the MORPH
 // route, which must apply signed coverage to the holed shape too.
 const morph = createShapeMorph(gl, createBundle(gl, await importSvg(${JSON.stringify(SVG)})), createBundle(gl, await importSvg(${JSON.stringify(SVG)})));
 morph.setT(0);
+if (renderer.awaitLbReady) await renderer.awaitLbReady(morph); // morph build is off-thread — wait before asserting the route
 const readAll = () => { const px = new Uint8Array(100 * 100 * 4); gl.readPixels(0, 0, 100, 100, gl.RGBA, gl.UNSIGNED_BYTE, px); return px; };
 const at = (px, x, yTop) => { const o = ((99 - yTop) * 100 + x) * 4; return [px[o], px[o + 1], px[o + 2]]; };
 const draw = (mode) => { renderer.setLoopBlinnFill(mode); const r = renderer.debugStats.loopBlinnRouteCount;

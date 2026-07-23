@@ -19,10 +19,15 @@ uniform sampler2D uIn;
 uniform vec2 uAtlasSize;
 uniform vec4 uAtlasRect;     // (atlasY, atlasW, atlasH, kind)
 uniform int  uPreserveAR;    // 1 = preserve (default), 0 = none
+uniform vec4 uRegionMap;     // vUV → filter-region uv (see @@FILTER_RECT@@)
 in vec2 vUV;                 // fullscreen-quad varying in [0,1]² (matches composite.vert)
 out vec4 fragColor;
+
+@@FILTER_RECT@@
 void main() {
-  vec2 uv = vUV;
+  // The image is placed across the filter REGION, not across this pass's
+  // output rect — they are the same only when the output covers the canvas.
+  vec2 uv = mapIn(vUV, uRegionMap);
   // Optional preserveAspectRatio: 'none' stretches u/v 1:1 across the
   // filter region; 'meet' (default) preserves source AR and centers.
   if (uPreserveAR == 1) {

@@ -68,7 +68,18 @@ try{
     // would thrash the morph's skipUploads gate): all Slug frames, then all
     // routed frames. Each pass keeps a single mode so setT stays in sync.
     renderer.setLoopBlinnMorphFill('off');  const slug=ts.map(t=>draw(morph,t));
-    renderer.setLoopBlinnMorphFill('auto'); const gpu =ts.map(t=>draw(morph,t));
+    renderer.setLoopBlinnMorphFill('auto');
+    // WARM the route: the morph mesh is built BY the first routed draw, and the
+    // t-SEGMENTED pair (flip morphs) can DEFER its build past one draw under
+    // load (the 4ms preparation slice → enqueueLbPrepare). One warm draw was a
+    // real flake; loop until the route engages (or a bounded number of tries —
+    // shapes that legitimately fall back to Slug never route and exit by count).
+    for (let w9 = 0; w9 < 40; w9++) {
+      const r9 = draw(morph, ts[0]);
+      if (r9.routed > 0) break;
+      await new Promise(res9 => setTimeout(res9, 25));
+    }
+    const gpu =ts.map(t=>draw(morph,t));
     for(let i=0;i<ts.length;i++) rec.perT.push({t:ts[i],
       slugInk:ink(slug[i].buf), gpuInk:ink(gpu[i].buf), slugRouted:slug[i].routed, gpuRouted:gpu[i].routed});
     out.shapes[key]=rec;

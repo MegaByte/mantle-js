@@ -45,11 +45,10 @@ function buildMorphPlan(src, dst, srcRange, dstRange) {
   // Prefer the bundle's pre-computed `curveRangesByShape` — it uses
   // the UNPADDED curve float count for the last shape's end so we
   // match by exact per-shape float count regardless of how the GL
-  // curve plane was row-padded. Hand-rolled test bundles that bypass
-  // createBundle fall back to the inline derivation, which resolves
-  // the last shape via curveTexels.length (correct when curveTexels
-  // is unpadded; the hand-built test fixtures pass this in
-  // intentionally to exercise both code paths).
+  // curve plane was row-padded. Bundles that bypass createBundle
+  // fall back to the inline derivation, which resolves the last
+  // shape via curveTexels.length (correct when curveTexels is
+  // unpadded).
   const srcRanges = src.curveRangesByShape || curveRangesByShape(src);
   const dstRanges = dst.curveRangesByShape || curveRangesByShape(dst);
   resolveLastShapeEnd(srcRanges, extractCurveFloats(src).length);
@@ -270,6 +269,25 @@ function composeMorphSections(src, dst, plan) {
     mergedCurveF32.set(dstCurveF32.subarray(r.begin, r.end), e.newOffsetF);
   }
 
+  // 2b) Build the ENDPOINT-form twins of the two planes. Those — not these — are
+  //     what setT interpolates, because a componentwise lerp of CENTRE-form arcs
+  //     tears the contour apart (prepareArcMorph has the argument). The planes
+  //     here stay in centre form: they are the bundle's t=0 state, read directly
+  //     by the shader.
+  const arcPrep = prepareArcMorph(src, plan, TEX_W, mergedCurveF32, dstRemapped);
+
+  // 2c) Who-joins-whom, for the per-frame join-tangent rebuild. A stroked
+  //     segment's join texel holds its neighbours' UNIT tangents, and those
+  //     cannot be interpolated — they have to be recomputed from the lerped
+  //     geometry each frame, or the stroke's joins fly apart (buildJoinTable).
+  // Adjacency is resolved on the ENDPOINT-form plane, where arc endpoints are
+  // stored and welded — centre form has none, and re-deriving them through trig
+  // in float32 leaves joints up to ~2e-4 apart, which breaks the pairing.
+  const joinTable = arcPrep.segTables.size
+    ? buildJoinTable(src, plan, TEX_W, arcPrep.srcEp || mergedCurveF32,
+                     arcPrep.segTables, new Set(arcPrep.arcs))
+    : EMPTY_I32;
+
   // 3) Build the merged meta plane. Src meta rows copied verbatim;
   //    dst-only meta rows appended with glyphLoc re-pointed into the
   //    appended curve region.
@@ -295,7 +313,7 @@ function composeMorphSections(src, dst, plan) {
   // Bands FIRST: append a collapsed band region for each dst-only shape so
   // it rasterizes (its segments repointed into the merged curve buffer).
   // Done before the dst-only meta loop, which needs the band glyphLocs.
-  const bandsResult = concatBandPlanes(src, dst, plan, TEX_W);
+  const bandsResult = concatBandPlanes(src, dst, plan, TEX_W, arcPrep, mergedCurveF32, dstRemapped);
   const dstOnlyBanded = appendDstOnlyBands(bandsResult.buf, dst, dstOnlyEntries, TEX_W);
   const bandsAb = dstOnlyBanded.buf;
   const matchedRewrites = bandsResult.matchedRewrites;
@@ -508,6 +526,18 @@ function composeMorphSections(src, dst, plan) {
     _dstCurveF32:    dstRemapped,
     _curveW: curveW,
     _curveH: curveH,
+    // ARC morph side-channel. When the morph carries arcs, setT does NOT lerp
+    // the two centre-form planes above — it lerps these endpoint-form twins and
+    // converts each arc record back to centre form on the way into the live
+    // curve texture. Null when no matched shape has a morphable arc, which is
+    // the common case and leaves the fast paths exactly as they were.
+    // (_arcOffsets lists each arc's HEADER float offset; see prepareArcMorph.)
+    _srcEpCurveF32: arcPrep.srcEp,
+    _dstEpCurveF32: arcPrep.dstEp,
+    _arcOffsets:    arcPrep.arcs,
+    // Stroke join-tangent rebuild table (see buildJoinTable). Empty when nothing
+    // matched is stroked, which leaves the fast paths untouched.
+    _joinTable:     joinTable,
     // Gradient stop-lerp plan. For each src gradient whose stop count
     // matches dst's gradient at the same index, the morph can lerp the
     // stop bytes byte-by-byte (premul.rgb + offset.a). Mismatched stop
@@ -604,26 +634,31 @@ function buildGradStopPlan(src, dst) {
   const srcG = src.gradientFloats;
   const dstG = dst.gradientFloats;
   const FLOATS_PER_GRAD = 16;     // 4 RGBA32F texels per gradient
-  const STOPS_TEXEL_BYTES = 4;    // RGBA8 = 4 bytes per stop
+  const TEXEL_BYTES = 4;          // RGBA8 texel
   const srcN = srcG.length / FLOATS_PER_GRAD;
   const dstN = dstG.length / FLOATS_PER_GRAD;
   const pairs = Math.min(srcN, dstN);
   const plan = [];
   for (let i = 0; i < pairs; i++) {
-    // Gradient param texel 2 (offset 8..11 within the 16 floats):
-    //   (ax, ay, stopsOffset, stopsCount)  — see svg/gradient.js
-    // The stops offset is in TEXEL units; convert to bytes.
+    // Gradient record slots 10/11: (stopsOffset, stopsCount) into the shared
+    // stops LUT — see svg/gradient.js buildGradientTables. stopsOffset is in
+    // TEXELS; stopsCount is SIGNED: negative = the all-opaque 1-texel/stop
+    // fast path, positive = 2 texels/stop (straight RGBA texel + offset
+    // texel). Sign must match for a byte-lerp to be meaningful (the sign IS
+    // the stride), so a signed compare covers both count and layout.
     const base = i * FLOATS_PER_GRAD;
     const srcStopOff = Math.floor(srcG[base + 10] + 0.5);
-    const srcStopCnt = Math.floor(srcG[base + 11] + 0.5);
+    const srcStopCnt = Math.round(srcG[base + 11]);
     const dstStopOff = Math.floor(dstG[base + 10] + 0.5);
-    const dstStopCnt = Math.floor(dstG[base + 11] + 0.5);
-    if (srcStopCnt <= 0 || dstStopCnt <= 0) continue;
-    if (srcStopCnt !== dstStopCnt) continue;   // stop-count mismatch → no lerp
+    const dstStopCnt = Math.round(dstG[base + 11]);
+    if (srcStopCnt === 0 || dstStopCnt === 0) continue;
+    if (srcStopCnt !== dstStopCnt) continue;   // count or stride mismatch → no lerp
+    const texelsPerStop = srcStopCnt < 0 ? 1 : 2;
+    const n = Math.abs(srcStopCnt);
     plan.push({
-      srcByteOffset: srcStopOff * STOPS_TEXEL_BYTES,
-      dstByteOffset: dstStopOff * STOPS_TEXEL_BYTES,
-      byteLength:    srcStopCnt * STOPS_TEXEL_BYTES,
+      srcByteOffset: srcStopOff * TEXEL_BYTES,
+      dstByteOffset: dstStopOff * TEXEL_BYTES,
+      byteLength:    n * texelsPerStop * TEXEL_BYTES,
     });
   }
   return plan;
@@ -632,7 +667,7 @@ function buildGradStopPlan(src, dst) {
 function extractCurveFloats(bundle) {
   // Source-of-truth priority:
   //   1. bundle.curveFloats — UNPADDED Float32Array exposed by
-  //      createBundle since the curve-byte-count followup landed.
+  //      createBundle exposes this unpadded view directly.
   //   2. bundle.curveTexels — textRun's intermediate shape (pre-
   //      createBundle); also unpadded.
   //   3. bundle._mergedCurveF32 — morph's own intermediate shape.
@@ -694,8 +729,9 @@ function appendDstOnlyBands(bandBuf, dst, dstOnlyEntries, TEX_W) {
 
   let appendTexels = 0;
   const layouts = perShape.map(segs => {
-    appendTexels += 4 + segs.length * 2 + TEX_W;   // +row slack for rounding
-    return { segs, headers: 4, hArr: segs.length, vArr: segs.length, glyphLocIdx: 0 };
+    const arr = Math.ceil(segs.length / 2);        // packed entries: 2 per texel
+    appendTexels += 4 + arr * 2 + TEX_W;           // +row slack for rounding
+    return { segs, headers: 4, hArr: arr, vArr: arr, glyphLocIdx: 0 };
   });
   const srcTexRounded = roundUpToTex(srcBand.length / 4, TEX_W);
   const out = new Float32Array(roundUpToTex(srcTexRounded + appendTexels, TEX_W) * 4);
@@ -714,17 +750,511 @@ function appendDstOnlyBands(bandBuf, dst, dstOnlyEntries, TEX_W) {
     texelWrite(out, TEX_W, headerBase + 1, 4, 0, 0, 0);
     texelWrite(out, TEX_W, headerBase + 2, counts[0], counts[1], counts[2], counts[3]);
     texelWrite(out, TEX_W, headerBase + 3, 4 + layout.hArr, 0, 0, 0);
-    const hSegs = sortBy(layout.segs, 'maxX');
-    for (let i = 0; i < hSegs.length; i++) texelWrite(out, TEX_W, hArrBase + i, hSegs[i].hx, hSegs[i].hy, hSegs[i].maxX, hSegs[i].segType);
-    const vSegs = sortBy(layout.segs, 'maxY');
-    for (let i = 0; i < vSegs.length; i++) texelWrite(out, TEX_W, vArrBase + i, vSegs[i].hx, vSegs[i].hy, vSegs[i].maxY, vSegs[i].segType);
+    // packed entry pairs: (loc0, brk0, loc1, brk1), loc = hy*4096 + hx; odd tail pads with
+    // a sentinel break. Type is positional (sortBy groups types to match the header counts).
+    const packPairs = (sorted, k, base) => {
+      for (let i = 0; i < sorted.length; i += 2) {
+        const s = sorted[i], t = sorted[i + 1];
+        texelWrite(out, TEX_W, base + (i >> 1), s.hy * TEX_W + s.hx, s[k],
+                   t ? t.hy * TEX_W + t.hx : 0, t ? t[k] : -1e30);
+      }
+    };
+    packPairs(sortBy(layout.segs, 'maxX'), 'maxX', hArrBase);
+    packPairs(sortBy(layout.segs, 'maxY'), 'maxY', vArrBase);
     cursor = vArrBase + layout.vArr;
     rewrites.push({ glyphLocIdx: layout.glyphLocIdx });
   }
   return { buf: out.buffer.slice(0), rewrites };
 }
 
-function concatBandPlanes(src, dst, plan, TEX_W) {
+/**
+ * Build the ENDPOINT-FORM curve planes the morph actually interpolates, and the
+ * table of arc records setT has to convert back afterwards.
+ *
+ * This is what lets a morph carry an arc EXACTLY, with no cubic stand-in.
+ *
+ * A morph is a COMPONENTWISE LERP of two curve planes — every path does it blind
+ * (the GPU mix(), its CPU fallback, the renderer's Loop-Blinn route), so the
+ * planes have to be in a parameterization where that lerp MEANS something. For
+ * line/quad/cubic it does: a segment's endpoints ARE stored floats, so they
+ * travel straight to their dst positions, and the endpoint a segment shares with
+ * its neighbour is literally the same pair of numbers in both — welded at every
+ * t. An arc is stored in CENTRE form (cx, cy, rx, ry, phi, theta_start,
+ * theta_end) and its endpoints are a NONLINEAR function of those: lerp the
+ * floats and the arc's endpoint swings around the ellipse while the neighbouring
+ * line's endpoint walks the chord. The contour comes apart mid-morph, the fill
+ * walker's crossings stop pairing, and the shape tears. Centre form is also
+ * MANY-TO-ONE — (rx, ry, phi, th), (rx, ry, phi+pi, th+pi) and (ry, rx,
+ * phi+pi/2, th-pi/2) denote the identical arc, as does any th + 2*pi*k — and two
+ * poses imported independently have no reason to agree on a branch, so a blind
+ * lerp can spin the ellipse through a whole turn on the way across. On a real
+ * asset that was the dominant term: joint gaps up to a THIRD of the artwork.
+ *
+ * ENDPOINT form — (p1, p4, rx, ry, phi, flags), the form the SVG author wrote —
+ * has neither problem. p1/p4 are stored floats, so they lerp straight and stay
+ * welded to the neighbours; rx/ry/phi lerp; the flags are structural and equal
+ * on both sides. And every intermediate is a TRUE ellipse arc — nothing is
+ * approximated, which is the whole point of keeping arcs native. It is also
+ * exactly what interpolating the two SVG `d` strings would give, which is the
+ * behaviour an author expects.
+ *
+ * The catch, and the only reason this isn't simply the storage format: the
+ * SHADER wants centre form (it ray-casts against cx/cy/rx/ry/theta). So the
+ * conversion has to happen AFTER the lerp, not before — hence the split: these
+ * endpoint-form planes are what setT interpolates, and it converts each arc
+ * record back to centre form on the way into the live curve texture. Cheap
+ * (arcEndpointToCenter per arc per frame, ~1e3 arcs on a heavy asset) and exact.
+ * It does mean an arc-bearing morph can't ride the GPU mix (which would write
+ * endpoint form straight into the texture the shader reads as centre form), so
+ * `arcs.length > 0` pins it to the CPU lerp path.
+ *
+ * The planes handed in stay in CENTRE form — they're the bundle's t=0 state and
+ * the shader reads them directly.
+ *
+ * @returns {{segTables: Map, srcEp: Float32Array, dstEp: Float32Array,
+ *            arcs: Int32Array}} `arcs` lists the float offset of each arc's
+ *   HEADER texel; srcEp/dstEp are the endpoint-form twins of the two planes.
+ */
+function prepareArcMorph(src, plan, TEX_W, merged, dstRemapped) {
+  const tables = new Map();
+  const empty = { segTables: tables, srcEp: null, dstEp: null, arcs: EMPTY_I32 };
+  if (!plan.matched.length) return empty;
+  const srcBand = src.bandFloats || (src.bands ? new Float32Array(src.bands) : null);
+  if (!srcBand || !srcBand.length) return empty;
+  const stride = src.metaFloatsPerShape || 48;
+  const srcMeta = src.metaFloats;
+
+  const arcs = [];
+  for (const m of plan.matched) {
+    const base = m.srcIdx * stride;
+    const glyph = (srcMeta[base + META_TEXEL_4 + 1] | 0) * TEX_W
+                + (srcMeta[base + META_TEXEL_4] | 0);
+    const bandsX = (srcMeta[base + META_TEXEL_4 + 2] | 0) + 1;
+    const bandsY = (srcMeta[base + META_TEXEL_4 + 3] | 0) + 1;
+    const segs = collectShapeSegs(srcBand, TEX_W, glyph, bandsY, bandsX);
+    tables.set(m.srcIdx, segs);
+    for (const s of segs) {
+      if (s.segType !== SEG_ARC_T) continue;
+      // Both poses' records for this segment sit at the SAME float offset —
+      // dstRemapped is dst's plane re-laid into src's layout, which is the
+      // premise the whole lerp already rests on.
+      const off = 4 * (s.hy * TEX_W + s.hx);
+      if (arcRecordMorphable(merged, off) && arcRecordMorphable(dstRemapped, off)) arcs.push(off);
+    }
+  }
+  if (!arcs.length) return empty;
+
+  // The endpoint-form twins differ from the centre-form planes ONLY inside arc
+  // records, so start from a copy and rewrite just those.
+  const srcEp = merged.slice();
+  const dstEp = dstRemapped.slice();
+  for (const off of arcs) {
+    arcRecordToEndpoint(merged, srcEp, off);
+    arcRecordToEndpoint(dstRemapped, dstEp, off);
+    // phi is only defined modulo pi (an ellipse rotated by pi is itself, with
+    // theta shifted — and theta is gone in endpoint form), and pi/2 with the
+    // radii swapped. Two poses can sit on different branches, so pull dst onto
+    // the branch nearest src or the lerp rotates the ellipse the long way.
+    harmonizeEndpointArc(srcEp, dstEp, off);
+    holdArcFlags(srcEp, dstEp, off);
+  }
+  const arcSet = new Set(arcs);
+  for (const [, segs] of tables) {
+    weldArcJoints(srcEp, segs, TEX_W, arcSet);
+    weldArcJoints(dstEp, segs, TEX_W, arcSet);
+  }
+  return { segTables: tables, srcEp, dstEp, arcs: Int32Array.from(arcs) };
+}
+
+/**
+ * Snap each arc's endpoints onto the exact point its neighbour already holds.
+ *
+ * An arc record stores no endpoints — arcRecordToEndpoint has to DERIVE them from
+ * the centre form, `c + R(phi)·(rx cos th, ry sin th)`. Two consecutive arcs of the
+ * same ellipse therefore recover their shared corner independently, through
+ * different trig, and land on points that agree only to within the conditioning of
+ * the centre-form round trip. Measured on real art: up to 2e-4 em.
+ *
+ * Both poses carry that error, and a lerp preserves it, so it is not a morph
+ * artifact — but it makes the contour ever so slightly OPEN. The GL walker never
+ * notices (it accumulates winding; a 2e-4 gap is far under a pixel). The native
+ * backend re-emits the shape as an SVG <path> and infers subpaths from pen
+ * continuity, with a 1e-4 tolerance — so it reads the gap as a subpath break,
+ * closes the contour early with a chord, and the fill loses a wedge. A circle
+ * comes out as a hollow ring.
+ *
+ * So weld: at each joint take ONE canonical point and write it into both sides.
+ * A non-arc neighbour's endpoint is a stored float and therefore exact — prefer it,
+ * and only average when both sides are arcs. Non-arc records are never written, so
+ * this cannot move real geometry. Applied to each pose independently by the same
+ * rule, which is what keeps the two planes structurally identical and the weld
+ * intact for every t.
+ */
+function weldArcJoints(buf, segs, TEX_W, arcSet) {
+  const n = segs.length;
+  if (n < 2) return;
+  const TOL = 1e-2;   // far under any real vertex spacing, far over the round-trip error
+  const off = new Array(n), isArc = new Array(n);
+  for (let i = 0; i < n; i++) {
+    off[i] = 4 * (segs[i].hy * TEX_W + segs[i].hx);
+    isArc[i] = (segs[i].segType & 3) === SEG_ARC_T && arcSet.has(off[i]);
+  }
+  const endSlot = (i) => {
+    const t = segs[i].segType & 3;
+    if (isArc[i] || t === 0 /* LINE */) return off[i] + 6;   // endpoint-form arc: p4 at +6
+    if (t === 1 /* QUAD */) return off[i] + 8;
+    return off[i] + 10;                                      // CUBIC
+  };
+  const startSlot = (i) => off[i] + 4;
+  // Consecutive in path order, plus the wrap that closes the last subpath.
+  for (let k = 0; k < n; k++) {
+    const i = k, j = (k + 1) % n;
+    if (!isArc[i] && !isArc[j]) continue;      // both stored exactly — already agree
+    const ei = endSlot(i), sj = startSlot(j);
+    const dx = buf[ei] - buf[sj], dy = buf[ei + 1] - buf[sj + 1];
+    if (Math.abs(dx) > TOL || Math.abs(dy) > TOL) continue;   // a genuine subpath break
+    let cx, cy;
+    if (!isArc[i])      { cx = buf[ei];     cy = buf[ei + 1]; }        // exact side wins
+    else if (!isArc[j]) { cx = buf[sj];     cy = buf[sj + 1]; }
+    else                { cx = (buf[ei] + buf[sj]) * 0.5;
+                          cy = (buf[ei + 1] + buf[sj + 1]) * 0.5; }
+    if (isArc[i]) { buf[ei] = cx; buf[ei + 1] = cy; }
+    if (isArc[j]) { buf[sj] = cx; buf[sj + 1] = cy; }
+  }
+}
+
+const SEG_ARC_T = 3;
+const EMPTY_I32 = new Int32Array(0);
+
+/**
+ * Adjacency table for rebuilding the JOIN TEXEL of every STROKED segment each
+ * frame. Rows are flat triples (selfOff, prevOff, nextOff) in curve-float units;
+ * -1 means "free end" (no neighbour).
+ *
+ * Why this can't ride the blind lerp: the join texel holds
+ * (prev.endTangent, next.startTangent) as UNIT vectors, and the stroke shader
+ * builds its joins and miters off them. Interpolating two unit vectors gives a
+ * vector that is neither unit nor tangent to the lerped curve — it shortens
+ * toward zero as the two poses' tangents diverge, and at a half turn it vanishes
+ * outright. The stroke geometry then divides by it: joins fly off as spurious
+ * discs and spokes, which is what a morphing outline looked like.
+ *
+ * The geometry is lerped, so its tangents must be RECOMPUTED from it, not
+ * interpolated. The ADJACENCY, on the other hand, is topology — and endpoint-form
+ * arcs keep every joint welded for all t (prepareArcMorph), so who-meets-whom
+ * cannot change mid-morph. Resolve it once here; per frame, only the trig.
+ */
+function buildJoinTable(src, plan, TEX_W, srcEp, segTables, arcSet) {
+  const EP = 1e-5;
+  const rows = [];
+  for (const m of plan.matched) {
+    const segs = segTables.get(m.srcIdx);
+    if (!segs || segs.length < 1) continue;
+    const n = segs.length;
+    const offs = new Array(n), isArc = new Array(n);
+    for (let i = 0; i < n; i++) {
+      offs[i] = 4 * (segs[i].hy * TEX_W + segs[i].hx);
+      isArc[i] = (segs[i].segType & 3) === SEG_ARC_T && arcSet.has(offs[i]);
+    }
+    // Fill-only shapes carry a zeroed join texel that nothing reads — skip them
+    // rather than write tangents no walker will look at. (The join texel trails
+    // the DATA texels, and a LINE has one where every other type has two, so its
+    // join sits 4 floats earlier. Reading the wrong slot here would misread the
+    // NEXT record's header as a tangent.)
+    let stroked = false;
+    for (let i = 0; i < n; i++) {
+      const j = joinSlot(offs[i], segs[i].segType);
+      if (srcEp[j] !== 0 || srcEp[j + 1] !== 0 || srcEp[j + 2] !== 0 || srcEp[j + 3] !== 0) { stroked = true; break; }
+    }
+    if (!stroked) continue;
+    // Endpoints, read from the ENDPOINT-form plane — the one place they are exact.
+    // Centre form has no stored endpoints, so they'd have to be re-derived through
+    // trig, and in float32 two arcs sharing a corner recover it up to ~2e-4 apart
+    // (see weldArcJoints, which is precisely why srcEp's are welded). Match those
+    // against a 1e-5 tolerance and every arc-to-arc joint fails to pair: prev/next
+    // come back -1, the tangents get written as ZERO, and the shader reads zero as
+    // a FREE end — so it caps the stroke instead of joining it. Outlines come out
+    // square-cornered.
+    const sp = new Array(n), ep = new Array(n);
+    for (let i = 0; i < n; i++) {
+      sp[i] = segEndpointFromRecord(srcEp, offs[i], segs[i].segType, true, isArc[i]);
+      ep[i] = segEndpointFromRecord(srcEp, offs[i], segs[i].segType, false, isArc[i]);
+    }
+    // Same neighbour rule as the importer (textures.js): prev is whoever ENDS at
+    // my start, next is whoever STARTS at my end; a segment that closes on itself
+    // is its own neighbour, so a lone full ellipse joins at its seam.
+    for (let i = 0; i < n; i++) {
+      let prev = -1, next = -1;
+      for (let j = 0; j < n; j++) {
+        if (j === i) continue;
+        if (Math.abs(ep[j][0] - sp[i][0]) < EP && Math.abs(ep[j][1] - sp[i][1]) < EP) prev = j;
+        if (Math.abs(sp[j][0] - ep[i][0]) < EP && Math.abs(sp[j][1] - ep[i][1]) < EP) next = j;
+      }
+      if (prev < 0 && next < 0
+          && Math.abs(sp[i][0] - ep[i][0]) < EP && Math.abs(sp[i][1] - ep[i][1]) < EP) {
+        prev = i; next = i;
+      }
+      rows.push(joinSlot(offs[i], segs[i].segType), segs[i].segType,
+                prev < 0 ? -1 : offs[prev], prev < 0 ? -1 : segs[prev].segType,
+                next < 0 ? -1 : offs[next], next < 0 ? -1 : segs[next].segType);
+    }
+  }
+  return rows.length ? Int32Array.from(rows) : EMPTY_I32;
+}
+
+/** Float offset of a record's JOIN texel. It trails the data texels, and a LINE
+ *  carries ONE where quad/cubic/arc carry two. */
+function joinSlot(off, segType) {
+  return off + ((segType & 3) === 0 ? 8 : 12);
+}
+
+/** Recompute every stroked segment's join texel from the CURRENT (lerped, and
+ *  for arcs already centre-form) geometry. Runs after arcRecordToCenter. */
+export function rebuildJoinTangents(buf, table) {
+  for (let i = 0; i < table.length; i += 6) {
+    const j = table[i];                       // the join texel's float slot
+    const pOff = table[i + 2], pType = table[i + 3];
+    const nOff = table[i + 4], nType = table[i + 5];
+    if (pOff >= 0) segTangentFromRecord(buf, pOff, pType, false, buf, j);
+    else { buf[j] = 0; buf[j + 1] = 0; }
+    if (nOff >= 0) segTangentFromRecord(buf, nOff, nType, true, buf, j + 2);
+    else { buf[j + 2] = 0; buf[j + 3] = 0; }
+  }
+}
+
+/** A segment record's start or end point. Mirrors segStart/segEnd. `epArc` says
+ *  the record is an ENDPOINT-form arc (p1 at +4, p4 at +6) rather than centre form. */
+function segEndpointFromRecord(buf, off, segType, atStart, epArc) {
+  const t = segType & 3;
+  if (t === SEG_ARC_T && !epArc) {
+    const cx = buf[off + 4], cy = buf[off + 5], rx = buf[off + 6], ry = buf[off + 7];
+    const th = atStart ? buf[off + 8] : buf[off + 9], phi = buf[off + 10];
+    const cp = Math.cos(phi), sp = Math.sin(phi), ct = Math.cos(th), st = Math.sin(th);
+    return [cx + rx * cp * ct - ry * sp * st, cy + rx * sp * ct + ry * cp * st];
+  }
+  if (atStart) return [buf[off + 4], buf[off + 5]];
+  // An endpoint-form arc keeps p4 where a LINE keeps p2.
+  if (t === 0 /* LINE */ || (t === SEG_ARC_T && epArc)) return [buf[off + 6], buf[off + 7]];
+  if (t === 1 /* QUAD */) return [buf[off + 8], buf[off + 9]];
+  return [buf[off + 10], buf[off + 11]];   // CUBIC
+}
+
+/** Unit tangent of a segment record at its start or end, written to out[o..o+1].
+ *  Same derivative conventions (and degenerate fallbacks) as textures.js's
+ *  segTangentAt — the numbers have to agree with what the importer would emit. */
+function segTangentFromRecord(buf, off, segType, atStart, out, o) {
+  const t = segType & 3;
+  let dx, dy;
+  if (t === 0) {                                   // LINE
+    dx = buf[off + 6] - buf[off + 4];
+    dy = buf[off + 7] - buf[off + 5];
+  } else if (t === 1) {                            // QUAD
+    const p1x = buf[off + 4], p1y = buf[off + 5];
+    const p2x = buf[off + 6], p2y = buf[off + 7];
+    const p3x = buf[off + 8], p3y = buf[off + 9];
+    const u = atStart ? 0 : 1, mu = 1 - u;
+    dx = 2 * mu * (p2x - p1x) + 2 * u * (p3x - p2x);
+    dy = 2 * mu * (p2y - p1y) + 2 * u * (p3y - p2y);
+    if (Math.hypot(dx, dy) < 1e-9) { dx = p3x - p1x; dy = p3y - p1y; }
+  } else if (t === 2) {                            // CUBIC
+    const p1x = buf[off + 4],  p1y = buf[off + 5];
+    const p2x = buf[off + 6],  p2y = buf[off + 7];
+    const p3x = buf[off + 8],  p3y = buf[off + 9];
+    const p4x = buf[off + 10], p4y = buf[off + 11];
+    const u = atStart ? 0 : 1, mu = 1 - u;
+    dx = 3*mu*mu*(p2x-p1x) + 6*mu*u*(p3x-p2x) + 3*u*u*(p4x-p3x);
+    dy = 3*mu*mu*(p2y-p1y) + 6*mu*u*(p3y-p2y) + 3*u*u*(p4y-p3y);
+    if (Math.hypot(dx, dy) < 1e-9) {
+      dx = p3x - p2x; dy = p3y - p2y;
+      if (Math.hypot(dx, dy) < 1e-9) { dx = p4x - p1x; dy = p4y - p1y; }
+    }
+  } else {                                         // ARC (centre form)
+    const rx = buf[off + 6], ry = buf[off + 7];
+    const th0 = buf[off + 8], th1 = buf[off + 9], phi = buf[off + 10];
+    const th = atStart ? th0 : th1, dth = th1 - th0;
+    const cp = Math.cos(phi), sp = Math.sin(phi);
+    const ct = Math.cos(th), st = Math.sin(th);
+    dx = (-cp * rx * st - sp * ry * ct) * dth;
+    dy = (-sp * rx * st + cp * ry * ct) * dth;
+  }
+  const mag = Math.hypot(dx, dy);
+  if (mag < 1e-12) { out[o] = 0; out[o + 1] = 0; return; }
+  out[o] = dx / mag; out[o + 1] = dy / mag;
+}
+
+/** An arc participates in the endpoint-form lerp only if endpoint form can
+ *  actually denote it: a non-empty sweep, short of the full turn at which p1 == p4
+ *  stops picking out an ellipse (import caps records at a half turn, so this is a
+ *  backstop). A ZERO radius is ALLOWED — a flat ellipse (or a point) is exactly how
+ *  a morph "appears from flat", and endpoint form denotes it fine: the radius is
+ *  just a number that lerps 0 → R. arcRecordToEndpoint recovers its endpoints by
+ *  forward evaluation (no radius division) and arcCentre guards the ry == 0 frame.
+ *  Otherwise it keeps centre form and rides the blind lerp — no worse than before. */
+function arcRecordMorphable(buf, off) {
+  const rx = buf[off + 6], ry = buf[off + 7];
+  const dth = buf[off + 9] - buf[off + 8];
+  return Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(dth) && dth !== 0
+    && Math.abs(dth) < 2 * Math.PI - 1e-6;
+}
+
+/**
+ * Write the endpoint form of the arc at float `off` in `centre` into `out`.
+ *
+ * Record layout (floats, from the header texel):
+ *   [0..3]   header (segType, freeStart, freeEnd, startDist)  — copied as-is
+ *   [4..7]   CENTRE (cx, cy, rx, ry)        ENDPOINT (p1x, p1y, p4x, p4y)
+ *   [8..11]  CENTRE (thetaS, thetaE, phi,_) ENDPOINT (rx, ry, phi, flags)
+ *   [12..15] join tangents — left alone; the geometry is unchanged, so the
+ *            endpoint tangents it holds are still the right ones.
+ * `flags` packs large_arc | sweep<<1 — structural, identical in both poses (they
+ * describe the same arc traversed the same way), so lerping it is a no-op.
+ */
+function arcRecordToEndpoint(centre, out, off) {
+  const cx = centre[off + 4], cy = centre[off + 5];
+  const rx = centre[off + 6], ry = centre[off + 7];
+  const th0 = centre[off + 8], th1 = centre[off + 9], phi = centre[off + 10];
+  const dth = th1 - th0;
+  const cp = Math.cos(phi), sp = Math.sin(phi);
+  const at = (th) => {
+    const c = Math.cos(th), s = Math.sin(th);
+    return [cx + rx * cp * c - ry * sp * s, cy + rx * sp * c + ry * cp * s];
+  };
+  const p1 = at(th0), p4 = at(th1);
+  const large = Math.abs(dth) > Math.PI ? 1 : 0;
+  const sweep = dth > 0 ? 1 : 0;
+  out[off + 4] = p1[0]; out[off + 5] = p1[1];
+  out[off + 6] = p4[0]; out[off + 7] = p4[1];
+  out[off + 8] = rx;    out[off + 9] = ry;
+  out[off + 10] = phi;  out[off + 11] = large | (sweep << 1);
+}
+
+/**
+ * Force both poses onto ONE (large, sweep) pair. The flags are STRUCTURAL — they
+ * pick which of the four arcs through p1 and p4 on this ellipse is meant — and
+ * they cannot ride the componentwise lerp with everything else.
+ *
+ * They are also the one field that genuinely differs between poses in practice.
+ * A projected cylinder cap sweeps through edge-on as the solid turns, and the
+ * visible arc reverses its bulge on the way out: sweep flips. Lerp the packed
+ * flag float across that and it lands BETWEEN — `int()` then yields a
+ * combination NEITHER pose ever had (typically large=1 on a small arc), and
+ * arcEndpointToCenter dutifully selects the enormous complementary arc. The shape
+ * detonates. Every blow-up of this kind traces back to exactly that.
+ *
+ * There is no continuous arc path between the two spellings — flipping sweep
+ * mirrors the arc across its chord — EXCEPT through the degenerate pose where the
+ * ellipse is flat (a radius goes to zero) and both spellings collapse onto the
+ * chord. That is precisely where the flip happens, and an exporter that cuts a
+ * keyframe there leaves one side of the bracket holding a flat, direction-agnostic
+ * arc whose flags mean nothing.
+ *
+ * So: keep the flags of the pose that is LESS degenerate, and give them to the
+ * other. On the flat pose the arc is a line either way, so the substitution costs
+ * nothing; on the healthy pose the arc stays exactly as authored. If neither is
+ * degenerate the poses genuinely disagree — hold one anyway, since a slightly
+ * wrong bulge beats a shape that explodes.
+ */
+function holdArcFlags(srcEp, dstEp, off) {
+  const sF = srcEp[off + 11], dF = dstEp[off + 11];
+  if (sF === dF) return;
+  const sMin = Math.min(Math.abs(srcEp[off + 8]), Math.abs(srcEp[off + 9]));
+  const dMin = Math.min(Math.abs(dstEp[off + 8]), Math.abs(dstEp[off + 9]));
+  const f = sMin >= dMin ? sF : dF;      // the fatter ellipse's spelling wins
+  srcEp[off + 11] = f;
+  dstEp[off + 11] = f;
+}
+
+/** Pull dst's (rx, ry, phi) onto the branch nearest src's. The ellipse is
+ *  invariant under phi += pi, and under phi += pi/2 with the radii swapped, so
+ *  the same arc has many spellings; lerping between two different ones spins it.
+ *  Endpoint form has no theta to correct, so this is just the ellipse's own
+ *  symmetry group — pick the spelling that travels least. */
+function harmonizeEndpointArc(srcEp, dstEp, off) {
+  const sRx = srcEp[off + 8], sRy = srcEp[off + 9], sPhi = srcEp[off + 10];
+  const rx = dstEp[off + 8], ry = dstEp[off + 9], phi = dstEp[off + 10];
+  let best = null;
+  for (const swap of [0, 1]) {
+    const dRx = swap ? ry : rx, dRy = swap ? rx : ry;
+    // phi is defined mod pi; the swapped spelling shifts it a quarter turn.
+    let p = phi + (swap ? Math.PI / 2 : 0);
+    p -= Math.PI * Math.round((p - sPhi) / Math.PI);
+    const cost = Math.abs(p - sPhi) * (Math.abs(sRx) + Math.abs(sRy))
+               + Math.abs(dRx - sRx) + Math.abs(dRy - sRy);
+    if (!best || cost < best.cost) best = { cost, rx: dRx, ry: dRy, phi: p };
+  }
+  dstEp[off + 8] = best.rx; dstEp[off + 9] = best.ry; dstEp[off + 10] = best.phi;
+}
+
+/**
+ * The inverse, applied per frame by setT: read the LERPED endpoint-form record
+ * at `off` and write the centre-form record the shader reads. Exact — this is
+ * SVG's own endpoint→centre conversion (F.6.5), radii-correction and all.
+ */
+export function arcRecordToCenter(buf, off) {
+  const p1x = buf[off + 4], p1y = buf[off + 5];
+  const p4x = buf[off + 6], p4y = buf[off + 7];
+  let rx = Math.abs(buf[off + 8]), ry = Math.abs(buf[off + 9]);
+  const phi = buf[off + 10];
+  // Round, don't truncate: the flags are held constant across the lerp
+  // (holdArcFlags), so this only has to survive float32 round-off — but a bit
+  // that drifts a hair low would silently select a different arc.
+  const flags = Math.round(buf[off + 11]) | 0;
+  const large = flags & 1, sweep = (flags >> 1) & 1;
+
+  const cp = Math.cos(phi), sp = Math.sin(phi);
+  const mx = (p1x - p4x) * 0.5, my = (p1y - p4y) * 0.5;
+  const x1p =  cp * mx + sp * my;
+  const y1p = -sp * mx + cp * my;
+  if (rx === 0 || ry === 0) {
+    const dx = p4x - p1x, dy = p4y - p1y;
+    const chord = Math.hypot(dx, dy);
+    let cx = p1x, cy = p1y, outPhi = phi, th0 = 0;
+    if (chord > 0) {
+      cx = (p1x + p4x) * 0.5; cy = (p1y + p4y) * 0.5;
+      const angle = Math.atan2(dy, dx), r = chord * 0.5;
+      if (ry === 0) { rx = r; ry = 0; outPhi = angle; th0 = Math.PI; }
+      else { rx = 0; ry = r; outPhi = angle - Math.PI * 0.5; th0 = -Math.PI * 0.5; }
+    } else { rx = 0; ry = 0; }
+    const dth = sweep ? Math.PI : -Math.PI;
+    buf[off + 4] = cx; buf[off + 5] = cy;
+    buf[off + 6] = rx; buf[off + 7] = ry;
+    buf[off + 8] = th0; buf[off + 9] = th0 + dth;
+    buf[off + 10] = outPhi; buf[off + 11] = 0;
+    return;
+  }
+  // SVG F.6.6: scale the radii up if they can't span the chord. Mid-lerp the
+  // endpoints move independently of the radii, so this genuinely fires — and it
+  // is exactly the right answer when it does.
+  const lam = (x1p / rx) ** 2 + (y1p / ry) ** 2;
+  if (lam > 1) { const s = Math.sqrt(lam); rx *= s; ry *= s; }
+  const num = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p;
+  const den = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
+  let sq = den > 0 ? Math.sqrt(Math.max(num / den, 0)) : 0;
+  if (large === sweep) sq = -sq;
+  const cxp =  sq * rx * y1p / ry;
+  const cyp = -sq * ry * x1p / rx;
+  const cx = cp * cxp - sp * cyp + (p1x + p4x) * 0.5;
+  const cy = sp * cxp + cp * cyp + (p1y + p4y) * 0.5;
+  const ang = (ux, uy, vx, vy) => {
+    const n = Math.hypot(ux, uy) * Math.hypot(vx, vy);
+    if (n === 0) return 0;
+    const c = Math.max(-1, Math.min(1, (ux * vx + uy * vy) / n));
+    return (ux * vy - uy * vx < 0) ? -Math.acos(c) : Math.acos(c);
+  };
+  const ux = (x1p - cxp) / rx, uy = (y1p - cyp) / ry;
+  const vx = (-x1p - cxp) / rx, vy = (-y1p - cyp) / ry;
+  const th0 = ang(1, 0, ux, uy);
+  let dth = ang(ux, uy, vx, vy);
+  if (!sweep && dth > 0) dth -= 2 * Math.PI;
+  if (sweep && dth < 0) dth += 2 * Math.PI;
+
+  buf[off + 4] = cx;  buf[off + 5] = cy;
+  buf[off + 6] = rx;  buf[off + 7] = ry;
+  buf[off + 8] = th0; buf[off + 9] = th0 + dth;
+  buf[off + 10] = phi; buf[off + 11] = 0;
+}
+
+function concatBandPlanes(src, dst, plan, TEX_W, arcPrep, merged, dstRemapped) {
   // Each matched-shape band-membership needs to cover BOTH src's and
   // dst's segment positions across the lerp range [0, 1]: bands are
   // computed from per-segment bboxes, and curves lerp from src→dst
@@ -769,9 +1299,12 @@ function concatBandPlanes(src, dst, plan, TEX_W) {
   const stride = src.metaFloatsPerShape || 48;
   const srcMeta = src.metaFloats;
   const dstMeta = dst.metaFloats;
-  const srcCurveF32 = src.curveFloats || (src.curves ? new Float32Array(src.curves) : null);
-  const dstCurveF32 = dst.curveFloats || (dst.curves ? new Float32Array(dst.curves) : null);
-  if (!srcCurveF32 || !dstCurveF32) {
+  // Read BOTH poses out of the composed planes, not the original bundles: the
+  // arc→cubic rewrite (cubicizeMatchedArcs) landed there, so the bundles' own
+  // curve data — and the segment types recorded in their bands — are stale for
+  // any matched shape. `dstRemapped` already carries dst's curves at src's
+  // offsets, which is also why one segment table indexes both.
+  if (!merged || !dstRemapped) {
     // No curve buffer to decode — fall back to forwarding src verbatim
     // (will still fragment at t>0).
     return {
@@ -780,47 +1313,65 @@ function concatBandPlanes(src, dst, plan, TEX_W) {
       matchedRewrites: [],
     };
   }
+  const segTables = arcPrep && arcPrep.segTables;
+  // Arcs the morph carries in ENDPOINT form (prepareArcMorph). Their bounds must
+  // be read from the endpoint planes, with the endpoint rule — the centre-form
+  // planes hold no lerpable centre for these.
+  const epArcs = new Set(arcPrep && arcPrep.arcs ? arcPrep.arcs : []);
+  const srcEp = (arcPrep && arcPrep.srcEp) || merged;
+  const dstEp = (arcPrep && arcPrep.dstEp) || dstRemapped;
+
   const matchedRewrites = [];
   for (const m of plan.matched) {
-    const sBase = m.srcIdx * stride;
     const dBase = m.dstIdx * stride;
-    const sGx = srcMeta[sBase + META_TEXEL_4] | 0;
-    const sGy = srcMeta[sBase + META_TEXEL_4 + 1] | 0;
-    const sBandsX = (srcMeta[sBase + META_TEXEL_4 + 2] | 0) + 1;
-    const sBandsY = (srcMeta[sBase + META_TEXEL_4 + 3] | 0) + 1;
-    const sGlyph = sGy * TEX_W + sGx;
     const dGx = dstMeta[dBase + META_TEXEL_4] | 0;
     const dGy = dstMeta[dBase + META_TEXEL_4 + 1] | 0;
     const dBandsX = (dstMeta[dBase + META_TEXEL_4 + 2] | 0) + 1;
     const dBandsY = (dstMeta[dBase + META_TEXEL_4 + 3] | 0) + 1;
     const dGlyph = dGy * TEX_W + dGx;
-    // Collect unique segments from src's H bands. Each entry stores
-    // its src curve-buffer header position (which the morph addresses
-    // since the merged curve buffer = src's at t=0 baseline) and the
-    // segment-index within the shape (used to find the matching dst
-    // segment for the union breakAxis).
-    const srcSegs = collectShapeSegs(srcBand, TEX_W, sGlyph, sBandsY, sBandsX);
+    const srcSegs = segTables && segTables.get(m.srcIdx);
+    if (!srcSegs) continue;
     const dstSegs = collectShapeSegs(dst.bandFloats || new Float32Array(dst.bands), TEX_W, dGlyph, dBandsY, dBandsX);
     // Matched-topology invariant: srcSegs.length === dstSegs.length.
-    // Pair by index. (Both bundles emit segments in path order.)
+    // (Both bundles emit segments in path order, which is what lets dst's
+    // curves sit at src's offsets in the first place.)
     if (srcSegs.length !== dstSegs.length) {
       // Segment counts diverge — can't pair by index; skip the union
       // rewrite and fall through to src-only bands for this shape.
       continue;
     }
-    // For each segment k: read control-polygon bbox from src AND dst
-    // curve plane, union them, store per-axis maxes for descending sort.
+    // STROKE PAD. The importer widens each segment's break value by the stroke's
+    // reach (textures.js bakes strokePadEm into breakAxis) precisely because a
+    // segment's INK extends past its control bbox — by half the stroke width for
+    // a cap or round join, and by the miter limit for a mitered one. The shader's
+    // early-out trusts the break value: a pixel out in the cap wedge, past the
+    // seg's control maxX, would otherwise see the walk stop short and the segment
+    // skipped. The importer's own note calls it "a notch at one corner of the cap";
+    // over a whole outline it reads as round caps and joins turning SQUARE and the
+    // halo thinning out. Rebuild the bands without it and every stroked morph loses
+    // its corners — which is what happened here.
+    const sSw = srcMeta[m.srcIdx * stride + 12];
+    const dSw = dstMeta[m.dstIdx * stride + 12];
+    const halfW = Math.max(Math.abs(sSw), Math.abs(dSw)) * 0.5;
+    const joinStyle = srcMeta[m.srcIdx * stride + 25] | 0;   // MT_CAP_JOIN.y
+    const miterLim = srcMeta[m.srcIdx * stride + 26];        // MT_CAP_JOIN.z
+    const pad = (joinStyle === 0 /* JOIN_MITER */ || joinStyle === 4 /* JOIN_ARCS */)
+      ? halfW * Math.max(1, miterLim || 4)
+      : halfW;
+
+    // For each segment: read the control-polygon bbox from BOTH poses at the
+    // same offset, union them, and store the per-axis maxes for the descending
+    // sort the shader's early-out relies on.
     const segs = [];
-    for (let k = 0; k < srcSegs.length; k++) {
-      const s = srcSegs[k];
-      const d = dstSegs[k];
-      const sBbox = readSegBbox(srcCurveF32, TEX_W, s.hx, s.hy, s.segType);
-      const dBbox = readSegBbox(dstCurveF32, TEX_W, d.hx, d.hy, d.segType);
+    for (const s of srcSegs) {
+      const ep = epArcs.has(4 * (s.hy * TEX_W + s.hx));
+      const sBbox = readSegBbox(ep ? srcEp : merged,      TEX_W, s.hx, s.hy, s.segType, ep);
+      const dBbox = readSegBbox(ep ? dstEp : dstRemapped, TEX_W, s.hx, s.hy, s.segType, ep);
       segs.push({
         hx: s.hx, hy: s.hy, segType: s.segType,
-        // Union per-axis extents over [src, dst] poses.
-        maxX: Math.max(sBbox.maxX, dBbox.maxX),
-        maxY: Math.max(sBbox.maxY, dBbox.maxY),
+        // Union per-axis extents over [src, dst] poses, then the stroke's reach.
+        maxX: Math.max(sBbox.maxX, dBbox.maxX) + pad,
+        maxY: Math.max(sBbox.maxY, dBbox.maxY) + pad,
       });
     }
     matchedRewrites.push({ srcIdx: m.srcIdx, segs });
@@ -828,16 +1379,16 @@ function concatBandPlanes(src, dst, plan, TEX_W) {
   // Layout per matched shape:
   //   2 H-band header texels   (counts, arrIdx)
   //   2 V-band header texels   (counts, arrIdx)
-  //   N segment-list entries for the H band (sorted descending by maxX)
-  //   N segment-list entries for the V band (sorted descending by maxY)
+  //   ceil(N/2) texels of H-band entries (2 per texel, sorted descending by maxX)
+  //   ceil(N/2) texels of V-band entries (2 per texel, sorted descending by maxY)
   // H and V arrays are separate because they sort by different axes;
   // sharing one array would break the descending-sort invariant the
   // shader's early-out relies on.
   let appendTexels = 0;
   const layouts = matchedRewrites.map(r => {
     const headers = 4;
-    const hArr = r.segs.length;
-    const vArr = r.segs.length;
+    const hArr = Math.ceil(r.segs.length / 2);
+    const vArr = Math.ceil(r.segs.length / 2);
     const layout = { ...r, headers, hArr, vArr, glyphLocIdx: 0 };
     appendTexels += headers + hArr + vArr;
     return layout;
@@ -873,18 +1424,19 @@ function concatBandPlanes(src, dst, plan, TEX_W) {
     // V band header at slot 1 (bandsY == 1).
     texelWrite(out, TEX_W, headerBase + 2, counts[0], counts[1], counts[2], counts[3]);
     texelWrite(out, TEX_W, headerBase + 3, layout.headers + layout.hArr,        0, 0, 0);
-    // H array: descending maxX.
-    const hSegs = sortByMaxThenType(layout.segs, 'x');
-    for (let i = 0; i < hSegs.length; i++) {
-      const s = hSegs[i];
-      texelWrite(out, TEX_W, hArrBase + i, s.hx, s.hy, s.maxX, s.segType);
-    }
-    // V array: descending maxY.
-    const vSegs = sortByMaxThenType(layout.segs, 'y');
-    for (let i = 0; i < vSegs.length; i++) {
-      const s = vSegs[i];
-      texelWrite(out, TEX_W, vArrBase + i, s.hx, s.hy, s.maxY, s.segType);
-    }
+    // Packed entry pairs: (loc0, brk0, loc1, brk1), loc = hy*4096 + hx; an odd tail pads
+    // with a sentinel break so a stray walk stops immediately. Type is positional (the
+    // sort groups line -> quad -> cubic -> arc, matching the header counts).
+    const packPairs = (sorted, key, base) => {
+      for (let i = 0; i < sorted.length; i += 2) {
+        const s = sorted[i], t = sorted[i + 1];
+        texelWrite(out, TEX_W, base + (i >> 1),
+                   s.hy * TEX_W + s.hx, s[key],
+                   t ? t.hy * TEX_W + t.hx : 0, t ? t[key] : -1e30);
+      }
+    };
+    packPairs(sortByMaxThenType(layout.segs, 'x'), 'maxX', hArrBase);   // descending maxX
+    packPairs(sortByMaxThenType(layout.segs, 'y'), 'maxY', vArrBase);   // descending maxY
     cursor = vArrBase + layout.vArr;
   }
   // Return both the buffer and the layouts so composeMorphSections
@@ -931,15 +1483,22 @@ function collectShapeSegs(bandFloats, TEX_W, glyphLocIdx, bandsY, bandsX) {
   const visitBand = (hdrSlot) => {
     const ht = bandTexelAt(bandFloats, TEX_W, glyphLocIdx + hdrSlot);
     const ot = bandTexelAt(bandFloats, TEX_W, glyphLocIdx + hdrSlot + 1);
-    const nTotal = (ht[0] | 0) + (ht[1] | 0) + (ht[2] | 0) + (ht[3] | 0);
+    const counts = [ht[0] | 0, ht[1] | 0, ht[2] | 0, ht[3] | 0];
+    const nTotal = counts[0] + counts[1] + counts[2] + counts[3];
     const arrIdx = ot[0] | 0;
     for (let i = 0; i < nTotal; i++) {
-      const e = bandTexelAt(bandFloats, TEX_W, glyphLocIdx + arrIdx + i);
-      const hx = e[0] | 0, hy = e[1] | 0;
+      // packed entries: 2 per texel, (loc0, brk0, loc1, brk1); loc = hy*4096 + hx
+      const t = bandTexelAt(bandFloats, TEX_W, glyphLocIdx + arrIdx + (i >> 1));
+      const loc = t[(i & 1) << 1] | 0;
+      const hx = loc & 4095, hy = loc >> 12;
       const key = hx + ',' + hy;
       if (seen.has(key)) continue;
       seen.add(key);
-      segs.push({ hx, hy, segType: (e[3] | 0) & 3 });
+      // segType is positional: the lists are type-grouped, so entry i's type is the
+      // count bucket it falls into (line -> quad -> cubic -> arc)
+      let segType = 0, acc = counts[0];
+      while (i >= acc && segType < 3) { segType++; acc += counts[segType]; }
+      segs.push({ hx, hy, segType });
     }
   };
   // H bands at slots [0 .. bandsY * 2).
@@ -960,7 +1519,13 @@ function collectShapeSegs(bandFloats, TEX_W, glyphLocIdx, bandsY, bandsX) {
 ///     ARC   → 2 texels: (cx, cy, rx, ry), (theta_s, theta_e, phi, 0)
 /// Returns control-polygon bbox (looser than curve-tight) — matches
 /// the importer's band-membership test in textures.js.
-function readSegBbox(curveFloats, TEX_W, hx, hy, segType) {
+///
+/// `epArc` selects how an ARC's two data texels are read. A morph's planes hold
+/// arcs in ENDPOINT form — (p1, p4), (rx, ry, phi, flags) — because that is the
+/// only exact form a componentwise lerp can carry (see prepareArcMorph); every
+/// other caller hands us CENTRE form. The two need different bounds, and reading
+/// one as the other yields silent nonsense, so the caller must say which it has.
+function readSegBbox(curveFloats, TEX_W, hx, hy, segType, epArc = false) {
   const baseTex = hy * TEX_W + hx;
   function ctrl(texOffset, slot) {
     const t = baseTex + texOffset;
@@ -969,6 +1534,17 @@ function readSegBbox(curveFloats, TEX_W, hx, hy, segType) {
   }
   // Collect control points by type.
   const xs = [], ys = [];
+  if (segType === 3 && !epArc) {  // ARC, CENTRE form — a static (unlerped) shape.
+    // Full-ellipse extent: exact in phi and conservative in theta. Rotation
+    // contributes both radii to each axis; understating it can drop crossings.
+    const cx = ctrl(1, 0), cy = ctrl(1, 1);
+    const rx = Math.abs(ctrl(1, 2)), ry = Math.abs(ctrl(1, 3));
+    const phi = ctrl(2, 2);
+    const cp = Math.cos(phi), sp = Math.sin(phi);
+    const wx = Math.hypot(rx * cp, ry * sp);
+    const wy = Math.hypot(rx * sp, ry * cp);
+    return { minX: cx - wx, maxX: cx + wx, minY: cy - wy, maxY: cy + wy };
+  }
   if (segType === 0) {            // LINE
     xs.push(ctrl(1, 0), ctrl(1, 2));
     ys.push(ctrl(1, 1), ctrl(1, 3));
@@ -978,12 +1554,37 @@ function readSegBbox(curveFloats, TEX_W, hx, hy, segType) {
   } else if (segType === 2) {     // CUBIC
     xs.push(ctrl(1, 0), ctrl(1, 2), ctrl(2, 0), ctrl(2, 2));
     ys.push(ctrl(1, 1), ctrl(1, 3), ctrl(2, 1), ctrl(2, 3));
-  } else {                        // ARC: bbox is centre ± radii (loose;
-                                  //      true arc-bbox would need θ-extrema)
-    const cx = ctrl(1, 0), cy = ctrl(1, 1);
-    const rx = ctrl(1, 2), ry = ctrl(1, 3);
-    xs.push(cx - rx, cx + rx);
-    ys.push(cy - ry, cy + ry);
+  } else {                        // ARC, ENDPOINT form — a morphing shape.
+    // These numbers become the band break values, and the shader's walker trusts
+    // them as descending upper bounds: it stops at the first segment whose max
+    // can't reach the pixel. Understate one and the walk stops early, skipping
+    // segments that DO cross the pixel's ray; the dropped crossings flip the
+    // winding parity and the fill tears. So the box must hold for EVERY t, since
+    // the caller unions the two poses' boxes and reuses that for the whole morph.
+    //
+    // The obvious box — centre ± radii — is unusable for that. It is wrong even
+    // statically (it assumes phi == 0; a rotated ellipse reaches
+    // hypot(rx·cosφ, ry·sinφ) in x), and worse, the arc's CENTRE is not a lerped
+    // quantity at all: the morph interpolates endpoint form, and the centre is
+    // re-derived from the lerped endpoints each frame. There is nothing to union.
+    //
+    // Anchor on what IS lerped. p1 and p4 travel straight (they are stored
+    // floats), and rx, ry lerp. Every point of an ellipse lies within
+    // R = max(rx, ry) of its centre, and the centre is itself within R of any
+    // point ON the ellipse — so the whole arc lies within 2R of p1, and likewise
+    // within 2R of p4:
+    //     arc(t) ⊆ box(p1(t), 2R(t)) ∩ box(p4(t), 2R(t))
+    // Both p ± 2R are affine in t, so each box's union over t is just the union
+    // of its two endpoint boxes — and intersecting the two unions is still sound
+    // (⋃(A∩B) ⊆ (⋃A) ∩ (⋃B)). Hence: per pose, emit both boxes; the caller
+    // unions across poses; a later intersection tightens it. Looser than a tight
+    // fit, but provably safe for every intermediate pose — and per this file's
+    // standing trade-off, correctness beats fill rate for animation.
+    const p1x = ctrl(1, 0), p1y = ctrl(1, 1);
+    const p4x = ctrl(1, 2), p4y = ctrl(1, 3);
+    const r2 = 2 * Math.max(Math.abs(ctrl(2, 0)), Math.abs(ctrl(2, 1)));
+    xs.push(p1x - r2, p1x + r2, p4x - r2, p4x + r2);
+    ys.push(p1y - r2, p1y + r2, p4y - r2, p4y + r2);
   }
   return {
     minX: Math.min(...xs), maxX: Math.max(...xs),

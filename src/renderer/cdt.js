@@ -20,29 +20,23 @@
 // the Slug path.
 //
 // Points are [x, y]. Returns { tris: Array<[i,j,k]> (CCW) }.
+//
+// Orientation AND the in-circle test are computed with EXACT-sign predicates
+// (predicates.js) so both signs are always correct — near-degenerate inputs
+// can flip the sign of a plain double determinant, which causes the
+// "8's waist" cavity livelock, the earcut "wrong wedges", and near-cocircular
+// Delaunay churn. There is no epsilon anywhere in the triangulation: every
+// orientation / crossing / empty-circle decision is exact-zero.
+import { orient2d, incircle, orient2dXY, incircleXY } from './predicates.js';
 
-const EPS = 1e-9;
-
-// Twice the signed area of triangle abc (>0 ⇒ CCW).
-function orient2d(a, b, c) {
-  return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-}
-
-// >0 ⇒ d strictly inside the circumcircle of CCW triangle abc.
-function inCircle(a, b, c, d) {
-  const ax = a[0] - d[0], ay = a[1] - d[1];
-  const bx = b[0] - d[0], by = b[1] - d[1];
-  const cx = c[0] - d[0], cy = c[1] - d[1];
-  const ad = ax * ax + ay * ay, bd = bx * bx + by * by, cd = cx * cx + cy * cy;
-  return ax * (by * cd - bd * cy) - ay * (bx * cd - bd * cx) + ad * (bx * cy - by * cx);
-}
-
-// Do open segments p1p2 and p3p4 properly cross (interiors intersect)?
+// Do open segments p1p2 and p3p4 properly cross (interiors intersect)? Exact:
+// both endpoint pairs must strictly straddle. Collinear or endpoint-touching
+// configurations are NOT proper crossings (orient2d returns exactly 0 there).
 function segsCross(p1, p2, p3, p4) {
   const d1 = orient2d(p3, p4, p1), d2 = orient2d(p3, p4, p2);
   const d3 = orient2d(p1, p2, p3), d4 = orient2d(p1, p2, p4);
-  return ((d1 > EPS && d2 < -EPS) || (d1 < -EPS && d2 > EPS)) &&
-         ((d3 > EPS && d4 < -EPS) || (d3 < -EPS && d4 > EPS));
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+         ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
 }
 
 const edgeKey = (a, b) => a < b ? a * 4294967296 + b : b * 4294967296 + a;
@@ -55,6 +49,25 @@ function ccw(pts, a, b, c) {
 // Build a Delaunay triangulation of `pts` (array of [x,y]) via Bowyer-Watson.
 // Returns an array of triangles [i,j,k] (indices into pts), CCW, super-triangle
 // verts excluded. Returns null if degenerate (all collinear / <3 points).
+//
+// FLAT INTERNALS. This is the build's hot loop, and it was allocation-bound rather than
+// arithmetic-bound: `Array<[x,y]>` points, `Array<[i,j,k]>` triangles, a `Map` edge→triangle
+// index keyed by a float-packed edgeKey, a `Set` for the cavity, and — worst — TWO fresh `Map`s
+// plus a `[u,v]` pair per POINT INSERTION. Measured against an identical-algorithm flat rewrite
+// (probes/_wasmCdtBench.mjs): 3.0x, flat across 500/2000/8000 points. So everything below lives
+// in typed arrays that are allocated once per call and reused across insertions.
+//
+// The public shape (Array<[x,y]> in, Array<[i,j,k]> out) is unchanged — the rest of cdt.js and
+// its callers still speak the old idiom, and delaunay's `em` was always private to it.
+//
+// OUTPUT IS BIT-IDENTICAL to the pointer-chasing version, order included. That is not incidental:
+// the tie-breaks depend on bookkeeping order that has nothing to do with the math, so the flat
+// structures must reproduce it exactly or the mesh silently changes —
+//   * `edges`: per-edge push order + swap-pop removal, since that decides what nbr() returns;
+//   * `bad`/`stack`: LIFO flood-fill order;
+//   * `touch`: the old `firstE` Map's first-seen insertion order, which sets retriangulation
+//     order and hence `lastT` (the next walk's seed).
+// probes/_lbCdtGolden.mjs is the regression gate.
 function delaunay(pts) {
   const n = pts.length;
   if (n < 3) return null;
@@ -63,67 +76,205 @@ function delaunay(pts) {
   const dx = maxX - minX || 1, dy = maxY - minY || 1, dm = Math.max(dx, dy) * 20;
   const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
   // Super-triangle vertices appended at indices n, n+1, n+2.
-  const P = pts.concat([[cx - dm, cy - dm], [cx + dm, cy - dm], [cx, cy + dm]]);
-  // Incremental Bowyer-Watson: locate the containing triangle by WALKING from the
-  // previous insertion (contour-order inputs are spatially coherent → short walks),
-  // then FLOOD-FILL the bad-triangle cavity through edge adjacency instead of
-  // scanning every triangle. `tris` reuses freed slots (indices stay stable for the
-  // edge map); `em` (edge→triangles) is maintained in step. Triangles stay CCW.
-  const tris = [[n, n + 1, n + 2]];
-  const em = new Map();
-  const addTE = (k, t) => { let a = em.get(k); if (!a) { a = []; em.set(k, a); } a.push(t); };
-  const remTE = (k, t) => { const a = em.get(k); if (!a) return; const i = a.indexOf(t); if (i >= 0) { a[i] = a[a.length - 1]; a.pop(); } if (!a.length) em.delete(k); };
-  const nbr = (u, v, t) => { const a = em.get(edgeKey(u, v)); if (!a) return -1; return a[0] === t ? (a.length > 1 ? a[1] : -1) : a[0]; };
-  addTE(edgeKey(n, n + 1), 0); addTE(edgeKey(n + 1, n + 2), 0); addTE(edgeKey(n + 2, n), 0);
-  const free = [];
+  const np = n + 3;
+  const PX = new Float64Array(np), PY = new Float64Array(np);
+  for (let i = 0; i < n; i++) { const p = pts[i]; PX[i] = p[0]; PY[i] = p[1]; }
+  PX[n] = cx - dm; PY[n] = cy - dm;
+  PX[n + 1] = cx + dm; PY[n + 1] = cy - dm;
+  PX[n + 2] = cx; PY[n + 2] = cy + dm;
+
+  // Triangle slots: TRI[3t..3t+2], with TRI[3t] === -1 marking a free/null slot (the old
+  // `tris[t] = null`). `triLen` mirrors the old `tris.length`; freed slots are recycled so
+  // indices stay stable for the edge table.
+  let triCap = 2 * np + 64;
+  let TRI = new Int32Array(triCap * 3);
+  let triLen = 1;
+  TRI[0] = n; TRI[1] = n + 1; TRI[2] = n + 2;
+
+  // Edge → incident triangles, open-addressed on the (lo,hi) vertex pair. Capacity is sized for
+  // every DISTINCT edge the run will ever touch (entries are never deleted — see below), which is
+  // O(n) for a Delaunay build; grow-and-rehash covers the tail.
+  let eCap = 1; while (eCap < 8 * np) eCap *= 2;
+  let eMask = eCap - 1;
+  let EA = new Int32Array(eCap).fill(-1);   // -1 = empty slot
+  let EB = new Int32Array(eCap);
+  let EN = new Int32Array(eCap);            // how many triangles on this edge (0..2)
+  let ET = new Int32Array(eCap * 2);        // the (up to 2) triangle ids, in push order
+  let eUsed = 0;                            // occupied slots — drives the rehash
+  // Deletion is deliberately absent. The old code did `em.delete(k)` once an edge's array went
+  // empty, so a later `em.get(k)` returned undefined and nbr() answered -1. Leaving the entry
+  // with EN === 0 answers -1 identically, and a later re-add starts from count 0 exactly as a
+  // fresh array would — so the observable behaviour matches without tombstones.
+  //
+  // Because nothing is deleted, the table accumulates every edge the run ever touches, so it
+  // MUST be able to grow: a full table would make the probe loop below spin forever. The rehash
+  // drops EN === 0 entries (semantically absent anyway), which is what keeps it bounded.
+  const growEdges = () => {
+    const oA = EA, oB = EB, oN = EN, oT = ET, oCap = eCap;
+    eCap *= 2; eMask = eCap - 1;
+    EA = new Int32Array(eCap).fill(-1); EB = new Int32Array(eCap);
+    EN = new Int32Array(eCap); ET = new Int32Array(eCap * 2); eUsed = 0;
+    for (let s = 0; s < oCap; s++) {
+      if (oA[s] === -1 || oN[s] === 0) continue;
+      const lo = oA[s], hi = oB[s];
+      let i = ((lo * 0x9E3779B1 ^ hi * 0x85EBCA77) >>> 0) & eMask;
+      while (EA[i] !== -1) i = (i + 1) & eMask;
+      EA[i] = lo; EB[i] = hi; EN[i] = oN[s]; ET[i * 2] = oT[s * 2]; ET[i * 2 + 1] = oT[s * 2 + 1];
+      eUsed++;
+    }
+  };
+  const eSlot = (a, b) => {
+    const lo = a < b ? a : b, hi = a < b ? b : a;
+    for (;;) {
+      let i = ((lo * 0x9E3779B1 ^ hi * 0x85EBCA77) >>> 0) & eMask;
+      for (;;) {
+        const ka = EA[i];
+        if (ka === -1) {
+          if (++eUsed * 2 >= eCap) { eUsed--; growEdges(); break; }   // rehash, then re-probe
+          EA[i] = lo; EB[i] = hi; return i;
+        }
+        if (ka === lo && EB[i] === hi) return i;
+        i = (i + 1) & eMask;
+      }
+    }
+  };
+  const addTE = (a, b, t) => { const i = eSlot(a, b); if (EN[i] < 2) ET[i * 2 + EN[i]] = t; EN[i]++; };
+  const remTE = (a, b, t) => {                       // mirrors indexOf + swap-pop + delete-if-empty
+    const i = eSlot(a, b), c = EN[i];
+    if (c === 0) return;
+    if (ET[i * 2] === t) { if (c > 1) ET[i * 2] = ET[i * 2 + 1]; EN[i] = c - 1; }
+    else if (c > 1 && ET[i * 2 + 1] === t) { EN[i] = c - 1; }
+  };
+  const nbr = (u, v, t) => {                         // a[0]===t ? (a[1] ?? -1) : a[0]
+    const i = eSlot(u, v), c = EN[i];
+    if (c === 0) return -1;
+    return ET[i * 2] === t ? (c > 1 ? ET[i * 2 + 1] : -1) : ET[i * 2];
+  };
+  addTE(n, n + 1, 0); addTE(n + 1, n + 2, 0); addTE(n + 2, n, 0);
+
+  let FREE = new Int32Array(triCap); let freeLen = 0;
   let lastT = 0;
-  const bad = [], badSet = new Set(), stack = [];
+
+  // Cavity scratch, allocated once. `badStamp` replaces the per-insertion `Set`: a generation
+  // counter makes "clear" free.
+  let bad = new Int32Array(256), stack = new Int32Array(256);
+  let badStamp = new Int32Array(triCap); let gen = 0;
+  // Everything indexed by triangle slot grows together, or a slot id outruns its side table.
+  const growTris = () => {
+    triCap *= 2;
+    const T = new Int32Array(triCap * 3); T.set(TRI); TRI = T;
+    const F = new Int32Array(triCap); F.set(FREE); FREE = F;
+    const B = new Int32Array(triCap); B.set(badStamp); badStamp = B;
+  };
+
+  // Per-insertion cavity-boundary tally — the old `count`/`firstE` Maps. Same open-addressed
+  // pair table, stamped by generation instead of reallocated, plus `touch` recording first-seen
+  // slot order so the retriangulation loop iterates exactly as Map insertion order did.
+  let cCap = 256, cMask = cCap - 1;
+  let CA = new Int32Array(cCap), CB = new Int32Array(cCap), CS = new Int32Array(cCap).fill(-1),
+      CC = new Int32Array(cCap), CU = new Int32Array(cCap), CV = new Int32Array(cCap);
+  let touch = new Int32Array(256), touchLen = 0;
+  // A cavity has at most 3*badLen distinct boundary edges. Sizing to >= 4x that keeps the load
+  // factor under 1/2 — necessary, because a full gen-stamped table has no empty slot to stop the
+  // probe. Called after the flood fill (badLen known) and before the tally, so nothing is live:
+  // the arrays can simply be replaced rather than rehashed.
+  const ensureCavityCap = (badLen) => {
+    const need = 8 * badLen;
+    if (cCap >= need) return;
+    while (cCap < need) cCap *= 2;
+    cMask = cCap - 1;
+    CA = new Int32Array(cCap); CB = new Int32Array(cCap); CS = new Int32Array(cCap).fill(-1);
+    CC = new Int32Array(cCap); CU = new Int32Array(cCap); CV = new Int32Array(cCap);
+  };
+  const cSlot = (a, b) => {
+    const lo = a < b ? a : b, hi = a < b ? b : a;
+    let i = ((lo * 0x9E3779B1 ^ hi * 0x85EBCA77) >>> 0) & cMask;
+    for (;;) {
+      if (CS[i] !== gen) { CS[i] = gen; CA[i] = lo; CB[i] = hi; CC[i] = 0; return i; }
+      if (CA[i] === lo && CB[i] === hi) return i;
+      i = (i + 1) & cMask;
+    }
+  };
+
   for (let ip = 0; ip < n; ip++) {
-    const p = P[ip];
+    const px = PX[ip], py = PY[ip];
     // Locate a triangle containing p by a straight walk (guarded against cycles).
-    let t = lastT; if (!tris[t]) t = tris.findIndex(Boolean);
-    let g = 0; const gMax = tris.length + 64;
+    let t = lastT;
+    if (TRI[t * 3] === -1) { t = -1; for (let s = 0; s < triLen; s++) if (TRI[s * 3] !== -1) { t = s; break; } if (t < 0) continue; }
+    let g = 0; const gMax = triLen + 64;
     while (g++ < gMax) {
-      const T = tris[t]; const a = T[0], b = T[1], c = T[2];
-      if (orient2d(P[a], P[b], p) < -EPS) { const nb = nbr(a, b, t); if (nb < 0) break; t = nb; continue; }
-      if (orient2d(P[b], P[c], p) < -EPS) { const nb = nbr(b, c, t); if (nb < 0) break; t = nb; continue; }
-      if (orient2d(P[c], P[a], p) < -EPS) { const nb = nbr(c, a, t); if (nb < 0) break; t = nb; continue; }
+      const a = TRI[t * 3], b = TRI[t * 3 + 1], c = TRI[t * 3 + 2];
+      if (orient2dXY(PX[a], PY[a], PX[b], PY[b], px, py) < 0) { const nb = nbr(a, b, t); if (nb < 0) break; t = nb; continue; }
+      if (orient2dXY(PX[b], PY[b], PX[c], PY[c], px, py) < 0) { const nb = nbr(b, c, t); if (nb < 0) break; t = nb; continue; }
+      if (orient2dXY(PX[c], PY[c], PX[a], PY[a], px, py) < 0) { const nb = nbr(c, a, t); if (nb < 0) break; t = nb; continue; }
       break;   // p is inside T (or on its boundary)
     }
-    const T0 = tris[t];
-    if (!T0 || inCircle(P[T0[0]], P[T0[1]], P[T0[2]], p) <= EPS) continue;   // degenerate / duplicate → skip
+    if (TRI[t * 3] === -1) continue;
+    {
+      const a = TRI[t * 3], b = TRI[t * 3 + 1], c = TRI[t * 3 + 2];
+      if (incircleXY(PX[a], PY[a], PX[b], PY[b], PX[c], PY[c], px, py) <= 0) continue;   // degenerate / duplicate → skip
+    }
     // Flood the cavity of triangles whose circumcircle contains p.
-    bad.length = 0; badSet.clear(); stack.length = 0;
-    bad.push(t); badSet.add(t); stack.push(t);
-    while (stack.length) {
-      const bt = stack.pop(), T = tris[bt];
+    gen++;
+    let badLen = 0, stackLen = 0;
+    bad[badLen++] = t; badStamp[t] = gen; stack[stackLen++] = t;
+    while (stackLen) {
+      const bt = stack[--stackLen];
       for (let e = 0; e < 3; e++) {
-        const nb = nbr(T[e], T[(e + 1) % 3], bt);
-        if (nb < 0 || badSet.has(nb)) continue;
-        const N = tris[nb];
-        if (inCircle(P[N[0]], P[N[1]], P[N[2]], p) > EPS) { badSet.add(nb); bad.push(nb); stack.push(nb); }
+        const nb = nbr(TRI[bt * 3 + e], TRI[bt * 3 + (e + 1) % 3], bt);
+        if (nb < 0 || badStamp[nb] === gen) continue;
+        const a = TRI[nb * 3], b = TRI[nb * 3 + 1], c = TRI[nb * 3 + 2];
+        if (incircleXY(PX[a], PY[a], PX[b], PY[b], PX[c], PY[c], px, py) > 0) {
+          badStamp[nb] = gen;
+          if (badLen === bad.length) { const B = new Int32Array(badLen * 2); B.set(bad); bad = B; }
+          bad[badLen++] = nb;
+          if (stackLen === stack.length) { const S = new Int32Array(stackLen * 2); S.set(stack); stack = S; }
+          stack[stackLen++] = nb;
+        }
       }
     }
     // Cavity boundary = edges used by exactly one bad triangle.
-    const count = new Map(), firstE = new Map();
-    for (const bt of bad) { const T = tris[bt];
-      for (let e = 0; e < 3; e++) { const u = T[e], v = T[(e + 1) % 3], k = edgeKey(u, v);
-        count.set(k, (count.get(k) || 0) + 1); if (!firstE.has(k)) firstE.set(k, [u, v]); } }
-    for (const bt of bad) { const T = tris[bt];
-      for (let e = 0; e < 3; e++) remTE(edgeKey(T[e], T[(e + 1) % 3]), bt);
-      tris[bt] = null; free.push(bt); }
-    for (const [k, uv] of firstE) {
-      if (count.get(k) !== 1) continue;
-      const nt = free.length ? free.pop() : tris.push(null) - 1;
-      tris[nt] = ccw(P, uv[0], uv[1], ip);
-      const T = tris[nt];
-      addTE(edgeKey(T[0], T[1]), nt); addTE(edgeKey(T[1], T[2]), nt); addTE(edgeKey(T[2], T[0]), nt);
+    ensureCavityCap(badLen);
+    touchLen = 0;
+    for (let bi = 0; bi < badLen; bi++) {
+      const bt = bad[bi];
+      for (let e = 0; e < 3; e++) {
+        const u = TRI[bt * 3 + e], v = TRI[bt * 3 + (e + 1) % 3];
+        const i = cSlot(u, v);
+        if (CC[i] === 0) { CU[i] = u; CV[i] = v;                       // first-seen wins, as firstE did
+          if (touchLen === touch.length) { const T2 = new Int32Array(touchLen * 2); T2.set(touch); touch = T2; }
+          touch[touchLen++] = i; }
+        CC[i]++;
+      }
+    }
+    for (let bi = 0; bi < badLen; bi++) {
+      const bt = bad[bi];
+      for (let e = 0; e < 3; e++) remTE(TRI[bt * 3 + e], TRI[bt * 3 + (e + 1) % 3], bt);
+      TRI[bt * 3] = -1; FREE[freeLen++] = bt;
+    }
+    for (let ti = 0; ti < touchLen; ti++) {
+      const i = touch[ti];
+      if (CC[i] !== 1) continue;
+      let nt;
+      if (freeLen) nt = FREE[--freeLen];
+      else { if (triLen === triCap) growTris(); nt = triLen++; }
+      // ccw(): orient the new triangle, writing straight into the slot.
+      const u = CU[i], v = CV[i];
+      let a = u, b = v, c = ip;
+      if (orient2dXY(PX[u], PY[u], PX[v], PY[v], PX[ip], PY[ip]) < 0) { b = ip; c = v; }
+      TRI[nt * 3] = a; TRI[nt * 3 + 1] = b; TRI[nt * 3 + 2] = c;
+      addTE(a, b, nt); addTE(b, c, nt); addTE(c, a, nt);
       lastT = nt;
     }
   }
   // Drop triangles touching the super-triangle (all already CCW).
   const out = [];
-  for (const T of tris) if (T && T[0] < n && T[1] < n && T[2] < n) out.push(T);
+  for (let t = 0; t < triLen; t++) {
+    const a = TRI[t * 3];
+    if (a === -1) continue;
+    const b = TRI[t * 3 + 1], c = TRI[t * 3 + 2];
+    if (a < n && b < n && c < n) out.push([a, b, c]);
+  }
   return out;
 }
 
@@ -433,26 +584,89 @@ function restoreDelaunay(pts, tris, constraintSet, em) {
     const w = third(tris[t1], u, v), x = third(tris[t2], u, v);
     if (!segsCross(pts[u], pts[v], pts[w], pts[x])) continue;   // non-convex → can't flip
     const T = ccw(pts, u, v, w);
-    if (inCircle(pts[T[0]], pts[T[1]], pts[T[2]], pts[x]) > EPS) {
+    if (incircle(pts[T[0]], pts[T[1]], pts[T[2]], pts[x]) > 0) {
       flip(em, pts, tris, t1, t2, u, v);
       push(edgeKey(u, w)); push(edgeKey(w, v)); push(edgeKey(v, x)); push(edgeKey(x, u));
     }
   }
 }
 
+// Intersection point of open segments p1p2 and p3p4 (double), or null if parallel
+// or the crossing is not in both interiors. Paired with the exact segsCross test.
+function segIntersect(p1, p2, p3, p4) {
+  const rx = p2[0] - p1[0], ry = p2[1] - p1[1];
+  const sx = p4[0] - p3[0], sy = p4[1] - p3[1];
+  const denom = rx * sy - ry * sx;
+  if (Math.abs(denom) < 1e-12) return null;                   // parallel / degenerate
+  const qx = p3[0] - p1[0], qy = p3[1] - p1[1];
+  const t = (qx * sy - qy * sx) / denom;
+  const u = (qx * ry - qy * rx) / denom;
+  if (t <= 1e-9 || t >= 1 - 1e-9 || u <= 1e-9 || u >= 1 - 1e-9) return null;
+  return [p1[0] + t * rx, p1[1] + t * ry];
+}
+
+/**
+ * Resolve pairwise-crossing constraints (CGAL `Exact_intersections_tag` behaviour):
+ * insert a shared vertex at each proper crossing and split BOTH constraints there,
+ * so the returned set has NO properly-crossing constraints. Intersection coordinates
+ * are computed in double (a consistent snap, as CGAL's non-exact-construction modes
+ * do); the exact-predicate pipeline then triangulates the augmented set robustly.
+ * O(C²) pairwise — fine at glyph/path constraint counts. Lets self-intersecting
+ * outlines (figure-eight subpaths, stroke-to-fill overlaps) triangulate as one exact
+ * planar subdivision instead of routing to the Slug fallback.
+ *   @returns an object with the augmented `pts` (Array<[x,y]>) and crossing-free
+ *            `constraints` (Array<[i,j]>).
+ */
+export function resolveConstraintIntersections(pts, constraints) {
+  const P = pts.map((p) => [p[0], p[1]]);
+  const cons = (constraints || []).map((c) => [c[0], c[1]]).filter((c) => c[0] !== c[1]);
+  const splits = cons.map(() => []);                          // per-constraint [{t, vi}]
+  const findOrAdd = (x, y) => {                               // dedup coincident crossings
+    for (let i = 0; i < P.length; i++) { const dx = P[i][0] - x, dy = P[i][1] - y; if (dx * dx + dy * dy < 1e-14) return i; }
+    P.push([x, y]); return P.length - 1;
+  };
+  const paramOf = (c0, c1, vi) => { const rx = P[c1][0] - P[c0][0], ry = P[c1][1] - P[c0][1]; return ((P[vi][0] - P[c0][0]) * rx + (P[vi][1] - P[c0][1]) * ry) / Math.max(rx * rx + ry * ry, 1e-30); };
+  for (let i = 0; i < cons.length; i++) {
+    for (let j = i + 1; j < cons.length; j++) {
+      const ai = cons[i][0], bi = cons[i][1], cj = cons[j][0], dj = cons[j][1];
+      if (ai === cj || ai === dj || bi === cj || bi === dj) continue;   // shared endpoint → not a proper cross
+      if (!segsCross(P[ai], P[bi], P[cj], P[dj])) continue;             // exact proper-cross test
+      const it = segIntersect(P[ai], P[bi], P[cj], P[dj]);
+      if (!it) continue;
+      const vi = findOrAdd(it[0], it[1]);
+      if (vi !== ai && vi !== bi) splits[i].push({ t: paramOf(ai, bi, vi), vi });
+      if (vi !== cj && vi !== dj) splits[j].push({ t: paramOf(cj, dj, vi), vi });
+    }
+  }
+  const out = [];
+  for (let i = 0; i < cons.length; i++) {
+    if (!splits[i].length) { out.push(cons[i]); continue; }
+    splits[i].sort((a, b) => a.t - b.t);
+    let prev = cons[i][0];
+    for (const s of splits[i]) { if (s.vi !== prev) out.push([prev, s.vi]); prev = s.vi; }
+    if (cons[i][1] !== prev) out.push([prev, cons[i][1]]);
+  }
+  return { pts: P, constraints: out };
+}
+
 /**
  * Constrained Delaunay triangulation.
  *   @param pts          Array<[x,y]> — all vertices (deduped by the caller ideally)
  *   @param constraints  Array<[i,j]> — edges that MUST appear (contour + curve tris)
- *   @returns tris — Array of CCW [i,j,k] index triples, or null if degenerate.
+ *   @param opts         optional; opts.resolveIntersections splits crossing
+ *                       constraints at their intersection first (G4).
+ *   @returns an object with `tris` (Array of CCW [i,j,k]) and the vertex list `pts`
+ *            the tris index into (possibly augmented); null if degenerate.
  */
-export function constrainedTriangulate(pts, constraints) {
-  const base = delaunay(pts);
+export function constrainedTriangulate(pts, constraints, opts) {
+  let P = pts, C = constraints || [];
+  if (opts && opts.resolveIntersections) { const r = resolveConstraintIntersections(pts, C); P = r.pts; C = r.constraints; }
+  const base = delaunay(P);
   if (!base) return null;
   const em = edgeMap(base);                                   // built once, patched by flip()
-  const constraintSet = insertConstraints(pts, base, constraints || [], em);
-  restoreDelaunay(pts, base, constraintSet, em);
-  return { tris: base.filter(Boolean) };
+  const constraintSet = insertConstraints(P, base, C, em);
+  restoreDelaunay(P, base, constraintSet, em);
+  return { tris: base.filter(Boolean), pts: P };
 }
 
-export { orient2d, inCircle, segsCross };
+export { orient2d, incircle, segsCross };

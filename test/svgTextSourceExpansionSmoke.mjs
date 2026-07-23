@@ -49,10 +49,7 @@ const imp = (svg, opts) => importSvg(svg, {
 
 // ── 1. No-mask: strict 1:1 (box + glyphs) ────────────────────────────
 {
-  const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">
-    <path d="M10 10 H60 V60 H10 Z" fill="#0000ff"/>
-    <text x="70" y="50" font-family="Roboto" font-size="40" fill="#ff0000">Hi</text>
-  </svg>`;
+  const SVG = readFileSync(new URL('../examples/smoke/svgTextSourceExpansion__SVG.svg', import.meta.url), 'utf8');
   const s = await imp(SVG);
   const r = renderableTags(s.svgSource);
   const tags = r.map(x => x.tag);
@@ -88,13 +85,7 @@ const imp = (svg, opts) => importSvg(svg, {
 //    assert count==numShapes; we assert the text expanded and the box +
 //    glyphs lead the renderable list in shape order.
 {
-  const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">
-    <defs><mask id="m"><rect x="0" y="0" width="200" height="100" fill="#fff"/></mask></defs>
-    <g mask="url(#m)">
-      <path d="M10 10 H60 V60 H10 Z" fill="#0000ff"/>
-      <text x="70" y="50" font-family="Roboto" font-size="40" fill="#ff0000">Hi</text>
-    </g>
-  </svg>`;
+  const SVG = readFileSync(new URL('../examples/smoke/svgTextSourceExpansion__SVG2.svg', import.meta.url), 'utf8');
   const s = await imp(SVG);
   const r = renderableTags(s.svgSource);
   const tags = r.map(x => x.tag);

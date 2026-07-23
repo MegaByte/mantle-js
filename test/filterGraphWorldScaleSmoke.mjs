@@ -43,17 +43,7 @@ const url  = `http://127.0.0.1:${port}/mantleDemo.html`;
 // but the filter ends in an feMerge — which the single-kind heuristic
 // does NOT reduce, so the filter routes through the composable graph
 // path. A one-node merge passes the blurred silhouette through unchanged.
-const SVG = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <defs>
-    <filter id="b" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="4" result="bl"/>
-      <feMerge><feMergeNode in="bl"/></feMerge>
-    </filter>
-  </defs>
-  <rect x="0" y="0" width="100" height="100" fill="#ffffff"/>
-  <rect filter="url(#b)" x="40" y="40" width="20" height="20" fill="#000000"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/filterGraphWorldScale__SVG.svg', import.meta.url), 'utf8');
 
 let failures = 0;
 const fail = (m) => { failures++; console.error('FAIL', m); };

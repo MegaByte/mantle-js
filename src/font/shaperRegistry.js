@@ -31,7 +31,7 @@ let _arabic = null;     // { isArabicCodepoint, resolveArabicForms, getArabicJoi
 let _hangul = null;     // { isHangulJamo, classifyHangulJamo }
 let _math   = null;     // { isCodepointStretchy, isAlwaysStretchy, targetStretchHeight }
 let _indic  = null;     // { isIndicCodepoint, findIndicSyllables, reorderSyllable, reorderSyllableExplicitReph, hasInitialReph }
-let _thai   = null;     // { isThaiLaoCodepoint, isThaiLaoMark, decomposeSaraAm, reorderThaiLao }
+let _thai   = null;     // { isThaiLaoCodepoint, isThaiLaoMark, decomposeSaraAm }
 let _use    = null;     // { isUseCodepoint, findUseClusters, reorderUseCluster }
 
 export function registerArabicShaping(hook)  { _arabic = hook; }

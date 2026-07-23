@@ -19,7 +19,13 @@ export function parseClipsAndMasks(root) {
     if (tag === 'clippath' || tag === 'mask') {
       const id = el.getAttribute('id');
       if (id) {
-        const units = (el.getAttribute('clipPathUnits') || el.getAttribute('maskUnits') || 'userSpaceOnUse').trim();
+        // Content geometry units: clipPathUnits for <clipPath>,
+        // maskContentUnits for <mask> — maskUnits governs the mask
+        // REGION rect, not its children's coordinates, and its default
+        // (objectBoundingBox) is the opposite of maskContentUnits'.
+        const units = (tag === 'clippath'
+          ? (el.getAttribute('clipPathUnits') || 'userSpaceOnUse')
+          : (el.getAttribute('maskContentUnits') || 'userSpaceOnUse')).trim();
         const maskType = (tag === 'mask'
           ? ((el.getAttribute('mask-type') || 'luminance').trim().toLowerCase())
           : 'luminance');

@@ -108,6 +108,7 @@ for (const ph of FRAMES) {
   // create time). Then stream with { lightweight:true } + handle.invalidate()
   // — the engine's streamGeometry — and draw THROUGH THE HANDLE.
   const lB = createBundle(gl, buildStreamableSections(shapes, VBOX));
+  lB._lbStreamRamp = false;   // Highway's opaque road/rough-band streaming mode
   const handle = renderer.createBundleHandle(lB);     // uploads stale unit-band cover-quads
   updateBundleGeometry(gl, lB, buildFrame(ph-7), { lightweight: true });   // prior frame
   updateBundleGeometry(gl, lB, fr, { lightweight: true });                 // refresh to target

@@ -1,0 +1,137 @@
+[
+ {
+  "file": "tiger.svg",
+  "elements": 240,
+  "bytes": 68630
+ },
+ {
+  "file": "_pattern.svg",
+  "elements": 7,
+  "bytes": 742
+ },
+ {
+  "file": "_blur.svg",
+  "elements": 5,
+  "bytes": 692
+ },
+ {
+  "file": "_filtergroup.svg",
+  "elements": 4,
+  "bytes": 434
+ },
+ {
+  "file": "_morph.svg",
+  "elements": 4,
+  "bytes": 717
+ },
+ {
+  "file": "_dropshadow.svg",
+  "elements": 3,
+  "bytes": 706
+ },
+ {
+  "file": "_fgraph_blend.svg",
+  "elements": 3,
+  "bytes": 806
+ },
+ {
+  "file": "_fgraph_cmat.svg",
+  "elements": 3,
+  "bytes": 894
+ },
+ {
+  "file": "_fgraph_light.svg",
+  "elements": 3,
+  "bytes": 1650
+ },
+ {
+  "file": "_fgraph_merge.svg",
+  "elements": 3,
+  "bytes": 1243
+ },
+ {
+  "file": "_isolation.svg",
+  "elements": 3,
+  "bytes": 820
+ },
+ {
+  "file": "_join_overshoot.svg",
+  "elements": 3,
+  "bytes": 1387
+ },
+ {
+  "file": "_no_isolation.svg",
+  "elements": 3,
+  "bytes": 329
+ },
+ {
+  "file": "_pattern_gradient.svg",
+  "elements": 3,
+  "bytes": 963
+ },
+ {
+  "file": "_stroke_caps_joins.svg",
+  "elements": 3,
+  "bytes": 675
+ },
+ {
+  "file": "_clipper_anim.svg",
+  "elements": 2,
+  "bytes": 270
+ },
+ {
+  "file": "_convolve.svg",
+  "elements": 2,
+  "bytes": 521
+ },
+ {
+  "file": "_dash_circle.svg",
+  "elements": 2,
+  "bytes": 232
+ },
+ {
+  "file": "_dash_cubic.svg",
+  "elements": 2,
+  "bytes": 242
+ },
+ {
+  "file": "_dash_quad.svg",
+  "elements": 2,
+  "bytes": 234
+ },
+ {
+  "file": "_displace.svg",
+  "elements": 2,
+  "bytes": 856
+ },
+ {
+  "file": "_feimage.svg",
+  "elements": 2,
+  "bytes": 1318
+ },
+ {
+  "file": "_miter_circle.svg",
+  "elements": 2,
+  "bytes": 385
+ },
+ {
+  "file": "_miter_overshoot.svg",
+  "elements": 2,
+  "bytes": 1193
+ },
+ {
+  "file": "_qbend_round.svg",
+  "elements": 2,
+  "bytes": 484
+ },
+ {
+  "file": "_turbulence.svg",
+  "elements": 2,
+  "bytes": 692
+ },
+ {
+  "file": "_pattern_image.svg",
+  "elements": 1,
+  "bytes": 754
+ }
+]

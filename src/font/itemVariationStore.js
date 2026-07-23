@@ -13,7 +13,6 @@
 export class ItemVariationStore {
   constructor(tables, off) {
     const v = tables.view;
-    // const format = v.getUint16(off + 0, false);  // must be 1
     const regionListOff = off + v.getUint32(off + 2, false);
     const ivdCount     = v.getUint16(off + 6, false);
     this._tables = tables;
@@ -56,14 +55,21 @@ export class ItemVariationStore {
   _parseIvd(off) {
     const v = this._tables.view;
     const itemCount       = v.getUint16(off + 0, false);
-    const shortDeltaCount = v.getUint16(off + 2, false);
+    const wordDeltaCount  = v.getUint16(off + 2, false);
+    // Bit 15 = LONG_WORDS (spec 1.9+): the "word" entries are int32 and
+    // the rest int16 (vs int16/int8). Left unmasked it inflated rowSize
+    // ~32770 bytes and every delta read garbage.
+    const longWords       = (wordDeltaCount & 0x8000) !== 0;
+    const shortDeltaCount = wordDeltaCount & 0x7FFF;
     const regionIndexCount = v.getUint16(off + 4, false);
     const regionIndices = new Array(regionIndexCount);
     for (let r = 0; r < regionIndexCount; r++)
       regionIndices[r] = v.getUint16(off + 6 + r * 2, false);
-    const rowSize = shortDeltaCount * 2 + (regionIndexCount - shortDeltaCount);
+    const rowSize = longWords
+      ? shortDeltaCount * 4 + (regionIndexCount - shortDeltaCount) * 2
+      : shortDeltaCount * 2 + (regionIndexCount - shortDeltaCount);
     const dataStart = off + 6 + regionIndexCount * 2;
-    return { itemCount, shortDeltaCount, regionIndices, rowSize, dataStart };
+    return { itemCount, shortDeltaCount, longWords, regionIndices, rowSize, dataStart };
   }
 
   /// Per-region scalar at coords (start, peak, end). Spec §
@@ -109,6 +115,10 @@ export class ItemVariationStore {
     for (let r = 0; r < ivd.regionIndices.length; r++) {
       let delta;
       if (r < ivd.shortDeltaCount) {
+        // "word" entries: int32 under LONG_WORDS, else int16.
+        if (ivd.longWords) { delta = v.getInt32(cursor, false); cursor += 4; }
+        else               { delta = v.getInt16(cursor, false); cursor += 2; }
+      } else if (ivd.longWords) {
         delta = v.getInt16(cursor, false);
         cursor += 2;
       } else {

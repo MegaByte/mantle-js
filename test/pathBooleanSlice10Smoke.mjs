@@ -20,11 +20,7 @@ mkdirSync(OUT, { recursive: true });
 //   - red interior (the two squares).
 //   - white outline along the L-shape boundary.
 //   - black background outside everything.
-const SVG = `
-<svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
-  <path d="M10,10 L40,10 L40,40 L10,40 Z" fill="#FF0000"/>
-  <path d="M30,30 L60,30 L60,60 L30,60 Z" fill="#FF0000"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/pathBooleanSlice10__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body style="margin:0;background:#000">
 <canvas id="c" width="200" height="200"></canvas>

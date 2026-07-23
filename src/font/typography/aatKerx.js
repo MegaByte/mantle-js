@@ -157,15 +157,17 @@ function _kerx1(v, st, gids, numGlyphs, xAdvance, xOffset, yOffset) {
     if (flags & 0x2000) stack.length = 0;                 // Reset
     if ((flags & 0x8000) && !atEnd) stack.push(i);        // Push
     if (kernActionIndex !== 0xFFFF && stack.length > 0) {
-      let aOff = kernActOff + (kernActionIndex & ~1);      // byteOffsetToIndex (extended ÷2 ×2)
-      let last = false;
-      while (!last && stack.length > 0) {
+      // 'kerx': kernActionIndex is an INDEX into the FWORD action array,
+      // popping ONE value per stacked glyph until the stack drains. (The
+      // classic 'kern' state table used a byte offset with a low-bit
+      // list terminator — reading kerx that way sampled values from half
+      // the correct offset and stopped on a data bit.)
+      let aIdx = kernActionIndex;
+      while (stack.length > 0) {
         const idx = stack.pop();
-        let val = v.getInt16(aOff, false); aOff += 2;
-        last = (val & 1) !== 0;
-        val &= ~1;
+        const val = v.getInt16(kernActOff + aIdx * 2, false); aIdx++;
         if (st.crossStream) {
-          if (val !== -0x8000) yOffset[idx] += val;        // cross-stream → y shift
+          if (val !== -0x8000) yOffset[idx] += val;        // 0x8000 = cross-stream reset
         } else {
           xAdvance[idx] += val;                            // normal → advance + offset
           xOffset[idx] += val;

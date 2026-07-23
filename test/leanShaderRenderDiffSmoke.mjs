@@ -49,11 +49,7 @@ else fail(`lean did not drop samplers (${sLean} vs ${sFull})`);
 // Solid-only content (the road / minimal-core case): no gradient/clip/mask/
 // filter/recolor, so omitting ALL of FILL_FEATURES is valid and must render
 // identically — this is the maximal lean variant (down to ~6 samplers).
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
-  <path d="M30 100 C30 30 100 20 130 40 C180 60 180 150 120 175 C70 195 30 160 30 100 Z" fill="#c83232"/>
-  <rect x="120" y="20" width="60" height="60" rx="12" fill="#3296c8"/>
-  <circle cx="60" cy="150" r="28" fill="#22aa44"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/leanShaderRenderDiff__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="256" height="256"></canvas>
@@ -66,8 +62,14 @@ const W = 256, H = 256;
 const sec = await importSvg(${JSON.stringify(SVG)});
 const OMIT = ${JSON.stringify(omit)};
 
+// The renderer now auto-specializes the fill program per-bundle/per-draw, so a
+// no-opts renderer would ALSO auto-lean, making this a lean-vs-lean compare.
+// Force the TRUE full ubershader for the baseline via disableFillVariants; the
+// defines path exercises the opts-forced lean variant. (Two separately-compiled
+// identical-source programs can differ by 1 ULP at AA ties on some drivers, so
+// the baseline must be the single default program to stay bit-exact.)
 function renderWith(defines, s) {
-  const renderer = createRenderer(gl, shaders, defines ? { fillDefines: defines } : {});
+  const renderer = createRenderer(gl, shaders, defines ? { fillDefines: defines } : { disableFillVariants: true });
   renderer.setViewport(W, H);
   const bundle = createBundle(gl, sec);
   const wm = new Float32Array([s,0,0, 0,s,0, 0,0,1]);

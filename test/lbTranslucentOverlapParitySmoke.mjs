@@ -10,6 +10,7 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer';
+import { emitFixture } from './_fixtures.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 let failures = 0;
@@ -20,6 +21,7 @@ const circ = (cx, cy, r, fill) => { const k = 0.5522847498 * r;
     + `C ${cx - k} ${cy - r} ${cx - r} ${cy - k} ${cx - r} ${cy} C ${cx - r} ${cy + k} ${cx - k} ${cy + r} ${cx} ${cy + r} `
     + `C ${cx + k} ${cy + r} ${cx + r} ${cy + k} ${cx + r} ${cy} Z"/>`; };
 const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">${circ(80, 100, 55, '#ff0000')}${circ(120, 100, 55, '#0000ff')}</svg>`;
+emitFixture('lbTranslucentOverlapParity__SVG', SVG);
 
 const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="200" height="200"></canvas>
 <script type="module">

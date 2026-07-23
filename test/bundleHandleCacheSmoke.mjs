@@ -39,14 +39,8 @@ await new Promise(r => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 const url  = `http://127.0.0.1:${port}/mantleDemo.html`;
 
-const SVG_RED  = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <rect x="0" y="0" width="100" height="100" fill="#ff0000"/>
-</svg>`;
-const SVG_BLUE = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <rect x="0" y="0" width="100" height="100" fill="#0000ff"/>
-</svg>`;
+const SVG_RED = readFileSync(new URL('../examples/smoke/bundleHandleCache__SVG_RED.svg', import.meta.url), 'utf8');
+const SVG_BLUE = readFileSync(new URL('../examples/smoke/bundleHandleCache__SVG_BLUE.svg', import.meta.url), 'utf8');
 
 let failures = 0;
 const fail = (m) => { failures++; console.error('FAIL', m); };
@@ -75,9 +69,9 @@ const results = await page.evaluate(async (svgRed, svgBlue) => {
   const bRed  = createBundle(gl, await importSvg(svgRed));
   const bBlue = createBundle(gl, await importSvg(svgBlue));
 
-  // Both handles opt into A1 caching via the staticCache opts arg.
-  const hRed  = renderer.createBundleHandle(bRed,  { staticCache: { strategy: CacheStrategy.ForceA1 } });
-  const hBlue = renderer.createBundleHandle(bBlue, { staticCache: { strategy: CacheStrategy.ForceA1 } });
+  // Both handles opt into whole-asset caching via the staticCache opts arg.
+  const hRed  = renderer.createBundleHandle(bRed,  { staticCache: { strategy: CacheStrategy.ForceWholeAsset } });
+  const hBlue = renderer.createBundleHandle(bBlue, { staticCache: { strategy: CacheStrategy.ForceWholeAsset } });
 
   function snap() {
     const w = cnv.width, h = cnv.height;

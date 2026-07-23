@@ -63,8 +63,8 @@ export function createShapeTimeline(gl, bundles, keys) {
   const duration = keys[keys.length - 1].time - keys[0].time;
   // Morphs are KEPT for the timeline's whole life, one per bracket pair —
   // flipbooks cycle the same pose pairs forever, and dispose-and-rebuild on
-  // every bracket transition re-ran curve matching + pair-mesh builds each
-  // switch (the pose-storm class). N keys → at most N-1
+  // every bracket transition would re-run curve matching + pair-mesh builds
+  // each switch. N keys → at most N-1
   // cached pairs, built once (lazily on first visit, or by the idle prewarm
   // below) and retuned with setT thereafter.
   const _pairMorphs = new Map();   // 'lo:hi' → createShapeMorph
@@ -190,16 +190,18 @@ export function createSpriteTimeline(gl, refs, keys) {
   }
   const duration = keys[keys.length - 1].time - keys[0].time;
 
-  // Cached morph for the current bracket pair (a ref-pair). Rebuilt only
-  // when the bracket's (lo, hi) ref indices change — the hot path retunes
+  // Cached morph for the current bracket pair (a ref-pair). Built once per
+  // (lo, hi) pair and kept in `_spritePairs` — the hot path retunes
   // setT. When lo === hi (before the first / after the last key, or two
   // keys pointing at the SAME ref) there's nothing to morph: we hold that
   // single ref via a degenerate self-morph (createSpriteMorph would reject
   // an overlapping same-bundle pair, so we special-case it to a static
   // single-sprite draw bundle built once).
   // Two kinds of active handle:
-  //   • bracketMorph — a createSpriteMorph between two DISTINCT refs, owned
-  //     here and disposed when the bracket's ref-pair changes.
+  //   • bracketMorph — a createSpriteMorph between two DISTINCT refs.
+  //     Cached per ref-pair in `_spritePairs` for the timeline's life and
+  //     disposed only at dispose(); a bracket change just switches which
+  //     cached pair is live.
   //   • a hold — a static single-sprite handle (lo === hi: clamp regions,
   //     or two keys on the same ref). Cached per ref index in `holds` and
   //     disposed only at dispose().
@@ -244,12 +246,13 @@ export function createSpriteTimeline(gl, refs, keys) {
       current = buildHold(loRef);
       return;
     }
-    // Distinct refs → blend. Reuse the cached bracket morph if the pair
-    // is unchanged; otherwise rebuild (disposing the prior bracket morph).
+    // Distinct refs → blend. Reuse the live bracket morph if the pair is
+    // unchanged; otherwise switch to the cached pair morph (building it on
+    // first visit).
     if (!(bracketMorph && curLoRef === loRef && curHiRef === hiRef)) {
       // KEPT per pair for the timeline's life (same rationale as the shape
-      // timeline: flipbooks revisit the same pairs; dispose-and-rebuild ran a
-      // sprite-morph construction on every pose transition).
+      // timeline: flipbooks revisit the same pairs, so a pair morph is never
+      // disposed on a bracket change — only at dispose()).
       {
         const k9 = loRef + ':' + hiRef;
         let m9 = _spritePairs.get(k9);
@@ -610,10 +613,13 @@ export function createPoseStack(gl, bundles) {
     poseA = a; poseB = b; poseC = c;
     tAB = clamp01(nTAB); tBC = clamp01(nTBC);
     // 2-level fast path: if tBC == 0 (no preempting transition),
-    // just use morphAB with t=tAB.
+    // just use morphAB with t=tAB. A pre-empting transition that
+    // re-targets the in-flight destination (poseC === poseB) composes:
+    //   lerp(lerp(A,B,tAB), B, tBC) = lerp(A, B, tAB + tBC·(1−tAB))
+    // — ignoring tBC here popped the blend backwards.
     if (tBC === 0 || poseC === poseB) {
       const m = ensureMorph('AB', poseA, poseB);
-      m.setT(tAB);
+      m.setT(tBC > 0 && poseC === poseB ? tAB + tBC * (1 - tAB) : tAB);
       return;
     }
     // Real 3-pose blend. Each morph's bundle is independent, so we can't

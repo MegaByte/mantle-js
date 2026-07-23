@@ -49,108 +49,6 @@ const G_BLEND_MODES = {
   'invert': 18,
 };
 
-// Generic DOM/SVG helpers in svg/utils.js.
-
-// Segment primitives in svg/segment.js.
-
-// ------------------------------------------------------------
-// Path parsing in svg/path.js.
-
-// ------------------------------------------------------------
-// Arc conversion (endpoint → centre parametrisation, and to cubics)
-// ------------------------------------------------------------
-
-// ------------------------------------------------------------
-// Affine transforms in svg/transform.js.
-
-// ------------------------------------------------------------
-// Primitive shape parsing in svg/shape.js.
-
-// ------------------------------------------------------------
-// Style extraction
-// ------------------------------------------------------------
-
-// CSS color parsing in svg/color.js (named-color set per W3C CSS Color
-// Module Level 4 §6.4). Re-exported below for consumers.
-
-// Style + stylesheet engine in svg/style.js + svg/stylesheet.js.
-
-// ------------------------------------------------------------
-// Gradients
-// ------------------------------------------------------------
-
-// Gradient parsing + table packing in svg/gradient.js.
-
-// Filter parser in svg/filter.js. <clipPath>/<mask> defs (clipMask.js)
-// flatten each element's child paths/rects into a single segment array.
-
-// Marker + clip/mask def registries in svg/marker.js + svg/clipMask.js.
-
-// ------------------------------------------------------------
-// Segment geometry helpers (for meshing + encoding)
-// ------------------------------------------------------------
-
-// Curve-tight axis-aligned bbox of a path segment. For lines, the
-// bbox is just the endpoint extrema. For quadratics and cubics, find
-// the parameter values where dP/dt = 0 along each axis (linear in t
-// for quadratics, quadratic in t for cubics) and evaluate the curve
-// there in addition to the endpoints. Using the control polygon bbox
-// here is wrong: cubics with extreme handles can have a control-polygon
-// bbox several times larger than the actual curve extent.
-// Control-polygon bbox of a segment. For Beziers, this is the bbox of
-// p1..p4 (where p2/p3 are control points that may extend outside the
-// actual curve). For arcs, the full ellipse bbox. Conservative — always
-// contains segBbox(curve-tight). The per-band sort + early-exit code
-// uses this because the shader's runtime break condition is computed
-// from the same control polygon (the shader has no cheap way to compute
-// curve-tight maxX from p1..p4 floats).
-// bbox math in svg/bbox.js.
-
-
-// Curve apex (rough midpoint along the curve in em-space). Used to
-// classify bulge direction (concave vs convex relative to the path
-// interior).
-// Cover-quad + curve subdivision in svg/mesh.js.
-
-
-
-// ------------------------------------------------------------
-// Texel buffers (RGBA32F curve texture, RGBA32UI bands texture)
-// Row-major texel buffer with width = TEXTURE_WIDTH.
-// ------------------------------------------------------------
-
-// Curve + band texture encoders + segment tangent/arc-length helpers
-// in svg/textures.js.
-
-
-// Bundle assembly (v3 header + curve/band + meta + cgeom chunks)
-// ------------------------------------------------------------
-
-// Meta record packer in svg/meta.js.
-// Interior-skip occupancy grid (opt-in: opts.occupancyGrid). Off by default.
-
-// ------------------------------------------------------------
-// Main export entry point
-// ------------------------------------------------------------
-
-// Image preload in svg/image.js.
-
-// Shared accumulator state passed through the importer's build
-// pipeline. Externalizing this lets callers (e.g. font/textRun for
-// SVG-in-OT emoji) build multiple SVG documents into ONE bundle by
-// reusing one context.
-//
-// Materializing the final bundle reads from these.
-//
-// Append-only invariant: callers may inspect after a build but must
-// not splice / reorder buffer contents — meta-row indices into the
-// curve/band buffers depend on append order. New build calls extend
-// in place.
-// BuildContext + emitShape + pickBandsXY in svg/buildContext.js.
-// Re-exported below for consumers (font/textRun.js, etc).
-// Perimeter-outline silhouette: opt-in path-boolean union of all
-// filled shapes. See src/svg/pathBoolean/.
-
 import { finalizeBundle, BUNDLE_FLAG_HYBRID_MESH_IN_CGEOM, BUNDLE_FLAG_HYBRID_MESH_CHUNKED, BUNDLE_FLAG_WIDE_BAND_HEADERS, TEXTURE_WIDTH, META_FLOATS_V3, COVER_QUAD_STRIDE } from './bundleFinalize.js';
 import { elementChildren, switchChildMatches, resolveIdRef } from './utils.js';
 import { mantleWarn } from '../core/diagnostics.js';
@@ -245,7 +143,30 @@ export async function importSvg(svgText, opts = {}) {
     // opts.ctx lets callers (e.g. font/textRun for SVG-in-OT) graft
     // multiple SVG imports into one bundle by sharing accumulator
     // state across calls. When unset, each import gets a fresh ctx.
-    const ctx = opts.ctx || makeBuildContext();
+    // Band layout is fixed at IMPORT; the engine is chosen at DRAW (aacFill:'auto'
+    // keys off px²/shape, a function of the world matrix). So unless the caller
+    // pins an engine, the bands must serve both:
+    //
+    //   'slug'  stripe H bands + V bands   Slug's layout. AAC renders it correctly
+    //                                      (stripe walk) but loses its pair speedup.
+    //   'aac'   pair   H bands, no V bands -44% band memory. Slug renders it
+    //                                      CORRECTLY BUT PATHOLOGICALLY: with one V
+    //                                      band, its vertical ray walks every segment
+    //                                      in the shape. Pin only if you will
+    //                                      never draw it with Slug.
+    //   default pair   H bands + V bands   The union. A pair list is a superset of a
+    //                                      stripe list, so Slug is correct and pays
+    //                                      only 0-8%; AAC keeps its full -24..-34%.
+    //                                      Costs +5.5% band memory over 'slug'.
+    //
+    // Default to the union so 'auto' is free to pick either engine at any scale.
+    const engine = opts.engine;
+    const dflt = { pairBands: engine !== 'slug', vBands: engine !== 'aac' };
+    const ctx = opts.ctx || makeBuildContext({
+      vBands: opts.vBands !== undefined ? opts.vBands : dflt.vBands,
+      pairBands: opts.pairBands !== undefined ? opts.pairBands : dflt.pairBands,
+      bandK: opts.bandK,
+    });
     const sections = await importSvgInner(root, opts, defaultFill, defaultStroke, defaultStrokeW, preserveViewport, ctx);
     // Opt-in source retention. The WebGL path never reads this; it
     // exists for the no-WebGL native-SVG fallback (createNativeScene),

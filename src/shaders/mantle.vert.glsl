@@ -1,6 +1,7 @@
 #version 300 es
 precision highp float;
 precision highp int;
+precision highp sampler2D;  // uMetaTex/uOverrideTex are RGBA32F em-space data (lowp default crushes them)
 
 // Per-shape OBB cover quad with full Lengyel "A Decade of Slug"
 // dynamic dilation. Each cover-quad corner is pushed outward along
@@ -35,6 +36,9 @@ layout(location=2) in vec2 aEmCoord;
 layout(location=7) in float aShapeIdx;
 out vec2 vEmCoord;
 out vec4 vOverrideTint;     // multiplied into the fill+stroke colour in mantle.frag
+#ifdef MANTLE_INSTANCED
+out vec4 vInstBias;         // ADDED to the fill+stroke colour after the tint (fog)
+#endif
 // Absolute attribute overrides. Driven by the override table's
 // per-attribute mask (texel 1.w); the fragment shader gates the
 // replacement at draw time so unmasked attributes pass through.
@@ -99,6 +103,20 @@ layout(location=8)  in vec3 aInstW0;   // uWorldM col0 (m00, m10, 0)
 layout(location=9)  in vec3 aInstW1;   // uWorldM col1 (m01, m11, 0)
 layout(location=10) in vec3 aInstW2;   // uWorldM col2 (tx,  ty,  1)
 layout(location=11) in float aInstAlpha;
+// Per-instance rgba tint (multiplicative; white = none). Folded into the
+// override tint below, so it multiplies fill + stroke exactly like a
+// diagonal colorMatrix would (the shared uColorMatrix, if enabled, applies
+// AFTER it in mantle.frag — matching the per-instance loop's composed-
+// matrix fallback semantics).
+layout(location=12) in vec4 aInstTint;
+// Per-instance additive BIAS, applied after the tint: out = clamp(in*tint + bias).
+//
+// A tint alone is a diagonal colour matrix — a pure multiply. It cannot express a FOG:
+//   out.rgb = in.rgb*fog + fogColor*(1 - fog)
+// which is a diagonal scale PLUS an offset. Without a bias slot, any instance carrying an
+// offset fell off the instanced fast path entirely and the whole draw collapsed to one
+// draw call PER INSTANCE. The offset is one vec4; the draw calls were the expensive part.
+layout(location=13) in vec4 aInstBias;
 #endif
 
 // Compose rows 0/1/3 of the em→clip matrix. The em→NDC pipeline is:
@@ -163,10 +181,13 @@ void main() {
   mat3  wWorldM    = mat3(aInstW0, aInstW1, aInstW2);
   int   wHasWorldM = 1;
   float wDrawAlpha = aInstAlpha;
+  vec4  wDrawTint  = aInstTint;
+  vInstBias        = aInstBias;
 #else
   mat3  wWorldM    = uWorldM;
   int   wHasWorldM = uHasWorldM;
   float wDrawAlpha = uDrawAlpha;
+  vec4  wDrawTint  = vec4(1.0);   // compile-time white → multiply folds away
 #endif
 
   // Per-shape override read. The shader-side default is identity +
@@ -204,6 +225,7 @@ void main() {
   // defaults to 1.0. Visibility is a CONTINUOUS [0,1] fade (0.5 ⇒ half-opacity),
   // not binary — the ovVis<=0 collapse below is just the fully-transparent fast
   // path.
+  ovTint *= wDrawTint;   // per-instance rgba tint (instanced variant; 1 otherwise)
   ovTint.a *= wDrawAlpha * ovVis;
   vOverrideTint = ovTint;
   vOverrideMask = ovMask;

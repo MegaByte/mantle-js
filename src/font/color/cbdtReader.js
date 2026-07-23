@@ -11,7 +11,7 @@
 
 /// One PNG-bearing bitmap glyph from CBDT.
 /// metrics: SmallGlyphMetrics — height/width in pixels, bearingX/Y
-/// in font units (s8), advance in pixels (u8).
+/// in pixels at the strike ppem (s8), advance in pixels (u8).
 export class CbdtGlyph {
   constructor(pngBytes, metrics, strikePpem) {
     this.pngBytes = pngBytes;

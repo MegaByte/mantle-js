@@ -33,8 +33,6 @@ uniform sampler2D uGradientStops;
 uniform sampler2D uImageTex;
 uniform vec2      uImageAtlasSize;
 uniform sampler2D uFilterTex;  // unused here, kept to match the main draw's uniform set
-uniform int       uGradientCount;
-uniform int       uGradientStopsCount;
 uniform vec4      uGlobalBBox;
 
 // Per-bake-invocation uniforms.
@@ -76,7 +74,7 @@ in  vec2 vEmCoord;
 out vec4 fragColor;
 
 @@GRADIENT_HELPERS@@
-@@SLUG_COVERAGE@@
+@@COVERAGE@@
 @@OVERRIDE_TRANSFORM@@
 
 void main() {
@@ -110,7 +108,7 @@ void main() {
 
   float cov;
   vec4 paint;
-  if (cSW > 0.0 && cStroke.a > 0.0) {
+  if (cSW > 0.0 && (cStroke.a > 0.0 || cStrokeGradId > 0)) {
     // Stroke-layer mask child: distance-to-curve with cap/join + dash.
     int   cDashId   = int(cStrokePad.w + 0.5);
     int   startCap  = int(cCapJoin.x + 0.5);

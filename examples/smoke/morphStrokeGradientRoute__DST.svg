@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff2020"/><stop offset="1" stop-color="#2040ff"/></linearGradient></defs><path d="M 182 100 C 182 75.6994710088 145.2873494836 56 100 56 C 54.712650516400004 56 18 75.6994710088 18 100 C 18 124.3005289912 54.712650516400004 144 100 144 C 145.2873494836 144 182 124.3005289912 182 100 Z" fill="none" stroke="url(#g)" stroke-width="16"/></svg>

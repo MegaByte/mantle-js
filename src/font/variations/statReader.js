@@ -49,7 +49,10 @@ export class StatReader {
       this._axes.push({ tag, nameID, ordering });
     }
     if (minor >= 1) {
-      this._elidedFallbackNameID = v.getUint16(off + 20, false);
+      // STAT header: version(4) designAxisSize(2) designAxisCount(2)
+      // designAxesOffset(4) axisValueCount(2) offsetToAxisValueOffsets(4)
+      // = 18 bytes; elidedFallbackNameID follows at +18.
+      this._elidedFallbackNameID = v.getUint16(off + 18, false);
     }
   }
 

@@ -159,8 +159,8 @@ export function createOverrideTable(gl, bundle) {
   };
   const _touchAll = () => { _globalEpoch++; _dirtyLo = 0; _dirtyHi = n - 1; };
 
-  // Allocate the GL texture lazily on first upload — caller may build
-  // the table before the bundle's main pass actually fires.
+  // Allocate + upload the GL texture immediately, so the table is
+  // bindable even before the bundle's main pass first fires.
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -305,10 +305,16 @@ export function createOverrideTable(gl, bundle) {
       // Transform
       if ('localRotation' in p || 'localScale' in p) {
         const m00 = packed[base + 0], m10 = packed[base + 2];
-        const sxCur = Math.hypot(m00, m10) || 1;
         const m01 = packed[base + 1], m11 = packed[base + 3];
-        const syCur = Math.hypot(m01, m11) || 1;
+        // SIGNED scale recovery: hypot() is always positive, so a mirror
+        // (negative scale) silently un-flipped on the next update(). Fix
+        // the rotation from column 0, then project each column onto its
+        // rotated axis — a det<0 matrix decomposes as a negative sy
+        // (same matrix family: (rot, −sx, −sy) ≡ (rot+π, sx, sy)).
         const rotCur = Math.atan2(m10, m00);
+        const cosC = Math.cos(rotCur), sinC = Math.sin(rotCur);
+        const sxCur = (m00 * cosC + m10 * sinC) || 1;
+        const syCur = (m11 * cosC - m01 * sinC) || 1;
         const rot = p.localRotation != null ? +p.localRotation : rotCur;
         const sx  = p.localScale ? +p.localScale[0] : sxCur;
         const sy  = p.localScale ? +p.localScale[1] : syCur;

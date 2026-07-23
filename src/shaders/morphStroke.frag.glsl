@@ -10,6 +10,7 @@
 // cumulative arc length to the subpath start.
 precision highp float;
 precision highp int;
+precision highp sampler2D;  // uDashTex is RGBA32F em-space data (lowp default crushes it)
 
 flat in vec2  vP0, vP1, vP2, vP3;
 flat in float vHalfW, vMiterLimit;

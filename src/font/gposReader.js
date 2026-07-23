@@ -90,8 +90,6 @@ export class GposReader {
     if (!this._cursLookups) return null;
     const v = this._view;
     for (const lookupOff of this._cursLookups) {
-      const type = v.getUint16(lookupOff, false);
-      if (type !== 3) continue;
       // Per OT spec, the RIGHT_TO_LEFT lookupFlag (0x0001) on a curs
       // lookup flips which glyph (current vs preceding) receives the
       // Y adjustment when chaining the cursive baseline. Real Arabic
@@ -100,9 +98,7 @@ export class GposReader {
       // can apply the offset correctly.
       const lookupFlag = v.getUint16(lookupOff + 2, false);
       const rtl = (lookupFlag & 0x0001) !== 0;
-      const subCount = v.getUint16(lookupOff + 4, false);
-      for (let s = 0; s < subCount; s++) {
-        const subOff = lookupOff + v.getUint16(lookupOff + 6 + s * 2, false);
+      for (const subOff of this._effSubtables(lookupOff, 3)) {
         const fmt = v.getUint16(subOff, false);
         if (fmt !== 1) continue;
         const covAbs = subOff + v.getUint16(subOff + 2, false);
@@ -169,11 +165,7 @@ export class GposReader {
     if (!this._markLookups) return null;
     const v = this._view;
     for (const lookupOff of this._markLookups) {
-      const type = v.getUint16(lookupOff, false);
-      if (type !== 5) continue;
-      const subCount = v.getUint16(lookupOff + 4, false);
-      for (let s = 0; s < subCount; s++) {
-        const subOff = lookupOff + v.getUint16(lookupOff + 6 + s * 2, false);
+      for (const subOff of this._effSubtables(lookupOff, 5)) {
         const fmt = v.getUint16(subOff, false);
         if (fmt !== 1) continue;
         const markCovAbs = subOff + v.getUint16(subOff + 2, false);
@@ -220,11 +212,7 @@ export class GposReader {
     if (!lookups) return null;
     const v = this._view;
     for (const lookupOff of lookups) {
-      const type = v.getUint16(lookupOff, false);
-      if (type !== wantType) continue;
-      const subCount = v.getUint16(lookupOff + 4, false);
-      for (let s = 0; s < subCount; s++) {
-        const subOff = lookupOff + v.getUint16(lookupOff + 6 + s * 2, false);
+      for (const subOff of this._effSubtables(lookupOff, wantType)) {
         // Mark-to-base format 1 and mark-to-mark format 1 share an
         // identical layout (the spec literally aliases base→mark2
         // for mkmk):
@@ -280,30 +268,35 @@ export class GposReader {
     if (!this._lookups) return 0;
     let total = 0;
     for (const lookupOff of this._lookups) {
-      const type = this._view.getUint16(lookupOff, false);
-      if (type !== 2) continue;
-      const subCount = this._view.getUint16(lookupOff + 4, false);
-      for (let s = 0; s < subCount; s++) {
-        const subOff = lookupOff + this._view.getUint16(lookupOff + 6 + s * 2, false);
-        total += this._readPairAdjustment(subOff, a, b);
+      // Within a lookup, subtables are ALTERNATIVES: the first one that
+      // actually matches the pair ends the search (a matched value of 0
+      // included) — summing every subtable double-kerns pairs present in
+      // two subtables. Values still accumulate ACROSS lookups.
+      for (const subOff of this._effSubtables(lookupOff, 2)) {
+        const adj = this._readPairAdjustment(subOff, a, b);
+        if (adj !== null) { total += adj; break; }
       }
     }
     return total;
   }
 
+  /// Pair adjustment for (a, b) from one PairPos subtable. Returns the
+  /// x-advance delta on a MATCH (which may legitimately be 0), or null
+  /// when the subtable doesn't cover the pair — the caller uses the
+  /// distinction for first-match-wins subtable search.
   _readPairAdjustment(subOff, a, b) {
     const v = this._view;
     const format = v.getUint16(subOff, false);
     const covAbs = subOff + v.getUint16(subOff + 2, false);
     const aCovIdx = coverageIndex(v, covAbs, a);
-    if (aCovIdx < 0) return 0;
+    if (aCovIdx < 0) return null;
     const vf1 = v.getUint16(subOff + 4, false);
     const vf2 = v.getUint16(subOff + 6, false);
     const v1Size = valueRecordSize(vf1);
     const v2Size = valueRecordSize(vf2);
     if (format === 1) {
       const pairSetCount = v.getUint16(subOff + 8, false);
-      if (aCovIdx >= pairSetCount) return 0;
+      if (aCovIdx >= pairSetCount) return null;
       const pairSetOff = subOff + v.getUint16(subOff + 10 + aCovIdx * 2, false);
       const recCount = v.getUint16(pairSetOff, false);
       const recBase = pairSetOff + 2;
@@ -317,7 +310,7 @@ export class GposReader {
         else if (second > b) hi = mid - 1;
         else return valueRecordXAdvance(v, rOff + 2, vf1);
       }
-      return 0;
+      return null;
     }
     if (format === 2) {
       const classDef1 = subOff + v.getUint16(subOff + 8, false);
@@ -326,13 +319,13 @@ export class GposReader {
       const class2Count = v.getUint16(subOff + 14, false);
       const aClass = classOf(v, classDef1, a);
       const bClass = classOf(v, classDef2, b);
-      if (aClass >= class1Count || bClass >= class2Count) return 0;
+      if (aClass >= class1Count || bClass >= class2Count) return null;
       const c1Stride = class2Count * (v1Size + v2Size);
       const matrixBase = subOff + 16;
       const cellOff = matrixBase + aClass * c1Stride + bClass * (v1Size + v2Size);
       return valueRecordXAdvance(v, cellOff, vf1);
     }
-    return 0;
+    return null;
   }
 
   // ---- GPOS lookup 1 (SinglePos) -------------------------------
@@ -346,34 +339,34 @@ export class GposReader {
     if (!this._lookups) return 0;
     let total = 0;
     for (const lookupOff of this._lookups) {
-      const type = this._view.getUint16(lookupOff, false);
-      if (type !== 1) continue;
-      const subCount = this._view.getUint16(lookupOff + 4, false);
-      for (let s = 0; s < subCount; s++) {
-        const subOff = lookupOff + this._view.getUint16(lookupOff + 6 + s * 2, false);
-        total += this._readSinglePos(subOff, gid);
+      // First covering subtable wins within a lookup (see getPairKerning).
+      for (const subOff of this._effSubtables(lookupOff, 1)) {
+        const adj = this._readSinglePos(subOff, gid);
+        if (adj !== null) { total += adj; break; }
       }
     }
     return total;
   }
 
+  /// SinglePos x-advance for gid from one subtable: the delta on a match
+  /// (may be 0), null when the subtable doesn't cover the glyph.
   _readSinglePos(subOff, gid) {
     const v = this._view;
     const fmt = v.getUint16(subOff, false);
     const covAbs = subOff + v.getUint16(subOff + 2, false);
     const covIdx = coverageIndex(v, covAbs, gid);
-    if (covIdx < 0) return 0;
+    if (covIdx < 0) return null;
     const vf = v.getUint16(subOff + 4, false);
     const vSize = valueRecordSize(vf);
     if (fmt === 1) {
       return valueRecordXAdvance(v, subOff + 6, vf);
     } else if (fmt === 2) {
       const valueCount = v.getUint16(subOff + 6, false);
-      if (covIdx >= valueCount) return 0;
+      if (covIdx >= valueCount) return null;
       const recOff = subOff + 8 + covIdx * vSize;
       return valueRecordXAdvance(v, recOff, vf);
     }
-    return 0;
+    return null;
   }
 
   // ================================================================
@@ -390,6 +383,30 @@ export class GposReader {
     const innerType = v.getUint16(subOff + 2, false);
     const innerOff  = subOff + v.getUint32(subOff + 4, false);
     return { innerType, innerOff };
+  }
+
+  /// Effective subtable offsets of `lookupOff` whose (Extension-deref'd)
+  /// type is `wantType`. Large fonts wrap lookups in Extension (type 9)
+  /// when the table outgrows 16-bit offsets — a scanner that gates on the
+  /// OUTER lookup type silently no-ops on them (kerning, cursive and mark
+  /// attachment all vanish).
+  _effSubtables(lookupOff, wantType) {
+    const v = this._view;
+    const type = v.getUint16(lookupOff, false);
+    const subCount = v.getUint16(lookupOff + 4, false);
+    const out = [];
+    for (let s = 0; s < subCount; s++) {
+      let subOff = lookupOff + v.getUint16(lookupOff + 6 + s * 2, false);
+      let effType = type;
+      if (effType === 9) {
+        const inner = this._derefExt9(subOff);
+        if (!inner) continue;
+        effType = inner.innerType;
+        subOff = inner.innerOff;
+      }
+      if (effType === wantType) out.push(subOff);
+    }
+    return out;
   }
 
   // ================================================================
@@ -707,8 +724,10 @@ export class GposReader {
   /// resolve nested-lookup indices).
   get lookupListOff() { return this._lookupListOff; }
 
-  /// Get (lookupType, lookupOff) for a global lookupListIdx, auto-
-  /// dereferencing Extension (type 9). Returns null when out of range.
+  /// Get the RAW (lookupType, lookupOff) for a global lookupListIdx —
+  /// the type is the outer lookup type (an Extension wrapper reports 9;
+  /// deref happens per SUBTABLE via _effSubtables/_derefExt9). Returns
+  /// null when out of range.
   getLookupAt(lookupListIdx) {
     if (this._lookupListOff == null) return null;
     const v = this._view;

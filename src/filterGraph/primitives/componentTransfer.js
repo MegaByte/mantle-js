@@ -1,7 +1,7 @@
 // primitives/componentTransfer.js — feComponentTransfer (per-channel
 // transfer function via a baked 256×4 LUT texture).
 import { registerSvgFilter } from '../dispatchRegistry.js';
-import { resolveInputTex, beginFullscreen, passthrough } from '../svgFilterShared.js';
+import { resolveInputTex, beginFullscreen, passthrough, setInMap } from '../svgFilterShared.js';
 
 function feComponentTransfer(node, inputs, outRT, ctx) {
   const { gl, pool, feComponentTransferProg, feComponentTransferU, coverVao } = ctx;
@@ -21,6 +21,7 @@ function feComponentTransfer(node, inputs, outRT, ctx) {
   gl.useProgram(feComponentTransferProg);
   gl.uniform1i(feComponentTransferU.uIn, 0);
   gl.uniform1i(feComponentTransferU.uLUT, 1);
+  setInMap(gl, feComponentTransferU.uInMap, inputs[0], outRT, ctx);
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, srcTex);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, lutTex);
   beginFullscreen(gl, outRT);

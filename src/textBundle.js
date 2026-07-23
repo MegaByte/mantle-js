@@ -4,14 +4,15 @@
 // Wraps `font/textRun.js::buildFromMarkup` + `createBundle` into a
 // single updateable handle. `setText(text, style?)` rebuilds the
 // text run, repacks the meta/curve/band/curveGeom planes, and
-// re-uploads them into the bundle's existing GL textures. The
-// renderer's `drawBundle`/`setBundle`/`render()` doesn't care that
-// the bundle's content changed — it re-binds the same textures.
-//
-// Cost shape: the GL textures are reallocated only when the new
-// content needs more rows / texels than the current allocation; the
-// common per-trial case (same string length / similar glyph count)
-// reuses storage via `texSubImage2D`.
+// REPLACES THE BUNDLE'S CONTENT IN PLACE: `tb.bundle` keeps the SAME
+// object identity for the handle's whole lifetime, so renderer draw
+// handles bound to it (renderer.setBundle / createBundleHandle) stay
+// valid across setText()/setStyle() — the rebuild bumps the bundle's
+// geometry generation and every bound handle re-uploads automatically
+// on its next draw. No re-mount, no id juggling, no manual
+// invalidate(). (The old GL textures are disposed and the fresh ones
+// adopted under the same identity; the first build allocates, later
+// builds swap.)
 //
 // Public API:
 //
@@ -76,6 +77,10 @@ export { buildTextSections } from './font/textSections.js';
  *  @property {string} [text]                 initial content; default ''
  *  @property {TextStyle|Object} [style]      initial style
  *  @property {boolean} [markup]              treat text as rich-text markup; default false
+ *  @property {boolean} [recolor]             this bundle is drawn with recolour state
+ *    (colorMatrix / channelLerp / palette). Fixes the fill variant at creation —
+ *    and, because setText/setStyle REBUILD the bundle, it is re-declared on every
+ *    rebuild so a recoloured label never silently drops back to the lean variant.
  */
 
 /**
@@ -98,10 +103,16 @@ export async function createTextBundle(gl, opts) {
   // outlines when called with { recoverText: true }. Cheap (a string + a
   // few scalars); off by default.
   const retainText = !!(opts.retainText || opts.retainSource);
+  // Recolour is a BUNDLE property, and setText/setStyle rebuild the bundle — so
+  // carry the declaration on the HANDLE and re-apply it to every rebuild, else the
+  // first setText on a tinted label would drop it back to the non-recolour variant
+  // and self-heal (recompile) on the very next draw.
+  const recolor = !!opts.recolor;
+  const gwnTree = !!opts.gwnTree;
   let text = typeof opts.text === 'string' ? opts.text : '';
   let style = opts.style || {};
 
-  let bundle = await rebuild(gl, font, text, style, markup, null);
+  let bundle = await rebuild(gl, font, text, style, markup, null, recolor, gwnTree);
   const applyTextSource = () => {
     if (retainText && bundle && (bundle.numShapes | 0) > 0)
       bundle.textSource = buildTextSource(text, style, font, bundle);
@@ -116,26 +127,40 @@ export async function createTextBundle(gl, opts) {
     /** Font-wide em-normalized metrics. Stable across setText()
      *  for the same font + axis configuration; cache once. */
     get fontMetrics() { return bundle ? bundle.fontMetrics : null; },
-    /** Per-current-string typographic rect (em-relative, in the
-     *  bundle's local coord space). Refreshed on every setText() /
-     *  setStyle(). Includes typoBBox (ascent-to-descent rect — NOT
-     *  the ink-tight bbox), firstBaselineY, lastBaselineY,
-     *  lineCount, lastLineAdvance. */
+    /** Per-current-string typographic metrics
+     *  ({@link import('./font/textSections.js').RunMetrics}), em-relative
+     *  in the bundle's local coord space. Refreshed on every setText() /
+     *  setStyle(). This is the SUPPORTED metrics surface for layout
+     *  consumers — position labels against `runMetrics.typoBBox`
+     *  (ascent-to-descent rect, stable across strings with/without
+     *  descenders) and the baselines, not the ink-tight globalBBox.
+     *  Fields: typoBBox [x,y,w,h], firstBaselineY, lastBaselineY,
+     *  baselineY, lineCount, lastLineAdvance. */
     get runMetrics() { return bundle ? bundle.runMetrics : null; },
 
-    /** Mutate content and (optionally) style; rebuild + re-upload. */
+    /** Mutate content and (optionally) style; rebuild + re-upload.
+     *  IN-PLACE: `tb.bundle` keeps its object identity, so existing
+     *  draw handles remain bound and pick the new glyphs up on their
+     *  next draw. Resolves to the (same) live bundle. */
     async setText(newText, newStyle) {
-      text = typeof newText === 'string' ? newText : '';
+      const nextText = typeof newText === 'string' ? newText : '';
+      // A caller that re-applies the current label has no observable update.
+      // More importantly, rebuilding here allocates every glyph texture and
+      // invalidates the bound handle's geometry. Do not infer equality for a
+      // supplied style: callers may deliberately mutate and re-submit one.
+      if (nextText === text && newStyle == null) return bundle;
+      text = nextText;
       if (newStyle != null) style = newStyle;
-      bundle = await rebuild(gl, font, text, style, markup, bundle);
+      bundle = await rebuild(gl, font, text, style, markup, bundle, recolor, gwnTree);
       applyTextSource();
       return bundle;
     },
 
-    /** Mutate style only; keep current text. */
+    /** Mutate style only; keep current text. Same in-place identity
+     *  contract as setText(). */
     async setStyle(newStyle) {
       if (newStyle != null) style = newStyle;
-      bundle = await rebuild(gl, font, text, style, markup, bundle);
+      bundle = await rebuild(gl, font, text, style, markup, bundle, recolor, gwnTree);
       applyTextSource();
       return bundle;
     },
@@ -149,22 +174,60 @@ export async function createTextBundle(gl, opts) {
 
 // ---- Internal helpers ----------------------------------------------
 
-async function rebuild(gl, font, text, style, markup, prevBundle) {
-  const { sections, bundleSrc } = await buildTextSections(font, text, style, markup);
-  // Dispose the previous bundle's GL textures before allocating fresh
-  // ones. `createBundle` allocates new Texture2Ds each call, so we'd
-  // otherwise leak across every setText.
-  if (prevBundle && typeof prevBundle.dispose === 'function') {
-    prevBundle.dispose();
-  }
+async function rebuild(gl, font, text, style, markup, prevBundle, recolor, gwnTree) {
+  const { sections, bundleSrc } = await buildTextSections(font, text, style, markup, { gwnTree: !!gwnTree });
+  // Rebuilds (prevBundle set) transplant the fresh bundle's fields into
+  // the EXISTING bundle object below; suppress createBundle's automatic
+  // off-thread LB build so the worker result can't land on the abandoned
+  // temporary. Post-transplant the bundle carries _geomGen > 0, which the
+  // LB-static route gate skips anyway (text rides Slug under 'auto').
+  if (prevBundle) sections.deferAutoLb = true;
   // Empty runs (no glyphs in the input font / text) produce zero-shape
   // bundles whose curve + band buffers are too small to round-trip
-  // through GL. Skip the GL upload and return a stub bundle the
-  // renderer treats as a no-op.
-  if (!bundleSrc || bundleSrc.numShapes === 0) {
-    return makeEmptyBundle(font);
-  }
-  return createBundle(gl, sections);
+  // through GL. Skip the GL upload and use a stub bundle the renderer
+  // treats as a no-op.
+  const next = (!bundleSrc || bundleSrc.numShapes === 0)
+    ? makeEmptyBundle(font)
+    : createBundle(gl, sections, { recolor: !!recolor });
+  if (!prevBundle) return next;
+  return transplantBundle(prevBundle, next);
+}
+
+/** Replace `target`'s content with `next`'s while PRESERVING `target`'s
+ *  object identity — the heart of the identity-stable setText contract.
+ *
+ *  Steps: (1) dispose target's GL textures (createBundle allocated fresh
+ *  ones on `next`; without this every setText leaks GPU memory),
+ *  (2) strip target's own properties, (3) adopt next's property
+ *  descriptors verbatim (fields, accessors like `hybridVerts`, methods
+ *  incl. dispose/applyNineSlice bound to their closure state), and
+ *  (4) carry the geometry generation forward MONOTONICALLY — the bump is
+ *  what makes bound renderer handles re-upload the new mesh and drop
+ *  stale caches on their next draw.
+ *
+ *  Safe for text bundles in both directions of the empty↔non-empty
+ *  transition (the empty stub is bundle-shaped). Text bundles emit no
+ *  clip/mask rows, so per-handle mask-region state cannot go stale. */
+function transplantBundle(target, next) {
+  const nextGen = ((target._geomGen | 0) + 1);
+  if (typeof target.dispose === 'function') target.dispose();
+  for (const k of Object.getOwnPropertyNames(target)) delete target[k];
+  Object.defineProperties(target, Object.getOwnPropertyDescriptors(next));
+  target._geomGen = nextGen;
+  // dispose() above stamped _disposed on target; the delete loop removed
+  // it, and `next` was never disposed — make the live state explicit.
+  target._disposed = false;
+  // `next` is now a SPENT SHELL: target owns every GL object it named, and next's
+  // fields still point at them. createBundle already enqueued next for fill-prewarm,
+  // so it is sitting in the PSO-warm queue — and on the NEXT setText, target.dispose()
+  // deletes exactly those textures. The shell then handed a deleted texture straight to
+  // beginFillPass: "bindTexture: attempt to use a deleted object", once per warm, for
+  // every text bundle a scene retypes (a score, a label, a timer).
+  //
+  // Mark it dead so the warm queues skip it. Do NOT dispose it — the textures are
+  // target's now, and deleting them here would kill the live bundle.
+  next._disposed = true;
+  return target;
 }
 
 
@@ -199,7 +262,6 @@ function buildTextSource(text, style, font, bundle) {
     lineCount: rm ? rm.lineCount : 1,
   };
 }
-
 
 
 

@@ -72,7 +72,7 @@ assert(colr.numBaseGlyphsV1 === 3, `numBaseGlyphsV1 = 3, got ${colr.numBaseGlyph
   assert(root.format === 32, `glyph 3 root format = 32 (Composite), got ${root.format}`);
   assert(root.mode === 7, `composite mode = 7 (HARD_LIGHT), got ${root.mode}`);
   const src = root.src, dst = root.dst;
-  assert(src.format === 22, `composite src format = 22 (Rotate), got ${src.format}`);
+  assert(src.format === 24, `composite src format = 24 (Rotate), got ${src.format}`);
   assert(approx(src.angleDeg, 45), `rotate angle ≈ 45°, got ${src.angleDeg}`);
   assert(src.child.format === 2 && src.child.paletteIndex === 0,
          'rotate child is PaintSolid red');

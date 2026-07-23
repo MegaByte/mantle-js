@@ -1,4 +1,4 @@
-// lbStreamGeometrySmoke.mjs — Architecture A2: streaming a solid-fill bundle
+// lbStreamGeometrySmoke.mjs — streaming a solid-fill bundle
 // through Loop-Blinn (updateBundleGeometryLB) instead of the Slug cover-quad
 // rebuild.
 //
@@ -228,7 +228,7 @@ else fail('streamed bundle did not auto-route to the analytic fill');
 if (o.bStreamStats.count > 300) ok('streamed-B renders via LB (' + o.bStreamStats.count + ' red px at ~' + o.bStreamStats.cx.toFixed(0) + ',' + o.bStreamStats.cy.toFixed(0) + ')');
 else fail('streamed-B did not render: ' + JSON.stringify(o.bStreamStats));
 
-// Pooling (A2 Stage 2): buffers refilled in place across same-topology frames.
+// Buffers are refilled in place across same-topology frames.
 if (o.packedReused && o.combinedReused && o.packedReused2)
   ok('pooling: per-shape + combined VBOs refilled in place across frames (no per-frame Float32Array alloc)');
 else fail('pooling failed (new buffers allocated): ' + JSON.stringify({ packed: o.packedReused, combined: o.combinedReused, packed2: o.packedReused2 }));

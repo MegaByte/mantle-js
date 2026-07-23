@@ -17,9 +17,9 @@ const server = http.createServer((q, r) => {
 });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${server.address().port}/`;
-const A = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 380"><rect width="380" height="380" rx="20" fill="#fff"/></svg>`;
-const B = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 380"><path d="M20 0 H360 Q380 0 380 20 V360 Q380 380 360 380 H20 Q0 380 0 360 V20 Q0 0 20 0 Z" fill="#fff"/></svg>`;
-const D = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><defs><filter id="s" x="-60%" y="-60%" width="220%" height="220%"><feDropShadow dx="0" dy="6" stdDeviation="3" flood-color="#000" flood-opacity="0.7"/></filter></defs><circle cx="100" cy="85" r="38" fill="#fff" filter="url(#s)"/></svg>`;
+const A = readFileSync(new URL('../examples/smoke/rectRxDropShadowRender__A.svg', import.meta.url), 'utf8');
+const B = readFileSync(new URL('../examples/smoke/rectRxDropShadowRender__B.svg', import.meta.url), 'utf8');
+const D = readFileSync(new URL('../examples/smoke/rectRxDropShadowRender__D.svg', import.meta.url), 'utf8');
 const br = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
 const pg = await br.newPage(); await pg.setViewport({ width: 300, height: 300 });
 pg.on('pageerror', e => console.error('[page]', e.message));

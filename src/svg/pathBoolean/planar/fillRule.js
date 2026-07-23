@@ -37,19 +37,38 @@ export function pointInShape(p, segs, fillRule) {
   const x0 = p[0], y0 = p[1];
   // Far-x bound: extend past the shape's max x by a margin. The
   // intersection kernels are dimensionless.
-  let maxX = x0;
+  //
+  // The ray must clear the shape ENTIRELY, or it stops inside and misses
+  // crossings — which silently flips an inside/outside verdict.
+  //
+  // Two scale-blind mistakes to avoid here, both of the family that has bitten
+  // repeatedly in this codebase: measuring a curve by its ENDPOINTS (a Bezier
+  // reaches to its control hull, not its endpoints — measured 23.7 units past
+  // the endpoint extent on real content), and then padding by an ABSOLUTE
+  // constant (100 was fine for that content and would not be for the same art
+  // authored at 10x coordinates).
+  //
+  // So: take the extent over control points too, and pad by the shape's own
+  // size. A Bezier is contained in its control hull, so this provably clears it.
+  let maxX = x0, minX = x0, minY = y0, maxY = y0;
   for (const s of segs) {
-    const start = segStart(s);
-    const end = segEnd(s);
-    if (start[0] > maxX) maxX = start[0];
-    if (end[0] > maxX) maxX = end[0];
-    // For arcs, also account for radii.
+    for (const p of [s.p1, s.p2, s.p3, s.p4]) {
+      if (!p) continue;
+      if (p[0] > maxX) maxX = p[0];
+      if (p[0] < minX) minX = p[0];
+      if (p[1] > maxY) maxY = p[1];
+      if (p[1] < minY) minY = p[1];
+    }
+    // An arc is not bounded by its control points; use the full radius box.
     if (s.type === SEG_ARC) {
       const r = Math.max(s.rx, s.ry);
       if (s.cx + r > maxX) maxX = s.cx + r;
+      if (s.cx - r < minX) minX = s.cx - r;
+      if (s.cy + r > maxY) maxY = s.cy + r;
+      if (s.cy - r < minY) minY = s.cy - r;
     }
   }
-  const farX = maxX + 100;
+  const farX = maxX + (Math.hypot(maxX - minX, maxY - minY) || 1);
   const rayP1 = [x0, y0];
   const rayP2 = [farX, y0];
   const ray = mkLine(rayP1, rayP2);

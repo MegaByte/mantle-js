@@ -147,8 +147,28 @@ export function segsToPathD(segs) {
 /// (lambda scaling per F.6.6).
 export function arcEndpointToCenter(p1, rx, ry, phiDeg, large, sweep, p2) {
   rx = Math.abs(rx); ry = Math.abs(ry);
-  const phi = phiDeg * Math.PI / 180;
+  let phi = phiDeg * Math.PI / 180;
   const cp = Math.cos(phi), sp = Math.sin(phi);
+  // SVG renders a zero-radius arc as its endpoint chord. Keep an arc record for
+  // morph topology, but encode that chord as a half-turn degenerate ellipse.
+  if (rx === 0 || ry === 0) {
+    const dx = p2[0] - p1[0], dy = p2[1] - p1[1];
+    const chord = Math.hypot(dx, dy);
+    if (chord === 0) {
+      return { cx: p1[0], cy: p1[1], rx: 0, ry: 0, phi, theta1: 0,
+               dtheta: sweep ? Math.PI : -Math.PI };
+    }
+    const cx = (p1[0] + p2[0]) * 0.5, cy = (p1[1] + p2[1]) * 0.5;
+    const angle = Math.atan2(dy, dx), r = chord * 0.5;
+    if (ry === 0) {
+      phi = angle;
+      return { cx, cy, rx: r, ry: 0, phi, theta1: Math.PI,
+               dtheta: sweep ? Math.PI : -Math.PI };
+    }
+    phi = angle - Math.PI * 0.5;
+    return { cx, cy, rx: 0, ry: r, phi, theta1: -Math.PI * 0.5,
+             dtheta: sweep ? Math.PI : -Math.PI };
+  }
   const mx = (p1[0]-p2[0]) * 0.5;
   const my = (p1[1]-p2[1]) * 0.5;
   const x1p =  cp*mx + sp*my;
@@ -177,12 +197,80 @@ export function arcEndpointToCenter(p1, rx, ry, phiDeg, large, sweep, p2) {
   return { cx, cy, rx, ry, phi, theta1, dtheta };
 }
 
-/// Build a native SVG_ARC segment from endpoint-form parameters.
-/// Degenerate (zero-radius or coincident-endpoints) collapses to a line.
-export function arcToNative(p1, rx, ry, phiDeg, large, sweep, p2) {
-  if (rx === 0 || ry === 0 || (p1[0]===p2[0] && p1[1]===p2[1])) {
-    return mkLine(p1, p2);
+/// Longest sweep a single native ARC record is allowed to span.
+///
+/// Nothing about the RASTERIZER needs this — it ray-casts an arc of any sweep
+/// exactly. The MORPH does. A morph interpolates an arc in ENDPOINT form
+/// (p1, p4, rx, ry, phi, flags) — the form the SVG author wrote — because that
+/// is the only exact form whose componentwise lerp keeps an arc's endpoints
+/// welded to its neighbours' (see morphCore.prepareArcMorph). Endpoint form
+/// cannot express a CLOSED arc: at a full turn p1 == p4 and the two points no
+/// longer pick out an ellipse. SVG has the same hole, which is why authors write
+/// a circle as two half-arcs.
+///
+/// Mantle does NOT — shape.js emits a <circle>/<ellipse> as a single 360-degree
+/// arc. So cap the sweep at a half turn here and such an arc lands as two
+/// records, restoring the same well-conditioned endpoint form an author would
+/// have written by hand.
+///
+/// Splitting an arc into arcs is EXACT — the pieces trace the identical ellipse,
+/// so nothing about static rendering changes. The only cost is one extra segment
+/// record per closed ellipse.
+export const MAX_ARC_SPAN = Math.PI;
+
+/// Split an arc into pieces each spanning at most MAX_ARC_SPAN. Exact: same
+/// ellipse, same endpoints, same sweep direction. Non-arcs pass through.
+export function splitArcSpan(s, maxSpan = MAX_ARC_SPAN) {
+  if (s.type !== SEG_ARC) return [s];
+  const dtheta = s.theta_end - s.theta_start;
+  const n = Math.ceil(Math.abs(dtheta) / maxSpan - 1e-9);
+  if (n <= 1) return [s];
+  const step = dtheta / n;
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const t0 = s.theta_start + step * i;
+    // Land the last piece exactly on theta_end — no accumulated drift, so the
+    // arc still closes on whatever segment follows it.
+    const t1 = i === n - 1 ? s.theta_end : t0 + step;
+    // Every piece is under a half-turn, so large_arc is 0 by construction; the
+    // sweep direction is the sign of the (unchanged) step.
+    out[i] = mkArc(s.cx, s.cy, s.rx, s.ry, t0, t1, s.phi, 0, step > 0 ? 1 : 0);
+    if (s.is_fill_only) out[i].is_fill_only = s.is_fill_only;
   }
+  // The first piece inherits the subpath-start marker — splitting a segment must
+  // not move where a subpath begins.
+  if (s.subStart) out[0].subStart = true;
+  return out;
+}
+
+/// Apply splitArcSpan across a whole segment list.
+export function splitArcSpans(segs, maxSpan = MAX_ARC_SPAN) {
+  let hasWide = false;
+  for (const s of segs) {
+    if (s.type === SEG_ARC && Math.abs(s.theta_end - s.theta_start) > maxSpan + 1e-9) {
+      hasWide = true;
+      break;
+    }
+  }
+  if (!hasWide) return segs;   // overwhelmingly the common case — don't re-alloc
+  const out = [];
+  for (const s of segs) {
+    if (s.type === SEG_ARC) out.push(...splitArcSpan(s, maxSpan));
+    else out.push(s);
+  }
+  return out;
+}
+
+/// Build a native SVG_ARC segment from endpoint-form parameters.
+///
+/// A zero-radius arc remains an ARC to preserve morph topology.
+/// arcEndpointToCenter encodes the SVG-required chord as a degenerate ellipse.
+///
+/// The one case that still becomes a line: coincident endpoints WITH non-zero radii — a full circle
+/// written as a single arc, which has no endpoint form at all (p1==p4 no longer picks out an
+/// ellipse). Those are authored/split elsewhere as two half-arcs (see MAX_ARC_SPAN).
+export function arcToNative(p1, rx, ry, phiDeg, large, sweep, p2) {
+  if (rx !== 0 && ry !== 0 && p1[0] === p2[0] && p1[1] === p2[1]) return mkLine(p1, p2);
   const c = arcEndpointToCenter(p1, rx, ry, phiDeg, large, sweep, p2);
   return mkArc(c.cx, c.cy, c.rx, c.ry, c.theta1, c.theta1 + c.dtheta, c.phi, large, sweep);
 }
@@ -190,10 +278,11 @@ export function arcToNative(p1, rx, ry, phiDeg, large, sweep, p2) {
 /// Cubic-Bezier approximation of an SVG arc. Splits into ≤90° quadrants
 /// to keep the per-segment Bezier error well below 1e-3 per the
 /// standard 4-Bezier-per-circle bound.
+///
+/// Zero-radius arcs become collinear cubics instead of a line, preserving topology
+/// when a transformed morph pose grows into a non-degenerate arc.
 export function arcToCubics(p1, rx, ry, phiDeg, large, sweep, p2) {
-  if (rx === 0 || ry === 0 || (p1[0]===p2[0] && p1[1]===p2[1])) {
-    return [mkLine(p1, p2)];
-  }
+  if (rx !== 0 && ry !== 0 && p1[0] === p2[0] && p1[1] === p2[1]) return [mkLine(p1, p2)];
   const c = arcEndpointToCenter(p1, rx, ry, phiDeg, large, sweep, p2);
   const n = Math.max(1, Math.ceil(Math.abs(c.dtheta) / (Math.PI/2)));
   const dt = c.dtheta / n;

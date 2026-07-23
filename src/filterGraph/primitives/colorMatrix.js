@@ -1,6 +1,6 @@
 // primitives/colorMatrix.js — feColorMatrix (4×5 row-major color xform).
 import { registerSvgFilter } from '../dispatchRegistry.js';
-import { resolveInputTex, beginFullscreen, passthrough } from '../svgFilterShared.js';
+import { resolveInputTex, beginFullscreen, passthrough, setInMap } from '../svgFilterShared.js';
 
 function feColorMatrix(node, inputs, outRT, ctx) {
   const { gl, pool, colorMatrixProg, colorMatrixU, coverVao } = ctx;
@@ -20,6 +20,7 @@ function feColorMatrix(node, inputs, outRT, ctx) {
   ];
   gl.useProgram(colorMatrixProg);
   gl.uniform1i(colorMatrixU.uTex, 0);
+  setInMap(gl, colorMatrixU.uInMap, inputs[0], outRT, ctx);
   gl.uniform4f(colorMatrixU.uM0,  m[0],  m[1],  m[2],  m[3]);
   gl.uniform4f(colorMatrixU.uM1,  m[5],  m[6],  m[7],  m[8]);
   gl.uniform4f(colorMatrixU.uM2,  m[10], m[11], m[12], m[13]);

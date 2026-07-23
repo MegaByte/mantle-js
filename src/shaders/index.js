@@ -258,22 +258,28 @@ const HELPER_INCLUDES = [
   // renderFill / sampleGradient / sampleChildImage. Must follow
   // @@GRADIENT_HELPERS@@ in the including shader (the coverage
   // helpers call sampleStops from gradient helpers).
-  ['@@SLUG_COVERAGE@@',       '_slugCoverage.glsl'],
+  ['@@COVERAGE@@',       '_coverage.glsl'],
   // Shared curve coeff/eval + GL-16 arc length (cubicCoeff, evalC/evalCD,
-  // slugCubicArcLen). Used by the Slug fill+stroke walk (inside _slugCoverage),
+  // slugCubicArcLen). Used by the Slug fill+stroke walk (inside _coverage),
   // the morph stroke FRAG, and the morph stroke VERT (which needs ONLY these — not
   // the stroke-distance math — so it stays light + sampler-free). MUST be AFTER
-  // @@SLUG_COVERAGE@@ (so the nested marker in the inlined body resolves in a later
+  // @@COVERAGE@@ (so the nested marker in the inlined body resolves in a later
   // pass) and BEFORE @@STROKE_MATH@@ (which calls these).
+  // Exact half-plane box coverage (exactBoxCov) — the ONE copy, shared by the band engines
+  // (Slug's exact-edge branch, GWN's SDF combine) and the Loop-Blinn fragment shader. It was
+  // duplicated, with both copies commented "the two MUST stay identical or LB and Slug disagree
+  // at every AA edge" — a rule nothing enforced. MUST be AFTER @@COVERAGE@@ so the nested marker
+  // in the inlined body resolves on a later pass.
+  ['@@BOX_COV@@',             '_boxCov.glsl'],
   ['@@CURVE_ARCLEN@@',        '_curveArcLen.glsl'],
   // Shared analytic stroke-distance math (closest-point + caps/joins/dash) used
-  // by the Slug stroke (inside _slugCoverage) and the morph stroke pass. MUST be
-  // registered AFTER @@SLUG_COVERAGE@@ + @@CURVE_ARCLEN@@ so the nested markers
+  // by the Slug stroke (inside _coverage) and the morph stroke pass. MUST be
+  // registered AFTER @@COVERAGE@@ + @@CURVE_ARCLEN@@ so the nested markers
   // resolve in later passes of preprocess()'s helper loop. Needs uDashTex declared
   // + @@CURVE_ARCLEN@@ included before it.
   ['@@STROKE_MATH@@',         '_strokeMath.glsl'],
   // Gradient paint sampler (sampleGradient) — shared by the Slug fill (inside
-  // _slugCoverage) and the Loop-Blinn direct path. AFTER @@SLUG_COVERAGE@@ (nested
+  // _coverage) and the Loop-Blinn direct path. AFTER @@COVERAGE@@ (nested
   // marker resolves later); each includer declares gradientSpreadToExtend +
   // @@GRADIENT_HELPERS@@ first.
   ['@@PAINT_SAMPLE@@',        '_paintSample.glsl'],
@@ -282,6 +288,10 @@ const HELPER_INCLUDES = [
   // child geometry) so they can't diverge. Needs uOverrideTex/uHasOverrides
   // declared by the including shader.
   ['@@OVERRIDE_TRANSFORM@@',   '_overrideTransform.glsl'],
+  // Rect addressing for filter-graph passes (mapIn / sampleIn). Every fe*
+  // shader that samples an input includes this: an input RT has its own canvas
+  // rect, so its uv is an affine remap of vUV rather than vUV itself.
+  ['@@FILTER_RECT@@',          '_filterRect.glsl'],
 ];
 export const HELPER_FILENAMES = HELPER_INCLUDES;
 
@@ -308,7 +318,7 @@ export function preprocess(src, helpers) {
       // split/join replaces ALL occurrences; String.replace (no /g)
       // would land on the first match only. Each helper's body may
       // itself contain comments referencing other `@@…@@` markers
-      // (e.g. `_slugCoverage.glsl` documents that it expects
+      // (e.g. `_coverage.glsl` documents that it expects
       // `@@GRADIENT_HELPERS@@` to precede it). We strip those
       // helper-internal comments in a second pass below so they
       // don't trip the leftover-marker guard.
@@ -364,7 +374,8 @@ export function minifyGlsl(src) {
 /// freshness test so the committed generated/*.glsl can't drift from source.
 export function assembleShader(raw, helpers, opts) {
   let glsl = preprocess(raw, helpers);
-  glsl = glsl.replace(/\n{3,}/g, '\n\n').replace(/^\n+/, '').replace(/\s+$/, '') + '\n';
+  glsl = glsl.replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n')
+    .replace(/^\n+/, '').replace(/\s+$/, '') + '\n';
   return (opts && opts.minify) ? minifyGlsl(glsl) : glsl;
 }
 
@@ -471,18 +482,18 @@ export function bundleShaders(rawSources, helpers) {
 /// referenced by a stable URL, but if yours doesn't, fall back to the
 /// explicit `bundleShaders({ ...?raw imports })` form.
 bundleShaders.fromPackage = function fromPackage(spec) {
-  // import.meta.url here is this module's URL; the .glsl files are its
-  // siblings, so loadShaders' `new URL('./x.glsl', base)` resolves them.
+  // Prefer pre-assembled files under ./generated/ (see loadShaders).
   return loadShaders(import.meta.url, spec);
 };
 
 /// Fetch .glsl files relative to a base URL (typically `import.meta.url`)
-/// and return them in the dict shape createRenderer expects. Splices any
-/// `@@INCLUDE_MARKER@@` placeholders with the matching helper file's text
-/// (HELPER_INCLUDES above).
+/// and return them in the dict shape createRenderer expects.
 ///
-/// `spec` (optional) selects which shaders to fetch — the runtime-fetch
-/// analog of the bundler-time tree-shaking that bundleShaders enables:
+/// Prefers `./generated/<file>` (pre-assembled by `npm run build:shaders`) —
+/// no helper fetch, no @@marker@@ splice. Falls back to sibling source files
+/// + HELPER_INCLUDES when generated is missing (live edit / pre-build clone).
+///
+/// `spec` (optional) selects which shaders to fetch:
 ///   loadShaders(import.meta.url)                       // all shaders (back-compat)
 ///   loadShaders(import.meta.url, { features: flags })  // core + features' shaders
 ///   loadShaders(import.meta.url, { include: [...] })   // core + explicit keys
@@ -492,17 +503,29 @@ bundleShaders.fromPackage = function fromPackage(spec) {
 /// program, so a filtered dict compiles cleanly.
 export async function loadShaders(baseUrl, spec) {
   const wanted = shaderKeysFor(spec);   // null = everything
-  // Fetch helper snippets first so they're ready for substitution. These
-  // are small and shared across core shaders — always fetched.
+  const names = wanted
+    ? SHADER_NAMES.filter(([key]) => wanted.has(key))
+    : SHADER_NAMES;
+  const genBase = new URL('./generated/', baseUrl);
+
+  // Fetch the assembled set once. Fall back as a unit if any requested file is
+  // absent, which keeps partially generated development trees usable.
+  try {
+    const responses = await Promise.all(names.map(([, file]) => fetch(new URL(file, genBase))));
+    if (responses.every(res => res.ok)) {
+      const entries = await Promise.all(
+        responses.map(async (res, i) => [names[i][0], await res.text()])
+      );
+      return Object.fromEntries(entries);
+    }
+  } catch { /* source-tree fallback below */ }
+
   const helpers = {};
   for (const [marker, file] of HELPER_INCLUDES) {
     const res = await fetch(new URL(`./${file}`, baseUrl));
     if (!res.ok) throw new Error(`failed to load helper ${file}: ${res.status}`);
     helpers[marker] = await res.text();
   }
-  const names = wanted
-    ? SHADER_NAMES.filter(([key]) => wanted.has(key))
-    : SHADER_NAMES;
   const entries = await Promise.all(
     names.map(async ([key, file]) => {
       const res = await fetch(new URL(`./${file}`, baseUrl));

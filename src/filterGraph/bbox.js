@@ -167,8 +167,7 @@ function nodeBbox(node, idx, bboxes, sourceBbox, canvasW, canvasH) {
     case 'feComposite':
     case 'feBlend':
       // Conservative: union of both inputs. Some operators (in / mask)
-      // could use intersection, but union is never incorrect — it just
-      // sometimes over-allocates. Refining is a follow-up.
+      // could use intersection, but union is conservative and may over-allocate.
       raw = unionBbox(inputBbox(0), inputBbox(1));
       break;
 

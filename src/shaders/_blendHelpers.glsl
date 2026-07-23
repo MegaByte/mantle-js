@@ -17,10 +17,20 @@ vec3 blendSeparable(int mode, vec3 src, vec3 dst) {
   }
   if (mode == 4)  return min(src, dst);                          // darken
   if (mode == 5)  return max(src, dst);                          // lighten
-  if (mode == 6)  return mix(min(vec3(1.0), dst / max(1.0 - src, 1e-6)),
-                              vec3(1.0), step(1.0, src));        // color-dodge
-  if (mode == 7)  return mix(1.0 - min(vec3(1.0), (1.0 - dst) / max(src, 1e-6)),
-                              vec3(0.0), step(src, vec3(0.0)));  // color-burn
+  if (mode == 6) {                                                // color-dodge
+    // Spec guard order: Cb==0 -> 0, else Cs==1 -> 1, else min(1, Cb/(1-Cs)).
+    // The Cb (dst) guard must win over the Cs==1 guard.
+    vec3 d6 = mix(min(vec3(1.0), dst / max(1.0 - src, 1e-6)),
+                  vec3(1.0), step(1.0, src));
+    return mix(d6, vec3(0.0), step(dst, vec3(0.0)));
+  }
+  if (mode == 7) {                                                // color-burn
+    // Spec guard order: Cb==1 -> 1, else Cs==0 -> 0, else 1-min(1,(1-Cb)/Cs).
+    // The Cb (dst) guard must win over the Cs==0 guard.
+    vec3 b7 = mix(1.0 - min(vec3(1.0), (1.0 - dst) / max(src, 1e-6)),
+                  vec3(0.0), step(src, vec3(0.0)));
+    return mix(b7, vec3(1.0), step(1.0, dst));
+  }
   if (mode == 8) {                                                // hard-light
     vec3 lo = 2.0 * src * dst;
     vec3 hi = 1.0 - 2.0 * (1.0 - src) * (1.0 - dst);

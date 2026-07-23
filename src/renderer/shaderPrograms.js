@@ -191,8 +191,8 @@ export function attachShaderPrograms(R) {
     R.lbCompProg = (R.lbProg && R.shaderSources.loopBlinnCompositeVert && R.shaderSources.loopBlinnCompositeFrag)
       ? program(R.shaderSources.loopBlinnCompositeVert, R.shaderSources.loopBlinnCompositeFrag, 'loopBlinnComposite')
       : null;
-    // (the legacy GPU-morph program is gone — morphs ride the MANTLE_LB_MORPH_PAIR
-    // variant of the STATIC LB program, created lazily by morphDraw)
+    // (morph FILL draws ride the MANTLE_LB_MORPH_PAIR variant of the STATIC LB
+    // program, created lazily by morphDraw)
     // STROKE morph path: GPU-resident stroke coverage — per-segment band quads,
     // the VS lerps control points by uT, the frag distance-fields the morphed curve
     // (MAX blend → round-cap/round-join stroke). Fed into

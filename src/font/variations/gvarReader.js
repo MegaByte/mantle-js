@@ -29,6 +29,28 @@ function readF2dot14(view, off) {
   return i / 16384;
 }
 
+// Reused per-tuple scratch (single-threaded reader; sized up on demand,
+// length-clamped per use). Slot 0/1 = packed dx/dy (plain arrays —
+// decodePackedDeltas writes every element); IUP slots are typed and
+// zero-filled per call.
+const _deltaScratch = [null, null];
+function _scratchDeltas(slot, n) {
+  let a = _deltaScratch[slot];
+  if (!a || a.length < n) a = _deltaScratch[slot] = new Array(n);
+  a.length = n;
+  return a;
+}
+const _iupScratch = [null, null, null];
+function _scratchIup(slot, n) {
+  let a = _iupScratch[slot];
+  if (!a || a.length < n) {
+    a = _iupScratch[slot] = slot === 2 ? new Uint8Array(n) : new Float64Array(n);
+  }
+  const view = a.length === n ? a : a.subarray(0, n);
+  view.fill(0);
+  return view;
+}
+
 export class GvarTable {
   constructor(tables) {
     this._tables = tables;
@@ -171,9 +193,11 @@ export class GvarTable {
         pointNums = sharedPoints;  // may be null = "all points"
       }
       const targetCount = pointNums == null ? totalPoints : pointNums.length;
-      // Deltas X then Y.
-      const dx = new Array(targetCount);
-      const dy = new Array(targetCount);
+      // Deltas X then Y — reused scratch (this runs per tuple per glyph,
+      // per FRAME for animated variable fonts; fresh arrays here were the
+      // VF morph path's dominant allocation).
+      const dx = _scratchDeltas(0, targetCount);
+      const dy = _scratchDeltas(1, targetCount);
       cursor = decodePackedDeltas(bytes, cursor, dx);
       cursor = decodePackedDeltas(bytes, cursor, dy);
       serializedDataOff = dataBlockEnd;
@@ -187,9 +211,10 @@ export class GvarTable {
       } else if (contourEnds) {
         // Partial point list on a simple glyph: fill the un-referenced points
         // via IUP (Interpolation of Untouched Points), then apply every point.
-        const rdx = new Float64Array(totalPoints);
-        const rdy = new Float64Array(totalPoints);
-        const touched = new Uint8Array(totalPoints);
+        // Reused scratch, zero-filled per tuple (IUP requires clean slates).
+        const rdx = _scratchIup(0, totalPoints);
+        const rdy = _scratchIup(1, totalPoints);
+        const touched = _scratchIup(2, totalPoints);
         for (let k = 0; k < pointNums.length; k++) {
           const pn = pointNums[k];
           if (pn < 0 || pn >= totalPoints) continue;
@@ -276,10 +301,16 @@ function tupleScalar(axisCount, n, peak, interStart, interEnd) {
     } else {
       const lo = interStart[a];
       const hi = interEnd[a];
+      // Region validity + peak ordering per fontTools supportScalar:
+      // an out-of-order region, or one crossing zero, is IGNORED for
+      // this axis; coord exactly at peak scores 1 even when the peak
+      // sits on the region edge (peak == start or peak == end).
+      if (lo > p || p > hi) continue;
+      if (lo < 0 && hi > 0) continue;
+      if (c === p) continue;  // s *= 1
       if (c <= lo || c >= hi) return 0;
       if (c < p)      s *= (c - lo) / (p - lo);
-      else if (c > p) s *= (hi - c) / (hi - p);
-      // else c === p → s *= 1
+      else            s *= (hi - c) / (hi - p);
     }
   }
   return s;

@@ -13,18 +13,9 @@ import puppeteer from 'puppeteer';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
-const SVG_TWO_SQUARES = `
-<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-  <path d="M0,0 L40,0 L40,40 L0,40 Z" fill="#FF0000"/>
-  <path d="M20,20 L60,20 L60,60 L20,60 Z" fill="#0000FF"/>
-</svg>`;
+const SVG_TWO_SQUARES = readFileSync(new URL('../examples/smoke/pathBooleanSlice8__SVG_TWO_SQUARES.svg', import.meta.url), 'utf8');
 
-const SVG_THREE_DISJOINT = `
-<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-  <path d="M0,0 L10,0 L10,10 L0,10 Z" fill="#FF0000"/>
-  <path d="M30,30 L40,30 L40,40 L30,40 Z" fill="#00FF00"/>
-  <path d="M60,60 L70,60 L70,70 L60,70 Z" fill="#0000FF"/>
-</svg>`;
+const SVG_THREE_DISJOINT = readFileSync(new URL('../examples/smoke/pathBooleanSlice8__SVG_THREE_DISJOINT.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <script type="module">

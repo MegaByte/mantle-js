@@ -1,0 +1,1166 @@
+[
+ {
+  "file": "aaMonotonic__RING.svg",
+  "smoke": "aaMonotonicSmoke.mjs",
+  "const": "RING",
+  "generated": true
+ },
+ {
+  "file": "aaMonotonic__SVG.svg",
+  "smoke": "aaMonotonicSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "bundleHandle__SVG_BLUE.svg",
+  "smoke": "bundleHandleSmoke.mjs",
+  "const": "SVG_BLUE"
+ },
+ {
+  "file": "bundleHandle__SVG_RED.svg",
+  "smoke": "bundleHandleSmoke.mjs",
+  "const": "SVG_RED"
+ },
+ {
+  "file": "bundleHandleCache__SVG_BLUE.svg",
+  "smoke": "bundleHandleCacheSmoke.mjs",
+  "const": "SVG_BLUE"
+ },
+ {
+  "file": "bundleHandleCache__SVG_RED.svg",
+  "smoke": "bundleHandleCacheSmoke.mjs",
+  "const": "SVG_RED"
+ },
+ {
+  "file": "bundleHandleDimensions__SVG_TALL.svg",
+  "smoke": "bundleHandleDimensionsSmoke.mjs",
+  "const": "SVG_TALL"
+ },
+ {
+  "file": "bundleHandleDimensions__SVG_WIDE.svg",
+  "smoke": "bundleHandleDimensionsSmoke.mjs",
+  "const": "SVG_WIDE"
+ },
+ {
+  "file": "bundleInstanced__BLUR_SVG.svg",
+  "smoke": "bundleInstancedSmoke.mjs",
+  "const": "BLUR_SVG"
+ },
+ {
+  "file": "bundleInstanced__MASK_SVG.svg",
+  "smoke": "bundleInstancedSmoke.mjs",
+  "const": "MASK_SVG"
+ },
+ {
+  "file": "bundleInstancedTint__SIMPLE_SVG.svg",
+  "smoke": "bundleInstancedTintSmoke.mjs",
+  "const": "SIMPLE_SVG"
+ },
+ {
+  "file": "cacheLbParity__SVG.svg",
+  "smoke": "cacheLbParitySmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "channelLerp__SVG_CHANNELS.svg",
+  "smoke": "channelLerpSmoke.mjs",
+  "const": "SVG_CHANNELS"
+ },
+ {
+  "file": "clipCoverage__CLIP.svg",
+  "smoke": "clipCoverageSmoke.mjs",
+  "const": "CLIP"
+ },
+ {
+  "file": "clipCoverage__CONTENT.svg",
+  "smoke": "clipCoverageSmoke.mjs",
+  "const": "CONTENT"
+ },
+ {
+  "file": "coincidentAa__DUPE.svg",
+  "smoke": "coincidentAaSmoke.mjs",
+  "const": "DUPE"
+ },
+ {
+  "file": "coincidentAa__REF.svg",
+  "smoke": "coincidentAaSmoke.mjs",
+  "const": "REF"
+ },
+ {
+  "file": "colorMatrix__SVG_TWO_RECTS.svg",
+  "smoke": "colorMatrixSmoke.mjs",
+  "const": "SVG_TWO_RECTS"
+ },
+ {
+  "file": "colorPalette__SVG.svg",
+  "smoke": "colorPaletteSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "coverQuadBatch__SVG.svg",
+  "smoke": "coverQuadBatchSmoke.mjs",
+  "const": "SVG",
+  "generated": true
+ },
+ {
+  "file": "cssClassFill__scaleBar.svg",
+  "smoke": "cssClassFillSmoke.mjs",
+  "const": "scaleBar"
+ },
+ {
+  "file": "cuspFill__SVG.svg",
+  "smoke": "cuspFillSmoke.mjs",
+  "const": "SVG",
+  "generated": true
+ },
+ {
+  "file": "debugOverlay__SVG.svg",
+  "smoke": "debugOverlaySmoke.mjs",
+  "const": "SVG",
+  "generated": true
+ },
+ {
+  "file": "engineSwitchIndependence__SVG.svg",
+  "smoke": "engineSwitchIndependenceSmoke.mjs",
+  "const": "SVG",
+  "generated": true
+ },
+ {
+  "file": "exportFrameSvg__ART.svg",
+  "smoke": "exportFrameSvgSmoke.mjs",
+  "const": "ART"
+ },
+ {
+  "file": "exportFrameSvg__CLIPART.svg",
+  "smoke": "exportFrameSvgSmoke.mjs",
+  "const": "CLIPART"
+ },
+ {
+  "file": "exportFrameSvg__POSE_A.svg",
+  "smoke": "exportFrameSvgSmoke.mjs",
+  "const": "POSE_A"
+ },
+ {
+  "file": "exportFrameSvg__POSE_B.svg",
+  "smoke": "exportFrameSvgSmoke.mjs",
+  "const": "POSE_B"
+ },
+ {
+  "file": "exportFrameSvg__SHEET.svg",
+  "smoke": "exportFrameSvgSmoke.mjs",
+  "const": "SHEET"
+ },
+ {
+  "file": "filterBakeCache__SVG.svg",
+  "smoke": "filterBakeCacheSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "filterCache__blurSvg.svg",
+  "smoke": "filterCacheSmoke.mjs",
+  "const": "blurSvg"
+ },
+ {
+  "file": "filterCache__SVG.svg",
+  "smoke": "filterCacheSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "filterCacheHit__CARD.svg",
+  "smoke": "filterCacheHitSmoke.mjs",
+  "const": "CARD"
+ },
+ {
+  "file": "filterFrameOrigin__BLURRED.svg",
+  "smoke": "filterFrameOriginSmoke.mjs",
+  "const": "BLURRED"
+ },
+ {
+  "file": "filterFrameOrigin__FILTERED.svg",
+  "smoke": "filterFrameOriginSmoke.mjs",
+  "const": "FILTERED"
+ },
+ {
+  "file": "filterFrameOrigin__PLAIN.svg",
+  "smoke": "filterFrameOriginSmoke.mjs",
+  "const": "PLAIN"
+ },
+ {
+  "file": "filterGraphWorldScale__SVG.svg",
+  "smoke": "filterGraphWorldScaleSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "filterWorldScale__SVG.svg",
+  "smoke": "filterWorldScaleSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "groupRect__SCENE.svg",
+  "smoke": "groupRectSmoke.mjs",
+  "const": "SCENE"
+ },
+ {
+  "file": "gwnCurveRange__CLAW.svg",
+  "smoke": "gwnCurveRangeSmoke.mjs",
+  "const": "CLAW",
+  "generated": true
+ },
+ {
+  "file": "gwnCurveRange__SVG.svg",
+  "smoke": "gwnCurveRangeSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "gwnEngine__SVG.svg",
+  "smoke": "gwnEngineSmoke.mjs",
+  "const": "SVG",
+  "generated": true
+ },
+ {
+  "file": "incrementalStroke__SVG.svg",
+  "smoke": "incrementalStrokeSmoke.mjs",
+  "const": "SVG",
+  "generated": true
+ },
+ {
+  "file": "instancedBundleRenderDiff__SVG.svg",
+  "smoke": "instancedBundleRenderDiffSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "instancedFog__SVG.svg",
+  "smoke": "instancedFogSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "keepInvisibleShapes__svg_0_000.svg",
+  "smoke": "keepInvisibleShapesSmoke.mjs",
+  "const": "svg_0_000"
+ },
+ {
+  "file": "keepInvisibleShapes__svg_0_551.svg",
+  "smoke": "keepInvisibleShapesSmoke.mjs",
+  "const": "svg_0_551"
+ },
+ {
+  "file": "lbAnnulusSdf__SVG.svg",
+  "smoke": "lbAnnulusSdfSmoke.mjs",
+  "const": "SVG",
+  "generated": true
+ },
+ {
+  "file": "lbBlendParity__SVG.svg",
+  "smoke": "lbBlendParitySmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbBuilderOwnership__LINE_SVG.svg",
+  "smoke": "lbBuilderOwnershipSmoke.mjs",
+  "const": "LINE_SVG"
+ },
+ {
+  "file": "lbBuilderOwnership__RING.svg",
+  "smoke": "lbBuilderOwnershipSmoke.mjs",
+  "const": "RING",
+  "generated": true
+ },
+ {
+  "file": "lbCircleSdf__SVG.svg",
+  "smoke": "lbCircleSdfSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbClipParity__SVG.svg",
+  "smoke": "lbClipParitySmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbComposeOrder__BLOB.svg",
+  "smoke": "lbComposeOrderSmoke.mjs",
+  "const": "BLOB"
+ },
+ {
+  "file": "lbComposeOrder__MESA.svg",
+  "smoke": "lbComposeOrderSmoke.mjs",
+  "const": "MESA"
+ },
+ {
+  "file": "lbCubicOverfill__wrap_SQUIRCLE.svg",
+  "smoke": "lbCubicOverfillSmoke.mjs",
+  "const": "wrap_SQUIRCLE"
+ },
+ {
+  "file": "lbCuspHoleParity__SVG.svg",
+  "smoke": "lbCuspHoleParitySmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbDiagonalFrameParity__SVG.svg",
+  "smoke": "lbDiagonalFrameParitySmoke.mjs",
+  "const": "SVG",
+  "generated": true
+ },
+ {
+  "file": "lbEllipticalRingParity__SVG.svg",
+  "smoke": "lbEllipticalRingParitySmoke.mjs",
+  "const": "SVG",
+  "generated": true
+ },
+ {
+  "file": "lbFilterParity__SVG.svg",
+  "smoke": "lbFilterParitySmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbGpuMorph__DST.svg",
+  "smoke": "lbGpuMorphSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "lbGpuMorph__SRC.svg",
+  "smoke": "lbGpuMorphSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "lbGradientBatch__sheet_16_linear.svg",
+  "smoke": "lbGradientBatchSmoke.mjs",
+  "const": "sheet_16_linear"
+ },
+ {
+  "file": "lbGradientBatch__sheet_16_radial.svg",
+  "smoke": "lbGradientBatchSmoke.mjs",
+  "const": "sheet_16_radial"
+ },
+ {
+  "file": "lbGradientParity__SVG.svg",
+  "smoke": "lbGradientParitySmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbHandleInstancedParity__SVG.svg",
+  "smoke": "lbHandleInstancedParitySmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbHoleParity__SVG.svg",
+  "smoke": "lbHoleParitySmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbLensParity__SVG.svg",
+  "smoke": "lbLensParitySmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbLoopParity__svg_evenodd.svg",
+  "smoke": "lbLoopParitySmoke.mjs",
+  "const": "svg_evenodd"
+ },
+ {
+  "file": "lbLoopParity__svg_nonzero.svg",
+  "smoke": "lbLoopParitySmoke.mjs",
+  "const": "svg_nonzero"
+ },
+ {
+  "file": "lbMaskParity__SVG.svg",
+  "smoke": "lbMaskParitySmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbMemBudget__SVG.svg",
+  "smoke": "lbMemBudgetSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbPerShapeFallbackParity__SVG.svg",
+  "smoke": "lbPerShapeFallbackParitySmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbQuadSeam__SVG.svg",
+  "smoke": "lbQuadSeamSmoke.mjs",
+  "const": "SVG",
+  "generated": true
+ },
+ {
+  "file": "lbRecolorParity__SVG.svg",
+  "smoke": "lbRecolorParitySmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbRquadSeam__SVG.svg",
+  "smoke": "lbRquadSeamSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbSentinelDeferral__SVG_DISJOINT.svg",
+  "smoke": "lbSentinelDeferralSmoke.mjs",
+  "const": "SVG_DISJOINT",
+  "generated": true
+ },
+ {
+  "file": "lbSentinelDeferral__SVG_OVERLAP.svg",
+  "smoke": "lbSentinelDeferralSmoke.mjs",
+  "const": "SVG_OVERLAP",
+  "generated": true
+ },
+ {
+  "file": "lbSplitRoute__SVG.svg",
+  "smoke": "lbSplitRouteSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbStrokeParity__SVG.svg",
+  "smoke": "lbStrokeParitySmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbTransformOverrideParity__SVG.svg",
+  "smoke": "lbTransformOverrideParitySmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbTranslucentOverlapParity__SVG.svg",
+  "smoke": "lbTranslucentOverlapParitySmoke.mjs",
+  "const": "SVG",
+  "generated": true
+ },
+ {
+  "file": "lbTranslucentParity__SVG.svg",
+  "smoke": "lbTranslucentParitySmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbTranslucentSolid__QUAD_SVG.svg",
+  "smoke": "lbTranslucentSolidSmoke.mjs",
+  "const": "QUAD_SVG"
+ },
+ {
+  "file": "lbTranslucentSolid__SVG.svg",
+  "smoke": "lbTranslucentSolidSmoke.mjs",
+  "const": "SVG",
+  "generated": true
+ },
+ {
+  "file": "lbTranslucentStripBlend__SVG.svg",
+  "smoke": "lbTranslucentStripBlendSmoke.mjs",
+  "const": "SVG",
+  "generated": true
+ },
+ {
+  "file": "leanShaderRenderDiff__SVG.svg",
+  "smoke": "leanShaderRenderDiffSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "loopBlinnMorph__DST.svg",
+  "smoke": "loopBlinnMorphSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "loopBlinnMorph__SRC.svg",
+  "smoke": "loopBlinnMorphSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "maskAnim__SVG.svg",
+  "smoke": "maskAnimSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "maskAnimInline__SHEET.svg",
+  "smoke": "maskAnimInlineSmoke.mjs",
+  "const": "SHEET"
+ },
+ {
+  "file": "maskCache__SVG.svg",
+  "smoke": "maskCacheSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "morphClipRoute__DST.svg",
+  "smoke": "morphClipRouteSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "morphClipRoute__SRC.svg",
+  "smoke": "morphClipRouteSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "morphComposedColorRoute__DST.svg",
+  "smoke": "morphComposedColorRouteSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "morphComposedColorRoute__SRC.svg",
+  "smoke": "morphComposedColorRouteSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "morphDashMultiSubpathRoute__DST.svg",
+  "smoke": "morphDashMultiSubpathRouteSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "morphDashMultiSubpathRoute__SRC.svg",
+  "smoke": "morphDashMultiSubpathRouteSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "morphFilterRoute__DST.svg",
+  "smoke": "morphFilterRouteSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "morphFilterRoute__SRC.svg",
+  "smoke": "morphFilterRouteSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "morphGpuCurveLerp__DST.svg",
+  "smoke": "morphGpuCurveLerpSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "morphGpuCurveLerp__SRC.svg",
+  "smoke": "morphGpuCurveLerpSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "morphGradientRoute__DST.svg",
+  "smoke": "morphGradientRouteSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "morphGradientRoute__SRC.svg",
+  "smoke": "morphGradientRouteSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "morphIntervalSplit__FLIP_DST.svg",
+  "smoke": "morphIntervalSplitSmoke.mjs",
+  "const": "FLIP_DST"
+ },
+ {
+  "file": "morphIntervalSplit__FLIP_SRC.svg",
+  "smoke": "morphIntervalSplitSmoke.mjs",
+  "const": "FLIP_SRC"
+ },
+ {
+  "file": "morphIntervalSplit__STABLE_DST.svg",
+  "smoke": "morphIntervalSplitSmoke.mjs",
+  "const": "STABLE_DST"
+ },
+ {
+  "file": "morphIntervalSplit__STABLE_SRC.svg",
+  "smoke": "morphIntervalSplitSmoke.mjs",
+  "const": "STABLE_SRC"
+ },
+ {
+  "file": "morphMaskRoute__DST.svg",
+  "smoke": "morphMaskRouteSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "morphMaskRoute__SRC.svg",
+  "smoke": "morphMaskRouteSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "morphOcclusionCull__svg_COLLAPSE_B.svg",
+  "smoke": "morphOcclusionCullSmoke.mjs",
+  "const": "svg_COLLAPSE_B"
+ },
+ {
+  "file": "morphOcclusionCull__svg_COVER_BIG.svg",
+  "smoke": "morphOcclusionCullSmoke.mjs",
+  "const": "svg_COVER_BIG"
+ },
+ {
+  "file": "morphOcclusionCull__svg_COVER_BIG2.svg",
+  "smoke": "morphOcclusionCullSmoke.mjs",
+  "const": "svg_COVER_BIG2"
+ },
+ {
+  "file": "morphOcclusionCull__svg_COVER_TINY.svg",
+  "smoke": "morphOcclusionCullSmoke.mjs",
+  "const": "svg_COVER_TINY"
+ },
+ {
+  "file": "morphOccupancyGuard__mk_40.svg",
+  "smoke": "morphOccupancyGuardSmoke.mjs",
+  "const": "mk_40"
+ },
+ {
+  "file": "morphOccupancyGuard__mk_8.svg",
+  "smoke": "morphOccupancyGuardSmoke.mjs",
+  "const": "mk_8"
+ },
+ {
+  "file": "morphOpenStrokeRoute__DST.svg",
+  "smoke": "morphOpenStrokeRouteSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "morphOpenStrokeRoute__SRC.svg",
+  "smoke": "morphOpenStrokeRouteSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "morphRoute__ring_70_70_35_35.svg",
+  "smoke": "morphRouteSmoke.mjs",
+  "const": "ring_70_70_35_35"
+ },
+ {
+  "file": "morphRoute__ring_80_50_40_25.svg",
+  "smoke": "morphRouteSmoke.mjs",
+  "const": "ring_80_50_40_25"
+ },
+ {
+  "file": "morphStrokeBevelRoute__svg_DSTd_J.svg",
+  "smoke": "morphStrokeBevelRouteSmoke.mjs",
+  "const": "svg_DSTd_J"
+ },
+ {
+  "file": "morphStrokeBevelRoute__svg_SRCd_J.svg",
+  "smoke": "morphStrokeBevelRouteSmoke.mjs",
+  "const": "svg_SRCd_J"
+ },
+ {
+  "file": "morphStrokeCapRoute__svg_DSTd_C.svg",
+  "smoke": "morphStrokeCapRouteSmoke.mjs",
+  "const": "svg_DSTd_C"
+ },
+ {
+  "file": "morphStrokeCapRoute__svg_SRCd_C.svg",
+  "smoke": "morphStrokeCapRouteSmoke.mjs",
+  "const": "svg_SRCd_C"
+ },
+ {
+  "file": "morphStrokeGradientRoute__DST.svg",
+  "smoke": "morphStrokeGradientRouteSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "morphStrokeGradientRoute__SRC.svg",
+  "smoke": "morphStrokeGradientRouteSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "morphStrokeNonScalingRoute__DST.svg",
+  "smoke": "morphStrokeNonScalingRouteSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "morphStrokeNonScalingRoute__SRC.svg",
+  "smoke": "morphStrokeNonScalingRouteSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "morphStrokeRoute__DST.svg",
+  "smoke": "morphStrokeRouteSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "morphStrokeRoute__SRC.svg",
+  "smoke": "morphStrokeRouteSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "morphTranslucentRoute__DST.svg",
+  "smoke": "morphTranslucentRouteSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "morphTranslucentRoute__SRC.svg",
+  "smoke": "morphTranslucentRouteSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "nativeBlendMode__CYAN.svg",
+  "smoke": "nativeBlendModeSmoke.mjs",
+  "const": "CYAN"
+ },
+ {
+  "file": "nativeBlendMode__MAGENTA.svg",
+  "smoke": "nativeBlendModeSmoke.mjs",
+  "const": "MAGENTA"
+ },
+ {
+  "file": "nativeClipDefLifecycle__CLIP.svg",
+  "smoke": "nativeClipDefLifecycleSmoke.mjs",
+  "const": "CLIP"
+ },
+ {
+  "file": "nativeClipDefLifecycle__CONTENT.svg",
+  "smoke": "nativeClipDefLifecycleSmoke.mjs",
+  "const": "CONTENT"
+ },
+ {
+  "file": "nativeDefIdCollision__A.svg",
+  "smoke": "nativeDefIdCollisionSmoke.mjs",
+  "const": "A"
+ },
+ {
+  "file": "nativeDefIdCollision__B.svg",
+  "smoke": "nativeDefIdCollisionSmoke.mjs",
+  "const": "B"
+ },
+ {
+  "file": "nativeDstOnlyMorph__DST.svg",
+  "smoke": "nativeDstOnlyMorphSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "nativeDstOnlyMorph__SRC.svg",
+  "smoke": "nativeDstOnlyMorphSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "nativeFallback__ART.svg",
+  "smoke": "nativeFallbackSmoke.mjs",
+  "const": "ART"
+ },
+ {
+  "file": "nativeFallback__CLIPART.svg",
+  "smoke": "nativeFallbackSmoke.mjs",
+  "const": "CLIPART"
+ },
+ {
+  "file": "nativeFallback__SHEET.svg",
+  "smoke": "nativeFallbackSmoke.mjs",
+  "const": "SHEET"
+ },
+ {
+  "file": "nativeIdlessMatchedMorph__DST.svg",
+  "smoke": "nativeIdlessMatchedMorphSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "nativeIdlessMatchedMorph__SRC.svg",
+  "smoke": "nativeIdlessMatchedMorphSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "nativeInstancedRecolor__WHITE.svg",
+  "smoke": "nativeInstancedRecolorSmoke.mjs",
+  "const": "WHITE"
+ },
+ {
+  "file": "nativeMaskedShapeIndex__SVG.svg",
+  "smoke": "nativeMaskedShapeIndexSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "nativeMaskGeometryMorph__pose_12.svg",
+  "smoke": "nativeMaskGeometryMorphSmoke.mjs",
+  "const": "pose_12"
+ },
+ {
+  "file": "nativeMaskGeometryMorph__pose_52.svg",
+  "smoke": "nativeMaskGeometryMorphSmoke.mjs",
+  "const": "pose_52"
+ },
+ {
+  "file": "nativeMorphAutoApply__pose_2.svg",
+  "smoke": "nativeMorphAutoApplySmoke.mjs",
+  "const": "pose_2"
+ },
+ {
+  "file": "nativeMorphAutoApply__pose_20.svg",
+  "smoke": "nativeMorphAutoApplySmoke.mjs",
+  "const": "pose_20"
+ },
+ {
+  "file": "nativeMorphInterp__SHEET.svg",
+  "smoke": "nativeMorphInterpSmoke.mjs",
+  "const": "SHEET"
+ },
+ {
+  "file": "nativeMorphPerf__PREFAB.svg",
+  "smoke": "nativeMorphPerfSmoke.mjs",
+  "const": "PREFAB"
+ },
+ {
+  "file": "nativeRecolor__SVG.svg",
+  "smoke": "nativeRecolorSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "nativeReconciler__PREFAB.svg",
+  "smoke": "nativeReconcilerSmoke.mjs",
+  "const": "PREFAB"
+ },
+ {
+  "file": "nativeStationaryClip__CONTENT.svg",
+  "smoke": "nativeStationaryClipSmoke.mjs",
+  "const": "CONTENT"
+ },
+ {
+  "file": "nativeTextMaskMorph__pose_2.svg",
+  "smoke": "nativeTextMaskMorphSmoke.mjs",
+  "const": "pose_2"
+ },
+ {
+  "file": "nativeTextMaskMorph__pose_20.svg",
+  "smoke": "nativeTextMaskMorphSmoke.mjs",
+  "const": "pose_20"
+ },
+ {
+  "file": "nativeViewportSpace__PREFAB.svg",
+  "smoke": "nativeViewportSpaceSmoke.mjs",
+  "const": "PREFAB"
+ },
+ {
+  "file": "nineSliceFilter__FILT.svg",
+  "smoke": "nineSliceFilterSmoke.mjs",
+  "const": "FILT"
+ },
+ {
+  "file": "nineSliceFilter__PLAIN.svg",
+  "smoke": "nineSliceFilterSmoke.mjs",
+  "const": "PLAIN"
+ },
+ {
+  "file": "nineSliceInstance__SVG.svg",
+  "smoke": "nineSliceInstanceSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "noAaStrokeCover__grid_N_0_0.svg",
+  "smoke": "noAaStrokeCoverSmoke.mjs",
+  "const": "grid_N_0_0"
+ },
+ {
+  "file": "noAaStrokeCover__grid_N_8_0_cubicRing.svg",
+  "smoke": "noAaStrokeCoverSmoke.mjs",
+  "const": "grid_N_8_0_cubicRing"
+ },
+ {
+  "file": "noAaStrokeCover__grid_N_8_0.svg",
+  "smoke": "noAaStrokeCoverSmoke.mjs",
+  "const": "grid_N_8_0"
+ },
+ {
+  "file": "noAaStrokeCover__grid_N_8_20_8.svg",
+  "smoke": "noAaStrokeCoverSmoke.mjs",
+  "const": "grid_N_8_20_8"
+ },
+ {
+  "file": "occlusionCull__NOT_COVERED.svg",
+  "smoke": "occlusionCullSmoke.mjs",
+  "const": "NOT_COVERED"
+ },
+ {
+  "file": "occlusionCull__SVG.svg",
+  "smoke": "occlusionCullSmoke.mjs",
+  "const": "SVG",
+  "generated": true
+ },
+ {
+  "file": "occlusionCullOverride__SVG.svg",
+  "smoke": "occlusionCullOverrideSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "occupancyAsync__SVG.svg",
+  "smoke": "occupancyAsyncSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "occupancyImport__svg.svg",
+  "smoke": "occupancyImportSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "occupancyRenderDiff__SVG.svg",
+  "smoke": "occupancyRenderDiffSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "optParity__BLURRED.svg",
+  "smoke": "optParitySmoke.mjs",
+  "const": "BLURRED"
+ },
+ {
+  "file": "optParity__CARD.svg",
+  "smoke": "optParitySmoke.mjs",
+  "const": "CARD"
+ },
+ {
+  "file": "optParity__CLIP.svg",
+  "smoke": "optParitySmoke.mjs",
+  "const": "CLIP"
+ },
+ {
+  "file": "optParity__SHAPES.svg",
+  "smoke": "optParitySmoke.mjs",
+  "const": "SHAPES"
+ },
+ {
+  "file": "optParity__STROKED.svg",
+  "smoke": "optParitySmoke.mjs",
+  "const": "STROKED"
+ },
+ {
+  "file": "overrideDirtyBand__SVG.svg",
+  "smoke": "overrideDirtyBandSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "overrideVisibilityFade__SVG.svg",
+  "smoke": "overrideVisibilityFadeSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "pathBooleanSlice10__SVG.svg",
+  "smoke": "pathBooleanSlice10Smoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "pathBooleanSlice8__SVG_THREE_DISJOINT.svg",
+  "smoke": "pathBooleanSlice8Smoke.mjs",
+  "const": "SVG_THREE_DISJOINT"
+ },
+ {
+  "file": "pathBooleanSlice8__SVG_TWO_SQUARES.svg",
+  "smoke": "pathBooleanSlice8Smoke.mjs",
+  "const": "SVG_TWO_SQUARES"
+ },
+ {
+  "file": "patternTransform__CONTROL.svg",
+  "smoke": "patternTransformSmoke.mjs",
+  "const": "CONTROL"
+ },
+ {
+  "file": "patternTransform__ROTATED.svg",
+  "smoke": "patternTransformSmoke.mjs",
+  "const": "ROTATED"
+ },
+ {
+  "file": "rectRxDropShadowRender__A.svg",
+  "smoke": "rectRxDropShadowRenderSmoke.mjs",
+  "const": "A"
+ },
+ {
+  "file": "rectRxDropShadowRender__B.svg",
+  "smoke": "rectRxDropShadowRenderSmoke.mjs",
+  "const": "B"
+ },
+ {
+  "file": "rectRxDropShadowRender__D.svg",
+  "smoke": "rectRxDropShadowRenderSmoke.mjs",
+  "const": "D"
+ },
+ {
+  "file": "rendererReadyBaseline__SVG.svg",
+  "smoke": "rendererReadyBaselineSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "resolutionScale__SCENE.svg",
+  "smoke": "resolutionScaleSmoke.mjs",
+  "const": "SCENE"
+ },
+ {
+  "file": "shaderBuild__SVG.svg",
+  "smoke": "shaderBuildSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "shapeAnimationMaskWipeRepro__DST.svg",
+  "smoke": "shapeAnimationMaskWipeRepro.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "shapeAnimationMaskWipeRepro__SRC.svg",
+  "smoke": "shapeAnimationMaskWipeRepro.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "shapeAnimationMultiCurveDiag__DST_SVG.svg",
+  "smoke": "shapeAnimationMultiCurveDiagSmoke.mjs",
+  "const": "DST_SVG"
+ },
+ {
+  "file": "shapeAnimationMultiCurveDiag__SRC_SVG.svg",
+  "smoke": "shapeAnimationMultiCurveDiagSmoke.mjs",
+  "const": "SRC_SVG"
+ },
+ {
+  "file": "shapeAnimationMultiCurveRepro__DST_SVG.svg",
+  "smoke": "shapeAnimationMultiCurveReproSmoke.mjs",
+  "const": "DST_SVG"
+ },
+ {
+  "file": "shapeAnimationMultiCurveRepro__SRC_SVG.svg",
+  "smoke": "shapeAnimationMultiCurveReproSmoke.mjs",
+  "const": "SRC_SVG"
+ },
+ {
+  "file": "shapeAnimationVisual__DST_SVG.svg",
+  "smoke": "shapeAnimationVisualSmoke.mjs",
+  "const": "DST_SVG"
+ },
+ {
+  "file": "shapeAnimationVisual__SRC_SVG.svg",
+  "smoke": "shapeAnimationVisualSmoke.mjs",
+  "const": "SRC_SVG"
+ },
+ {
+  "file": "shapeMorphMaskFilter__POSE_A.svg",
+  "smoke": "shapeMorphMaskFilterSmoke.mjs",
+  "const": "POSE_A"
+ },
+ {
+  "file": "shapeMorphMaskFilter__POSE_B.svg",
+  "smoke": "shapeMorphMaskFilterSmoke.mjs",
+  "const": "POSE_B"
+ },
+ {
+  "file": "sharedGroupCache__SVG_GREEN.svg",
+  "smoke": "sharedGroupCacheSmoke.mjs",
+  "const": "SVG_GREEN"
+ },
+ {
+  "file": "slugQuadScale__svg_N_SS.svg",
+  "smoke": "slugQuadScaleSmoke.mjs",
+  "const": "svg_N_SS"
+ },
+ {
+  "file": "slugQuadScale__svg_N.svg",
+  "smoke": "slugQuadScaleSmoke.mjs",
+  "const": "svg_N"
+ },
+ {
+  "file": "spriteMorph__SHEET.svg",
+  "smoke": "spriteMorphSmoke.mjs",
+  "const": "SHEET"
+ },
+ {
+  "file": "spriteMorph__SHEET2.svg",
+  "smoke": "spriteMorphSmoke.mjs",
+  "const": "SHEET2"
+ },
+ {
+  "file": "spriteMorphClip__SHEET.svg",
+  "smoke": "spriteMorphClipSmoke.mjs",
+  "const": "SHEET"
+ },
+ {
+  "file": "spriteRangeRoute__SHEET.svg",
+  "smoke": "spriteRangeRouteSmoke.mjs",
+  "const": "SHEET"
+ },
+ {
+  "file": "spriteSheet__SHEET.svg",
+  "smoke": "spriteSheetSmoke.mjs",
+  "const": "SHEET"
+ },
+ {
+  "file": "spriteTimeline__SHEET.svg",
+  "smoke": "spriteTimelineSmoke.mjs",
+  "const": "SHEET"
+ },
+ {
+  "file": "staticCache__SVG.svg",
+  "smoke": "staticCacheSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "staticCacheFilter__BLUR.svg",
+  "smoke": "staticCacheFilterSmoke.mjs",
+  "const": "BLUR"
+ },
+ {
+  "file": "svgAuto__svg_rect_width_100_height_10.svg",
+  "smoke": "svgAutoSmoke.mjs",
+  "const": "svg_rect_width_100_height_10"
+ },
+ {
+  "file": "svgAuto__svg_rect_width_100_height_102.svg",
+  "smoke": "svgAutoSmoke.mjs",
+  "const": "svg_rect_width_100_height_10"
+ },
+ {
+  "file": "svgTextDecoration__both.svg",
+  "smoke": "svgTextDecorationSmoke.mjs",
+  "const": "both"
+ },
+ {
+  "file": "svgTextDecoration__inherited.svg",
+  "smoke": "svgTextDecorationSmoke.mjs",
+  "const": "inherited"
+ },
+ {
+  "file": "svgTextDecoration__noneOnGrandchild.svg",
+  "smoke": "svgTextDecorationSmoke.mjs",
+  "const": "noneOnGrandchild"
+ },
+ {
+  "file": "svgTextDecoration__plain.svg",
+  "smoke": "svgTextDecorationSmoke.mjs",
+  "const": "plain"
+ },
+ {
+  "file": "svgTextDecoration__underlined.svg",
+  "smoke": "svgTextDecorationSmoke.mjs",
+  "const": "underlined"
+ },
+ {
+  "file": "svgTextSourceExpansion__SVG.svg",
+  "smoke": "svgTextSourceExpansionSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "svgTextSourceExpansion__SVG2.svg",
+  "smoke": "svgTextSourceExpansionSmoke.mjs",
+  "const": "SVG2"
+ },
+ {
+  "file": "svgTextSynthVertical__bold.svg",
+  "smoke": "svgTextSynthVerticalSmoke.mjs",
+  "const": "bold"
+ },
+ {
+  "file": "svgTextSynthVertical__horizontal.svg",
+  "smoke": "svgTextSynthVerticalSmoke.mjs",
+  "const": "horizontal"
+ },
+ {
+  "file": "svgTextSynthVertical__italic.svg",
+  "smoke": "svgTextSynthVerticalSmoke.mjs",
+  "const": "italic"
+ },
+ {
+  "file": "svgTextSynthVertical__plain.svg",
+  "smoke": "svgTextSynthVerticalSmoke.mjs",
+  "const": "plain"
+ },
+ {
+  "file": "svgTextSynthVertical__vertical.svg",
+  "smoke": "svgTextSynthVerticalSmoke.mjs",
+  "const": "vertical"
+ },
+ {
+  "file": "viewBoxOverhangSibling__CLIPPED.svg",
+  "smoke": "viewBoxOverhangSiblingSmoke.mjs",
+  "const": "CLIPPED"
+ },
+ {
+  "file": "viewBoxOverhangSibling__CONTROL.svg",
+  "smoke": "viewBoxOverhangSiblingSmoke.mjs",
+  "const": "CONTROL"
+ },
+ {
+  "file": "viewBoxOverhangSibling__OVERHANG.svg",
+  "smoke": "viewBoxOverhangSiblingSmoke.mjs",
+  "const": "OVERHANG"
+ },
+ {
+  "file": "zOrderSubmit__BLUE.svg",
+  "smoke": "zOrderSubmitSmoke.mjs",
+  "const": "BLUE"
+ }
+]

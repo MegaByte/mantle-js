@@ -24,11 +24,7 @@ let failures = 0;
 const ok = m => console.log('ok', m);
 const fail = m => { failures++; console.error('FAIL', m); };
 
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
-  <path d="M30 100 C30 30 100 20 130 40 C180 60 180 150 120 175 C70 195 30 160 30 100 Z" fill="#c83232"/>
-  <rect x="120" y="20" width="60" height="60" rx="12" fill="#3296c8"/>
-  <circle cx="60" cy="150" r="28" fill="#22aa44"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/instancedBundleRenderDiff__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="256" height="256"></canvas>

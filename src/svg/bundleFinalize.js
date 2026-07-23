@@ -56,7 +56,7 @@ import { packMetaBody } from './meta.js';
 import { buildOccupancyGrid } from './occupancy.js';
 import { decodeImageHref, preloadImages, downscaleRgba8 } from './image.js';
 import { makeBuildContext, pickBandsXY, emitShape } from './buildContext.js';
-import { unionPaths } from './pathBoolean/union.js';
+import { unionContours } from './pathBoolean/union.js';
 import { runImportWalk } from './importWalk.js';
 import { buildFilterSections } from './importFilters.js';
 
@@ -64,9 +64,32 @@ import { buildFilterSections } from './importFilters.js';
 export const BUNDLE_FLAG_HYBRID_MESH_IN_CGEOM = 1;
 export const BUNDLE_FLAG_HYBRID_MESH_CHUNKED = 2;
 export const BUNDLE_FLAG_WIDE_BAND_HEADERS = 4;
+// Each H band lists two adjacent stripes; the AAC walker must step b += 2.
+export const BUNDLE_FLAG_PAIR_BANDS = 8;
+// No V bands: AAC never reads them, but Slug's vertical ray then degenerates to an
+// O(segments-in-shape) walk. The
+// draw-time engine selector must never route such a bundle to Slug.
+export const BUNDLE_FLAG_NO_VBANDS = 16;
 export const TEXTURE_WIDTH = 4096;
 export const META_FLOATS_V3 = 48;  // 12 texels: 9 + image em-rect + atlas slot + primitive fast-path
 export const COVER_QUAD_STRIDE = 12;
+
+// A fill's implicit closing edge is not stroked for an open SVG subpath. The
+// no-AA route therefore requires every geometric subpath to return to its
+// start; exact Z provenance is no longer available after path parsing.
+function hasClosedSubpaths(segs) {
+  if (!segs || !segs.length) return false;
+  let first = segStart(segs[0]), prev = segEnd(segs[0]);
+  for (let i = 1; i < segs.length; i++) {
+    const start = segStart(segs[i]);
+    if (Math.abs(prev[0] - start[0]) > 1e-4 || Math.abs(prev[1] - start[1]) > 1e-4) {
+      if (Math.abs(prev[0] - first[0]) > 1e-4 || Math.abs(prev[1] - first[1]) > 1e-4) return false;
+      first = start;
+    }
+    prev = segEnd(segs[i]);
+  }
+  return Math.abs(prev[0] - first[0]) <= 1e-4 && Math.abs(prev[1] - first[1]) <= 1e-4;
+}
 
 export async function finalizeBundle(root, opts, defaultFill, defaultStroke, defaultStrokeW, preserveViewport, ctx, walk, walkCtx) {
   // Build cover quads + meta shells: each shape can produce a fill
@@ -75,41 +98,8 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
   // importSvgInner so vector-pattern claim can use them during the walk.)
   // nextGid lives on ctx so multiple importSvg calls sharing one
   // ctx (e.g. textRun's SVG-in-OT fan-out) allocate distinct gids.
-  // Continuous-NPOT band picker. The shader's band-location calc wraps
-  // at a 4096-texel row regardless of POT, so any band count works as
-  // long as writer + shader agree on the offset. Pick H and V independently from per-axis
-  // segment density — a wide-and-thin shape doesn't need 64 H bands.
-  // Coefficient k=32 → target ≈ sqrt(32·N). Per-band-walk cost in the
-  // shader is O(segs/band); per-pixel band-header read is O(1), so
-  // over-provisioning bands is cheap until ctx.bandBuf footprint starts
-  // hurting cache. k=32 is the knee: higher k grows the bundle ~10% per
-  // step for negligible gain.
-  function pickBandsAxis(densitySegCount) {
-    const target = Math.round(Math.sqrt(Math.max(1, densitySegCount) * 32));
-    return Math.max(4, Math.min(96, target));
-  }
-  // Per-axis density: count of segments whose extent on that axis is
-  // non-trivial (filters out near-axis-aligned slivers that don't
-  // benefit from finer bands on the perpendicular axis).
-  function pickBandsXY(segs, bbox) {
-    const w = Math.max(1e-6, bbox[2] - bbox[0]);
-    const h = Math.max(1e-6, bbox[3] - bbox[1]);
-    let nx = 0, ny = 0;
-    const sb4 = [0, 0, 0, 0];
-    for (const s of segs) {
-      segBboxInto(s, sb4, 0);
-      // A segment "contributes to H bands" when it spans some Y range
-      // — i.e. a horizontal ray could cross it. Same vice-versa for V.
-      if (sb4[3] - sb4[1] > h * 0.005) nx++;
-      if (sb4[2] - sb4[0] > w * 0.005) ny++;
-    }
-    // Fallback: if filter dropped everything, use raw count.
-    if (nx === 0) nx = segs.length;
-    if (ny === 0) ny = segs.length;
-    // bandsY = number of H bands (slice along Y) → driven by H-crossing
-    // segments (nx). bandsX = number of V bands (slice along X) → ny.
-    return { bandsX: pickBandsAxis(ny), bandsY: pickBandsAxis(nx) };
-  }
+  // NOTE: pickBandsXY / pickBandsAxis intentionally live in buildContext.js and
+  // are imported above — do not redefine them locally.
 
   // Perimeter-outline silhouette: opt-in via opts.computeSilhouette.
   // Runs the path-boolean union over every filled shape collected so
@@ -120,8 +110,25 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
   // chunk-emission pipeline below (mesh, curves, bands, meta) — no
   // separate codepath needed.
   //
-  // Placeholder color/width: opts.outlineColor (default white) and
-  // opts.outlineWidth (default 4 em-units). Per-instance recoloring
+  // opts.outlineColor (default white), opts.outlineWidth (default 4 em-units),
+  // opts.outlineJoin / opts.outlineCap ('round' | 'miter' | 'bevel' | 'butt' |
+  // 'square'; both default to ROUND).
+  //
+  // NOT usable on a MORPHING shape. The silhouette is baked per bundle, and
+  // its structure — contour count, and segment count/type per contour —
+  // depends on how the parts happen to overlap at that pose, so two keyframes
+  // of the same animation generally disagree (a rotating train: 24 contours /
+  // 202 segs at one heading, 28 / 211 at the next) and buildMorphStroke's
+  // structure check rejects the pair. That is not a gap to close: the union is
+  // a topology-changing, nonlinear function of the geometry, so the correct
+  // silhouette at an in-between pose is NOT the interpolation of the endpoint
+  // silhouettes, and no amount of structure-matching would make it one. For a
+  // morphing shape, inflate each part instead (stroke every path outward by W
+  // with round joins and paint the set behind the art) — dilation distributes
+  // over union, so ⋃ dilate(Pᵢ,W) == dilate(⋃ Pᵢ, W) exactly, and it morphs
+  // because it is the same path set.
+  //
+  // Per-instance recoloring
   // at draw time uses the existing OverrideTable mechanism (set
   // absolute stroke color on the synthetic shape's meta row via
   // bundle.shapeIds[0]). Width is baked in.
@@ -134,10 +141,23 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
       filledShapes.push({ segs: sd.segs, fillRule: sd.fillRule || 'nonzero' });
     }
     if (filledShapes.length > 0) {
-      const silSegs = unionPaths(filledShapes);
+      // Contour-wise, so the degenerate zero-area slivers that abutting or
+      // coincident input edges throw off get dropped: a thick stroke turns
+      // each one into a visible lens. The pieces stay concatenated in one
+      // segs list — the stroke and fill pipelines re-split on discontinuity,
+      // so a multi-piece silhouette (a train and its caboose; an outline with
+      // a hole) already works.
+      const silSegs = unionContours(filledShapes).flat();
       if (silSegs.length > 0) {
         const silColor = opts.outlineColor || [1, 1, 1, 1];
         const silWidth = (opts.outlineWidth != null) ? opts.outlineWidth : 4;
+        // ROUND by default. A silhouette follows the art's corners, and at
+        // outline widths (which are thick — that's the point) a MITER join
+        // shoots a spike off every sharp one.
+        const silJoin = (opts.outlineJoin != null)
+          ? (JOIN_ENUM[opts.outlineJoin] ?? JOIN_ROUND) : JOIN_ROUND;
+        const silCap = (opts.outlineCap != null)
+          ? (CAP_ENUM[opts.outlineCap] ?? CAP_ROUND) : CAP_ROUND;
         // Synthetic stroke-only shape. Field set mirrors what a normal
         // <path stroke="..." stroke-width="..." fill="none"> would
         // produce after parsing.
@@ -148,8 +168,8 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
           strokeRgba: silColor,
           sw: silWidth,
           fillRule: 'nonzero',
-          capStyle: 0,                      // CAP_BUTT
-          joinStyle: 0,                     // JOIN_MITER
+          capStyle: silCap,
+          joinStyle: silJoin,
           miterLimit: 4,
           flagsShape: 0,
           shapeId: '__silhouette__',
@@ -193,12 +213,78 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
     }
   }
 
+  // Document content extent (union of path bboxes) — the reference area for the
+  // occupancy grid's eligibility gate. The interior-skip only fires when a cell
+  // clears the draw-time cellSize ≥ 1.5·emPerPx gate, so a shape drawn small
+  // never benefits; area-fraction of the content is our import-time proxy for
+  // "will be drawn large enough". Only shapes over the fraction build a grid.
+  let _dX0 = Infinity, _dY0 = Infinity, _dX1 = -Infinity, _dY1 = -Infinity;
+  for (let i = 0; i < shapeBbRaw.length; i++) {
+    const bb = shapeBbRaw[i]; if (!bb) continue;
+    if (bb[0] < _dX0) _dX0 = bb[0]; if (bb[1] < _dY0) _dY0 = bb[1];
+    if (bb[2] > _dX1) _dX1 = bb[2]; if (bb[3] > _dY1) _dY1 = bb[3];
+  }
+  const _docArea = (_dX1 > _dX0 && _dY1 > _dY0) ? (_dX1 - _dX0) * (_dY1 - _dY0) : 0;
+  // opts.occupancyGrid: undefined/true → ON (default); false → OFF; object →
+  // ON with tuning ({grid, minInteriorFrac, minBboxAreaFrac}). minBboxAreaFrac
+  // defaults to 2% of content area, excluding small shapes whose grids provide
+  // little render benefit.
+  const _occOpts = (opts.occupancyGrid && typeof opts.occupancyGrid === 'object') ? opts.occupancyGrid : undefined;
+  const _occOn = opts.occupancyGrid !== false;
+  const _occMinAreaFrac = (_occOpts && _occOpts.minBboxAreaFrac != null) ? _occOpts.minBboxAreaFrac : 0.02;
+  const _occAreaOk = (bb) => {
+    if (!_occOn || _docArea <= 0 || !bb) return false;
+    const a = (bb[2] - bb[0]) * (bb[3] - bb[1]);
+    return a >= _occMinAreaFrac * _docArea;
+  };
+  // Default-on builds the grid ASYNC: import reserves a zeroed cell region + the
+  // descriptor, and an idle pass fills it AFTER first draw. The grid is purely
+  // additive (occSkip only ever turns a walk that would return 1.0 into one
+  // fetch), so the first frame renders correct-but-unaccelerated and speeds up
+  // once the bits land — no visible change, zero load stall. An explicit object
+  // opt-in ({grid,…}) builds SYNC instead, so `sections.curves` carries the bits
+  // immediately (predictable for tests / non-GL consumers like the C# exporter).
+  const _occAsync = _occOn && !_occOpts;
+  const _occG = (_occOpts && _occOpts.grid) || 24;
+
   // shape-index → (first, last) meta row this shape produced. The
   // visible-pattern stamp uses these to translate ctx.vecPatternsUsed[i]'s
   // recorded (firstShapeIdx, lastShapeIdx) into the contiguous meta-row
   // span for atlasSlot.xy.
   const shapeToFirstMeta = new Array(ctx.shapesData.length).fill(-1);
   const shapeToLastMeta  = new Array(ctx.shapesData.length).fill(-1);
+
+  // No-AA eligibility is bundle-wide because one fill program draws every row.
+  // Restrict it to plain closed shapes whose later opaque stroke provably hides
+  // the fill edge. Effects/layers and non-scaling strokes use separate geometry
+  // or scale rules and stay on an AA engine.
+  let _noAaAnyFill = false, _noAaAllCovered = true, _noAaMinSW = Infinity, _noAaCubicArc = false;
+  for (const sd of ctx.shapesData) {
+    const fillDrawn = !sd.fillNone && sd.fillRgba && sd.fillRgba[3] > 0;
+    if (!fillDrawn) continue;
+    _noAaAnyFill = true;
+    const covered = sd.sw > 0 && sd.strokeRgba && sd.strokeRgba[3] >= 0.996
+      && !sd.strokeGradId && !sd.strokeImageId
+      && (!sd.dashArray || sd.dashArray.length === 0)
+      && !sd.strokeFirst && !sd.isLayer
+      && !sd.clipId && !sd.maskId && !sd.filterId && !sd.vecPatternId
+      && !sd.blendMode && !sd.isolation
+      && ((sd.flagsShape || 0) & 1) === 0
+      && hasClosedSubpaths(sd.segs);
+    if (!covered) { _noAaAllCovered = false; break; }
+    if (sd.sw < _noAaMinSW) _noAaMinSW = sd.sw;
+    if (sd.segs) for (const sg of sd.segs) {
+      if (sg.type === SEG_CUBIC || sg.type === SEG_ARC) { _noAaCubicArc = true; }
+    }
+  }
+  const noAaFill = _noAaAnyFill && _noAaAllCovered;
+  // Cubic/arc hard fills need the winding tree; line/quad bundles use the cheaper band crossing
+  // path. Cusps AND self-intersecting loops stay on the tree — the encoder emits their pieces as
+  // exact type-6 ray-crossing pieces (see textures.js). A loop keeps only a sub-pixel hard-vs-AA
+  // residual at its self-crossing (stroke-masked), acceptable on the no-AA route; a loop that is
+  // NOT opaque-stroke-covered fails `covered` above and is already routed to an AA engine.
+  ctx._noAaTreeHard = noAaFill && _noAaCubicArc;
+
   for (let _si = 0; _si < ctx.shapesData.length; _si++) {
     const sd = ctx.shapesData[_si];
     // Group transition shapes have no geometry — they're scaffolding
@@ -328,7 +414,7 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
       // path-interior pixels undercounted.
       const closedFillSegs = [];
       splitSubpathsWithCloseInto(sd.segs, closedFillSegs);
-      const bxy = pickBandsXY(closedFillSegs, bbox);
+      const bxy = pickBandsXY(closedFillSegs, bbox, ctx.vBands !== false, ctx.bandK || 32);
       // Capture the curveBuf write head BEFORE buildTexturesShape so
       // we can emit a per-shape curve-range array in `sections`. Used
       // by createShapeMorph to slice src/dst per matched shape. This is
@@ -337,8 +423,23 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
       // from glyphLoc would produce out-of-bounds slices on multi-shape
       // morphs.
       const _fillCurveStart = ctx.curveBuf.count * 4;
+      // gwnTree (opt-in, importSvg({ gwnTree: true })): the run-tree the closed-form winding
+      // kernel needs. Bands cannot prune a winding number; this can. Fill shapes only.
+      // TIER-3 async: the AUTOMATIC no-AA-tree-hard path defers the tier-3 occupancy
+      // grid (85% of the bake) to a post-load idle pass — the tree still renders
+      // (tier-1/2 present), the grid just accelerates interior pixels once it lands.
+      // An EXPLICIT gwnTree opt keeps it synchronous (bits in `sections.bands` for
+      // non-GL consumers / predictable tests).
+      const _treeAsync = ctx._noAaTreeHard === true && !opts.gwnTree;
       const fm = buildTexturesShape(closedFillSegs, bxy.bandsX, bxy.bandsY, bbox,
-                                    ctx.curveBuf, ctx.bandBuf, 0, /* fillOnly */ true);
+                                    ctx.curveBuf, ctx.bandBuf, 0, /* fillOnly */ true, false, ctx.pairBands === true,
+                                    !!opts.gwnTree || ctx._noAaTreeHard === true,
+                                    _treeAsync ? (ctx._pendingTier3 || (ctx._pendingTier3 = [])) : null,
+                                    // the FILL RULE, which the GWN tree needs to decide each
+                                    // contour's ink side (an even-odd hole is wound like its outer)
+                                    sd.fillRule === 'evenodd');
+      ctx.segTypeMask |= fm.typeMask;
+      ctx.totalSegments += fm.numSegments | 0;
 
       // Vector pattern: visible parent shape's fill row stamps
       // atlasSlot = (firstMetaRow+1, lastMetaRow+1, 0, 2) — meta-row
@@ -389,6 +490,21 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
         // the GPU). Used to build sections.curveRangesByShape; the
         // morph slices per-shape curves with these offsets.
         _curveStartF: _fillCurveStart,
+        // …and where they END. Inferring the end from "the next shape's begin,
+        // else the buffer total" is wrong for the LAST shape: the curve buffer
+        // also carries trailing data owned by NO shape (its size varies with
+        // geometry), so that shape's length came out inflated AND different per
+        // bundle. buildMorphPlan matches on equal curve length, so the last
+        // shape of every bundle silently fell out of the morph and CROSSFADED —
+        // a ghost of it drifting between poses. The cursor after emit is the
+        // exact end; record it.
+        //
+        // And it must be the end of the CURVES, not of the buffer cursor: with importSvg({gwnTree})
+        // the GWN run tree appends its piece records to this same buffer, right after them. Taking
+        // the cursor here would hand every consumer that reads a shape by range (the Loop-Blinn
+        // builder, the morph planner, the hit test) the tree as if it were geometry. buildTextures
+        // reports where the curves actually stop.
+        _curveEndF: (fm.curveEndF !== undefined ? fm.curveEndF : ctx.curveBuf.count * 4),
         bbox: [bbox[0], bbox[1], bbox[2], bbox[3]],
         fillColor: sd.fillRgba,
         strokeColor: [0, 0, 0, 0],
@@ -432,16 +548,20 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
         // unchanged). Not built for primKind fast-path shapes (already O(1)),
         // vector-pattern carriers (texel-5 slots reused), or coverage-sampled
         // paints would still be correct but skip the build to keep it cheap.
-        _occGrid: (opts.occupancyGrid && !sd.primKind && !sd.vecPatternId)
-          ? buildOccupancyGrid(sd.segs, bbox, sd.fillRule === 'evenodd',
-                               typeof opts.occupancyGrid === 'object' ? opts.occupancyGrid : undefined)
+        _occGrid: (_occOn && !_occAsync && !sd.primKind && !sd.vecPatternId && _occAreaOk(shapeBbRaw[_si]))
+          ? buildOccupancyGrid(sd.segs, bbox, sd.fillRule === 'evenodd', _occOpts)
+          : null,
+        // Async eligibility: hold the build inputs; the packing pass reserves a
+        // zeroed region + descriptor and records this for the idle fill.
+        _occPending: (_occOn && _occAsync && !sd.primKind && !sd.vecPatternId && _occAreaOk(shapeBbRaw[_si]))
+          ? { segs: sd.segs, bbox: bbox.slice(), evenOdd: sd.fillRule === 'evenodd' }
           : null,
       });
     }
     // (2) Stroke shell — emits a cover-quad chunk + curve/band data
     // for inline single-pass-per-shape rendering.
     if (sd.sw > 0 && sd.strokeRgba[3] > 0) {
-      const sbxy = pickBandsXY(sd.segs, bbox);
+      const sbxy = pickBandsXY(sd.segs, bbox, ctx.vBands !== false, ctx.bandK || 32);
       // Pad band membership by halfW so pixels within stroke distance
       // of a segment that lives in an adjacent band still discover it.
       const _strokeCurveStart = ctx.curveBuf.count * 4;
@@ -456,6 +576,8 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
       const sm = buildTexturesShape(sd.segs, sbxy.bandsX, sbxy.bandsY, bbox,
                                     ctx.curveBuf, ctx.bandBuf, strokePad,
                                     false, sd.joinStyle === JOIN_ARCS);
+      ctx.segTypeMask |= sm.typeMask;
+      ctx.totalSegments += sm.numSegments | 0;
 
       // Layer stroke rows: no cover-quad mesh, no accum gid — the parent
       // pattern composite samples their stroke coverage directly.
@@ -477,6 +599,7 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
           ? `${sd.shapeId}_stroke`
           : `shape_${ctx.metas.length}_stroke`,
         _curveStartF: _strokeCurveStart,
+        _curveEndF: (sm.curveEndF !== undefined ? sm.curveEndF : ctx.curveBuf.count * 4),
         // Use the halfW-padded ink-tight bbox for meta storage. The
         // band grid + cover quad use the miter-padded version (`bbox`)
         // so per-pixel rendering correctly reaches miter wedges, but
@@ -614,9 +737,12 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
         const psubs = [];
         splitSubpathsWithCloseInto(sd.segs, psubs);
         const pbbox = fillBb2;  // path-tight for layer rows
-        const pbxy = pickBandsXY(psubs, pbbox);
+        const pbxy = pickBandsXY(psubs, pbbox, ctx.vBands !== false, ctx.bandK || 32);
         const _layerFillStart = ctx.curveBuf.count * 4;
-        const pfm = buildTexturesShape(psubs, pbxy.bandsX, pbxy.bandsY, pbbox, ctx.curveBuf, ctx.bandBuf);
+        const pfm = buildTexturesShape(psubs, pbxy.bandsX, pbxy.bandsY, pbbox, ctx.curveBuf, ctx.bandBuf,
+                                       0, false, false, ctx.pairBands === true);
+        ctx.segTypeMask |= pfm.typeMask;
+        ctx.totalSegments += pfm.numSegments | 0;
         if (shapeToFirstMeta[i] < 0) shapeToFirstMeta[i] = ctx.metas.length;
         if (firstMeta < 0) firstMeta = ctx.metas.length;
         lastMeta = ctx.metas.length;
@@ -649,10 +775,12 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
       // Stroke row.
       const strokeDegen = (fillBb2[2] - fillBb2[0]) < 1e-6 && (fillBb2[3] - fillBb2[1]) < 1e-6;
       if (sd.sw > 0 && sd.strokeRgba && sd.strokeRgba[3] > 0 && !strokeDegen) {
-        const sbxy = pickBandsXY(sd.segs, bbox2);
+        const sbxy = pickBandsXY(sd.segs, bbox2, ctx.vBands !== false, ctx.bandK || 32);
         const _layerStrokeStart = ctx.curveBuf.count * 4;
         const sm = buildTexturesShape(sd.segs, sbxy.bandsX, sbxy.bandsY, bbox2,
                                        ctx.curveBuf, ctx.bandBuf, sd.sw * 0.5);
+        ctx.segTypeMask |= sm.typeMask;
+        ctx.totalSegments += sm.numSegments | 0;
         let flagsShape = FLAG_LAYER;
         if (sd.flagsShape & 2) flagsShape |= 2;  // dash bit
         if (sd.flagsShape & 1) flagsShape |= 1;  // non-scaling stroke
@@ -699,6 +827,25 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
   // re-walk children that were already emitted.
   let processedClips = 0;
   let processedMasks = 0;
+  // objectBoundingBox binding bbox for entry `i`: the REFERENCING
+  // element's box (SVG 1.1 §14.3.5). When the attribute sat on a group
+  // (instances[i] > 0, shared by every leaf claim under that group), the
+  // box is the UNION of all shapes claiming the same instance — binding
+  // each leaf to its own bbox visibly re-anchors the clip per shape.
+  const _bindingBb = (bindings, instances, i) => {
+    const own = shapeBb[bindings[i]];
+    const inst = instances ? (instances[i] | 0) : 0;
+    if (!inst) return own;
+    let u = null;
+    for (let j = 0; j < bindings.length; j++) {
+      if ((instances[j] | 0) !== inst) continue;
+      const sb = shapeBb[bindings[j]];
+      if (!sb || !(sb[2] > sb[0] && sb[3] > sb[1])) continue;
+      u = u ? [Math.min(u[0], sb[0]), Math.min(u[1], sb[1]),
+               Math.max(u[2], sb[2]), Math.max(u[3], sb[3])] : sb.slice();
+    }
+    return u || own;
+  };
   while (processedClips < ctx.clipsUsed.length
       || processedMasks < ctx.masksUsed.length) {
   for (let ci = processedClips; ci < ctx.clipsUsed.length; ci++) {
@@ -706,7 +853,7 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
     if (!clip.element) continue;
     let ctm = IDENT;
     if (ctx.clipBindings[ci] >= 0) {
-      const refBb = shapeBb[ctx.clipBindings[ci]];
+      const refBb = _bindingBb(ctx.clipBindings, ctx.clipInstances, ci);
       if (refBb && refBb[2] > refBb[0] && refBb[3] > refBb[1]) {
         const w = refBb[2] - refBb[0], h = refBb[3] - refBb[1];
         ctm = [w, 0, 0, h, refBb[0], refBb[1]];
@@ -746,7 +893,7 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
     if (!mask.element) continue;
     let ctm = IDENT;
     if (ctx.maskBindings[mi] >= 0) {
-      const refBb = shapeBb[ctx.maskBindings[mi]];
+      const refBb = _bindingBb(ctx.maskBindings, ctx.maskInstances, mi);
       if (refBb && refBb[2] > refBb[0] && refBb[3] > refBb[1]) {
         const w = refBb[2] - refBb[0], h = refBb[3] - refBb[1];
         ctm = [w, 0, 0, h, refBb[0], refBb[1]];
@@ -961,15 +1108,24 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
   // reach a boundary, keeping output identical to the walk). Never on pattern
   // carriers (their texel 5 holds patInvLinear). Must run BEFORE texelToBytes.
   let anyOccupancy = false;
+  const pendingOcc = [];                        // async grids: {base, G, segs, bbox, evenOdd}
   for (const m of ctx.metas) {
-    if (!m._occGrid || m.patInvLinear) continue;
-    const { bits, G } = m._occGrid;
-    const base = ctx.curveBuf.count;            // texel index of first cell-texel
-    for (let i = 0; i < bits.length; i += 4)
-      texelAppend(ctx.curveBuf, bits[i] || 0, bits[i+1] || 0, bits[i+2] || 0, bits[i+3] || 0);
-    m._solid_float_start = base;                // baseTexelIdx (texel 5 .x)
-    m._solid_float_count = G;                   // grid dim G (texel 5 .y)
-    anyOccupancy = true;
+    if (m.patInvLinear) continue;
+    if (m._occGrid) {                           // SYNC: real bits packed in-buffer now
+      const { bits, G } = m._occGrid;
+      const base = ctx.curveBuf.count;          // texel index of first cell-texel
+      for (let i = 0; i < bits.length; i += 4)
+        texelAppend(ctx.curveBuf, bits[i] || 0, bits[i+1] || 0, bits[i+2] || 0, bits[i+3] || 0);
+      m._solid_float_start = base;              // baseTexelIdx (texel 5 .x)
+      m._solid_float_count = G;                 // grid dim G (texel 5 .y)
+      anyOccupancy = true;
+    } else if (m._occPending) {                 // ASYNC: reserve G²/4 zeroed texels; fill later
+      const G = _occG, base = ctx.curveBuf.count, nTexels = Math.ceil(G * G / 4);
+      for (let i = 0; i < nTexels; i++) texelAppend(ctx.curveBuf, 0, 0, 0, 0);
+      m._solid_float_start = base;
+      m._solid_float_count = G;                 // descriptor valid, but cells zero → dormant until filled
+      pendingOcc.push({ base, G, segs: m._occPending.segs, bbox: m._occPending.bbox, evenOdd: m._occPending.evenOdd });
+    }
   }
 
   // Curve + band textures populated by buildTexturesShape for strokes.
@@ -984,7 +1140,9 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
   // check it see the expected layout; readers may also ignore it.
   const flags = BUNDLE_FLAG_HYBRID_MESH_IN_CGEOM
               | BUNDLE_FLAG_HYBRID_MESH_CHUNKED
-              | BUNDLE_FLAG_WIDE_BAND_HEADERS;
+              | BUNDLE_FLAG_WIDE_BAND_HEADERS
+              | (ctx.pairBands === true ? BUNDLE_FLAG_PAIR_BANDS : 0)
+              | (ctx.vBands === false ? BUNDLE_FLAG_NO_VBANDS : 0);
 
   // Gradient section: records + stops LUT. Empty if no gradients used.
   // Gradients use an exact-stop LUT; record slots 10/11 point into the LUT.
@@ -1161,10 +1319,26 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
 
   // Return the bundle struct (typed-array section views) directly.
   // The runtime consumes the bundle struct directly, verbatim.
+  // (noAaFill / noAaTree / minStrokeEmW computed above the emit loop, since the tree-hard
+  // route bakes its GWN tree during that loop.)
   return {
     version: 3,
     numShapes: ctx.metas.length,
+    noAaFill,
+    noAaTree: ctx._noAaTreeHard === true,
+    // Was the GWN run tree baked into the band texture? The GWN kernels walk a header that
+    // only exists when it was; without it they render NOTHING, so the renderer says so
+    // instead of leaving you with a blank canvas and no clue.
+    // MUST mirror the buildTexturesShape call above, which is what actually bakes it:
+    // `!!opts.gwnTree || ctx._noAaTreeHard`. Reporting ctx.gwnTree instead was wrong on this path
+    // (ctx carries no gwnTree here), so every bundle that HAD a tree claimed it did not — and the
+    // "you asked for a GWN kernel with no run tree" warning fired at bundles holding a perfectly
+    // good tree.
+    gwnTree: !!opts.gwnTree || ctx._noAaTreeHard === true,
+    minStrokeEmW: noAaFill ? _noAaMinSW : 0,
     flags,
+    segTypeMask: ctx.segTypeMask | 0,
+    totalSegments: ctx.totalSegments | 0,
     globalBBox: [minX, minY, gw, gh],
     viewBox: [vbMinX, vbMinY, vbW, vbH],
     preserveAspectRatio: [parAx, parAy, parMs],
@@ -1202,6 +1376,13 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
     // since the skip is output-identical, a runtime without it (C#) renders the
     // same pixels — no parity impact.
     hasOccupancy: anyOccupancy,
+    // Async interior grids: reserved (zeroed) in the curve buffer above; the
+    // renderer fills them from an idle pass after first draw, then flips
+    // bundle.hasOccupancy on. Absent when every grid was built synchronously.
+    pendingOccupancy: pendingOcc.length ? pendingOcc : undefined,
+    // Async GWN tier-3 grids (band buffer): reserved zeroed during the tree bake,
+    // filled by the same idle pass. Absent unless the automatic tree-hard path ran.
+    pendingTier3: (ctx._pendingTier3 && ctx._pendingTier3.length) ? ctx._pendingTier3 : undefined,
     extFlags: 0,
     // Per-meta-row string ids. Per-shape overrides address
     // shapes by this string. Length === numShapes (one entry per meta row).
@@ -1316,13 +1497,28 @@ export async function finalizeBundle(root, opts, defaultFill, defaultStroke, def
     // BAND-buffer index, NOT a curveBuf offset.
     curveRangesByShape: (function() {
       const total = ctx.curveBuf.count * 4;
-      const out = new Array(ctx.metas.length);
-      for (let i = 0; i < ctx.metas.length; i++) {
-        const begin = ctx.metas[i]._curveStartF | 0;
-        out[i] = { begin, end: 0 };
+      const n = ctx.metas.length;
+      const begins = new Array(n);
+      const sorted = [];
+      for (let i = 0; i < n; i++) {
+        const hasStart = ctx.metas[i]._curveStartF !== undefined;
+        begins[i] = hasStart ? (ctx.metas[i]._curveStartF | 0) : -1;
+        if (hasStart) sorted.push(begins[i]);
       }
-      for (let i = 0; i < out.length - 1; i++) out[i].end = out[i + 1].begin;
-      if (out.length > 0) out[out.length - 1].end = total;
+      sorted.sort((a, b) => a - b);
+      const out = new Array(n);
+      for (let i = 0; i < n; i++) {
+        const b = begins[i];
+        if (b < 0) { out[i] = { begin: 0, end: 0 }; continue; }
+        // Prefer the END RECORDED AT EMIT — exact, and the only correct answer
+        // for the last shape (see _curveEndF above). Fall back to the old
+        // inference for meta rows that predate it.
+        const e = ctx.metas[i]._curveEndF;
+        if (e !== undefined) { out[i] = { begin: b, end: e | 0 }; continue; }
+        let lo = 0, hi = sorted.length;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (sorted[mid] <= b) lo = mid + 1; else hi = mid; }
+        out[i] = { begin: b, end: lo < sorted.length ? sorted[lo] : total };
+      }
       return out;
     })(),
     // Per-meta-row <a href> values: when a shape lives inside an

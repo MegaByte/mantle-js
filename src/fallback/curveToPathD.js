@@ -72,7 +72,20 @@ function arcStartPt(cx, cy, rx, ry, th0, phi) {
  * @param {number} endFloat    range end (exclusive)
  * @returns {string} SVG path `d`
  */
-export function curveRangeToPathD(curveF32, beginFloat, endFloat) {
+/**
+ * @param {Set<number>|null} epArcs  Float offsets of ARC records stored in
+ *   ENDPOINT form — (p1.xy, p4.xy), (rx, ry, phi, flags) — rather than centre
+ *   form. A morph interpolates arcs that way (morphCore.prepareArcMorph), and
+ *   this decoder is the one consumer that should NOT be handed centre form:
+ *   `A rx ry phi large sweep x y` IS endpoint form, so it emits the stored
+ *   numbers verbatim. Going via centre form would re-derive the arc's endpoints
+ *   through a trig round trip, and in float32 they land a hair off the
+ *   neighbouring segment's endpoint — which the pen-continuity test below then
+ *   reads as a subpath break. The contour opens, and the fill loses a wedge.
+ *   (The GL walker never notices: it accumulates winding and a sub-pixel gap is
+ *   beneath it. Only the path decoder is exact-match sensitive.)
+ */
+export function curveRangeToPathD(curveF32, beginFloat, endFloat, epArcs = null) {
   let d = '';
   const end = Math.min(endFloat | 0, curveF32.length);
   // Walk header-first from the range start.
@@ -111,7 +124,18 @@ export function curveRangeToPathD(curveF32, beginFloat, endFloat) {
       ex = curveF32[dataAt + 6]; ey = curveF32[dataAt + 7];
       cmd = `C${f(c2x)} ${f(c2y)} ${f(c3x)} ${f(c3y)} ${f(ex)} ${f(ey)}`;
       hdr = dataAt + 8 + 4;
-    } else { // SEG_ARC
+    } else if (epArcs && epArcs.has(hdr)) {   // SEG_ARC, already ENDPOINT form
+      // Exactly the `A` command's own parameterization — emit it verbatim, so the
+      // endpoints stay bit-identical to the neighbouring segments' and the pen
+      // never appears to jump.
+      sx = curveF32[dataAt];     sy = curveF32[dataAt + 1];
+      ex = curveF32[dataAt + 2]; ey = curveF32[dataAt + 3];
+      const rx = Math.abs(curveF32[dataAt + 4]), ry = Math.abs(curveF32[dataAt + 5]);
+      const rot = curveF32[dataAt + 6] * 180 / Math.PI;
+      const flags = curveF32[dataAt + 7] | 0;
+      cmd = `A${f(rx)} ${f(ry)} ${f(rot)} ${flags & 1} ${(flags >> 1) & 1} ${f(ex)} ${f(ey)}`;
+      hdr = dataAt + 8 + 4;
+    } else { // SEG_ARC, centre form
       const cx = curveF32[dataAt],     cy = curveF32[dataAt + 1];
       const rx = curveF32[dataAt + 2], ry = curveF32[dataAt + 3];
       const th0 = curveF32[dataAt + 4], th1 = curveF32[dataAt + 5], phi = curveF32[dataAt + 6];

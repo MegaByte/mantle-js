@@ -7,13 +7,13 @@ uniform vec2 uBboxOutOrigin;
 uniform vec2 uBboxOutSize;
 uniform vec2 uBboxInOrigin;
 uniform vec2 uBboxInSize;
-uniform vec4 uMRow0;  
-uniform vec4 uMRow1;  
+uniform vec4 uMRow0;
+uniform vec4 uMRow1;
 out vec4 fragColor;
 
 void main() {
   vec2 qOut = uBboxOutOrigin + vUV * uBboxOutSize;
-  
+
   float xx = uMRow0.x, xy = uMRow0.y, dx = uMRow0.z;
   float yx = uMRow1.x, yy = uMRow1.y, dy = uMRow1.z;
   vec2 r = qOut - vec2(dx, dy);

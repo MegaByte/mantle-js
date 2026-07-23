@@ -4,7 +4,7 @@
 // returns true when it handled the tag. No recursion (the container dispatch
 // stays in importWalk.js).
 
-import { resolveIdRef, elementChildren } from './utils.js';
+import { resolveIdRef, resolvePaintRef, elementChildren } from './utils.js';
 import { parseLengthOr } from './length.js';
 import { parseShape } from './shape.js';
 import { IDENT, transformSegInto } from './transform.js';
@@ -42,7 +42,7 @@ export function handleShapePaintTag(walkCtx, node, tag, ctm, f, s, w) {
     currentClipRef, currentMaskRef, currentFilterRef,
     ctx, _patternElById, markersDict,
   } = walkCtx;
-  let segs = parseShape(node);
+  let segs = parseShape(node, walkCtx.viewport);
   if (segs.length) {
         if (ctm !== IDENT && !(ctm[0]===1 && ctm[1]===0 && ctm[2]===0 && ctm[3]===1 && ctm[4]===0 && ctm[5]===0)) {
           const xformed = [];
@@ -55,8 +55,8 @@ export function handleShapePaintTag(walkCtx, node, tag, ctm, f, s, w) {
         const rawStrokeStr = styleMap.stroke || node.getAttribute('stroke') || s;
         let fillGradId = 0, strokeGradId = 0;
         let fillVecPatternId = 0;
-        const fid = resolveIdRef(rawFillStr);
-        const sid = resolveIdRef(rawStrokeStr);
+        const fid = resolvePaintRef(rawFillStr);
+        const sid = resolvePaintRef(rawStrokeStr);
         if (fid) {
           fillGradId = claimGradient(fid);
           if (!fillGradId && fid in _patternElById) {
@@ -87,7 +87,11 @@ export function handleShapePaintTag(walkCtx, node, tag, ctm, f, s, w) {
         // semantics: mask + clip-path inherit through container
         // elements (`<g>`, `<svg>`, `<a>`, `<use>`) unless the
         // descendant declares its own.
-        const rawClipStr = styleMap['clip-path'] || node.getAttribute('clip-path') || currentClipRef();
+        // clip-path is read from the STACK ALONE: walk() already pushed this
+        // node's own clip INTERSECTED with the inherited one (SVG 1.1 §14.3,
+        // see combineClipRefs in importWalk.js), so re-reading the attribute
+        // here would drop the ancestor half of the intersection.
+        const rawClipStr = currentClipRef();
         const rawMaskStr = styleMap['mask']      || node.getAttribute('mask')      || currentMaskRef();
         const rawFilterStr = styleMap['filter']  || node.getAttribute('filter')   || currentFilterRef();
         const clipRef = resolveIdRef(rawClipStr);
@@ -135,10 +139,12 @@ export function handleShapePaintTag(walkCtx, node, tag, ctm, f, s, w) {
         // shows through, keeping the stroke-opacity in alpha.
         if (strokeImageId > 0) styles.strokeRgba = [1, 1, 1, styles.strokeRgba[3]];
         // Vector pattern: keep alpha intact (parent fill-opacity still
-        // applies as a multiplier) but force RGB to white so the
-        // shader's "color = vFill.rgba * fCov" line stays opaque before
-        // the vector-pattern branch overrides it.
-        if (fillVecPatternId > 0) styles.fillRgba = [1, 1, 1, styles.fillRgba[3] > 0 ? styles.fillRgba[3] : 1];
+        // applies as a multiplier — including a legitimate 0, which must
+        // stay 0) but force RGB to white so the shader's
+        // "color = vFill.rgba * fCov" line stays opaque before the
+        // vector-pattern branch overrides it. parseColor('url(#p)')
+        // yields alpha 1, so an unset fill-opacity is already 1 here.
+        if (fillVecPatternId > 0) styles.fillRgba = [1, 1, 1, styles.fillRgba[3]];
         // vector-effect: SVG 2 §6.6 — counteract parts of the supplemental
         // transformation matrix (the post-import world transform applied
         // at draw time via uWorldM). All 4 spec values accepted as a
@@ -165,22 +171,27 @@ export function handleShapePaintTag(walkCtx, node, tag, ctm, f, s, w) {
         const rawDash = (styleMap['stroke-dasharray']
                           || getInheritedStyleProp(node, 'stroke-dasharray', '')
                           || '').trim();
+        // Average CTM scale — segments are baked into root space, so
+        // stroke width AND dash lengths/offset (which position along the
+        // TRANSFORMED arc length) must scale the same way. Percent dash
+        // entries resolve against the viewport diagonal (§7.10).
+        const ctmScale = 0.5 * (Math.hypot(ctm[0], ctm[1]) + Math.hypot(ctm[2], ctm[3]));
+        const vpD9 = walkCtx.viewport ? { ...walkCtx.viewport, axis: 'd' } : undefined;
         let dashArray = [];
         if (rawDash && rawDash.toLowerCase() !== 'none') {
-          dashArray = rawDash.split(/[\s,]+/).map(parseFloat).filter(Number.isFinite);
+          dashArray = rawDash.split(/[\s,]+/)
+            .map((t) => parseLengthOr(t, NaN, vpD9))
+            .filter(Number.isFinite)
+            .map((d) => d * ctmScale);
           if (dashArray.length & 1) dashArray = dashArray.concat(dashArray);
         }
         const dashOffsetStr = (styleMap['stroke-dashoffset']
                                 || getInheritedStyleProp(node, 'stroke-dashoffset', '0')
                                 || '0').trim();
-        const dashOffset = parseLengthOr(dashOffsetStr, 0);
+        const dashOffset = parseLengthOr(dashOffsetStr, 0, vpD9) * ctmScale;
         const hasDash = dashArray.length > 0;
         let sw = styles.sw;
-        if (sw > 0 && !nonScalingStroke) {
-          const sx = Math.hypot(ctm[0], ctm[1]);
-          const sy = Math.hypot(ctm[2], ctm[3]);
-          sw *= 0.5 * (sx + sy);
-        }
+        if (sw > 0 && !nonScalingStroke) sw *= ctmScale;
         let flagsShape = 0;
         if (nonScalingStroke) flagsShape |= 1;
         if (hasDash)          flagsShape |= 2;
@@ -269,7 +280,7 @@ export function handleShapePaintTag(walkCtx, node, tag, ctm, f, s, w) {
           const angleEnd   = Math.atan2(tanEnd[1], tanEnd[0]);
           if (mStart) {
             const sp0 = segStart(segs[0]);
-            for (const sd of instantiateMarker(mStart, sp0[0], sp0[1], angleStart, sw || 1))
+            for (const sd of instantiateMarker(mStart, sp0[0], sp0[1], angleStart, sw || 1, true))
               enqueueShape(sd);
           }
           if (mMid && segs.length > 1) {

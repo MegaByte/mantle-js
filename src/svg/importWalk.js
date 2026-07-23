@@ -63,6 +63,40 @@ const G_BLEND_MODES = {
 };
 
 /// Shared walk context threaded through DOM traversal + text handlers.
+/// viewBox → viewport fit (SVG 1.1 §7.8) for <svg>/<symbol> viewports:
+/// Translate(x,y) ∘ FitMatrix(preserveAspectRatio) ∘ Translate(−vbX,−vbY).
+/// Returns the plain translate when the element has no usable viewBox or
+/// the viewport is degenerate.
+function viewportFitMatrix(el, sx, sy, sw_, sh_) {
+  const vb = (el.getAttribute('viewBox') || '').trim();
+  let vbX = 0, vbY = 0, vbW = 0, vbH = 0, hasVb = false;
+  if (vb) {
+    const p = vb.split(/[\s,]+/).map(Number);
+    if (p.length === 4 && p.every(Number.isFinite) && p[2] > 0 && p[3] > 0) {
+      vbX = p[0]; vbY = p[1]; vbW = p[2]; vbH = p[3]; hasVb = true;
+    }
+  }
+  if (!(hasVb && sw_ > 0 && sh_ > 0)) return [1, 0, 0, 1, sx, sy];
+  const parA = (el.getAttribute('preserveAspectRatio') || 'xMidYMid meet').trim();
+  const parParts = parA.split(/\s+/);
+  const align = (parParts[0] || 'xMidYMid').toLowerCase();
+  const slice = (parParts[1] || 'meet').toLowerCase() === 'slice';
+  let scaleX = sw_ / vbW, scaleY = sh_ / vbH;
+  if (align !== 'none') {
+    const s = slice ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
+    scaleX = scaleY = s;
+  }
+  // Alignment offset within the viewport box. Default xMid/yMid.
+  const xIdx = align.indexOf('x'), yIdx = align.indexOf('y');
+  const xPart = (xIdx >= 0 && yIdx > xIdx) ? align.substring(xIdx + 1, yIdx) : 'mid';
+  const yPart = (yIdx >= 0) ? align.substring(yIdx + 1) : 'mid';
+  const xFactor = xPart === 'min' ? 0 : xPart === 'max' ? 1 : 0.5;
+  const yFactor = yPart === 'min' ? 0 : yPart === 'max' ? 1 : 0.5;
+  const tx = sx + (align === 'none' ? 0 : (sw_ - vbW * scaleX) * xFactor) - vbX * scaleX;
+  const ty = sy + (align === 'none' ? 0 : (sh_ - vbH * scaleY) * yFactor) - vbY * scaleY;
+  return [scaleX, 0, 0, scaleY, tx, ty];
+}
+
 export function makeImportWalkContext() {
   return {
     walkLayerMode: false,
@@ -87,6 +121,24 @@ export async function runImportWalk(root, opts, defaultFill, defaultStroke, defa
   walkCtx.defaultFill = defaultFill;
   walkCtx.defaultStroke = defaultStroke;
   walkCtx.defaultStrokeW = defaultStrokeW;
+
+  // Root viewport for percentage-length resolution (SVG 1.1 §7.10):
+  // viewBox width/height when present, else the width/height attrs.
+  // Without a ctx, parseUnit resolves '%' against 0 and the geometry
+  // vanishes (the full-viewport `<rect width="100%">` pattern).
+  {
+    const vbStr = (root.getAttribute && (root.getAttribute('viewBox') || '').trim()) || '';
+    const p = vbStr ? vbStr.split(/[\s,]+/).map(parseFloat) : [];
+    let vw = (p.length === 4 && Number.isFinite(p[2]) && p[2] > 0) ? p[2] : NaN;
+    let vh = (p.length === 4 && Number.isFinite(p[3]) && p[3] > 0) ? p[3] : NaN;
+    if (!Number.isFinite(vw)) vw = parseLengthOr(root.getAttribute && root.getAttribute('width'), NaN);
+    if (!Number.isFinite(vh)) vh = parseLengthOr(root.getAttribute && root.getAttribute('height'), NaN);
+    walkCtx.viewport = Number.isFinite(vw) && vw > 0
+      ? { parentWidth: vw, parentHeight: (Number.isFinite(vh) && vh > 0) ? vh : vw }
+      : null;
+  }
+  const vpX = walkCtx.viewport ? { ...walkCtx.viewport, axis: 'x' } : undefined;
+  const vpY = walkCtx.viewport ? { ...walkCtx.viewport, axis: 'y' } : undefined;
 
   // Sprite-sheet allow-list. When opts.sprites is a non-empty array, only
   // those top-level sprite ids are kept; everything else is discarded at
@@ -198,14 +250,28 @@ export async function runImportWalk(root, opts, defaultFill, defaultStroke, defa
   // own attribute when present.
   const maskStack = [];
   const clipStack = [];
-  // SVG 1.1 §6.4: `filter` is an inheritable property. Mirror the
+  // `filter` is NOT an inherited property per spec — on a <g> it
+  // applies to the group as a single rendered unit. Mirroring the
   // mask + clip-path stacks so `<g filter="url(#fN)"><path .../></g>`
-  // applies the filter to the descendant.
+  // applies the filter to each descendant shape is a deliberate
+  // per-shape approximation of that group-level filter.
   const filterStack = [];
   const currentMaskRef = () =>
     maskStack.length > 0 ? maskStack[maskStack.length - 1] : '';
   const currentClipRef = () =>
     clipStack.length > 0 ? clipStack[clipStack.length - 1] : '';
+  // Per-REFERENCING-ELEMENT instance ids: an objectBoundingBox clip/mask
+  // binds to the bbox of the element that carries the attribute (SVG 1.1
+  // §14.3.5) — for a <g>, that's the union of its shapes, not each
+  // leaf's own box. A fresh id is minted where the attribute appears;
+  // descendants inherit it, and finalize unions the bboxes of all
+  // claims sharing an instance.
+  let _clipInstNext = 1, _maskInstNext = 1;
+  const clipInstStack = [], maskInstStack = [];
+  const currentClipInstance = () =>
+    clipInstStack.length > 0 ? clipInstStack[clipInstStack.length - 1] : 0;
+  const currentMaskInstance = () =>
+    maskInstStack.length > 0 ? maskInstStack[maskInstStack.length - 1] : 0;
   const currentFilterRef = () =>
     filterStack.length > 0 ? filterStack[filterStack.length - 1] : '';
   const claimVectorPattern = (svgId, patternEl) => {
@@ -371,11 +437,13 @@ export async function runImportWalk(root, opts, defaultFill, defaultStroke, defa
   const claimClip = (svgId, referencingShapeIdx) => {
     const def = clipDict[svgId];
     if (!def) return 0;
+    if (!ctx.clipInstances) ctx.clipInstances = [];
     const isObjBBox = def.units === 'objectBoundingBox';
     if (!isObjBBox) {
       if (!(svgId in clipIdBySvgId)) {
         ctx.clipsUsed.push(def);
         ctx.clipBindings.push(-1);
+        ctx.clipInstances.push(0);
         ctx.clipSvgIds.push(svgId);
         clipIdBySvgId[svgId] = ctx.clipsUsed.length;
       }
@@ -383,6 +451,7 @@ export async function runImportWalk(root, opts, defaultFill, defaultStroke, defa
     }
     ctx.clipsUsed.push(def);
     ctx.clipBindings.push(referencingShapeIdx);
+    ctx.clipInstances.push(currentClipInstance());
     ctx.clipSvgIds.push(svgId);
     return ctx.clipsUsed.length;
   };
@@ -396,11 +465,13 @@ export async function runImportWalk(root, opts, defaultFill, defaultStroke, defa
   const claimMask = (svgId, referencingShapeIdx) => {
     const def = maskDict[svgId];
     if (!def) return 0;
+    if (!ctx.maskInstances) ctx.maskInstances = [];
     const isObjBBox = def.units === 'objectBoundingBox';
     if (!isObjBBox) {
       if (!(svgId in maskIdBySvgId)) {
         ctx.masksUsed.push(def);
         ctx.maskBindings.push(-1);
+        ctx.maskInstances.push(0);
         ctx.maskSvgIds.push(svgId);
         maskIdBySvgId[svgId] = ctx.masksUsed.length;
       }
@@ -408,6 +479,7 @@ export async function runImportWalk(root, opts, defaultFill, defaultStroke, defa
     }
     ctx.masksUsed.push(def);
     ctx.maskBindings.push(referencingShapeIdx);
+    ctx.maskInstances.push(currentMaskInstance());
     ctx.maskSvgIds.push(svgId);
     return ctx.masksUsed.length;
   };
@@ -468,7 +540,57 @@ export async function runImportWalk(root, opts, defaultFill, defaultStroke, defa
     if (_spriteAllow && !sd._spriteId) return;  // un-id'd top-level = "the rest"
     ctx.shapesData.push(sd);
   }
+  // Nested clip-path INTERSECTION (SVG 1.1 §14.3): an element's own
+  // `clip-path` narrows the inherited one, it does not replace it. This is the
+  // pdftocairo / Illustrator shape — an outer artboard-bbox clip wrapping an
+  // inner contour clip — where taking the inner alone silently over-draws.
+  //
+  // Rather than teach the per-shape data model to hold a list of clip ids
+  // (each shape carries exactly one `clipId`), synthesize a combined
+  // `<clipPath>` def: a copy of the inner def whose children are wrapped in
+  // `<g clip-path="url(#outer)">`. The clip-def drain in bundleFinalize.js
+  // walks clip children with the SAME walk(), so the wrapper re-enters this
+  // path and the shader's depth-1 nested-clip evaluator AND-multiplies the
+  // two coverages. Deeper nesting folds recursively (the synthetic def
+  // becomes the next level's outer).
+  //
+  // Returns a `url(#id)` ref string. Memoized per (outer, inner) pair so a
+  // file with 76 identical nestings registers each combination once.
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const _combinedClipIds = new Map();
+  const combineClipRefs = (ownRef, inheritedRef) => {
+    if (!ownRef) return inheritedRef || '';
+    if (!inheritedRef) return ownRef;
+    const innerId = resolveIdRef(ownRef), outerId = resolveIdRef(inheritedRef);
+    // Unresolvable ref (or a non-url() value like `none`): keep today's
+    // behavior rather than fabricating a def that clips everything away.
+    if (!innerId || !outerId) return ownRef;
+    const inner = clipDict[innerId], outer = clipDict[outerId];
+    if (!inner || !outer || !inner.element || !outer.element) return ownRef;
+    const key = `${outerId} ${innerId}`;
+    const hit = _combinedClipIds.get(key);
+    if (hit) return hit;
+    const doc = inner.element.ownerDocument;
+    if (!doc || !doc.createElementNS) return ownRef;
+    const combinedId = `__mantleClipIsect${_combinedClipIds.size}_${outerId}_${innerId}`;
+    const el = doc.createElementNS(SVGNS, 'clipPath');
+    el.setAttribute('id', combinedId);
+    // clipPathUnits is the INNER def's — the wrapper's own clip resolves
+    // through the normal ref path and carries the outer def's units itself.
+    el.setAttribute('clipPathUnits', inner.units);
+    const g = doc.createElementNS(SVGNS, 'g');
+    g.setAttribute('clip-path', `url(#${outerId})`);
+    const kids = elementChildren(inner.element);
+    for (let i = 0; i < kids.length; i++) g.appendChild(kids[i].cloneNode(true));
+    el.appendChild(g);
+    clipDict[combinedId] = { element: el, units: inner.units, maskType: 'luminance' };
+    const ref = `url(#${combinedId})`;
+    _combinedClipIds.set(key, ref);
+    return ref;
+  };
+
   walkCtx.enqueueShape = enqueueShape;
+  walkCtx.combineClipRefs = combineClipRefs;
   walkCtx.claimClip = claimClip;
   walkCtx.claimMask = claimMask;
   walkCtx.claimFilter = claimFilter;
@@ -526,8 +648,12 @@ export async function runImportWalk(root, opts, defaultFill, defaultStroke, defa
       ? (getStyleProp(node, 'filter', '') || node.getAttribute('filter') || '')
       : '';
     maskStack.push(_ownMask || currentMaskRef());
-    clipStack.push(_ownClip || currentClipRef());
+    // Own clip INTERSECTS the inherited one (SVG 1.1 §14.3) — see
+    // combineClipRefs. mask/filter keep replace-semantics for now.
+    clipStack.push(combineClipRefs(_ownClip, currentClipRef()));
     filterStack.push(_ownFilter || currentFilterRef());
+    clipInstStack.push(_ownClip ? _clipInstNext++ : currentClipInstance());
+    maskInstStack.push(_ownMask ? _maskInstNext++ : currentMaskInstance());
     try {
       _walkInner(node, pf, ps, pw, pCtm);
     } finally {
@@ -536,6 +662,8 @@ export async function runImportWalk(root, opts, defaultFill, defaultStroke, defa
       maskStack.pop();
       clipStack.pop();
       filterStack.pop();
+      clipInstStack.pop();
+      maskInstStack.pop();
     }
   }
 
@@ -559,10 +687,15 @@ export async function runImportWalk(root, opts, defaultFill, defaultStroke, defa
       const href = node.getAttribute('href') || node.getAttribute('xlink:href') || '';
       const refId = resolveIdRef(href);
       if (!refId || !idMap[refId]) return;
+      // A <use> that reaches itself through its target's subtree is a
+      // reference cycle (spec error); browsers break the cycle — recursing
+      // would overflow the stack.
+      const active = walkCtx._useActive || (walkCtx._useActive = new Set());
+      if (active.has(refId)) return;
       const target = idMap[refId];
       const localTm2 = parseTransform(node.getAttribute('transform') || '');
-      const x = parseLengthOr(node.getAttribute('x') || '0', 0);
-      const y = parseLengthOr(node.getAttribute('y') || '0', 0);
+      const x = parseLengthOr(node.getAttribute('x') || '0', 0, vpX);
+      const y = parseLengthOr(node.getAttribute('y') || '0', 0, vpY);
       const useTm = matMul(localTm2, [1, 0, 0, 1, x, y]);
       const ctm2 = matMul(pCtm, useTm);
       // <use> can override fill/stroke/etc; resolve with use's own attrs as
@@ -578,14 +711,25 @@ export async function runImportWalk(root, opts, defaultFill, defaultStroke, defa
       // their own (the DOM leaf is the <use>) — flag so enqueueShape stamps
       // _domLeaf -1 instead of claiming the referenced element's ordinal.
       walkCtx._useDepth++;
+      active.add(refId);
       try {
         if (targetTag === 'symbol') {
+          // SVG 2 §5.9.3: <use> instantiates the symbol as an <svg> with
+          // the use's width/height and the SYMBOL's viewBox/PAR — walking
+          // the children unscaled rendered a viewBoxed symbol at its raw
+          // coordinates. Without width/height on the <use>, keep the
+          // untransformed walk (translate-only, the legacy behavior).
+          const uw = parseLengthOr(node.getAttribute('width')  || '0', 0, vpX);
+          const uh = parseLengthOr(node.getAttribute('height') || '0', 0, vpY);
+          const ctm3 = (uw > 0 && uh > 0)
+            ? matMul(ctm2, viewportFitMatrix(target, 0, 0, uw, uh))
+            : ctm2;
           const tk = elementChildren(target);
-          for (let i = 0; i < tk.length; i++) walk(tk[i], f2, s2, w2, ctm2);
+          for (let i = 0; i < tk.length; i++) walk(tk[i], f2, s2, w2, ctm3);
         } else {
           walk(target, f2, s2, w2, ctm2);
         }
-      } finally { walkCtx._useDepth--; }
+      } finally { active.delete(refId); walkCtx._useDepth--; }
       return;
     }
     let localTm = parseTransform(node.getAttribute ? node.getAttribute('transform') || '' : '');
@@ -595,44 +739,11 @@ export async function runImportWalk(root, opts, defaultFill, defaultStroke, defa
     // <svg> is handled separately at bundle-finalize, so this branch only
     // fires for non-root <svg> elements. SVG 1.1 §7.2 + §7.8.
     if (ntag === 'svg' && node !== root) {
-      const sx = parseLengthOr(node.getAttribute('x') || '0', 0);
-      const sy = parseLengthOr(node.getAttribute('y') || '0', 0);
-      const sw_ = parseLengthOr(node.getAttribute('width')  || '0', 0);
-      const sh_ = parseLengthOr(node.getAttribute('height') || '0', 0);
-      const vb  = (node.getAttribute('viewBox') || '').trim();
-      let vbX = 0, vbY = 0, vbW = 0, vbH = 0, hasVb = false;
-      if (vb) {
-        const p = vb.split(/[\s,]+/).map(Number);
-        if (p.length === 4 && p.every(Number.isFinite) && p[2] > 0 && p[3] > 0) {
-          vbX = p[0]; vbY = p[1]; vbW = p[2]; vbH = p[3]; hasVb = true;
-        }
-      }
-      // Build viewport transform: Translate(x,y) ∘ FitMatrix ∘ Translate(-vbX,-vbY).
-      // FitMatrix scales the viewBox to width/height honoring PAR (xMidYMid
-      // meet by default). When no viewBox is present the translate(x,y) is
-      // the entire viewport adjustment.
-      let vt = [1, 0, 0, 1, sx, sy];
-      if (hasVb && sw_ > 0 && sh_ > 0) {
-        const parA = (node.getAttribute('preserveAspectRatio') || 'xMidYMid meet').trim();
-        const parParts = parA.split(/\s+/);
-        const align = (parParts[0] || 'xMidYMid').toLowerCase();
-        const slice = (parParts[1] || 'meet').toLowerCase() === 'slice';
-        let scaleX = sw_ / vbW, scaleY = sh_ / vbH;
-        if (align !== 'none') {
-          const s = slice ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
-          scaleX = scaleY = s;
-        }
-        // Alignment offset within the viewport box. Default xMid/yMid.
-        const xIdx = align.indexOf('x'), yIdx = align.indexOf('y');
-        const xPart = (xIdx >= 0 && yIdx > xIdx) ? align.substring(xIdx + 1, yIdx) : 'mid';
-        const yPart = (yIdx >= 0) ? align.substring(yIdx + 1) : 'mid';
-        const xFactor = xPart === 'min' ? 0 : xPart === 'max' ? 1 : 0.5;
-        const yFactor = yPart === 'min' ? 0 : yPart === 'max' ? 1 : 0.5;
-        const tx = sx + (align === 'none' ? 0 : (sw_ - vbW * scaleX) * xFactor) - vbX * scaleX;
-        const ty = sy + (align === 'none' ? 0 : (sh_ - vbH * scaleY) * yFactor) - vbY * scaleY;
-        vt = [scaleX, 0, 0, scaleY, tx, ty];
-      }
-      localTm = matMul(vt, localTm);
+      const sx = parseLengthOr(node.getAttribute('x') || '0', 0, vpX);
+      const sy = parseLengthOr(node.getAttribute('y') || '0', 0, vpY);
+      const sw_ = parseLengthOr(node.getAttribute('width')  || '0', 0, vpX);
+      const sh_ = parseLengthOr(node.getAttribute('height') || '0', 0, vpY);
+      localTm = matMul(viewportFitMatrix(node, sx, sy, sw_, sh_), localTm);
     }
     const ctm = matMul(pCtm, localTm);
     const f = getStyleProp(node, 'fill', pf);
@@ -676,13 +787,16 @@ export async function runImportWalk(root, opts, defaultFill, defaultStroke, defa
       const isolStr = (getStyleProp(node, 'isolation', 'auto') || 'auto')
                         .trim().toLowerCase();
       gIsolation = (isolStr === 'isolate') ? 1 : 0;
-      // Need flatten if any compositing-changing attribute applies AND
-      // the group has more than one descendant shape (a single-leaf
-      // group is equivalent to applying the attrs to the leaf).
-      const childShapeCount = kids.length;
+      // Need flatten whenever any compositing-changing attribute applies.
+      // A single-child group is NOT equivalent to pushing the attrs onto
+      // the leaf: the child may itself be a container, blend modes always
+      // need the group backdrop, and group opacity applies to the
+      // composited result (≠ scaling fill and stroke separately where
+      // they overlap). Nothing else applies these attrs, so gating on
+      // child count silently dropped them.
       needsGroupFlatten =
         (gOpacity < 1 - 1e-6 || gBlendMode !== 0 || gIsolation === 1)
-        && childShapeCount > 1;
+        && kids.length > 0;
     }
 
     if (needsGroupFlatten) {

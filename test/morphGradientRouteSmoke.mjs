@@ -36,6 +36,7 @@ const shaders=await loadShaders(new URL('/src/shaders/',location.href).href);
 const renderer=createRenderer(gl,shaders); renderer.setViewport(W,H);
 const bSrc=createBundle(gl,await importSvg(${JSON.stringify(SRC)})), bDst=createBundle(gl,await importSvg(${JSON.stringify(DST)}));
 const morph=createShapeMorph(gl,bSrc,bDst);
+if(renderer.awaitLbReady)await renderer.awaitLbReady(morph); // morph build is off-thread — wait before asserting the route
 function read(){const u=new Uint8Array(W*H*4);gl.readPixels(0,0,W,H,gl.RGBA,gl.UNSIGNED_BYTE,u);return u;}
 function clr(){gl.clearColor(1,1,1,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);}
 function draw(t){morph.setT(t);clr();const b0=renderer.debugStats.loopBlinnMorphRouteCount;renderer.drawBundle(morph);return {buf:read(),routed:renderer.debugStats.loopBlinnMorphRouteCount-b0};}

@@ -9,15 +9,19 @@
 // (matching Chromium and Firefox).
 precision highp float;
 uniform sampler2D uTex;
-uniform vec2  uTexel;     // 1 / textureSize
+uniform vec2  uTexel;     // 1 / inRect.size — one CANVAS pixel, in input uv
+uniform vec4  uInMap;     // vUV → input uv (see @@FILTER_RECT@@)
 uniform vec2  uDir;       // (1,0) horizontal pass, (0,1) vertical pass
 uniform float uRadius;    // pixels along the current axis; <0.5 → identity
 uniform int   uOperator;  // 0 = erode (min), 1 = dilate (max)
 in vec2 vUV;
 out vec4 fragColor;
 
+@@FILTER_RECT@@
+
 void main() {
-  if (uRadius < 0.5) { fragColor = texture(uTex, vUV); return; }
+  vec2 uv = mapIn(vUV, uInMap);
+  if (uRadius < 0.5) { fragColor = sampleIn(uTex, uv); return; }
   // Cap the kernel at 64 px/axis for performance. MUST match the C#
   // MantleFilterFeMorphology cap + rounding (ceil) so dilate/erode of a
   // radius in 33..64 px renders identically on both runtimes; beyond 64 px
@@ -28,12 +32,12 @@ void main() {
   // edges). Dilate picks the highest. We start with the center sample
   // so the running accumulator is always a real RGBA point on the
   // input surface (not an artificial sentinel).
-  vec4 acc = texture(uTex, vUV);
+  vec4 acc = sampleIn(uTex, uv);
   for (int i = 1; i <= 64; ++i) {
     if (i > r) break;
     vec2 d = uDir * uTexel * float(i);
-    vec4 p = texture(uTex, vUV + d);
-    vec4 n = texture(uTex, vUV - d);
+    vec4 p = sampleIn(uTex, uv + d);
+    vec4 n = sampleIn(uTex, uv - d);
     if (uOperator == 1) {
       acc = max(acc, max(p, n));   // dilate
     } else {

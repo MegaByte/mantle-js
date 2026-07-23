@@ -13,9 +13,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 // A diamond with a blue fill and a thick red stroke.
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <path d="M50 12 L88 50 L50 88 L12 50 Z" fill="#3366cc" stroke="#ff0000" stroke-width="8"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/lbStrokeParity__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="100" height="100"></canvas>

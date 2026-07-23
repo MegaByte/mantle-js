@@ -21,13 +21,7 @@ const ROOT = path.resolve(__dirname, '..');
 // Multi-shape mask (two white rects → a real offscreen bake region). The
 // LEFT window has id "win" so the override table can move it; the right is
 // static. Orange fill is revealed only inside the windows.
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100" width="200" height="100">
-  <defs><mask id="m">
-    <rect id="win" x="10" y="30" width="40" height="40" fill="#fff"/>
-    <rect x="150" y="30" width="40" height="40" fill="#fff"/>
-  </mask></defs>
-  <rect x="0" y="0" width="200" height="100" fill="#ff6600" mask="url(#m)"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/maskAnim__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="200" height="100"></canvas>

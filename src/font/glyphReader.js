@@ -99,7 +99,7 @@ function _readGlyph(tables, gid, depth, varCoords) {
   const numContours = v.getInt16(off, false);
   if (numContours === 0) return null;
   if (numContours > 0)  return _readSimple(tables, off + 10, numContours, gid, varCoords);
-  return _readComposite(tables, off + 10, depth, varCoords);
+  return _readComposite(tables, off + 10, depth, varCoords, gid);
 }
 
 function _parseSimpleCoords(tables, p, numContours) {
@@ -261,9 +261,13 @@ function _contoursToSegs(xs, ys, flags, endPts) {
   return segs;
 }
 
-function _readComposite(tables, p, depth, varCoords) {
+function _readComposite(tables, p, depth, varCoords, gid) {
   const v = tables.view, b = tables.bytes;
-  const out = [];
+  // Pass 1: parse every component record. Deferring the child reads lets
+  // the composite's OWN gvar tuple apply first — its "points" are the
+  // component dx/dy offsets, so a variable font moves accents with the
+  // axes (skipping this froze components at their default positions).
+  const comps = [];
   let flags;
   do {
     flags = v.getUint16(p, false);
@@ -271,19 +275,26 @@ function _readComposite(tables, p, depth, varCoords) {
     p += 4;
 
     let dx, dy;
+    const isXY = (flags & C_ARGS_ARE_XY_VALUES) !== 0;
     if (flags & C_ARG_1_AND_2_ARE_WORDS) {
-      const a1 = (flags & C_ARGS_ARE_XY_VALUES) ? v.getInt16(p, false)     : v.getUint16(p, false);
-      const a2 = (flags & C_ARGS_ARE_XY_VALUES) ? v.getInt16(p + 2, false) : v.getUint16(p + 2, false);
+      const a1 = isXY ? v.getInt16(p, false)     : v.getUint16(p, false);
+      const a2 = isXY ? v.getInt16(p + 2, false) : v.getUint16(p + 2, false);
       dx = a1; dy = a2;
       p += 4;
     } else {
       // Byte-sized args: signed when ARGS_ARE_XY_VALUES, unsigned otherwise.
       const a1raw = b[p], a2raw = b[p + 1];
       const sext = (n) => (n & 0x80) ? n - 0x100 : n;
-      dx = (flags & C_ARGS_ARE_XY_VALUES) ? sext(a1raw) : a1raw;
-      dy = (flags & C_ARGS_ARE_XY_VALUES) ? sext(a2raw) : a2raw;
+      dx = isXY ? sext(a1raw) : a1raw;
+      dy = isXY ? sext(a2raw) : a2raw;
       p += 2;
     }
+    // ARGS_ARE_XY_VALUES clear = POINT-MATCHING indices, not a
+    // translation — using them as offsets translates the component by
+    // the point numbers. Full matching needs retained point lists;
+    // approximate with (0,0) (components in such fonts are typically
+    // pre-aligned at the default position).
+    if (!isXY) { dx = 0; dy = 0; }
 
     let xx = 1, xy = 0, yx = 0, yy = 1;
     if (flags & C_WE_HAVE_A_SCALE) {
@@ -300,9 +311,32 @@ function _readComposite(tables, p, depth, varCoords) {
       yy = v.getInt16(p + 6, false) / 16384;
       p += 8;
     }
+    comps.push({ childIdx, dx, dy, xx, xy, yx, yy, isXY });
+  } while (flags & C_MORE_COMPONENTS);
 
-    const child = _readGlyph(tables, childIdx, depth + 1, varCoords);
+  // The composite's own gvar deltas (per-component offset points + the
+  // 4 phantoms). No IUP for composites (contourEnds null); rounding
+  // matches the simple path (Math.round — half toward +∞, the JS↔C#
+  // parity convention).
+  if (varCoords != null && tables._gvarReader && tables._gvarReader.hasGvar && gid != null) {
+    const pts = new Float64Array((comps.length + 4) * 2);
+    for (let k = 0; k < comps.length; k++) {
+      pts[k * 2]     = comps[k].dx;
+      pts[k * 2 + 1] = comps[k].dy;
+    }
+    tables._gvarReader.applyDeltas(gid, pts, comps.length, varCoords, null);
+    for (let k = 0; k < comps.length; k++) {
+      if (!comps[k].isXY) continue;   // point-matching offsets don't vary
+      comps[k].dx = Math.round(pts[k * 2]);
+      comps[k].dy = Math.round(pts[k * 2 + 1]);
+    }
+  }
+
+  const out = [];
+  for (const c of comps) {
+    const child = _readGlyph(tables, c.childIdx, depth + 1, varCoords);
     if (child) {
+      const { xx, xy, yx, yy, dx, dy } = c;
       const X = (q) => [xx * q[0] + xy * q[1] + dx, yx * q[0] + yy * q[1] + dy];
       for (const seg of child) {
         if (seg.type === 0) out.push(mkLine(X(seg.p1), X(seg.p2)));
@@ -310,7 +344,7 @@ function _readComposite(tables, p, depth, varCoords) {
         else if (seg.type === 2) out.push(mkCubic(X(seg.p1), X(seg.p2), X(seg.p3), X(seg.p4)));
       }
     }
-  } while (flags & C_MORE_COMPONENTS);
+  }
 
   return out.length === 0 ? null : out;
 }

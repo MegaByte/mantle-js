@@ -163,9 +163,9 @@ export function findIndicSyllables(cps) {
 /// Pick the "base" consonant index inside [start, end). Returns -1
 /// when the syllable has no consonant (vowel-only or pure modifier).
 ///
-/// Default rule (most Indic scripts): the LAST consonant that isn't
-/// itself followed by halant. Reph (Ra + Halant at start) doesn't
-/// count as the base — it'll be moved out as the reph mark.
+/// Default rule (most Indic scripts): the LAST consonant of the
+/// syllable. Reph (Ra + Halant at start) doesn't count as the
+/// base — it'll be moved out as the reph mark.
 export function pickBaseConsonant(cps, start, end) {
   // Detect reph: initial Ra + Halant.
   let scan = start;
@@ -176,8 +176,8 @@ export function pickBaseConsonant(cps, start, end) {
     hasReph = true;
     scan += 2;  // skip the reph
   }
-  // Find the LAST consonant in scan..end that isn't followed by a
-  // halant (the last consonant in a halant + C chain IS the base).
+  // Find the LAST consonant in scan..end (in a C + halant + C chain
+  // the final consonant IS the base).
   let last = -1;
   for (let k = scan; k < end; k++) {
     const c = classifyIsc(cps[k]);

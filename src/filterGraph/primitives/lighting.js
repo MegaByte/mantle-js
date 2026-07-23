@@ -1,11 +1,10 @@
 // primitives/lighting.js — feDiffuseLighting + feSpecularLighting.
 // One handler serves both node types (distinguished by node.type).
 import { registerSvgFilter } from '../dispatchRegistry.js';
-import { resolveInputTex, beginFullscreen, passthrough } from '../svgFilterShared.js';
+import { resolveInputTex, beginFullscreen, passthrough, setInMap, texelOf, rectOfRT } from '../svgFilterShared.js';
 
 function feLightingDispatch(node, inputs, outRT, ctx) {
   const { gl, pool, feLightingProg, feLightingU, coverVao } = ctx;
-  const [w, h] = outRT.size;
   if (!feLightingProg) return passthrough(gl, inputs[0], outRT, ctx);
   const srcTex = resolveInputTex(inputs[0], pool, ctx);
   if (!srcTex) {
@@ -17,7 +16,13 @@ function feLightingDispatch(node, inputs, outRT, ctx) {
   const isSpecular = node.type === 'feSpecularLighting';
   gl.useProgram(feLightingProg);
   gl.uniform1i(feLightingU.uIn, 0);
-  gl.uniform2f(feLightingU.uTexel, 1 / w, 1 / h);
+  setInMap(gl, feLightingU.uInMap, inputs[0], outRT, ctx);
+  const [tx, ty] = texelOf(inputs[0], ctx);
+  gl.uniform2f(feLightingU.uTexel, tx, ty);   // sobel taps step ONE CANVAS PIXEL
+  // Light positions are canvas-space, so the shader needs this pass's rect to
+  // place the surface point it is lighting.
+  const oR = rectOfRT(outRT);
+  if (feLightingU.uOutRect) gl.uniform4f(feLightingU.uOutRect, oR[0], oR[1], oR[2], oR[3]);
   // Per-draw world scale keeps surface relief invariant under the
   // shape's worldMatrix (default [1,1] = identity → unchanged output).
   const ws = ctx.worldScale || [1, 1];

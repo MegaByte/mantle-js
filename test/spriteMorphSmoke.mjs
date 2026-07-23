@@ -25,15 +25,9 @@ const ROOT = path.resolve(__dirname, '..');
 
 // Two sprites, matched topology (both a single <rect>), different x + color.
 // A third un-id'd shape (green marker) must NOT appear in the morph.
-const SHEET = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100" width="300" height="100">
-  <g id="poseA"><rect x="20" y="20" width="60" height="60" fill="#ff0000"/></g>
-  <g id="poseB"><rect x="220" y="20" width="60" height="60" fill="#0000ff"/></g>
-  <rect x="140" y="40" width="20" height="20" fill="#00ff00"/>
-</svg>`;
+const SHEET = readFileSync(new URL('../examples/smoke/spriteMorph__SHEET.svg', import.meta.url), 'utf8');
 // A second sheet with the SAME sprite id 'poseA' (cross-bundle case).
-const SHEET2 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100" width="300" height="100">
-  <g id="poseA"><rect x="120" y="20" width="60" height="60" fill="#00ffff"/></g>
-</svg>`;
+const SHEET2 = readFileSync(new URL('../examples/smoke/spriteMorph__SHEET2.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="300" height="100"></canvas>

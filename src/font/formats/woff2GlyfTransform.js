@@ -27,7 +27,10 @@ export function untransformGlyfLoca(src, srcOff, srcLen) {
   const oGL = oFL + fl_sz;
   const oCP = oGL + gl_sz;
   const oBM = oCP + cp_sz;
-  const bmLen = (numGlyphs + 7) >> 3;
+  // Spec: the bboxBitmap is padded to a 4-byte boundary — (n+7)>>3 starts
+  // the bbox stream up to 3 bytes early for numGlyphs % 32 in 1..24,
+  // corrupting every explicit bbox (all composites).
+  const bmLen = 4 * ((numGlyphs + 31) >> 5);
   const oBS = oBM + bmLen;
   const oIN = oBM + bb_sz;
   const oOverlap = oIN + in_sz;
@@ -35,7 +38,6 @@ export function untransformGlyfLoca(src, srcOff, srcLen) {
 
   let curNC = oNC, curNP = oNP, curFL = oFL, curGL = oGL;
   let curComp = oCP, curBS = oBS, curIN = oIN;
-  let overlapBitCursor = 0;
 
   const glyphBufs = new Array(numGlyphs);
   for (let gid = 0; gid < numGlyphs; gid++) {
@@ -70,10 +72,12 @@ export function untransformGlyfLoca(src, srcOff, srcLen) {
         xs[p] = xPrev; ys[p] = yPrev;
         ttFlags[p] = onCurve ? 0x01 : 0x00;
         if (hasOverlap && p === 0) {
-          const byteIdx = overlapBitCursor >> 3;
-          const bitIdx  = 7 - (overlapBitCursor & 7);
+          // The overlapSimpleBitmap is indexed by GLYPH ID (spec /
+          // fontTools) — a sequential per-simple-glyph cursor drifts as
+          // soon as any composite or empty glyph precedes a simple one.
+          const byteIdx = gid >> 3;
+          const bitIdx  = 7 - (gid & 7);
           if ((src[oOverlap + byteIdx] >> bitIdx) & 1) ttFlags[p] |= 0x40;
-          overlapBitCursor++;
         }
       }
       const ilr = read255U16(src, curGL); curGL = ilr.cursor;

@@ -2,17 +2,18 @@
 
 precision highp float;
 precision highp int;
+precision highp sampler2D;
 
 flat in vec2  vP0, vP1, vP2, vP3;
 flat in float vHalfW, vMiterLimit;
-flat in vec2  vInTan, vOutTan;        
+flat in vec2  vInTan, vOutTan;
 flat in float vFreeStart, vFreeEnd;
-flat in int   vCap, vJoin;            
+flat in int   vCap, vJoin;
 flat in float vStartDist;
 in vec2 vEm;
 out vec4 o;
 
-uniform int       uDashId;            
+uniform int       uDashId;
 uniform sampler2D uDashTex;
 
 vec4 cubicCoeff(float p1, float p2, float p3, float p4) {
@@ -47,30 +48,30 @@ float slugCubicArcLen(vec4 cx, vec4 cy, float t) {
   return t * sum;
 }
 
-const int MT_BBOX         = 0;   
-const int MT_FILL         = 1;   
-const int MT_STROKE       = 2;   
-const int MT_STROKE_PARAMS = 3;  
-const int MT_GLYPH_BAND   = 4;   
-const int MT_SOLID        = 5;   
-const int MT_CAP_JOIN     = 6;   
-const int MT_PAINT_ID     = 7;   
-const int MT_FILTER_BLEND = 8;   
-const int MT_IMAGE_RECT   = 9;   
-const int MT_ATLAS        = 10;  
-const int MT_PRIM         = 11;  
+const int MT_BBOX         = 0;
+const int MT_FILL         = 1;
+const int MT_STROKE       = 2;
+const int MT_STROKE_PARAMS = 3;
+const int MT_GLYPH_BAND   = 4;
+const int MT_SOLID        = 5;
+const int MT_CAP_JOIN     = 6;
+const int MT_PAINT_ID     = 7;
+const int MT_FILTER_BLEND = 8;
+const int MT_IMAGE_RECT   = 9;
+const int MT_ATLAS        = 10;
+const int MT_PRIM         = 11;
 
-const int FT_R0   = 0;   
+const int FT_R0   = 0;
 const int FT_R1   = 1;
 const int FT_R2   = 2;
 const int FT_R3   = 3;
-const int FT_OFF  = 4;   
-const int FT_META = 5;   
+const int FT_OFF  = 4;
+const int FT_META = 5;
 
 const int GR_G0 = 0;  const int GR_G1 = 1;  const int GR_G2 = 2;  const int GR_G3 = 3;
 
-const int OV_AFFINE   = 0;  
-const int OV_POS_VIS  = 1;  
+const int OV_AFFINE   = 0;
+const int OV_POS_VIS  = 1;
 const int OV_TINT     = 2;
 const int OV_FILL     = 3;
 const int OV_STROKE   = 4;
@@ -103,10 +104,10 @@ bool dashCovered(int dashId, float dist) {
 }
 
 float perpDistToArc(vec2 q, vec2 tan, float kappa) {
-  vec2 L = vec2(-tan.y, tan.x);                 
-  if (abs(kappa) < 1e-6) return abs(dot(q, L)); 
-  float R = 1.0 / kappa;                         
-  vec2 CC = R * L;                               
+  vec2 L = vec2(-tan.y, tan.x);
+  if (abs(kappa) < 1e-6) return abs(dot(q, L));
+  float R = 1.0 / kappa;
+  vec2 CC = R * L;
   return abs(length(q - CC) - abs(R));
 }
 
@@ -119,7 +120,12 @@ float strokeCapsJoinsDash(
   bool drop = false;
   if (t < 1e-4) {
     if (freeStart) {
-      if (startCap == 0) drop = true;
+      if (startCap == 0) {
+
+        float tL0 = max(length(dStart), 1e-12);
+        float aOut = dot(-pStart, -(dStart / tL0));
+        thisD = max(thisD, halfW + aOut);
+      }
       else if (startCap == 2) {
         float tL = max(length(dStart), 1e-12);
         vec2 segTan = dStart / tL;
@@ -134,8 +140,9 @@ float strokeCapsJoinsDash(
       vec2 epStart = pStart;
       if (startPrevReach < 1e8 && dot(-epStart, inTan) < 0.0) drop = true;
       float c = dot(-segTan, inTan);
-      float cosHalf = sqrt(max(0.5 * (1.0 + c), 1e-9));
-      float miterLen = halfW / max(cosHalf, 1e-6);
+
+      float sinHalf = sqrt(max(0.5 * (1.0 - c), 1e-9));
+      float miterLen = halfW / max(sinHalf, 1e-6);
       float maxMiter = halfW * miterLimit;
       if (joinStyle == 3) miterLen = min(miterLen, maxMiter);
       else if (miterLen > maxMiter) miterLen = -1.0;
@@ -151,17 +158,16 @@ float strokeCapsJoinsDash(
         }
       }
     } else if (joinStyle == 4) {
-      
-      
-      
-      vec2 segTan = normalize(dStart);
+
+      vec2 segTan = dStart / max(length(dStart), 1e-12);
       vec2 ep = pStart;
       if (startPrevReach < 1e8 && dot(-ep, inTan) < 0.0) drop = true;
       float c = dot(-segTan, inTan);
-      float cosHalf = sqrt(max(0.5 * (1.0 + c), 1e-9));
-      float miterLen = halfW / max(cosHalf, 1e-6);
+
+      float sinHalf = sqrt(max(0.5 * (1.0 - c), 1e-9));
+      float miterLen = halfW / max(sinHalf, 1e-6);
       if (miterLen > halfW * miterLimit) {
-        
+
         float cr = inTan.x * segTan.y - inTan.y * segTan.x;
         float sd = (cr >= 0.0) ? 1.0 : -1.0;
         vec2 nA = sd * vec2(inTan.y, -inTan.x), nB = sd * vec2(segTan.y, -segTan.x);
@@ -169,20 +175,17 @@ float strokeCapsJoinsDash(
         if (bl > 1e-4) { vec2 bis = nb / bl;
           thisD = max(thisD, halfW + dot(-ep, bis) - halfW * dot(nA, bis)); }
       } else if (dot(-ep, -segTan) >= 0.0) {
-        float perpThis  = perpDistToArc(-ep, segTan, curv.x);  
-        float perpOther = perpDistToArc(-ep, inTan, curv.z);   
+        float perpThis  = perpDistToArc(-ep, segTan, curv.x);
+        float perpOther = perpDistToArc(-ep, inTan, curv.z);
         thisD = min(thisD, max(perpThis, perpOther));
       }
     } else {
       vec2 ep = pStart;
       if (dot(-ep, inTan) < 0.0) drop = true;
       else if (joinStyle == 2) {
-        
-        
-        
-        
-        vec2 tB = normalize(dStart);
-        float cr = inTan.x * tB.y - inTan.y * tB.x;       
+
+        vec2 tB = dStart / max(length(dStart), 1e-12);
+        float cr = inTan.x * tB.y - inTan.y * tB.x;
         float sd = (cr >= 0.0) ? 1.0 : -1.0;
         vec2 nA = sd * vec2(inTan.y, -inTan.x), nB = sd * vec2(tB.y, -tB.x);
         vec2 nb = nA + nB; float bl = length(nb);
@@ -193,7 +196,12 @@ float strokeCapsJoinsDash(
   }
   if (t > 1.0 - 1e-4) {
     if (freeEnd) {
-      if (endCap == 0) drop = true;
+      if (endCap == 0) {
+
+        float tL1 = max(length(dEnd), 1e-12);
+        float aOut = dot(-pEnd, dEnd / tL1);
+        thisD = max(thisD, halfW + aOut);
+      }
       else if (endCap == 2) {
         float tL = max(length(dEnd), 1e-12);
         vec2 segTan = dEnd / tL;
@@ -208,8 +216,9 @@ float strokeCapsJoinsDash(
       vec2 epEnd = pEnd;
       if (endNextReach < 1e8 && dot(-epEnd, outTan) > 0.0) drop = true;
       float c = dot(segTan, -outTan);
-      float cosHalf = sqrt(max(0.5 * (1.0 + c), 1e-9));
-      float miterLen = halfW / max(cosHalf, 1e-6);
+
+      float sinHalf = sqrt(max(0.5 * (1.0 - c), 1e-9));
+      float miterLen = halfW / max(sinHalf, 1e-6);
       float maxMiter = halfW * miterLimit;
       if (joinStyle == 3) miterLen = min(miterLen, maxMiter);
       else if (miterLen > maxMiter) miterLen = -1.0;
@@ -225,13 +234,14 @@ float strokeCapsJoinsDash(
         }
       }
     } else if (joinStyle == 4) {
-      
-      vec2 segTan = normalize(dEnd);
+
+      vec2 segTan = dEnd / max(length(dEnd), 1e-12);
       vec2 ep = pEnd;
       if (endNextReach < 1e8 && dot(-ep, outTan) > 0.0) drop = true;
       float c = dot(segTan, -outTan);
-      float cosHalf = sqrt(max(0.5 * (1.0 + c), 1e-9));
-      float miterLen = halfW / max(cosHalf, 1e-6);
+
+      float sinHalf = sqrt(max(0.5 * (1.0 - c), 1e-9));
+      float miterLen = halfW / max(sinHalf, 1e-6);
       if (miterLen > halfW * miterLimit) {
         float cr = segTan.x * outTan.y - segTan.y * outTan.x;
         float sd = (cr >= 0.0) ? 1.0 : -1.0;
@@ -240,23 +250,21 @@ float strokeCapsJoinsDash(
         if (bl > 1e-4) { vec2 bis = nb / bl;
           thisD = max(thisD, halfW + dot(-ep, bis) - halfW * dot(nA, bis)); }
       } else if (dot(-ep, segTan) >= 0.0) {
-        float perpThis  = perpDistToArc(-ep, segTan, curv.y);  
-        float perpOther = perpDistToArc(-ep, outTan, curv.w);  
+        float perpThis  = perpDistToArc(-ep, segTan, curv.y);
+        float perpOther = perpDistToArc(-ep, outTan, curv.w);
         thisD = min(thisD, max(perpThis, perpOther));
       }
     } else {
       vec2 ep = pEnd;
       if (dot(-ep, outTan) > 0.0) drop = true;
       else if (joinStyle == 2) {
-        
-        
-        vec2 tA = normalize(dEnd);
+
+        vec2 tA = dEnd / max(length(dEnd), 1e-12);
         float cr = tA.x * outTan.y - tA.y * outTan.x;
         float sd = (cr >= 0.0) ? 1.0 : -1.0;
         vec2 nA = sd * vec2(tA.y, -tA.x), nB = sd * vec2(outTan.y, -outTan.x);
         vec2 nb = nA + nB; float bl = length(nb);
-        
-        
+
         if (bl > 1e-4) { vec2 bis = nb / bl;
           thisD = max(thisD, halfW + dot(-ep, bis) - halfW * dot(nA, bis)); }
       }
@@ -345,6 +353,64 @@ float quadArcLen(vec2 p1, vec2 p2, vec2 p3, float t) {
   return Ft - F0;
 }
 
+float quadClosestT(vec2 A, vec2 B, vec2 C) {
+  float a3 = 2.0 * dot(A, A);
+  float a2 = 3.0 * dot(A, B);
+  float a1 = dot(B, B) + 2.0 * dot(A, C);
+  float a0 = dot(B, C);
+  float cand[5];
+  int n = 0;
+  cand[0] = 0.0; cand[1] = 1.0; n = 2;
+  if (abs(a3) < 1e-12 * max(abs(a2), max(abs(a1), abs(a0)))) {
+    if (abs(a2) > 1e-30) {
+      float disc = a1 * a1 - 4.0 * a2 * a0;
+      if (disc >= 0.0) {
+        float sd = sqrt(disc);
+        float qq = -0.5 * (a1 + (a1 >= 0.0 ? sd : -sd));
+        cand[n++] = qq / a2;
+        if (abs(qq) > 1e-30) cand[n++] = a0 / qq;
+      }
+    } else if (abs(a1) > 1e-30) cand[n++] = -a0 / a1;
+  } else {
+    float p = a2 / a3, q2 = a1 / a3, r = a0 / a3;
+    float pp = q2 - p * p / 3.0;
+    float qq = (2.0 * p * p * p) / 27.0 - (p * q2) / 3.0 + r;
+    float shift = -p / 3.0;
+    float disc = qq * qq / 4.0 + pp * pp * pp / 27.0;
+    if (disc > 0.0) {
+      float sd = sqrt(disc);
+      float u = -qq / 2.0 + sd, v = -qq / 2.0 - sd;
+      float uc = sign(u) * pow(abs(u), 1.0 / 3.0);
+      float vc = sign(v) * pow(abs(v), 1.0 / 3.0);
+      cand[n++] = uc + vc + shift;
+    } else {
+      float rr = sqrt(max(-pp * pp * pp / 27.0, 0.0));
+      float phi = acos(clamp(-qq / (2.0 * max(rr, 1e-30)), -1.0, 1.0));
+      float m = 2.0 * sqrt(max(-pp / 3.0, 0.0));
+      cand[n++] = m * cos(phi / 3.0) + shift;
+      cand[n++] = m * cos((phi + 6.2831853071795865) / 3.0) + shift;
+      cand[n++] = m * cos((phi + 12.566370614359172) / 3.0) + shift;
+    }
+  }
+
+  for (int i = 2; i < 5; i++) {
+    if (i >= n) break;
+    float t0 = cand[i];
+    float ft = ((a3 * t0 + a2) * t0 + a1) * t0 + a0;
+    float df = (3.0 * a3 * t0 + 2.0 * a2) * t0 + a1;
+    if (abs(df) > 1e-30) cand[i] = t0 - ft / df;
+  }
+  float bt = 0.0, bs = 1e30;
+  for (int i = 0; i < 5; i++) {
+    if (i >= n) break;
+    float tt = clamp(cand[i], 0.0, 1.0);
+    vec2 qv = (A * tt + B) * tt + C;
+    float d2 = dot(qv, qv);
+    if (d2 < bs) { bs = d2; bt = tt; }
+  }
+  return bt;
+}
+
 float strokeQuadAccum(vec4 p12, vec2 p3,
                       bool freeStart, bool freeEnd,
                       int startCap, int endCap,
@@ -357,22 +423,7 @@ float strokeQuadAccum(vec4 p12, vec2 p3,
   vec2 A = p1 - 2.0 * p2 + p3;
   vec2 B = 2.0 * (p2 - p1);
   vec2 C = p1;
-  float bT = 0.0, bS = 1e20;
-  for (int k = 0; k <= 4; k++) {
-    float tt = float(k) / 4.0;
-    vec2 q = (A * tt + B) * tt + C;
-    float d2 = dot(q, q);
-    if (d2 < bS) { bS = d2; bT = tt; }
-  }
-  float t = bT;
-  for (int j = 0; j < 3; j++) {
-    vec2 q = (A * t + B) * t + C;
-    vec2 d = 2.0 * A * t + B;
-    float f = dot(q, d);
-    float df = dot(d, d) + dot(q, 2.0 * A);
-    if (abs(df) < 1e-9) break;
-    t = clamp(t - f / df, 0.0, 1.0);
-  }
+  float t = quadClosestT(A, B, C);
   vec2 q = (A * t + B) * t + C;
   float thisD = length(q);
   vec2 dStart = B;
@@ -390,18 +441,12 @@ float strokeQuadAccum(vec4 p12, vec2 p3,
 void main() {
   vec2 ePx = fwidth(vEm);
   float pxSize = max(0.5 * (ePx.x + ePx.y), 1e-6);
-  
-  
+
   vec4 p12 = vec4(vP0 - vEm, vP1 - vEm);
   vec4 p34 = vec4(vP2 - vEm, vP3 - vEm);
   float reachS = vFreeStart > 0.5 ? 1e9 : 0.0;
   float reachE = vFreeEnd > 0.5 ? 1e9 : 0.0;
-  
-  
-  
-  
-  
-  
+
   vec4 curv = vec4(0.0);
   if (vJoin == 4) {
     vec2 d1s = 3.0 * (vP1 - vP0), d2s = 6.0 * (vP0 - 2.0 * vP1 + vP2);
@@ -413,7 +458,7 @@ void main() {
   float md = strokeCubicAccum(p12, p34, vFreeStart > 0.5, vFreeEnd > 0.5, vCap, vCap,
                               vJoin, vMiterLimit, vHalfW, vInTan, vOutTan,
                               uDashId, vStartDist, reachS, reachE, curv, 1e20);
-  
+
   float halfWVis = max(vHalfW, 0.5 * pxSize);
   float weightFade = vHalfW / halfWVis;
   float dfe = md - halfWVis;

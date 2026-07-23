@@ -386,8 +386,10 @@ export class ColrReader {
         startStored += this._varDelta(varIndexBase, 2, coords);
         endStored   += this._varDelta(varIndexBase, 3, coords);
       }
-      const startAngle = startStored / 16384 * 180;
-      const endAngle   = endStored / 16384 * 180;
+      // COLR spec: sweep angles are F2DOT14 with a BIAS of 1.0 —
+      // angle = (value + 1.0) × 180°. (Rotate/skew paints are unbiased.)
+      const startAngle = (startStored / 16384 + 1) * 180;
+      const endAngle   = (endStored / 16384 + 1) * 180;
       const cl = this._readColorLine(off + clRel, isVar, coords);
       return { format: 8, center: [cx, cy], startAngle, endAngle,
                stops: cl.stops, extend: cl.extend };
@@ -472,19 +474,6 @@ export class ColrReader {
       return { format: 16, child, sx, sy };
     }
     if (format === 18 || format === 19) {
-      // PaintScaleUniform / PaintVarScaleUniform:
-      //   u8 format, Offset24 paint, F2DOT14 s
-      //   [PaintVarScaleUniform only] uint32 varIndexBase
-      const childRel = this._readOffset24(off + 1);
-      let s = v.getInt16(off + 4, false) / 16384;
-      if (format === 19 && coords) {
-        const varIndexBase = v.getUint32(off + 6, false);
-        s += this._varDelta(varIndexBase, 0, coords) / 16384;
-      }
-      const child = this._readPaint(off + childRel, coords);
-      return { format: 18, child, s };
-    }
-    if (format === 20 || format === 21) {
       // PaintScaleAroundCenter / Var:
       //   u8 format, Offset24 paint, F2DOT14 sx, sy, FWORD cx, cy
       //   [PaintVarScaleAroundCenter only] uint32 varIndexBase
@@ -493,7 +482,7 @@ export class ColrReader {
       let sy = v.getInt16(off + 6, false) / 16384;
       let cx = v.getInt16(off + 8, false);
       let cy = v.getInt16(off + 10, false);
-      if (format === 21 && coords) {
+      if (format === 19 && coords) {
         const varIndexBase = v.getUint32(off + 12, false);
         sx += this._varDelta(varIndexBase, 0, coords) / 16384;
         sy += this._varDelta(varIndexBase, 1, coords) / 16384;
@@ -501,23 +490,53 @@ export class ColrReader {
         cy += this._varDelta(varIndexBase, 3, coords);
       }
       const child = this._readPaint(off + childRel, coords);
-      return { format: 20, child, sx, sy, cx, cy };
+      return { format: 18, child, sx, sy, cx, cy };
+    }
+    if (format === 20 || format === 21) {
+      // PaintScaleUniform / PaintVarScaleUniform:
+      //   u8 format, Offset24 paint, F2DOT14 s
+      //   [PaintVarScaleUniform only] uint32 varIndexBase
+      const childRel = this._readOffset24(off + 1);
+      let s = v.getInt16(off + 4, false) / 16384;
+      if (format === 21 && coords) {
+        const varIndexBase = v.getUint32(off + 6, false);
+        s += this._varDelta(varIndexBase, 0, coords) / 16384;
+      }
+      const child = this._readPaint(off + childRel, coords);
+      return { format: 20, child, s };
     }
     if (format === 22 || format === 23) {
+      // PaintScaleUniformAroundCenter / Var:
+      //   u8 format, Offset24 paint, F2DOT14 s, FWORD cx, cy
+      //   [PaintVarScaleUniformAroundCenter only] uint32 varIndexBase
+      const childRel = this._readOffset24(off + 1);
+      let s = v.getInt16(off + 4, false) / 16384;
+      let cx = v.getInt16(off + 6, false);
+      let cy = v.getInt16(off + 8, false);
+      if (format === 23 && coords) {
+        const varIndexBase = v.getUint32(off + 10, false);
+        s  += this._varDelta(varIndexBase, 0, coords) / 16384;
+        cx += this._varDelta(varIndexBase, 1, coords);
+        cy += this._varDelta(varIndexBase, 2, coords);
+      }
+      const child = this._readPaint(off + childRel, coords);
+      return { format: 22, child, s, cx, cy };
+    }
+    if (format === 24 || format === 25) {
       // PaintRotate / PaintVarRotate:
       //   u8 format, Offset24 paint, F2DOT14 angle (degrees / 180)
       //   [PaintVarRotate only] uint32 varIndexBase
       const childRel = this._readOffset24(off + 1);
       let angleStored = v.getInt16(off + 4, false);
-      if (format === 23 && coords) {
+      if (format === 25 && coords) {
         const varIndexBase = v.getUint32(off + 6, false);
         angleStored += this._varDelta(varIndexBase, 0, coords);
       }
       const angleDeg = angleStored / 16384 * 180;
       const child = this._readPaint(off + childRel, coords);
-      return { format: 22, child, angleDeg };
+      return { format: 24, child, angleDeg };
     }
-    if (format === 24 || format === 25) {
+    if (format === 26 || format === 27) {
       // PaintRotateAroundCenter / Var:
       //   u8 format, Offset24 paint, F2DOT14 angle, FWORD cx, cy
       //   [PaintVarRotateAroundCenter only] uint32 varIndexBase
@@ -525,7 +544,7 @@ export class ColrReader {
       let angleStored = v.getInt16(off + 4, false);
       let cx = v.getInt16(off + 6, false);
       let cy = v.getInt16(off + 8, false);
-      if (format === 25 && coords) {
+      if (format === 27 && coords) {
         const varIndexBase = v.getUint32(off + 10, false);
         angleStored += this._varDelta(varIndexBase, 0, coords);
         cx          += this._varDelta(varIndexBase, 1, coords);
@@ -533,16 +552,16 @@ export class ColrReader {
       }
       const angleDeg = angleStored / 16384 * 180;
       const child = this._readPaint(off + childRel, coords);
-      return { format: 24, child, angleDeg, cx, cy };
+      return { format: 26, child, angleDeg, cx, cy };
     }
-    if (format === 26 || format === 27) {
+    if (format === 28 || format === 29) {
       // PaintSkew / PaintVarSkew:
       //   u8 format, Offset24 paint, F2DOT14 skewX, F2DOT14 skewY
       //   [PaintVarSkew only] uint32 varIndexBase
       const childRel = this._readOffset24(off + 1);
       let skewXStored = v.getInt16(off + 4, false);
       let skewYStored = v.getInt16(off + 6, false);
-      if (format === 27 && coords) {
+      if (format === 29 && coords) {
         const varIndexBase = v.getUint32(off + 8, false);
         skewXStored += this._varDelta(varIndexBase, 0, coords);
         skewYStored += this._varDelta(varIndexBase, 1, coords);
@@ -550,9 +569,9 @@ export class ColrReader {
       const skewXDeg = skewXStored / 16384 * 180;
       const skewYDeg = skewYStored / 16384 * 180;
       const child = this._readPaint(off + childRel, coords);
-      return { format: 26, child, skewXDeg, skewYDeg };
+      return { format: 28, child, skewXDeg, skewYDeg };
     }
-    if (format === 28 || format === 29) {
+    if (format === 30 || format === 31) {
       // PaintSkewAroundCenter / Var:
       //   u8 format, Offset24 paint, F2DOT14 skewX, skewY, FWORD cx, cy
       //   [PaintVarSkewAroundCenter only] uint32 varIndexBase
@@ -561,7 +580,7 @@ export class ColrReader {
       let skewYStored = v.getInt16(off + 6, false);
       let cx = v.getInt16(off + 8, false);
       let cy = v.getInt16(off + 10, false);
-      if (format === 29 && coords) {
+      if (format === 31 && coords) {
         const varIndexBase = v.getUint32(off + 12, false);
         skewXStored += this._varDelta(varIndexBase, 0, coords);
         skewYStored += this._varDelta(varIndexBase, 1, coords);
@@ -571,7 +590,7 @@ export class ColrReader {
       const skewXDeg = skewXStored / 16384 * 180;
       const skewYDeg = skewYStored / 16384 * 180;
       const child = this._readPaint(off + childRel, coords);
-      return { format: 28, child, skewXDeg, skewYDeg, cx, cy };
+      return { format: 30, child, skewXDeg, skewYDeg, cx, cy };
     }
     if (format === 32) {
       // PaintComposite:

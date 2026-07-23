@@ -58,6 +58,13 @@ function asMorphInput(sections) {
     metaFloatsPerShape: sections.metaFloatsPerShape || 48,
     metaFloats: meta.metaFloats,
     curveFloats: sections.curves ? new Float32Array(sections.curves) : new Float32Array(0),
+    // The BANDS come along too. Native never rasterizes from them — but the shared
+    // morph core walks them to enumerate a shape's segments, which is how it finds
+    // the ARC records it has to re-express in endpoint form (prepareArcMorph).
+    // Without them that pass silently no-ops, native falls back to lerping arcs in
+    // CENTRE form, and every arc tears exactly as it did before the fix.
+    bands: sections.bands || null,
+    bandFloats: sections.bands ? new Float32Array(sections.bands) : null,
     curveRangesByShape: sections.curveRangesByShape,
     shapeIds: sections.shapeIds,
     flags: sections.flags,
@@ -108,8 +115,27 @@ export function createNativeMorph(srcBundle, dstBundle, opts = {}) {
   const plan = _morphBuildPlan(srcIn, dstIn, srcRange, dstRange);
   const sections = _morphComposeSections(srcIn, dstIn, plan);
 
-  const merged = sections._mergedCurveF32;          // src curves (baseline)
-  const dstRemapped = sections._dstCurveF32;        // dst curves at src slots
+  // The planes to INTERPOLATE. When the morph carries arcs, that is the
+  // endpoint-form pair, not the centre-form one: a componentwise lerp of
+  // centre-form arcs pulls their endpoints off the contour and the shape tears
+  // (morphCore.prepareArcMorph has the argument).
+  //
+  // And unlike the GL path, we do NOT convert them back afterwards. This backend
+  // re-emits every shape as an SVG <path>, and `A rx ry phi large sweep x y` IS
+  // endpoint form — so the decoder can print the lerped numbers verbatim. Going
+  // via centre form would re-derive each arc's endpoints through a trig round
+  // trip that, in float32, lands a hair off the neighbouring segment's endpoint;
+  // curveRangeToPathD reads that as a subpath break, the contour opens, and the
+  // fill loses a wedge. (GL never sees it — the winding walker doesn't care about
+  // a sub-pixel gap. Only the path decoder demands an exact match.)
+  //
+  // Nor is there a join-tangent rebuild here: the browser strokes the <path>, so
+  // nothing ever reads the join texel.
+  const arcOffsets = sections._arcOffsets;
+  const hasArcs = !!(arcOffsets && arcOffsets.length);
+  const epArcs = hasArcs ? new Set(arcOffsets) : null;
+  const merged = hasArcs ? sections._srcEpCurveF32 : sections._mergedCurveF32;
+  const dstRemapped = hasArcs ? sections._dstEpCurveF32 : sections._dstCurveF32;
 
   // The override table the scene reads. Native (CPU) — no gl. Addresses
   // shapes by the SRC bundle's ids (same as srcIn.shapeIds).
@@ -200,7 +226,10 @@ export function createNativeMorph(srcBundle, dstBundle, opts = {}) {
       for (let i = m.srcBegin; i < m.srcEnd; i++) {
         lerp[i] = merged[i] * (1 - t) + dstRemapped[i] * t;
       }
-      const d = curveRangeToPathD(lerp, m.srcBegin, m.srcEnd);
+    }
+    for (const m of plan.matched) {
+      // Arcs stay in ENDPOINT form all the way to the `d` string — see above.
+      const d = curveRangeToPathD(lerp, m.srcBegin, m.srcEnd, epArcs);
       // Matched shapes are always visible (never hidden), so no visibility
       // entry is needed on the fast path — geometry alone.
       if (directD) directD[m.srcIdx] = d;

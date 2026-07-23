@@ -23,11 +23,7 @@ const ROOT = path.resolve(__dirname, '..');
 // matching rect (morph partner). The clipPath layer rows are appended after
 // the visible shapes (outside any sprite range) — exactly the case that
 // exercises the forwarded-clipperRows path.
-const SHEET = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <defs><clipPath id="window"><rect x="40" y="40" width="20" height="20"/></clipPath></defs>
-  <g id="win"><rect x="0" y="0" width="100" height="100" fill="#ff6600" clip-path="url(#window)"/></g>
-  <g id="plain"><rect x="0" y="0" width="100" height="100" fill="#3366ff"/></g>
-</svg>`;
+const SHEET = readFileSync(new URL('../examples/smoke/spriteMorphClip__SHEET.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="100" height="100"></canvas>

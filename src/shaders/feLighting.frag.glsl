@@ -27,7 +27,9 @@
 //   1 = specular (uK = specularConstant, uExponent = specularExponent)
 precision highp float;
 uniform sampler2D uIn;      // input (alpha = height field)
-uniform vec2  uTexel;       // 1/textureSize
+uniform vec2  uTexel;       // 1 / inRect.size — one CANVAS pixel, in input uv
+uniform vec4  uInMap;       // vUV → input uv (see @@FILTER_RECT@@)
+uniform vec4  uOutRect;     // this pass's canvas rect (origin.xy, size.xy) in px
 uniform vec2  uWorldScale;  // per-draw worldMatrix scale (X,Y); 1.0 = identity.
                             // The height-field gradient is sampled over
                             // device texels, so when a draw's worldMatrix
@@ -48,7 +50,10 @@ uniform float uSpotCosCone; // cos(limitingConeAngle); >1.0 means no cone
 in vec2 vUV;
 out vec4 fragColor;
 
+@@FILTER_RECT@@
+
 void main() {
+  vec2 uv = mapIn(vUV, uInMap);
   // Compute height-field gradient via the spec's recommended 3×3
   // kernel (Sobel-like with weights from §18.4). The spec gives:
   //   ∂F/∂x at center (i, j) =
@@ -59,15 +64,15 @@ void main() {
   // Layout (row-major):  TL T TR
   //                       L C  R
   //                      BL B BR
-  float aTL = texture(uIn, vUV + uTexel * vec2(-1.0, -1.0)).a;
-  float aT  = texture(uIn, vUV + uTexel * vec2( 0.0, -1.0)).a;
-  float aTR = texture(uIn, vUV + uTexel * vec2( 1.0, -1.0)).a;
-  float aL  = texture(uIn, vUV + uTexel * vec2(-1.0,  0.0)).a;
-  float aC  = texture(uIn, vUV).a;
-  float aR  = texture(uIn, vUV + uTexel * vec2( 1.0,  0.0)).a;
-  float aBL = texture(uIn, vUV + uTexel * vec2(-1.0,  1.0)).a;
-  float aB  = texture(uIn, vUV + uTexel * vec2( 0.0,  1.0)).a;
-  float aBR = texture(uIn, vUV + uTexel * vec2( 1.0,  1.0)).a;
+  float aTL = sampleIn(uIn, uv + uTexel * vec2(-1.0, -1.0)).a;
+  float aT  = sampleIn(uIn, uv + uTexel * vec2( 0.0, -1.0)).a;
+  float aTR = sampleIn(uIn, uv + uTexel * vec2( 1.0, -1.0)).a;
+  float aL  = sampleIn(uIn, uv + uTexel * vec2(-1.0,  0.0)).a;
+  float aC  = sampleIn(uIn, uv).a;
+  float aR  = sampleIn(uIn, uv + uTexel * vec2( 1.0,  0.0)).a;
+  float aBL = sampleIn(uIn, uv + uTexel * vec2(-1.0,  1.0)).a;
+  float aB  = sampleIn(uIn, uv + uTexel * vec2( 0.0,  1.0)).a;
+  float aBR = sampleIn(uIn, uv + uTexel * vec2( 1.0,  1.0)).a;
   // Fold the per-draw world scale into the gradient so the slope is
   // measured per world-unit, not per device texel (world-scale-invariant).
   float Nx = scale * uWorldScale.x * ((aTR + 2.0 * aR + aBR) - (aTL + 2.0 * aL + aBL));
@@ -82,7 +87,9 @@ void main() {
     L = normalize(uLightPos);
   } else {
     // point or spot
-    vec3 pos = vec3(vUV / uTexel, 0.0);  // pixel coords
+    // Light positions are in CANVAS pixels, so the surface point must be too —
+    // vUV alone is relative to whatever rect this pass happens to cover.
+    vec3 pos = vec3(uOutRect.xy + vUV * uOutRect.zw, 0.0);
     vec3 toLight = uLightPos - pos;
     L = normalize(toLight);
     if (uLightType == 2) {

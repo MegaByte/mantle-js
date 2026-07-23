@@ -192,6 +192,11 @@ export function attachDrawImages(R) {
     //              Default = whole image.
     //   alpha:     0..1 global multiplier (default 1).
     //   tint:      [r,g,b,a] straight-alpha color multiply (default white).
+    //   colorMatrix:       column-major mat4 (16 floats) recolor, applied to
+    //                      straight color before tint/alpha, exactly as on the
+    //                      vector path (drawBundle's opts.colorMatrix).
+    //   colorMatrixOffset: vec4 added after the matrix (default zero).
+    //                      Either option alone enables the recolor.
     //   blendMode: 0 normal, 1 multiply, 2 screen, 4 darken, 5 lighten.
     // A non-handle source is uploaded for this draw only (one-shot) and
     // released after — for repeated draws, createImage() once and pass the
@@ -252,6 +257,17 @@ export function attachDrawImages(R) {
             ? opts.worldMatrix : new Float32Array(opts.worldMatrix))
         : _imgIdentM;
       R.gl.uniformMatrix3fv(R.diUWorldM, false, wm);
+      // Per-draw recolor; same enable rule as the vector path (either half
+      // present turns it on, the missing half falls back to identity/zero).
+      const cm = opts.colorMatrix, cmo = opts.colorMatrixOffset;
+      if ((cm || cmo) && R.diUCEnabled) {
+        R.gl.uniformMatrix4fv(R.diUCMatrix, false,
+          cm ? (cm instanceof Float32Array ? cm : new Float32Array(cm))
+             : R.IDENTITY_COLOR_MATRIX);
+        const o = cmo || R.ZERO_OFFSET;
+        R.gl.uniform4f(R.diUCOffset, o[0], o[1], o[2], o[3] || 0);
+        R.gl.uniform1i(R.diUCEnabled, 1);
+      } else if (R.diUCEnabled) R.gl.uniform1i(R.diUCEnabled, 0);
   
       R.gl.enable(R.gl.BLEND);
       R.applyBlendMode(opts.blendMode | 0);
@@ -269,7 +285,7 @@ export function attachDrawImages(R) {
       // Changed program + clobbered TEXTURE0. Self-report so a following
       // drawBundle re-binds its asset textures instead of trusting the
       // fill-pass cache (same contract as the mask/filter/cache passes).
-      if (R._handle) R._handle.fillPassAssetDirty = true;
+      if (R._handle) R._handle.fillPassAssetDirty = true; R._fpUValid = false;
   
       if (oneShot) oneShot.dispose();
       return true;
@@ -315,22 +331,28 @@ export function attachDrawImages(R) {
       const buf = _instScratch;
       for (let i = 0; i < n; i++) {
         const inst = instances[i] || {};
-        const dst = inst.dstRect || [0, 0, img.width, img.height];
+        const dst = inst.dstRect;
         // wm is only element-indexed into a scratch buffer below (never
         // passed to uniformMatrix3fv), so a plain array works as-is.
         const wm = inst.worldMatrix || _diiIdentCols;
-        const tint = inst.tint || [1, 1, 1, 1];
+        const tint = inst.tint;
         const alpha = (typeof inst.alpha === 'number')
           ? Math.max(0, Math.min(1, inst.alpha)) : 1.0;
-        const ta = (tint.length > 3 ? tint[3] : 1.0) * alpha;
+        const ta = (tint && tint.length > 3 ? tint[3] : 1.0) * alpha;
         let o = i * 17;
-        buf[o++] = dst[0]; buf[o++] = dst[1]; buf[o++] = dst[2]; buf[o++] = dst[3];
+        buf[o++] = dst ? dst[0] : 0;
+        buf[o++] = dst ? dst[1] : 0;
+        buf[o++] = dst ? dst[2] : img.width;
+        buf[o++] = dst ? dst[3] : img.height;
         // mat3 columns (column-major source → laid out col0,col1,col2)
         buf[o++] = wm[0]; buf[o++] = wm[1]; buf[o++] = wm[2];
         buf[o++] = wm[3]; buf[o++] = wm[4]; buf[o++] = wm[5];
         buf[o++] = wm[6]; buf[o++] = wm[7]; buf[o++] = wm[8];
         // tint.rgb, folded alpha (tint.a*alpha) so the frag matches drawImage
-        buf[o++] = tint[0]; buf[o++] = tint[1]; buf[o++] = tint[2]; buf[o++] = ta;
+        buf[o++] = tint ? tint[0] : 1;
+        buf[o++] = tint ? tint[1] : 1;
+        buf[o++] = tint ? tint[2] : 1;
+        buf[o++] = ta;
       }
   
       const [vw, vh] = R.viewportSize();
@@ -361,7 +383,7 @@ export function attachDrawImages(R) {
       R.gl.blendFunc(R.gl.ONE, R.gl.ONE_MINUS_SRC_ALPHA);
   
       // Clobbered program + TEXTURE0 — same self-report contract as drawImage.
-      if (R._handle) R._handle.fillPassAssetDirty = true;
+      if (R._handle) R._handle.fillPassAssetDirty = true; R._fpUValid = false;
   
       if (oneShot) oneShot.dispose();
       return n;

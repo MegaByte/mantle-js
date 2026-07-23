@@ -17,12 +17,43 @@ export function applyVerticalLayout(slots, font, textOrient, writingMode, ox = 0
   // bundle's globalBBox origin to (0,0) for vertical runs too).
   void writingMode;
   const out = new Array(slots.length);
+  // Column positions are RE-ACCUMULATED from each glyph's VERTICAL
+  // advance (vmtx for upright glyphs) — reusing the horizontal penX
+  // (hmtx sums) mis-spaced vertical CJK wherever vmtx ≠ hmtx (common
+  // for punctuation/kana). Each line keeps its leading penX offset
+  // (alignment/margin); zero-advance marks ride the previous glyph's
+  // position plus their GPOS inline delta.
+  const posByIdx = new Float64Array(slots.length);
+  let curLine = null;
+  let colPos = 0;
+  let colStarted = false;
   for (let i = 0; i < slots.length; i++) {
     const s = slots[i];
+    const lnY9 = s.lineY !== undefined ? s.lineY : s.penY;
+    if (curLine === null || lnY9 !== curLine) { curLine = lnY9; colStarted = false; }
     const upright = textOrient === 'upright'
                  || (textOrient === 'mixed' && isCjkOrUprightCodepoint(s.codepoint | 0));
+    // Vertical step: vmtx advanceHeight when upright; sideways glyphs
+    // span their horizontal advance along the line axis (CSS Writing
+    // Modes).
+    let vAdv = s.advance || 0;
+    if (upright && typeof font.getVerticalMetricsByGid === 'function') {
+      const m = font.getVerticalMetricsByGid(s.glyphId);
+      if (m && m.advanceHeight) vAdv = m.advanceHeight;
+    }
+    let pos;
+    if ((s.advance || 0) === 0 && i > 0) {
+      // Combining mark: anchor to the previous glyph's column position,
+      // preserving the GPOS inline delta the pen loop applied.
+      pos = posByIdx[i - 1] + (s.penX - slots[i - 1].penX);
+    } else {
+      if (!colStarted) { colPos = s.penX; colStarted = true; }
+      pos = colPos;
+      colPos += vAdv;
+    }
+    posByIdx[i] = pos;
     let originXEm = 0;
-    let originYEm = s.penX;  // inline advance becomes Y position
+    let originYEm = pos;
     if (upright) {
       const vOriginYem = (typeof font.getVerticalOriginY === 'function')
         ? font.getVerticalOriginY(s.glyphId) : 0.5;
@@ -37,14 +68,7 @@ export function applyVerticalLayout(slots, font, textOrient, writingMode, ox = 0
     if (!upright) {
       cloned.style = { ...(s.style || {}), rotateDeg: 90 };
     }
-    // Vertical advance comes from vmtx when the glyph is upright;
-    // sideways glyphs use the horizontal advance as their vertical
-    // step (CSS Writing Modes: sideways glyphs span their horizontal
-    // advance along the LINE axis).
-    if (upright && typeof font.getVerticalMetricsByGid === 'function') {
-      const m = font.getVerticalMetricsByGid(s.glyphId);
-      if (m && m.advanceHeight) cloned.advance = m.advanceHeight;
-    }
+    cloned.advance = vAdv;
     out[i] = cloned;
   }
   return out;

@@ -9,11 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 // Single-shape mask (one window) → inline path. Wrapped in sprite 'hero'.
-const SHEET = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100" width="200" height="100">
-  <defs><mask id="m"><rect id="win" x="10" y="30" width="40" height="40" fill="#fff"/></mask></defs>
-  <g id="hero"><rect x="0" y="0" width="100" height="100" fill="#ff6600" mask="url(#m)"/></g>
-  <g id="plain"><rect x="120" y="20" width="60" height="60" fill="#3366ff"/></g>
-</svg>`;
+const SHEET = readFileSync(new URL('../examples/smoke/maskAnimInline__SHEET.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="200" height="100"></canvas>
 <script type="module">

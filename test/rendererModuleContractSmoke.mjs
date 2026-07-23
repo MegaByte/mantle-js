@@ -21,7 +21,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/renderer/');
-const MODULES = ['shaderPrograms', 'drawImages', 'instancedFill', 'morphDraw', 'drawSprites', 'cacheDraw', 'staticCache', 'filterDraw', 'clipDraw', 'bundleHandle', 'maskBake', 'fillPass', 'frameLoop', 'drawDispatch'];
+const MODULES = ['shaderPrograms', 'drawImages', 'instancedFill', 'morphDraw', 'drawSprites', 'cacheDraw', 'staticCache', 'filterDraw', 'clipDraw', 'bundleHandle', 'maskBake', 'fillPass', 'frameLoop', 'drawDispatch', 'incrementalStroke'];
 
 // Allowlist for cross-refs that are intentionally not-yet-on-R. Keep this
 // empty: filter-compositing dependencies (shapeFbo, ensureShapeFbo,

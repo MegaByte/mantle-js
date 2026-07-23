@@ -3,7 +3,7 @@
 precision highp float;
 in vec2 vUv;
 uniform sampler2D uCoverage;
-uniform vec4 uColor;        
+uniform vec4 uColor;
 out vec4 o;
 void main() {
   float cov = texture(uCoverage, vUv).r;

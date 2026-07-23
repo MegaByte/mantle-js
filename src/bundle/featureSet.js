@@ -130,8 +130,12 @@ export function inspect(bundle) {
   }
 
   // === Gradient table walk — derive per-type sub-flags ===
-  if ((f & Features.Gradients) !== 0n && bundle.gradients) {
-    const grads = new Float32Array(bundle.gradients);
+  // Sections bundles carry `gradients` (ArrayBuffer); uploaded bundles
+  // expose `gradientFloats` instead — accept both, or the sub-flags
+  // silently vanish on createBundle output.
+  const gradSrc = bundle.gradients || bundle.gradientFloats;
+  if ((f & Features.Gradients) !== 0n && gradSrc) {
+    const grads = gradSrc instanceof Float32Array ? gradSrc : new Float32Array(gradSrc);
     const gradCount = grads.length / GRAD_FLOATS_PER_GRADIENT;
     for (let i = 0; i < gradCount; i++) {
       const type = grads[i * GRAD_FLOATS_PER_GRADIENT + GRAD_TYPE] | 0;

@@ -29,7 +29,7 @@
 /// One decoded embedded bitmap glyph.
 ///   alphaBitmap: Uint8Array(width*height), 8-bit coverage
 ///   width/height: pixels
-///   bearingX/bearingY: font units (s8); advance: pixels (u8)
+///   bearingX/bearingY: pixels at the strike ppem (s8); advance: pixels (u8)
 export class EbdtGlyph {
   constructor(alphaBitmap, metrics, bitDepth, strikePpem) {
     this.alphaBitmap = alphaBitmap;

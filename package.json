@@ -1,7 +1,7 @@
 {
   "name": "@kontek/mantle",
-  "version": "1.0.0",
-  "description": "Mantle is a vector graphics renderer. WebGL2 implementation: imports .svg files into a compact bundle (curves table, per-shape meta, cover quads) and draws each shape as a single cover quad, computing exact per-curve coverage in one fragment-shader pass via the Slug ray-cast algorithm (analytic anti-aliasing, no tessellation or stencil).",
+  "version": "1.1.0",
+  "description": "Mantle is a vector graphics renderer. WebGL2 implementation: imports .svg into a compact bundle and draws with analytic anti-aliasing (Slug ray-cast, Loop-Blinn, AAC, and hierarchical winding fills). Fonts, morphs, filters, and a native-SVG fallback included.",
   "keywords": [
     "vector",
     "graphics",
@@ -27,7 +27,8 @@
     "check:types": "node scripts/checkRendererTypes.mjs",
     "prepublishOnly": "npm run build:shaders && npm run gen:types && npm run test && npm run test:render",
     "fetch:fixtures": "node scripts/fetchTestFixtures.mjs",
-    "pretest": "node scripts/fetchTestFixtures.mjs"
+    "pretest": "node scripts/fetchTestFixtures.mjs",
+    "gen:smoke-assets": "node scripts/genSmokeAssets.mjs"
   },
   "exports": {
     ".": {
@@ -223,13 +224,17 @@
     "./src/filterGraph/colr/paints.js"
   ],
   "files": [
-    "src/",
+    "src/**/*.js",
+    "src/shaders/*.glsl",
+    "src/shaders/generated/",
     "types/",
     "README.md",
     "LICENSE",
     "NOTICE"
   ],
   "devDependencies": {
+    "@xmldom/xmldom": "^0.8.13",
+    "puppeteer": "^24.0.0",
     "typescript": "^6.0.3"
   },
   "engines": {

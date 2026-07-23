@@ -127,11 +127,15 @@ export async function preloadImages(root, opts) {
     for (let i = 0; i < ks.length; i++) visit(ks[i]);
   };
   visit(root);
-  const out = new Map();
-  for (const el of list) {
+  // Decode concurrently — each image is an independent fetch + decode, so
+  // serial awaiting stacks N round trips of latency into importSvg.
+  const decoded = await Promise.all(list.map((el) => {
     const href = el.getAttribute('href') || el.getAttribute('xlink:href') || '';
-    const dec = await decodeImageHref(href, opts);
-    if (dec) out.set(el, dec);
+    return decodeImageHref(href, opts);
+  }));
+  const out = new Map();
+  for (let i = 0; i < list.length; i++) {
+    if (decoded[i]) out.set(list[i], decoded[i]);
   }
   return out;
 }

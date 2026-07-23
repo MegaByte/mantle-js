@@ -2,7 +2,7 @@
 // font 'o'/'O'/'0') must NOT be mistaken for a circle by the annulus SDF. The
 // circle fit only sampled the on-curve ENDPOINTS, so a few-percent ellipse passed
 // (res/r≈0.02 < the old 0.03 tolerance) and rendered as a MIS-SIZED circle — the
-// ring came out too thick, mean boundary error ~0.3 vs Slug (MuseoSans o/O/0 were
+// ring came out too thick, mean boundary error ~0.3 vs Slug (round glyphs were
 // visibly rough). The fit now also checks each segment's t=½ ON-CURVE midpoint and
 // tightens to 0.01·r, so the ellipse is rejected → it takes the accurate CDT
 // crescent path and matches Slug. (True circles sit at res/r≈0, still SDF-exact —
@@ -12,6 +12,7 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer';
+import { emitFixture } from './_fixtures.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -37,6 +38,7 @@ function quadEllipse(cx, cy, rx, ry, ccw) {
 // ellipse, like a font 'o') — res/r≈0.02 sits between the old 0.03 tolerance
 // (false-accept → mis-sized circle, mean≈0.3) and the new 0.01 (rejected → CDT).
 const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${R} ${R}" width="${R}" height="${R}"><path fill="black" d="${quadEllipse(32, 32, 26, 25.2, true)} ${quadEllipse(32, 32, 17.3, 16.8, false)}"/></svg>`;
+emitFixture('lbEllipticalRingParity__SVG', SVG);
 
 const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="${R}" height="${R}"></canvas>
 <script type="module">

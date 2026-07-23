@@ -89,26 +89,21 @@ void main() {
 
   vec2 mn = min(min(P0, P1), min(P2, P3)), mx = max(max(P0, P1), max(P2, P3));
   float emPerPx = uGlobalBBox.z / max(uCanvasAR.x * uViewportSize.x, 1.0);
-  
-  
-  
-  
-  
-  
+
   float reach = uHalfW;
   if (uJoinStyle == 0) {
     float worst = uHalfW * max(uMiterLimit, 1.0);
     vec2 dS = P1 - P0, dE = P3 - P2;
     float mS = uHalfW, mE = uHalfW;
     if (vFreeStart < 0.5) {
-      if (length(dS) < 1e-6) mS = worst;   
-      else { float ch = sqrt(max(0.5 * (1.0 + dot(-nrm(dS), vInTan)), 1e-9));
-             float m = uHalfW / max(ch, 1e-6); mS = (m <= worst) ? m : uHalfW; }
+      if (length(dS) < 1e-6) mS = worst;
+      else { float sh = sqrt(max(0.5 * (1.0 - dot(-nrm(dS), vInTan)), 1e-9));
+             float m = uHalfW / max(sh, 1e-6); mS = (m <= worst) ? m : uHalfW; }
     }
     if (vFreeEnd < 0.5) {
       if (length(dE) < 1e-6) mE = worst;
-      else { float ch = sqrt(max(0.5 * (1.0 + dot(nrm(dE), -vOutTan)), 1e-9));
-             float m = uHalfW / max(ch, 1e-6); mE = (m <= worst) ? m : uHalfW; }
+      else { float sh = sqrt(max(0.5 * (1.0 - dot(nrm(dE), -vOutTan)), 1e-9));
+             float m = uHalfW / max(sh, 1e-6); mE = (m <= worst) ? m : uHalfW; }
     }
     reach = max(mS, mE);
   }

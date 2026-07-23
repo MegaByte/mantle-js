@@ -19,8 +19,8 @@ const fail = m => { failures++; console.error('FAIL', m); };
 
 // Square → diamond, same shape count + same segment layout (4 lines) → matched,
 // fixed topology. Straight edges → the streaming refresh's earcut-reuse applies.
-const SRC = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><path d="M40 40 L160 40 L160 160 L40 160 Z" fill="#3296c8"/></svg>`;
-const DST = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><path d="M100 30 L170 100 L100 170 L30 100 Z" fill="#3296c8"/></svg>`;
+const SRC = readFileSync(new URL('../examples/smoke/loopBlinnMorph__SRC.svg', import.meta.url), 'utf8');
+const DST = readFileSync(new URL('../examples/smoke/loopBlinnMorph__DST.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="256" height="256"></canvas>
@@ -41,6 +41,7 @@ renderer.setViewport(W, H);
 const bSrc = createBundle(gl, await importSvg(${JSON.stringify(SRC)}));
 const bDst = createBundle(gl, await importSvg(${JSON.stringify(DST)}));
 const morph = createShapeMorph(gl, bSrc, bDst);
+if (renderer.awaitLbReady) await renderer.awaitLbReady(morph); // morph build is off-thread — wait before asserting the route
 
 // One setT per frame (real usage), then draw at each mode from the SAME state.
 function frame(t) {

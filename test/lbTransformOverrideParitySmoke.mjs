@@ -13,10 +13,7 @@ const ROOT = path.resolve(__dirname, '..');
 
 // Two diamonds. Shape 1 (right) gets a translate override (moved up 40em); shape
 // 0 (left) is untransformed → analytic.
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <path d="M55 110 L85 140 L55 170 L25 140 Z" fill="#cc3333"/>
-  <path d="M145 110 L175 140 L145 170 L115 140 Z" fill="#3366cc"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/lbTransformOverrideParity__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="200" height="200"></canvas>

@@ -504,8 +504,8 @@ export function createNativeScene(host, opts = {}) {
   // shape's path `d` (+ optional fill) onto its cached <path> element with a
   // per-shape last-applied guard, skipping the whole slot when the bundle's
   // stream generation hasn't advanced. No override-table allocation/diffing —
-  // this is the cost difference vs the generic override loop on a scrolling
-  // road (N shapes/frame). The bundle's synthesized svgSource is all <path>s in
+  // this is the cost difference vs the generic override loop when N shapes
+  // change every frame. The bundle's synthesized svgSource is all <path>s in
   // shape-index order, so shapeElByIndex(i) is shape i's element directly.
   function applyStreamGeometry(slot, groupEl, bundle) {
     const gen = bundle.__streamGen | 0;
@@ -521,19 +521,23 @@ export function createNativeScene(host, opts = {}) {
       const dv = ds[i];
       // undefined ⇒ this shape isn't stream-driven (a morph fills only its
       // matched shapes; the rest keep their source geometry). '' is distinct —
-      // it clears a degenerate shape (an off-screen road band).
+      // it clears a degenerate shape (e.g. one scrolled off-screen).
       if (dv === undefined) continue;
-      let el = shapeElByIndex(slot, groupEl, i);
+      // Route META ROW → element through shapeDomIndex (identity for
+      // synthesized streaming sources, which have no map): a retained-
+      // source morph whose shapes emit fill+stroke rows would otherwise
+      // land the tweened `d` on the wrong <path>.
+      let el = shapeElByRow(slot, groupEl, bundle, i);
       if (!el) continue;
       // A morph's matched shape may be a primitive in the source markup —
-      // convert to <path> once so the streamed `d` lands (no-op for the road's
-      // synthesized <path> source).
+      // convert to <path> once so the streamed `d` lands (no-op for a
+      // synthesized all-<path> source).
       if (el.tagName.toLowerCase() !== 'path') el = ensurePathEl(slot, el, null, i);
       const d = dv || '';
       // An empty `d` paints nothing but still costs layout/paint walk per
       // frame. display:none drops the node from paint entirely — this is what
-      // closes the gap vs the classic visible-only road rebuild for the road's
-      // many off-screen (degenerate) bands. Toggle is guarded so it only writes
+      // keeps a stream with many off-screen (degenerate) shapes cheap vs a
+      // visible-only rebuild. Toggle is guarded so it only writes
       // on a visible↔hidden transition, and a hidden shape skips d/fill writes.
       const empty = d === '';
       if (hCache[i] !== empty) { el.style.display = empty ? 'none' : ''; hCache[i] = empty; }
@@ -911,8 +915,8 @@ export function createNativeScene(host, opts = {}) {
     // APPLY when present; absence is handled by finishSlotFrame not seeing
     // the attr in frameTouch.
     // Build the matrix(...) string ONLY when the worldMatrix actually changed
-    // (a scrolling road's <g> is stationary — the scroll is in the band
-    // geometry — so this is a no-op string alloc every frame otherwise). Cache
+    // (a streaming bundle's <g> is often stationary — the motion lives in the
+    // streamed geometry — so this is a no-op string alloc every frame otherwise). Cache
     // the 6 components + the resulting string on the slot. applyAttr is still
     // called so its diff no-ops the DOM write AND records the per-frame touch
     // (skipping it would make finishSlotFrame revert the transform).
@@ -988,8 +992,8 @@ export function createNativeScene(host, opts = {}) {
     // updateNativeBundleGeometry carries per-shape path `d` (+ fills) on the
     // bundle. Write them STRAIGHT to the cached <path> elements — no override
     // table, no get()/snapshot diffing, no per-shape allocation. This is the
-    // per-frame scrolling-road hot path; the generic override loop below is too
-    // heavy at N shapes × 60fps (it loses to just rebuilding the road SVG).
+    // per-frame streaming hot path; the generic override loop below is too
+    // heavy when N shapes change every frame (it loses to a full SVG rebuild).
     if (bundle.__streamPathD) applyStreamGeometry(slot, g, bundle);
 
     // Apply overrides (transform/visibility/recolor/morph-d by id) and
@@ -1369,16 +1373,20 @@ export function createNativeScene(host, opts = {}) {
     if (blend) img.style.mixBlendMode = blend;
     // tint: SVG <image> has no native multiply-tint; honor an alpha-only
     // tint via opacity, and an RGB tint via an feColorMatrix filter.
+    // A per-draw colorMatrix rides the same filter (feColorMatrix operates
+    // on straight color, like the GL path), applied BEFORE the tint.
+    let rgbTint = null;
     if (drawOpts.tint) {
       const t = drawOpts.tint;
       if (t[3] != null && t[3] < 1) {
         const cur = parseFloat(img.getAttribute('opacity') || '1');
         img.setAttribute('opacity', String(cur * t[3]));
       }
-      if ((t[0] !== 1 || t[1] !== 1 || t[2] !== 1)) {
-        img.setAttribute('filter', rasterTintFilter(layer, t));
-      }
+      if ((t[0] !== 1 || t[1] !== 1 || t[2] !== 1)) rgbTint = t;
     }
+    const cm = drawOpts.colorMatrix, cmo = drawOpts.colorMatrixOffset;
+    if (cm || cmo || rgbTint)
+      img.setAttribute('filter', rasterRecolorFilter(layer, cm, cmo, rgbTint));
 
     layer.appendChild(img);
     // The wrapper is already mounted (slotted); nothing to push.
@@ -1387,17 +1395,37 @@ export function createNativeScene(host, opts = {}) {
 
   // Build an feColorMatrix filter that multiplies RGB by the tint and
   // append its <filter> to the layer; return url(#id).
-  function rasterTintFilter(layer, t) {
+  // Recolor filter for a raster blit: an optional per-draw colorMatrix
+  // (+ offset) followed by an optional RGB tint multiply — the native
+  // analogue of drawImage's `uColorMatrix` then `uTint` in
+  // src/shaders/drawImage.frag.glsl. Both stages are feColorMatrix, which
+  // (like the shader) works on straight, un-premultiplied color.
+  function rasterRecolorFilter(layer, cm, cmo, tint) {
     const id = `mantleRasterTint${rasterClipSeq++}`;
     const filter = ownerDoc.createElementNS(SVGNS, 'filter');
     filter.setAttribute('id', id);
     filter.setAttribute('x', '0'); filter.setAttribute('y', '0');
     filter.setAttribute('width', '100%'); filter.setAttribute('height', '100%');
-    const fe = ownerDoc.createElementNS(SVGNS, 'feColorMatrix');
-    fe.setAttribute('type', 'matrix');
-    fe.setAttribute('values',
-      `${t[0]} 0 0 0 0  0 ${t[1]} 0 0 0  0 0 ${t[2]} 0 0  0 0 0 1 0`);
-    filter.appendChild(fe);
+    if (cm || cmo) {
+      // GL mat4 is COLUMN-major (`out = M * c`, so M[col*4+row]); SVG wants
+      // 4 rows of 5 (row-major, 5th column = the offset term).
+      const m = cm || [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+      const o = cmo || [0, 0, 0, 0];
+      const rows = [];
+      for (let r = 0; r < 4; r++)
+        rows.push(`${m[r]} ${m[4 + r]} ${m[8 + r]} ${m[12 + r]} ${o[r] || 0}`);
+      const feM = ownerDoc.createElementNS(SVGNS, 'feColorMatrix');
+      feM.setAttribute('type', 'matrix');
+      feM.setAttribute('values', rows.join('  '));
+      filter.appendChild(feM);
+    }
+    if (tint) {
+      const fe = ownerDoc.createElementNS(SVGNS, 'feColorMatrix');
+      fe.setAttribute('type', 'matrix');
+      fe.setAttribute('values',
+        `${tint[0]} 0 0 0 0  0 ${tint[1]} 0 0 0  0 0 ${tint[2]} 0 0  0 0 0 1 0`);
+      filter.appendChild(fe);
+    }
     layer.appendChild(filter);
     return `url(#${id})`;
   }
@@ -1464,8 +1492,7 @@ export function createNativeScene(host, opts = {}) {
     return `matrix(${a},${b},${c},${d},${e},${f})`;
   }
 
-  // Strip per-element paint so a wrapping group's fill is inherited (used to
-  // force the 'out' mask shapes BLACK regardless of their authored color).
+  // Strip per-element paint so a wrapping group's fill is inherited.
   function stripPaint(el) {
     if (el.removeAttribute) {
       for (const a of ['fill', 'stroke', 'style', 'opacity', 'fill-opacity', 'stroke-opacity'])

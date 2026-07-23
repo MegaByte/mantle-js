@@ -9,3 +9,12 @@ test/font/visuals/
 # Third-party test fixtures — fetched by scripts/fetchTestFixtures.mjs
 test/font/fixtures/
 examples/tiger.svg
+
+# Proprietary benchmark artwork — local only, never tracked
+/examples/_bench/
+
+# Probe captures and generated benchmark reports
+/probes/*Out/
+/probes/_broken90/
+/probes/_balanceBench*.json
+/probes/_balanceBench*Report*.md

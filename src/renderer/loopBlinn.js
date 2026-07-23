@@ -36,13 +36,13 @@ import { SEG_LINE, SEG_QUAD, SEG_CUBIC, SEG_RQUAD } from '../primitives/seg.js';
 
 
 import { earcut } from './lbEarcut.js';
-import { _setKeyOrigin, circleFromContours, extractAnnuli } from './lbContour.js';
+import { _setKeyOrigin, circleFromContours, ellipseFromContours, extractAnnuli } from './lbContour.js';
 export { curveRangeToContours, _setKeyOrigin } from './lbContour.js';   // barrel: decode surface
 export { bezoutCubicImplicit, evalBezout, cubicKLMN, partitionCubicSplitTs, uvInHull } from './lbCubicMath.js';   // barrel: public math surface
-export { LB_VERT_FLOATS, packLoopBlinnMesh, transformLoopBlinnRaw, lbCanonicalFrame, lbCanonicalHash } from './lbPack.js';   // barrel: pack/reuse surface
+export { LB_VERT_FLOATS, LB_MAX_VERTS_PER_MESH, LB_MAX_VERTS_PER_BUNDLE, packLoopBlinnMesh, transformLoopBlinnRaw, lbCanonicalFrame, lbCanonicalHash, lbCanonicalHashes } from './lbPack.js';   // barrel: pack/reuse surface
 import { _healCand } from './lbInteriorSplit.js';
-import { buildRims, buildCornerCaps2, turnsEqual, flattenRims, rimLens, assemble, healCracks, buildLoopBlinnMesh } from './lbFastMesh.js';
-export { selfOrientRows, buildLoopBlinnMesh } from './lbFastMesh.js';   // barrel: fast-path surface
+import { buildRims, turnsEqual, layoutRims, triangulateLayout, rimLens, assemble, healCracks, buildLoopBlinnMesh, resolveSelfOverlap } from './lbFastMesh.js';
+export { selfOrientRows, buildLoopBlinnMesh, dropDegenerateFaces } from './lbFastMesh.js';   // barrel: fast-path surface
 import { buildLoopBlinnPartition } from './lbPartition.js';
 export { buildLoopBlinnPartitionPair, partitionPairMidError } from './lbPartitionPair.js';   // barrel: morph-pair surface
 
@@ -59,6 +59,8 @@ export function buildLoopBlinnCDT(contours, opts) {
   _setKeyOrigin(contours);
   const circ = circleFromContours(contours);
   if (circ) return { interior: new Float32Array(0), interiorEdges: null, quads: [], cubics: [], edges: [], fallback: [], circles: [circ], _topo: null };
+  const ell = ellipseFromContours(contours);
+  if (ell) return { interior: new Float32Array(0), interiorEdges: null, quads: [], cubics: [], edges: [], fallback: [], circles: [ell], _topo: null };
   // Pull out concentric circular RINGS → exact annulus SDF; the rest builds below.
   const _ann = extractAnnuli(contours, opts && opts.fillRule);
   contours = _ann.rest;
@@ -77,6 +79,24 @@ export function buildLoopBlinnCDT(contours, opts) {
       try { pp9 = buildLoopBlinnPartition(contours, opts); }
       catch (e9) { pp9 = null; if (typeof globalThis !== 'undefined') globalThis.__lbPartitionErr = String(e9 && e9.stack || e9).slice(0, 500); }
       if (pp9) return pp9;
+      // The partition DECLINED (returned null). One cause is a SELF-OVERLAPPING
+      // outline: two segments of a contour overlap with opposite winding (common
+      // in exported art where strokes were flattened to fills), leaving a
+      // winding-0 sliver the per-crescent fill-side test cannot honour — both
+      // overlapping crescents paint the sliver (each reads its own f<0) while the
+      // true fill is empty there, so the shape over-paints AIR and declines
+      // (Assist-Ants head, Broccoli). Retry ONCE from the exact union silhouette
+      // (native cubics preserved), which has no winding-0 straddle. resolveSelfOverlap
+      // returns the SAME contours unless the outline genuinely self-intersects, so
+      // a shape that declined for any OTHER reason changes nothing and this second
+      // build is skipped — clean shapes never pay for it and stay byte-identical.
+      // STATIC only — morphs build through buildLoopBlinnPartitionPair, untouched.
+      const contours9 = resolveSelfOverlap(contours, opts && opts.fillRule);
+      if (contours9 !== contours) {
+        try { pp9 = buildLoopBlinnPartition(contours9, opts); }
+        catch (e9) { pp9 = null; if (typeof globalThis !== 'undefined') globalThis.__lbPartitionErr = String(e9 && e9.stack || e9).slice(0, 500); }
+        if (pp9) return pp9;
+      }
     }
   }
   // After circle/annulus extraction (thin rings legitimately have cross-contour
@@ -98,8 +118,18 @@ export function buildLoopBlinnCDT(contours, opts) {
 // convex↔concave, gained/lost an inflection, or a loop/cusp appeared).
 export function refreshLoopBlinnMesh(prev, contours) {
   if (!prev || !prev._topo) return buildLoopBlinnMesh(contours);
-  const r = buildRims(contours);
-  const { coords, holeStarts } = flattenRims(r.rims);
+  // Same per-build setup as buildLoopBlinnMesh: the vertex-key origin is
+  // scale-aware GLOBAL state (without the reset, rim quantization keys
+  // against whichever shape built LAST — refresh output depended on
+  // cross-shape build order), and a ramped refresh must not feed
+  // healCracks another build's stale candidates. buildRims also gets the
+  // ramped flag so a static mesh's refresh runs the same
+  // degree-reduce/subdivide steps as its own build (count guards in the
+  // earcut pair path silently lost the cheap route otherwise).
+  _healCand.length = 0;
+  _setKeyOrigin(contours);
+  const r = buildRims(contours, !!prev._topo.ramped);
+  const { coords, holeStarts, spans } = layoutRims(r.rims);
   const t = prev._topo, lens = rimLens(r.rims);
   let same = lens.length === t.rimLens.length && holeStarts.length === t.holeStarts.length
           && r.fallback.length === prev.fallback.length;
@@ -127,10 +157,11 @@ export function refreshLoopBlinnMesh(prev, contours) {
       if (sgn === 0) sgn = s;
     }
   }
-  const tris = same ? t.tris : earcut(coords, holeStarts.length ? holeStarts : null);
+  const tris = same ? t.tris : triangulateLayout(coords, spans);
   const mesh = assemble(r, coords, tris, holeStarts, t.ramped);
-  mesh.caps = t.ramped ? buildCornerCaps2(contours) : [];
-  mesh.curveStrips = !!t.ramped;
+  // Whole-arc band snapshot BEFORE healing (same as buildLoopBlinnMesh).
+  if (t.ramped) mesh.bandArcs = mesh.quads.filter((q) => !q.circle && !q.tc)
+    .map((q) => ({ tri: q.tri, sign: q.sign, w: q.w, e1: q.e1, e2: q.e2 }));
   if (t.ramped) healCracks(mesh);
   return mesh;
 }

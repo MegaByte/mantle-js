@@ -11,6 +11,7 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer';
+import { emitFixture } from './_fixtures.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -34,6 +35,7 @@ function quadEllipse(cx, cy, rx, ry) {
 }
 const R = 40;
 const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40"><path fill="#000" d="${quadEllipse(20, 20, 17, 11)}"/></svg>`;
+emitFixture('lbQuadSeam__SVG', SVG);
 
 const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="${R}" height="${R}"></canvas>
 <script type="module">
@@ -41,13 +43,17 @@ import { importSvg, createBundle, createRenderer, loadShaders } from '/src/index
 const gl = document.getElementById('c').getContext('webgl2', { antialias: false, premultipliedAlpha: true, preserveDrawingBuffer: true });
 const shaders = await loadShaders(new URL('/src/shaders/', location.href).href);
 const renderer = createRenderer(gl, shaders); renderer.setViewport(${R}, ${R});
+// REFERENCE = AAC (exact signed-area coverage). Slug and LB now share the same exactBoxCov
+// kernel, so "LB matches Slug" no longer proves either is right.
+const refR = createRenderer(gl, shaders, { aacFill: true }); refR.setViewport(${R}, ${R}); refR.setLoopBlinnFill('off');
 const bundle = createBundle(gl, await importSvg(${JSON.stringify(SVG)})); renderer.prepareBundle(bundle);
 const read = () => { const px = new Uint8Array(${R}*${R}*4); gl.readPixels(0,0,${R},${R},gl.RGBA,gl.UNSIGNED_BYTE,px); return px; };
 const cov = (px,x,y) => { const q = ((${R}-1-y)*${R}+x)*4; return (255-px[q])/255; };
 const draw = (m) => { renderer.setLoopBlinnFill(m); const r = renderer.debugStats.loopBlinnRouteCount;
   renderer.beginFrame([1,1,1,1]); renderer.drawBundle(bundle); renderer.endFrame();
   return { px: read(), routed: renderer.debugStats.loopBlinnRouteCount - r }; };
-const slug = draw('off'), lb = draw('on');
+const drawRef = () => { refR.beginFrame([1,1,1,1]); refR.drawBundle(bundle); refR.endFrame(); return { px: read(), routed: 1 }; };
+const slug = drawRef(), lb = draw('on');
 let sum=0, sgn=0, n=0, maxOver=0, maxUnder=0, notch=0;
 for (let y=0;y<${R};y++) for (let x=0;x<${R};x++){ const s=cov(slug.px,x,y), l=cov(lb.px,x,y);
   if ((s>0.02&&s<0.98)||(l>0.02&&l<0.98)){ const d=l-s; sum+=Math.abs(d); sgn+=d; n++;
@@ -90,7 +96,11 @@ if (o.lbRouted) ok('quad ellipse routes through LB'); else fail('ellipse did NOT
 // so the guard is on the bias, not per-pixel maxima.
 if (o.bias <= 0.02) ok('no systematic curve over-coverage (band bias = ' + o.bias + ')');
 else fail('LB systematically OVER-covers the quad arc (band bias ' + o.bias + ') — tangent-line coverage regressed?');
-if (o.mean <= 0.03) ok('mean boundary error ' + o.mean); else fail('mean boundary error too high (' + o.mean + ')');
+// Against the EXACT reference this measures 0.0054 — LB's rquad arcs are accurate. (The old
+// 0.03 bound was against Slug's blended combiner; when Slug became exact that comparison read
+// 0.0568, which said nothing about LB.) Keep the bound tight so a real regression trips.
+if (o.mean <= 0.015) ok('mean boundary error ' + o.mean);
+else fail('mean boundary error too high (' + o.mean + ')');
 // Residual seam notch (under-coverage at crescent pinch) must stay sub-pixel-bounded.
 if (o.maxUnder <= 0.25) ok('seam notch bounded (max under-coverage ' + o.maxUnder + ')');
 else fail('seam notch too deep (max under-coverage ' + o.maxUnder + ') — crescents pinching badly?');

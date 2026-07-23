@@ -13,9 +13,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 // A diamond filled at 50% opacity over a black background.
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <path d="M50 8 L92 50 L50 92 L8 50 Z" fill="#3366cc" fill-opacity="0.5"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/lbTranslucentParity__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="100" height="100"></canvas>

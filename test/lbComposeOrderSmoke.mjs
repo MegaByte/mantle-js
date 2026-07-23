@@ -14,15 +14,8 @@ import puppeteer from 'puppeteer';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
-const MESA = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="#c8a060"/><stop offset="1" stop-color="#603010"/>
-  </linearGradient></defs>
-  <path d="M10 160 C10 90 40 70 70 70 L130 70 C160 70 190 90 190 160 Z" fill="url(#g)"/>
-</svg>`;
-const BLOB = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <path d="M60 120 C60 80 100 80 110 110 C120 140 90 160 70 150 C55 143 60 135 60 120 Z" fill="#3366cc"/>
-</svg>`;
+const MESA = readFileSync(new URL('../examples/smoke/lbComposeOrder__MESA.svg', import.meta.url), 'utf8');
+const BLOB = readFileSync(new URL('../examples/smoke/lbComposeOrder__BLOB.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="200" height="200"></canvas>

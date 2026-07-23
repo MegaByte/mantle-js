@@ -45,14 +45,8 @@ const url  = `http://127.0.0.1:${port}/mantleDemo.html`;
 
 // Two distinct fixtures: solid red square vs solid blue square.
 // Different colors give the cross-interference assertion a clear signal.
-const SVG_RED  = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <rect x="0" y="0" width="100" height="100" fill="#ff0000"/>
-</svg>`;
-const SVG_BLUE = `<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <rect x="0" y="0" width="100" height="100" fill="#0000ff"/>
-</svg>`;
+const SVG_RED = readFileSync(new URL('../examples/smoke/bundleHandle__SVG_RED.svg', import.meta.url), 'utf8');
+const SVG_BLUE = readFileSync(new URL('../examples/smoke/bundleHandle__SVG_BLUE.svg', import.meta.url), 'utf8');
 
 let failures = 0;
 const fail = (m) => { failures++; console.error('FAIL', m); };

@@ -30,11 +30,7 @@ const OUT = path.join(__dirname, 'visuals', 'color-matrix');
 mkdirSync(OUT, { recursive: true });
 
 // Tiny SVG with two side-by-side rects: left red, right blue.
-const SVG_TWO_RECTS = `
-<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-  <rect x="0"  y="0" width="50"  height="100" fill="#FF0000"/>
-  <rect x="50" y="0" width="50"  height="100" fill="#0000FF"/>
-</svg>`;
+const SVG_TWO_RECTS = readFileSync(new URL('../examples/smoke/colorMatrix__SVG_TWO_RECTS.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body style="margin:0;background:#000">
 <canvas id="c" width="100" height="100"></canvas>

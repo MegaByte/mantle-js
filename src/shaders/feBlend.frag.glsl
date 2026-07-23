@@ -12,15 +12,19 @@
 precision highp float;
 uniform sampler2D uIn1;   // src
 uniform sampler2D uIn2;   // dst
+uniform vec4 uIn1Map;     // vUV → uIn1 uv (see @@FILTER_RECT@@)
+uniform vec4 uIn2Map;     // vUV → uIn2 uv — a DIFFERENT rect
 uniform int uMode;
 in vec2 vUV;
 out vec4 fragColor;
 
+@@FILTER_RECT@@
+
 @@BLEND_HELPERS@@
 
 void main() {
-  vec4 srcPre = texture(uIn1, vUV);
-  vec4 dstPre = texture(uIn2, vUV);
+  vec4 srcPre = sampleIn(uIn1, mapIn(vUV, uIn1Map));
+  vec4 dstPre = sampleIn(uIn2, mapIn(vUV, uIn2Map));
   vec3 src = unpre(srcPre);
   vec3 dst = unpre(dstPre);
   float as = srcPre.a, ad = dstPre.a;

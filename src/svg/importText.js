@@ -54,7 +54,9 @@ export function handleTextPaintTag(walkCtx, node, tag, ctm, pf, ps, pw, f, s, st
       // Mask / clip-path inheritance on <textArea>, resolved once before
       // the per-glyph loop.
       const _taStyleMap     = parseStyleString(node.getAttribute('style') || '');
-      const _taRawClipStr   = _taStyleMap['clip-path'] || node.getAttribute('clip-path') || walkCtx.currentClipRef();
+      // Stack alone: walk() already folded this node's own clip-path into
+      // the inherited one (intersection, SVG 1.1 §14.3).
+      const _taRawClipStr   = walkCtx.currentClipRef();
       const _taRawMaskStr   = _taStyleMap['mask']      || node.getAttribute('mask')      || walkCtx.currentMaskRef();
       const _taRawFilterStr = _taStyleMap['filter']    || node.getAttribute('filter')    || walkCtx.currentFilterRef();
       const _taClipRef      = resolveIdRef(_taRawClipStr);
@@ -103,7 +105,8 @@ export function handleTextPaintTag(walkCtx, node, tag, ctm, pf, ps, pw, f, s, st
       // inheritance. Stamp the claimed 1-based ids on every emitted glyph
       // so the bake pipeline can clip text the same way it clips paths.
       const _textStyleMap     = parseStyleString(node.getAttribute('style') || '');
-      const _textRawClipStr   = _textStyleMap['clip-path'] || node.getAttribute('clip-path') || walkCtx.currentClipRef();
+      // Stack alone — see the <textArea> note above.
+      const _textRawClipStr   = walkCtx.currentClipRef();
       const _textRawMaskStr   = _textStyleMap['mask']      || node.getAttribute('mask')      || walkCtx.currentMaskRef();
       const _textRawFilterStr = _textStyleMap['filter']    || node.getAttribute('filter')    || walkCtx.currentFilterRef();
       const _textClipRef   = resolveIdRef(_textRawClipStr);

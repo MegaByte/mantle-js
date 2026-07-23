@@ -18,8 +18,8 @@ const fail = m => { failures++; console.error('FAIL', m); };
 
 // Big red square (src) → small blue diamond (dst): geometry (curve lerp) AND
 // fill color (meta lerp) both change, so the GPU-vs-CPU compare covers both.
-const SRC = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><path d="M20 20 L180 20 L180 180 L20 180 Z" fill="#c83232"/></svg>`;
-const DST = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><path d="M100 70 L130 100 L100 130 L70 100 Z" fill="#2864d2"/></svg>`;
+const SRC = readFileSync(new URL('../examples/smoke/morphGpuCurveLerp__SRC.svg', import.meta.url), 'utf8');
+const DST = readFileSync(new URL('../examples/smoke/morphGpuCurveLerp__DST.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="256" height="256"></canvas>

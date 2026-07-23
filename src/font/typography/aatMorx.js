@@ -137,9 +137,10 @@ export class AatMorx {
     const step = reverse ? -1 : 1;
     // The driver visits each glyph once, plus a final end-of-text tick.
     let guard = 0;
-    const guardMax = n * 4 + 16;     // generous bound against malformed loops
+    const guardMax = n * 4 + 256;    // generous bound against malformed loops
     while (guard++ < guardMax) {
-      const atEnd = reverse ? i < 0 : i >= n;
+      // Live length: insertion entries grow the array mid-walk.
+      const atEnd = reverse ? i < 0 : i >= glyphs.length;
       let cls;
       if (atEnd) cls = CLASS_END_OF_TEXT;
       else {
@@ -154,6 +155,10 @@ export class AatMorx {
       const flags = v.getUint16(eOff + 2, false);
       const advance = handler.entry(glyphs, i, eOff, flags, atEnd);
       state = newState;
+      // An entry that inserted glyphs at-or-before the cursor reports the
+      // shift here so the SAME logical glyph stays current (inserted
+      // glyphs are never reprocessed).
+      if (handler.pendingShift) { i += handler.pendingShift; handler.pendingShift = 0; }
       if (atEnd) break;
       // `advance` true = consume current glyph (move to next); false =
       // don't advance (the entry reprocesses with the new state).
@@ -293,25 +298,57 @@ function _ctxSubst(v, substTableOff, tableIndex, gid, numGlyphs) {
 }
 
 // ── type 5: insertion ─────────────────────────────────────────────────
+// Entry flags (Apple morx spec, InsertionSubtable):
+//   0x8000 setMark            0x4000 dontAdvance
+//   0x2000 currentIsKashidaLike   0x1000 markedIsKashidaLike
+//   0x0800 currentInsertBefore    0x0400 markedInsertBefore
+//   0x03E0 currentInsertCount (>> 5)   0x001F markedInsertCount
 const INS_SET_MARK = 0x8000;
 const INS_DONT_ADVANCE = 0x4000;
-const INS_CURRENT_IS_KASHIDA = 0x2000; // current-insert-count bits live low
+const INS_CURRENT_INSERT_BEFORE = 0x0800;
+const INS_MARKED_INSERT_BEFORE  = 0x0400;
 function _insertionHandler(self, subOff) {
   const v = self._view;
   let insertOff = 0;
+  let markIdx = -1;
   return {
     kind: 'insertion',
-    init() { insertOff = subOff + v.getUint32(subOff + 16, false); },
+    pendingShift: 0,
+    init() { insertOff = subOff + v.getUint32(subOff + 16, false); markIdx = -1; this.pendingShift = 0; },
     entry(glyphs, i, eOff, flags, atEnd) {
+      if ((flags & INS_SET_MARK) && !atEnd) markIdx = i;
       const currentInsertIndex = v.getUint16(eOff + 4, false);
-      // Current-insertion count is in the low 5 bits of flags.
-      const count = flags & 0x001F;
-      if (currentInsertIndex !== 0xFFFF && count > 0 && !atEnd) {
+      const markedInsertIndex  = v.getUint16(eOff + 6, false);
+      const currentCount = (flags & 0x03E0) >> 5;
+      const markedCount  =  flags & 0x001F;
+      const readIns = (idx0, count) => {
         const ins = [];
         for (let k = 0; k < count; k++)
-          ins.push(v.getUint16(insertOff + (currentInsertIndex + k) * 2, false));
-        glyphs.splice(i + 1, 0, ...ins);
-        if (this.src) this.src.splice(i + 1, 0, ...ins.map(() => this.src[i]));
+          ins.push(v.getUint16(insertOff + (idx0 + k) * 2, false));
+        return ins;
+      };
+      const spliceAt = (at, ins, srcFrom) => {
+        glyphs.splice(at, 0, ...ins);
+        if (this.src) {
+          const s0 = this.src[Math.max(0, Math.min(srcFrom, this.src.length - 1))];
+          this.src.splice(at, 0, ...ins.map(() => s0));
+        }
+      };
+      // Marked insertion first (its position precedes the cursor, so it
+      // shifts everything after it, the current glyph included).
+      if (markedInsertIndex !== 0xFFFF && markedCount > 0 && markIdx >= 0) {
+        const ins = readIns(markedInsertIndex, markedCount);
+        const at = (flags & INS_MARKED_INSERT_BEFORE) ? markIdx : markIdx + 1;
+        spliceAt(at, ins, markIdx);
+        if (!atEnd && at <= i) this.pendingShift += ins.length;
+        if (at <= markIdx) markIdx += ins.length;
+      }
+      if (currentInsertIndex !== 0xFFFF && currentCount > 0 && !atEnd) {
+        const iEff = i + this.pendingShift;
+        const ins = readIns(currentInsertIndex, currentCount);
+        const at = (flags & INS_CURRENT_INSERT_BEFORE) ? iEff : iEff + 1;
+        spliceAt(at, ins, iEff);
+        if (at <= iEff) this.pendingShift += ins.length;
       }
       return (flags & INS_DONT_ADVANCE) === 0;
     },

@@ -18,9 +18,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 // Sharp vesica: two arcs from (50,10)→(50,90)→(50,10), bulging opposite ways.
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <path fill="#3366cc" d="M50 10 A44 44 0 0 1 50 90 A44 44 0 0 1 50 10 Z"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/lbLensParity__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="100" height="100"></canvas>

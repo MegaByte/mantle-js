@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ffcc00"/><stop offset="1" stop-color="#cc0066"/>
+  </linearGradient></defs>
+  <path d="M30 100 C30 30 100 20 130 40 C180 60 180 150 120 175 C70 195 30 160 30 100 Z" fill="url(#g)"/>
+  <polygon points="150,20 195,90 150,160 105,90" fill="#3296c8"/>
+</svg>

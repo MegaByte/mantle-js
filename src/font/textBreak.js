@@ -29,7 +29,10 @@ export function isCjkCore(cp) {
          (cp >= 0x20000 && cp <= 0x2FFFF);
 }
 
-// CJK CLOSING punctuation — must stay with the preceding glyph (TR#14 LB13).
+// CJK/fullwidth characters forbidden at line start (TR#14): closing
+// punctuation (class CL, LB13), fullwidth exclamation/question (EX),
+// small kana + prolonged sound mark (CJ), and NS marks (LB21) — all
+// must stay with the preceding glyph.
 export function isCjkClosing(cp) {
   switch (cp) {
     case 0xFF09: case 0xFF3D: case 0xFF5D:

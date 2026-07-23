@@ -58,6 +58,7 @@ import { emitSvgInOtGlyphIfPresent } from './textSvgInOt.js';
  *   ideographs / kana / hangul upright and rotates Latin glyphs
  *   90° clockwise; `upright` keeps everything upright; `sideways`
  *   rotates everything 90° CW. Ignored in horizontal mode.
+ */
 
 // ---------------------------------------------------------------------
 // Public API
@@ -103,7 +104,7 @@ export async function buildStyled(spans, font, layout = {}) {
       normalizeTextOrientation(layout.textOrientation),
       writingMode, layout.originX || 0, layout.originY || 0);
   }
-  return await assembleBundle(slots, font, layout.varCoords || null);
+  return await assembleBundle(slots, font, layout.varCoords || null, layout);
 }
 
 /**
@@ -166,9 +167,10 @@ export function measureText(spans, font, layout = {}) {
   let curLineY = null;
   let nLines = 0;
   for (const slot of slots) {
-    if (curLineY === null || slot.penY !== curLineY) {
+    const slotLineY = slot.lineY !== undefined ? slot.lineY : slot.penY;
+    if (curLineY === null || slotLineY !== curLineY) {
       if (curLineY !== null) lineWidths.push(curLineWidth);
-      curLineY = slot.penY;
+      curLineY = slotLineY;
       curLineWidth = 0;
       nLines++;
     }
@@ -270,8 +272,9 @@ export function measureGlyphs(spans, font, layout = {}) {
   let lineCount = 0;
   for (let i = 0; i < slots.length; i++) {
     const s = slots[i];
-    if (curLineY === null || s.penY !== curLineY) {
-      curLineY = s.penY;
+    const sLineY = s.lineY !== undefined ? s.lineY : s.penY;
+    if (curLineY === null || sLineY !== curLineY) {
+      curLineY = sLineY;
       lineCount++;
     }
     const cp = s.codepoint | 0;
@@ -416,12 +419,13 @@ export function buildSvgTextGlyphs(text, font, x, y, fontSize, fallbacks = null,
     if (styleOpts.synthesizeItalic === false) synthItalic = false;
   }
   const baseStyle = defaultStyle();
-  // Carry letter-spacing / word-spacing through to the span style so
-  // layoutSlots can apply them. The span style schema already has
-  // these fields for the markup path; reuse the same names.
+  // Carry letter-spacing / word-spacing through to the span style using
+  // the fields layoutSlots actually reads: cspaceEm adds per glyph,
+  // wspaceEm adds on word separators. (The old letterSpacing/wordSpacing
+  // names were written here and read nowhere — the options were no-ops.)
   if (styleOpts) {
-    if (typeof styleOpts.letterSpacingEm === 'number') baseStyle.letterSpacing = styleOpts.letterSpacingEm;
-    if (typeof styleOpts.wordSpacingEm   === 'number') baseStyle.wordSpacing   = styleOpts.wordSpacingEm;
+    if (typeof styleOpts.letterSpacingEm === 'number') baseStyle.cspaceEm = styleOpts.letterSpacingEm;
+    if (typeof styleOpts.wordSpacingEm   === 'number') baseStyle.wspaceEm = styleOpts.wordSpacingEm;
   }
   const spans = [{ text: t, style: baseStyle }];
   // maxWidthEm > 0 triggers word-wrap (used by <textArea>); 0 = single line.
@@ -470,8 +474,8 @@ export function _layoutSlotsForTest(spans, font, layout) {
 // Assembly
 // ---------------------------------------------------------------------
 
-async function assembleBundle(slots, font, varCoords = null) {
-  const ctx = makeBuildContext();
+async function assembleBundle(slots, font, varCoords = null, layout = null) {
+  const ctx = makeBuildContext({ gwnTree: !!(layout && layout.gwnTree) });
   const gidBox = { next: 1 };
   const bboxBox = { xmin: Infinity, ymin: Infinity, xmax: -Infinity, ymax: -Infinity };
   let firstBaselineY = 0, lastBaselineY = 0, lineCount = 0, lastLineAdvance = 0;
@@ -479,9 +483,10 @@ async function assembleBundle(slots, font, varCoords = null) {
     let curLineY = null;
     let curLineRight = 0;
     for (const slot of slots) {
-      if (curLineY === null || slot.penY !== curLineY) {
-        if (curLineY === null) firstBaselineY = slot.penY;
-        curLineY = slot.penY;
+      const slotLineY = slot.lineY !== undefined ? slot.lineY : slot.penY;
+      if (curLineY === null || slotLineY !== curLineY) {
+        if (curLineY === null) firstBaselineY = slotLineY;
+        curLineY = slotLineY;
         lineCount++;
         curLineRight = 0;
       }
@@ -595,6 +600,11 @@ async function assembleBundle(slots, font, varCoords = null) {
     version: 3,
     numShapes,
     flags: 1 | 2 | 4,
+    // Union of curve types across every glyph. A TrueType face is quadratics
+    // only; a CFF face cubics only. Lets both walkers compile the unused kernels
+    // out (see fillPass typeOmit) — occupancy, not work.
+    segTypeMask: ctx.segTypeMask | 0,
+    totalSegments: ctx.totalSegments | 0,
     metaFloatsPerShape: 48,
     globalBBox: [xmin, ymin, xmax - xmin, ymax - ymin],
     fontMetrics: fontMetricsSnapshot,
@@ -640,6 +650,10 @@ function emitDecorationRects(slots, font, ctx, gidBox, bboxBox, flags) {
   const markBot = -font.descent;
 
   const n = slots.length;
+  // Decoration runs coalesce per LINE; penY varies per glyph now that
+  // GPOS mark-attach dy survives emission (a combining mark must not
+  // split its base's underline).
+  const lnY = (s) => (s.lineY !== undefined ? s.lineY : s.penY);
   let i = 0;
   while (i < n) {
     const s0 = slots[i];
@@ -651,14 +665,14 @@ function emitDecorationRects(slots, font, ctx, gidBox, bboxBox, flags) {
         const sj = slots[j + 1];
         if (!sj.style.mark) break;
         if (!colorEq(sj.style.markColor, s0.style.markColor)) break;
-        if (Math.abs(sj.penY - s0.penY) > 1e-6) break;
+        if (Math.abs(lnY(sj) - lnY(s0)) > 1e-6) break;
         j++;
       }
       const sN = slots[j];
       const x0 = s0.penX;
       const x1 = sN.penX + sN.advance;
-      const yTop = s0.penY + markTop * s0.style.sizeScale - s0.style.voffsetEm;
-      const yBot = s0.penY + markBot * s0.style.sizeScale - s0.style.voffsetEm;
+      const yTop = lnY(s0) + markTop * s0.style.sizeScale - s0.style.voffsetEm;
+      const yBot = lnY(s0) + markBot * s0.style.sizeScale - s0.style.voffsetEm;
       emitRect(x0, yTop, x1, yBot, s0.style.markColor, ctx, gidBox, bboxBox, `mark_${ctx.metas.length}`);
       i = j + 1;
       continue;
@@ -679,14 +693,14 @@ function emitDecorationRects(slots, font, ctx, gidBox, bboxBox, flags) {
         if (!colorEq(cj, decoColor0)) break;
         if (styleJ !== decoStyle0) break;
         if (Math.abs(thickJ - decoThick0) > 1e-9) break;
-        if (Math.abs(sj.penY - s0.penY) > 1e-6) break;
+        if (Math.abs(lnY(sj) - lnY(s0)) > 1e-6) break;
         j++;
       }
       const sN = slots[j];
       const x0 = s0.penX;
       const x1 = sN.penX + sN.advance;
       const thick = (decoThick0 > 0 ? decoThick0 : ulThick) * s0.style.sizeScale;
-      const yTop = s0.penY + ulY * s0.style.sizeScale - s0.style.voffsetEm;
+      const yTop = lnY(s0) + ulY * s0.style.sizeScale - s0.style.voffsetEm;
       emitDecoration(decoStyle0, x0, yTop, x1, thick, decoColor0, ctx, gidBox, bboxBox, `underline_${ctx.metas.length}`);
       i = j + 1;
       continue;
@@ -706,7 +720,7 @@ function emitDecorationRects(slots, font, ctx, gidBox, bboxBox, flags) {
         if (!colorEq(cj, decoColor0)) break;
         if (styleJ !== decoStyle0) break;
         if (Math.abs(thickJ - decoThick0) > 1e-9) break;
-        if (Math.abs(sj.penY - s0.penY) > 1e-6) break;
+        if (Math.abs(lnY(sj) - lnY(s0)) > 1e-6) break;
         j++;
       }
       const sN = slots[j];
@@ -716,7 +730,7 @@ function emitDecorationRects(slots, font, ctx, gidBox, bboxBox, flags) {
       // Strike is mid-line: yTop sits ABOVE the centerline so emitDecoration
       // (which positions style relative to yTop=top-of-stroke) renders
       // the band centered on strikeY.
-      const yMid = s0.penY + strikeY * s0.style.sizeScale - s0.style.voffsetEm;
+      const yMid = lnY(s0) + strikeY * s0.style.sizeScale - s0.style.voffsetEm;
       const yTop = yMid - 0.5 * thick;
       emitDecoration(decoStyle0, x0, yTop, x1, thick, decoColor0, ctx, gidBox, bboxBox, `strike_${ctx.metas.length}`);
       i = j + 1;
@@ -774,12 +788,13 @@ function emitDecoration(style, x0, yTop, x1, thick, color, ctx, gidBox, bboxBox,
     return;
   }
   if (style === 'wavy') {
-    // Sine-like band emitted as a chain of cubic Bezier segments.
-    // Wavelength ≈ 5× thick; amplitude ≈ 1.5× thick. The wave is
-    // built as two parallel curves offset perpendicularly to the
-    // tangent direction by half the thickness, then closed with line
-    // endcaps. Working in +Y-down, so positive amplitude moves the
-    // wave DOWN at peaks. One closed shape per coalesced run.
+    // Sine-like band approximated with line segments (sampled every
+    // quarter wavelength). Wavelength ≈ 5× thick; amplitude ≈ 1.5×
+    // thick. The wave is built as two parallel polylines offset
+    // perpendicularly to the tangent direction by half the thickness,
+    // then closed with line endcaps. Working in +Y-down, so positive
+    // amplitude moves the wave DOWN at peaks. One closed shape per
+    // coalesced run.
     const wavelen = Math.max(thick * 5, 0.001);
     const amp = thick * 1.5;
     const yMid = yTop + thick * 0.5;

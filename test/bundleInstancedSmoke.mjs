@@ -23,19 +23,10 @@ const ROOT = path.resolve(__dirname, '..');
 // A MULTI-shape mask (≥2 rects → a real offscreen bake region). The bake
 // is worldM-independent, so instancing it at N transforms bakes once.
 // Red fill revealed in the left+right thirds (gap in centre).
-const MASK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30" width="30" height="30">
-  <defs><mask id="m">
-    <rect x="0"  y="0" width="9"  height="30" fill="#fff"/>
-    <rect x="21" y="0" width="9"  height="30" fill="#fff"/>
-  </mask></defs>
-  <rect id="r" x="0" y="0" width="30" height="30" fill="#ff2020" mask="url(#m)"/>
-</svg>`;
+const MASK_SVG = readFileSync(new URL('../examples/smoke/bundleInstanced__MASK_SVG.svg', import.meta.url), 'utf8');
 
 // A blurred rect — used only to DOCUMENT that filters re-eval per transform.
-const BLUR_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30" width="30" height="30">
-  <defs><filter id="b"><feGaussianBlur stdDeviation="2"/></filter></defs>
-  <rect id="r" x="6" y="6" width="18" height="18" fill="#ff2020" filter="url(#b)"/>
-</svg>`;
+const BLUR_SVG = readFileSync(new URL('../examples/smoke/bundleInstanced__BLUR_SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="240" height="240"></canvas>

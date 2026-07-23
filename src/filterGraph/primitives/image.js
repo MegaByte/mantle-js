@@ -1,7 +1,7 @@
 // primitives/image.js — feImage (sample an image-atlas slot as a filter
 // source).
 import { registerSvgFilter } from '../dispatchRegistry.js';
-import { beginFullscreen } from '../svgFilterShared.js';
+import { beginFullscreen, mapFor, rectOfRT } from '../svgFilterShared.js';
 
 function feImage(node, inputs, outRT, ctx) {
   const { gl, feImageProg, feImageU, coverVao, bundle } = ctx;
@@ -27,6 +27,12 @@ function feImage(node, inputs, outRT, ctx) {
   gl.uniform2f(feImageU.uAtlasSize, bundle.imageAtlasSize[0] || 1, bundle.imageAtlasSize[1] || 1);
   gl.uniform4f(feImageU.uAtlasRect, atlasY, slotW, slotH, 0);
   gl.uniform1i(feImageU.uPreserveAR, p.preserveAR | 0);
+  // The image is fitted to the filter region (the canvas), not to this pass's
+  // output rect — which are the same thing only when the output covers it.
+  if (feImageU.uRegionMap) {
+    const m = mapFor(rectOfRT(outRT), [0, 0, ctx.w, ctx.h]);
+    gl.uniform4f(feImageU.uRegionMap, m[0], m[1], m[2], m[3]);
+  }
   beginFullscreen(gl, outRT);
   gl.bindVertexArray(coverVao);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);

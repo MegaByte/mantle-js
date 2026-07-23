@@ -6,8 +6,12 @@
 function platformNFC(s) {
   return s.normalize("NFC");
 }
+let _graphemeSeg = null;
 function platformGraphemes(s) {
-  const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  // Singleton: Segmenter construction is expensive and this runs per
+  // layout call.
+  const seg = _graphemeSeg
+    || (_graphemeSeg = new Intl.Segmenter(undefined, { granularity: "grapheme" }));
   const out = [];
   for (const { segment } of seg.segment(s)) out.push(segment);
   return out;

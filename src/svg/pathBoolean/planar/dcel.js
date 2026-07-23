@@ -120,17 +120,18 @@ export function buildDCEL(elementarySegs) {
     const n = outs.length;
     for (let i = 0; i < n; i++) {
       const outHe = outs[i];           // outgoing from v
-      const inHe = outHe.twin;          // incoming to v from the other direction
-      // The previous outgoing (CCW order, so CW of outHe) is at i-1.
-      const prevIdx = (i - 1 + n) % n;
-      const prevOut = outs[prevIdx];
-      // prevOut.twin is incoming-to-v from "just before" outHe in CCW.
-      // To form a face boundary going CCW inside the face, after we
-      // arrive at v via prevOut.twin, we leave via outHe. So:
-      //   prevOut.twin.next = outHe
-      //   outHe.prev = prevOut.twin
-      prevOut.twin.next = outHe;
-      outHe.prev = prevOut.twin;
+      // Arriving at v along twin(out_next) (the incoming half-edge whose
+      // outgoing twin is the CCW-NEXT ray), the boundary of the face
+      // between the two rays leaves along outHe:
+      //   next(twin(out_{i+1})) = out_i    (de Berg's CW-successor rule)
+      // The two pairings are identical at degree-2 vertices (every simple
+      // contour), so only CROSSING vertices (degree 4+, exactly the
+      // self-overlap-resolve case) distinguish them — the CCW pairing
+      // walked straight through crossings and fused the faces.
+      const nextIdx = (i + 1) % n;
+      const nextOut = outs[nextIdx];
+      nextOut.twin.next = outHe;
+      outHe.prev = nextOut.twin;
     }
   }
 

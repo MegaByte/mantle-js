@@ -262,8 +262,8 @@ function colorSpaceToSrgb(space, c1, c2, c3) {
 // Linearly interpolate two colors in a chosen mixing space. `t` is the
 // fraction toward c2 (c1 at t=0, c2 at t=1). Inputs are sRGB [r,g,b,a]
 // from parseColor; output is the same. Honors `in <space>` from
-// color-mix() — supported: srgb, srgb-linear, oklab, oklch, lab, lch,
-// hsl, hwb, xyz, xyz-d50, xyz-d65. Unknown spaces fall back to srgb.
+// color-mix() — implemented: srgb, srgb-linear, oklab, oklch, hsl,
+// hwb. Any other space (lab, lch, xyz, …) falls back to srgb mixing.
 function mixIn(space, c1, c2, t) {
   const a = c1[3] * (1 - t) + c2[3] * t;
   const lerp3 = (x, y) => [x[0] * (1 - t) + y[0] * t,
@@ -405,8 +405,9 @@ function _parseColorUncached(s) {
     const p = hsl[1].split(/[,\s/]+/).map(t => t.trim()).filter(t => t);
     if (p.length < 3) return [0, 0, 0, 1];
     let h = parseFloat(p[0]);
-    if (p[0].endsWith('rad')) h = h * 180 / Math.PI;
-    else if (p[0].endsWith('grad')) h = h * 360 / 400;
+    // 'grad' before 'rad': 'grad'.endsWith('rad') is true.
+    if (p[0].endsWith('grad')) h = h * 360 / 400;
+    else if (p[0].endsWith('rad')) h = h * 180 / Math.PI;
     else if (p[0].endsWith('turn')) h = h * 360;
     const sat = (parseFloat(p[1]) || 0) / 100;
     const lit = (parseFloat(p[2]) || 0) / 100;
@@ -508,8 +509,9 @@ function _parseColorUncached(s) {
 function clamp01(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
 function parseHue(t) {
   let h = parseFloat(t);
-  if (t.endsWith('rad'))  h = h * 180 / Math.PI;
-  else if (t.endsWith('grad')) h = h * 360 / 400;
+  // 'grad' before 'rad': 'grad'.endsWith('rad') is true.
+  if (t.endsWith('grad')) h = h * 360 / 400;
+  else if (t.endsWith('rad')) h = h * 180 / Math.PI;
   else if (t.endsWith('turn')) h = h * 360;
   return h;
 }

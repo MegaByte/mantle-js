@@ -152,8 +152,8 @@ try {
       + '<path d="M120 30 L175 45 L160 110 L110 80 Z" fill="#3296c8"/></svg>';
     const sec = await importSvg(svg);
     const renderRoute = (lb) => {
-      const bundle = createBundle(gl, sec); renderer.prepareBundle(bundle);
       renderer.setLoopBlinnFill(lb);
+      const bundle = createBundle(gl, sec); renderer.prepareBundle(bundle);
       const before = renderer.debugStats.loopBlinnRouteCount;
       clear();
       renderer.drawBundle(bundle);
@@ -175,7 +175,8 @@ try {
       + '<path d="M40 100 A60 60 0 0 1 160 100 A60 60 0 0 1 40 100 Z" fill="#3296c8"/></svg>';
     const sec = await importSvg(svg);
     const r = (lb) => {
-      const bundle = createBundle(gl, sec); renderer.prepareBundle(bundle); renderer.setLoopBlinnFill(lb);
+      renderer.setLoopBlinnFill(lb);
+      const bundle = createBundle(gl, sec); renderer.prepareBundle(bundle);
       const before = renderer.debugStats.loopBlinnRouteCount; clear(); renderer.drawBundle(bundle);
       const buf = readback(); const routed = renderer.debugStats.loopBlinnRouteCount > before;
       bundle.dispose(); return { buf, routed };

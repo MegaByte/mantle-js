@@ -22,9 +22,7 @@ const ROOT = path.resolve(__dirname, '..');
 // A curved solid-fill blob (cubics → the analytic mesh; solid → the one-draw
 // combined route). No mask/clip/filter so the instanced loop routes it (a
 // composed bundle would stay on Slug to keep its bake-once reuse).
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <path d="M50 10 C80 10 90 40 90 50 C90 80 60 90 50 90 C20 90 10 60 10 50 C10 20 40 10 50 10 Z" fill="#3366cc"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/lbHandleInstancedParity__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="100" height="100"></canvas>
@@ -35,6 +33,7 @@ const shaders = await loadShaders(new URL('/src/shaders/', location.href).href);
 const renderer = createRenderer(gl, shaders);
 renderer.setViewport(100, 100);
 const bundle = createBundle(gl, await importSvg(${JSON.stringify(SVG)})); renderer.prepareBundle(bundle);
+await renderer.awaitLbReady(bundle);   // LB builds off-thread; wait before asserting the route
 
 const readAll = () => { const px = new Uint8Array(100 * 100 * 4); gl.readPixels(0, 0, 100, 100, gl.RGBA, gl.UNSIGNED_BYTE, px); return px; };
 // Interior mean channel diff over pixels inked in BOTH (skips the AA rim).
@@ -81,7 +80,7 @@ const out = {};
 // ── 3. cached handle: LB must NOT route (cache blit owns it), still renders ──
 {
   renderer.setLoopBlinnFill(true);   // LB on — the cache gate must still win
-  const hc = renderer.createBundleHandle(bundle, { staticCache: { strategy: CacheStrategy.ForceA1 } });
+  const hc = renderer.createBundleHandle(bundle, { staticCache: { strategy: CacheStrategy.ForceWholeAsset } });
   const drawC = () => { renderer.beginFrame([0, 0, 0, 1]); hc.draw({}); renderer.endFrame(); };
   const r = renderer.debugStats.loopBlinnRouteCount;
   drawC(); drawC();   // frame 1 bakes, frame 2 blits — neither should route LB
@@ -136,7 +135,7 @@ else fail('drawBundleInstanced did NOT route static LB (Gap 2 regression)');
 if (o.instDiff <= 6) ok('instanced LB matches Slug (mean channel diff ' + o.instDiff + ')');
 else fail('instanced LB != Slug (mean channel diff ' + o.instDiff + ')');
 
-// 3. cached handle — POLICY CHANGE (A1-disappearance fix): cached handles route
+// 3. cached handle: cached handles route
 // LB like everything else. The cache blit still owns VALID frames (no dispatch
 // runs then); LB serves live/bake frames — forcing Slug rendered BLANK for
 // bundles with no Slug cover-quads (lightweight builds).

@@ -15,6 +15,7 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer';
+import { emitFixture } from './_fixtures.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -28,6 +29,7 @@ for (let i = 0; i < N; i++) {
   shapes += `<path id="s${i}" d="M${x} ${y}h20v20h-20Z" fill="#3366cc"/>`;
 }
 const PREFAB = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">${shapes}</svg>`;
+emitFixture('nativeMorphPerf__PREFAB', PREFAB);
 
 const HTML = `<!DOCTYPE html><html><body>
 <div id="host"></div>

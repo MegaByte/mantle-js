@@ -165,7 +165,7 @@ export function buildCff2TestFont({
     cffOperandU(charstring, 50);   // default dx
     cffOperandU(charstring, 250);  // delta for region 0
     cffOperandU(charstring, 1);    // N (number of values being blended)
-    charstring.u8(0x17);           // blend (opcode 23)
+    charstring.u8(0x10);           // blend (opcode 16)
     // After blend, ONE value remains on stack (the blended dx).
     // Push dy = 700 to complete the rlineto pair.
     cffOperandU(charstring, 700);
@@ -180,7 +180,7 @@ export function buildCff2TestFont({
     cffOperandU(charstring, 50);
     cffOperandU(charstring, -250);
     cffOperandU(charstring, 1);
-    charstring.u8(0x17);  // blend
+    charstring.u8(0x10);  // blend
     cffOperandU(charstring, -700);
     charstring.u8(0x05);  // rlineto
   } else {

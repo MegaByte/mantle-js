@@ -12,11 +12,13 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, '..');
 const PROJECT = path.join(PKG, 'tsconfig.dts.json');
+const OUT = path.join(PKG, 'types');
 
 let tscJs;
 try {
@@ -26,12 +28,17 @@ try {
   process.exit(2);
 }
 
+// TypeScript overwrites declarations for live sources but does not remove
+// declarations whose source files or exports disappeared. Always build from an
+// empty artifact directory so removed APIs cannot leak into the npm package.
+rmSync(OUT, { recursive: true, force: true });
 const r = spawnSync(process.execPath, [tscJs, '-p', PROJECT], { cwd: PKG, encoding: 'utf8' });
 // noEmitOnError is false, so declarations emit even if TS reports diagnostics in
 // the (ungated) non-renderer JS. Only a HARD failure (config error, no output)
 // is fatal here.
 const out = (r.stdout || '') + (r.stderr || '');
-if (r.status !== 0 && /error TS5\d{3}/.test(out)) {
+if ((r.status !== 0 && /error TS5\d{3}/.test(out))
+    || !existsSync(path.join(OUT, 'index.d.ts'))) {
   // TS5xxx = config/CLI errors (e.g. bad rootDir) — these block emission.
   console.error('gen:types: declaration emit failed:\n' + out.trim());
   process.exit(1);

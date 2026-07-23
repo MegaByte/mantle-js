@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30" width="30" height="30">
+  <defs><mask id="m">
+    <rect x="0"  y="0" width="9"  height="30" fill="#fff"/>
+    <rect x="21" y="0" width="9"  height="30" fill="#fff"/>
+  </mask></defs>
+  <rect id="r" x="0" y="0" width="30" height="30" fill="#ff2020" mask="url(#m)"/>
+</svg>

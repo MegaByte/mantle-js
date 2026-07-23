@@ -16,12 +16,7 @@ const ROOT = path.resolve(__dirname, '..');
 
 // A diamond PATH (not a <rect>, so it's not the primKind-excluded rect) with a
 // horizontal linear gradient red→green in objectBoundingBox units.
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
-    <stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#00ff00"/>
-  </linearGradient></defs>
-  <path d="M50 8 L92 50 L50 92 L8 50 Z" fill="url(#g)"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/lbGradientParity__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="100" height="100"></canvas>

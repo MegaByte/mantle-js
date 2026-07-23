@@ -449,9 +449,9 @@ function buildColrV1Rich() {
   // PaintComposite: format=32, Offset24 src, u8 mode=7, Offset24 dst
   b.u8(32); off24(b, pRot3 - pComposite3); b.u8(7);
   off24(b, pSolid3Dst - pComposite3);
-  // PaintRotate: format=22, Offset24, F2DOT14 angle (45° → 45/180=0.25
+  // PaintRotate: format=24, Offset24, F2DOT14 angle (45° → 45/180=0.25
   // → 0.25 * 16384 = 4096)
-  b.u8(22); off24(b, pSolid3Src - pRot3); b.s16(4096);
+  b.u8(24); off24(b, pSolid3Src - pRot3); b.s16(4096);
   // Composite's src branch terminator (red) and dst (green)
   b.u8(2); b.u16(0); b.s16(16384);
   b.u8(2); b.u16(1); b.s16(16384);
@@ -519,10 +519,10 @@ function buildColrV1Grad() {
   b.u8(6); off24(b, clRad - pRad);
   b.s16(50); b.s16(50); b.u16(0); b.s16(50); b.s16(50); b.u16(50);
   // PaintSweepGradient (gid 3): format=8
-  // startAngle = 0° → F2DOT14 raw 0; endAngle = 180° → F2DOT14 raw
-  //   180/180*16384 = 16384.
+  // Sweep angles are F2DOT14 with a bias of 1.0 (angle = (raw/16384 + 1)·180°):
+  // startAngle = 0° → raw −16384; endAngle = 180° → raw 0.
   b.u8(8); off24(b, clSwp - pSwp);
-  b.s16(50); b.s16(50); b.s16(0); b.s16(16384);
+  b.s16(50); b.s16(50); b.s16(-16384); b.s16(0);
   // Three ColorLines: PAD, REPEAT, REFLECT
   colorLine(b, 0);
   colorLine(b, 1);

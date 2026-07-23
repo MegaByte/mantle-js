@@ -15,8 +15,8 @@ let failures = 0;
 const ok = (m) => console.log('ok ' + m);
 const fail = (m) => { failures++; console.error('FAIL: ' + m); };
 
-const SRC = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><path d="M100 20 Q 180 20, 180 100 Q 180 180, 100 180 Q 20 180, 20 100 Q 20 20, 100 20 Z M100 55 Q 145 55, 145 100 Q 145 145, 100 145 Q 55 145, 55 100 Q 55 55, 100 55 Z" fill="#264"/></svg>`;
-const DST = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><path d="M100 20 Q 180 20, 180 100 Q 180 180, 100 180 Q 20 180, 20 100 Q 20 20, 100 20 Z M100 62 Q 138 62, 138 100 Q 138 138, 100 138 Q 62 138, 62 100 Q 62 62, 100 62 Z" fill="#264"/></svg>`;
+const SRC = readFileSync(new URL('../examples/smoke/lbGpuMorph__SRC.svg', import.meta.url), 'utf8');
+const DST = readFileSync(new URL('../examples/smoke/lbGpuMorph__DST.svg', import.meta.url), 'utf8');
 
 const W = 320, H = 320;
 const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="${W}" height="${H}"></canvas>
@@ -45,7 +45,10 @@ window.__run = async (srcSvg, dstSvg) => {
     for (let i = 0; i < A.length; i += 4) { const d = Math.abs(A[i] - B[i]); if (d > mx) mx = d; if (d > 76) n3++; }
     return { mx, n3 }; };
   const out = { cases: [] };
-  drawMorph('auto', mLb, 0);   // warm the pair pipeline (first-frame RT/pool setup)
+  drawMorph('auto', mLb, 0);   // warm the pair pipeline + kick off the OFF-THREAD morph build
+  // The morph-pair mesh now builds in the LB worker; wait for it (as a game would
+  // via awaitLbReady) before asserting the LB route, else the first frames are Slug.
+  if (renderer.awaitLbReady) await renderer.awaitLbReady(mLb);
   for (const t of [0, 0.33, 0.66, 1]) {
     const slug = drawMorph('off', mSlug, t), lb = drawMorph('auto', mLb, t);
     out.cases.push({ t, routed: lb.routed, vsSlug: diff(slug.buf, lb.buf) });

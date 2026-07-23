@@ -13,13 +13,7 @@ const ROOT = path.resolve(__dirname, '..');
 
 // Big interior-heavy shapes that are NOT primKind fast-path (so they take the
 // walk / occupancy path): a curved blob + a diamond polygon, filling the frame.
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-    <stop offset="0" stop-color="#ffcc00"/><stop offset="1" stop-color="#cc0066"/>
-  </linearGradient></defs>
-  <path d="M30 100 C30 30 100 20 130 40 C180 60 180 150 120 175 C70 195 30 160 30 100 Z" fill="url(#g)"/>
-  <polygon points="150,20 195,90 150,160 105,90" fill="#3296c8"/>
-</svg>`;
+const SVG = readFileSync(new URL('../examples/smoke/occupancyRenderDiff__SVG.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="256" height="256"></canvas>

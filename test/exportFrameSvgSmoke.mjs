@@ -26,32 +26,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 // Three id'd shapes so overrides can address them by id.
-const ART = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <rect id="box" x="10" y="10" width="30" height="30" fill="#e74c3c"/>
-  <circle id="dot" cx="72" cy="25" r="15" fill="#2980b9"/>
-  <rect id="bar" x="20" y="60" width="60" height="25" fill="#27ae60"/>
-</svg>`;
+const ART = readFileSync(new URL('../examples/smoke/exportFrameSvg__ART.svg', import.meta.url), 'utf8');
 
 // Two matched-topology poses (same id 'p', same path topology, different x)
 // for a whole-bundle shape morph. The matched path lerps geometrically.
-const POSE_A = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <path id="p" d="M10 10 H40 V40 H10 Z" fill="#ff0000"/>
-</svg>`;
-const POSE_B = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <path id="p" d="M60 10 H90 V40 H60 Z" fill="#0000ff"/>
-</svg>`;
+const POSE_A = readFileSync(new URL('../examples/smoke/exportFrameSvg__POSE_A.svg', import.meta.url), 'utf8');
+const POSE_B = readFileSync(new URL('../examples/smoke/exportFrameSvg__POSE_B.svg', import.meta.url), 'utf8');
 
 // A two-sprite sheet for drawSprite subset export.
-const SHEET = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100" width="200" height="100">
-  <g id="poseA"><rect id="ra" x="10" y="20" width="60" height="60" fill="#ff0000"/></g>
-  <g id="poseB"><rect id="rb" x="130" y="20" width="60" height="60" fill="#0000ff"/></g>
-</svg>`;
+const SHEET = readFileSync(new URL('../examples/smoke/exportFrameSvg__SHEET.svg', import.meta.url), 'utf8');
 
 // A clipped shape whose clip can be moved via setClipper('win', …).
-const CLIPART = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <clipPath id="win"><rect id="winrect" x="0" y="0" width="40" height="100"/></clipPath>
-  <rect id="wide" x="0" y="0" width="100" height="100" fill="#8e44ad" clip-path="url(#win)"/>
-</svg>`;
+const CLIPART = readFileSync(new URL('../examples/smoke/exportFrameSvg__CLIPART.svg', import.meta.url), 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="100" height="100"></canvas>

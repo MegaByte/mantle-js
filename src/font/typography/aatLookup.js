@@ -5,19 +5,25 @@
 // width: 2 (u16, default) or 4 (u32) — kerx format-6 "long" lookups
 // carry u32 values; everything else is u16.
 
+// Width-dispatched value read as a plain function — this lookup sits
+// inside per-glyph-pair binary-search loops, so a per-call reader
+// closure was measurable allocation churn.
+function _rdVal(v, o, valueBytes) {
+  return valueBytes === 4 ? v.getUint32(o, false) : v.getUint16(o, false);
+}
+
 export function aatLookup(v, off, gid, numGlyphs, valueBytes = 2) {
-  const rd = valueBytes === 4 ? (o) => v.getUint32(o, false) : (o) => v.getUint16(o, false);
   const format = v.getUint16(off, false);
   switch (format) {
     case 0: { // simple array: value[numGlyphs]
       if (gid >= numGlyphs) return -1;
-      return rd(off + 2 + gid * valueBytes);
+      return _rdVal(v, off + 2 + gid * valueBytes, valueBytes);
     }
     case 2: { // segment single value
-      return _binSearchSegments(v, off, gid, false, rd, valueBytes);
+      return _binSearchSegments(v, off, gid, false, valueBytes);
     }
     case 4: { // segment array (offset to per-glyph values)
-      return _binSearchSegments(v, off, gid, true, rd, valueBytes);
+      return _binSearchSegments(v, off, gid, true, valueBytes);
     }
     case 6: { // single glyph table
       const unitSize = v.getUint16(off + 2, false);
@@ -30,7 +36,7 @@ export function aatLookup(v, off, gid, numGlyphs, valueBytes = 2) {
         const g = v.getUint16(u, false);
         if (gid < g) hi = mid - 1;
         else if (gid > g) lo = mid + 1;
-        else return rd(u + 2);
+        else return _rdVal(v, u + 2, valueBytes);
       }
       return -1;
     }
@@ -38,7 +44,7 @@ export function aatLookup(v, off, gid, numGlyphs, valueBytes = 2) {
       const first = v.getUint16(off + 2, false);
       const count = v.getUint16(off + 4, false);
       if (gid < first || gid >= first + count) return -1;
-      return rd(off + 6 + (gid - first) * valueBytes);
+      return _rdVal(v, off + 6 + (gid - first) * valueBytes, valueBytes);
     }
     case 10: { // trimmed array with variable unit size
       const unitSize = v.getUint16(off + 2, false);   // 1, 2, or 4 bytes
@@ -58,7 +64,7 @@ export function aatLookup(v, off, gid, numGlyphs, valueBytes = 2) {
 // Formats 2 & 4 share a BinSrchHeader + segments[{lastGlyph, firstGlyph,
 // value-or-offset}]. When `valuesByOffset`, the third u16 is an offset
 // (from the subtable start `off`) to a per-glyph u16 value array.
-function _binSearchSegments(v, off, gid, valuesByOffset, rd = (o) => v.getUint16(o, false), valueBytes = 2) {
+function _binSearchSegments(v, off, gid, valuesByOffset, valueBytes = 2) {
   const unitSize = v.getUint16(off + 2, false);     // = 6
   const nUnits = v.getUint16(off + 4, false);
   const base = off + 12;
@@ -72,9 +78,9 @@ function _binSearchSegments(v, off, gid, valuesByOffset, rd = (o) => v.getUint16
     if (gid < firstG) hi = mid - 1;
     else if (gid > last) lo = mid + 1;
     else {
-      if (!valuesByOffset) return rd(u + 4);
+      if (!valuesByOffset) return _rdVal(v, u + 4, valueBytes);
       const valuesOff = off + v.getUint16(u + 4, false);
-      return rd(valuesOff + (gid - firstG) * valueBytes);
+      return _rdVal(v, valuesOff + (gid - firstG) * valueBytes, valueBytes);
     }
   }
   return -1;

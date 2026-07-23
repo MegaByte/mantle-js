@@ -258,7 +258,9 @@ scene.endFrame();
 height, rgba}` pixels, an `<img>`/`<canvas>`/`ImageBitmap`/`ImageData`,
 or a data/remote URL string. `opts`: `dstRect` (canvas px, default =
 natural size at origin), `srcRect` (sub-image), `worldMatrix`, `alpha`,
-`tint` (RGB → feColorMatrix, alpha → opacity), `blendMode` (→ CSS
+`tint` (RGB → feColorMatrix, alpha → opacity), `colorMatrix` /
+`colorMatrixOffset` (per-draw recolor → a second feColorMatrix chained
+ahead of the tint's, matching the GL shader's order), `blendMode` (→ CSS
 `mix-blend-mode`). Rasters live in a nested `<svg viewBox="0 0 vpW vpH">`
 so they place in viewport-pixel space, independent of any bundle's
 em/bbox viewBox — matching the WebGL blit's pixel-space semantics.

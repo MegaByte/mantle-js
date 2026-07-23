@@ -90,7 +90,7 @@ export function segBbox(s) {
 
 // Non-allocating overload: writes (minX, minY, maxX, maxY) at
 // out[off..off+3]. For LINE, computes inline (the common case in
-// stroked tiger paths). For QUAD/CUBIC/ARC, falls back to the
+// stroked paths). For QUAD/CUBIC/ARC, falls back to the
 // allocating helpers and copies — those helpers each cost one
 // 4-array per call which still beats the segBbox + destructure
 // pattern at the caller. Saves the segBbox return allocation +
@@ -111,13 +111,12 @@ export function segBboxInto(s, out, off) {
   out[off] = bb[0]; out[off+1] = bb[1]; out[off+2] = bb[2]; out[off+3] = bb[3];
 }
 
-// Tight axis-aligned bbox of an SVG arc subset. The previous formula
-// returned the bbox of the whole rotated ellipse, which for short
-// arcs vastly overestimates the curve extent (e.g., a 30 deg arc of
-// a circle with cx well outside the viewBox returned a bbox covering
-// the whole ellipse, not just the arc). Sample the arc at endpoints
-// + axis extrema in the [theta_start, theta_end] range and return
-// min/max.
+// Tight axis-aligned bbox of an SVG arc subset. The whole rotated
+// ellipse's bbox would vastly overestimate a short arc's extent
+// (e.g., a 30 deg arc of a circle with cx well outside the viewBox
+// would get a bbox covering the whole ellipse, not just the arc).
+// Sample the arc at endpoints + axis extrema in the
+// [theta_start, theta_end] range and return min/max.
 export function arcTightBbox(s) {
   const rx = s.rx, ry = s.ry, cp = Math.cos(s.phi), sp = Math.sin(s.phi);
   const evalArc = (theta) => {
@@ -266,10 +265,9 @@ export function splitSubpathsWithClose(segs) {
   // Synthetic close is ALWAYS emitted (even when endpoints coincide
   // exactly) so two paths with identical Q/L topology produce the same
   // curveFloats.length regardless of whether their endpoints happen
-  // to land within the 1e-4 close-detection band or not. Pre-fix this
-  // tolerance check made shape-morph topology matching fail for pose
-  // pairs that straddled the threshold (importer determinism). The
-  // degenerate-
+  // to land within the 1e-4 close-detection band or not — an importer
+  // determinism invariant that shape-morph topology matching depends
+  // on. The degenerate
   // case (lp == fp) emits a zero-length fill-only line, which costs 3
   // texels = 12 curve floats and contributes nothing to the fill walk;
   // buildTexturesShape exempts fill-only lines from the degenerate
@@ -300,7 +298,18 @@ export function splitSubpathsWithCloseInto(segs, out) {
   for (let i = 1; i < segs.length; i++) {
     const prevEnd = segEnd(segs[i-1]);
     const curStart = segStart(segs[i]);
-    if (Math.abs(prevEnd[0] - curStart[0]) > 1e-4 || Math.abs(prevEnd[1] - curStart[1]) > 1e-4) {
+    // A new subpath starts where the AUTHOR put an `M` — parsePathD marks that
+    // segment — or, for synthetically-built segment lists that carry no marker,
+    // wherever the pen jumps. The marker has to win: two authored subpaths that
+    // merely TOUCH are geometrically indistinguishable from one, so the gap test
+    // alone merges them, and then the shape emits one less synthetic close. That
+    // makes a shape's segment count depend on its geometry — and a shape whose
+    // size wobbles from pose to pose cannot morph (buildMorphPlan pairs on equal
+    // curve length and falls back to a crossfade), which shows up as a ghost.
+    const authoredStart = segs[i].subStart === true;
+    const penJumped = Math.abs(prevEnd[0] - curStart[0]) > 1e-4
+                   || Math.abs(prevEnd[1] - curStart[1]) > 1e-4;
+    if (authoredStart || penJumped) {
       closeSubpath();
       subStart = out.length;
     }
