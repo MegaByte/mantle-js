@@ -47,6 +47,17 @@ import { svgFilterDispatch, colrPaintDispatch } from '../filterGraph/dispatchReg
 import { computeNodeBboxes } from '../filterGraph/bbox.js';
 import { Strategy as CacheStrategy, Level as CacheLevel } from './staticCache.js';
 import { attachShaderPrograms } from './shaderPrograms.js';
+import loopBlinnVertSource from '../shaders/generated/loopBlinn.vert.glsl?raw';
+import loopBlinnFragSource from '../shaders/generated/loopBlinn.frag.glsl?raw';
+import morphStrokeVertSource from '../shaders/generated/morphStroke.vert.glsl?raw';
+import morphStrokeFragSource from '../shaders/generated/morphStroke.frag.glsl?raw';
+
+const shaderSourcesCallersNoLongerSupply = {
+  loopBlinnVert: loopBlinnVertSource,
+  loopBlinnFrag: loopBlinnFragSource,
+  morphStrokeVert: morphStrokeVertSource,
+  morphStrokeFrag: morphStrokeFragSource,
+};
 import { attachDrawImages } from './drawImages.js';
 import { attachInstancedFill } from './instancedFill.js';
 import { attachMorphDraw } from './morphDraw.js';
@@ -242,6 +253,7 @@ export function createRenderer(gl, shaderSources, opts = {}) {
       (opts.fillDefines || []).includes('MANTLE_SLOPE_AA') ? [] : ['MANTLE_SLOPE_AA']) };
   }
   /** @type {import('./rendererContext.js').RendererContext} */
+  shaderSources = { ...shaderSourcesCallersNoLongerSupply, ...shaderSources };
   const R = { gl, shaderSources, opts, mantleWarn, mantleError, mantleDebugFlag,
     _asyncCompile, _khrParallel, _pendingShaders, _pendingPrograms };
   // WebGL context-loss state + the backing canvas for the listeners (null for

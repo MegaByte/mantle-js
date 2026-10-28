@@ -152,6 +152,8 @@ export function unityChannelLerp(primary, contrast, highlight) {
   };
 }
 
+export { unityChannelLerp as channelLerpParams };
+
 /** Compose two color-matrix transforms: apply B then A.
  *  `combine(A, B)` produces a transform whose effect is `A(B(in))`.
  *  Both matrices in column-major mat4 form.
