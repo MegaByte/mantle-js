@@ -1204,9 +1204,65 @@ export function createRenderer(gl, shaderSources, opts = {}) {
     _pendingStart = -1; _pendingEnd = -1;
   }
 
+  /** The stripped cover mesh laid out in draw-list order, or null when the draw
+   *  list already walks it contiguously. The occlusion cull drops hidden shapes
+   *  from the draw list but not from the mesh, so each dropped shape ends a
+   *  contiguous range and costs another drawArrays — dozens per detailed asset.
+   *  Chunks outside the draw list (culled shapes, mask sources) follow the live
+   *  ones, so every chunk keeps a start. Cached on the bundle per draw list. */
+  function _drawOrderedCover(bundle) {
+    const verts = bundle.coverQuadVboFloats;
+    const chunks = bundle.coverQuadChunks;
+    const drawList = bundle.drawList;
+    if (!verts || !chunks || !drawList) return null;
+    const cached = bundle._drawOrderedCover;
+    if (cached && cached.drawList === drawList && cached.verts === verts) return cached.layout;
+    let gaps = 0, end = -1;
+    for (const op of drawList) {
+      const c = op.chunk;
+      if (!c || c.vboStart == null) continue;
+      if (end >= 0 && c.vboStart !== end) gaps++;
+      end = c.vboStart + c.count;
+    }
+    let layout = null;
+    if (gaps > 0) {
+      const sidx = bundle.hybridShapeIdxVboFloats;
+      const ordered = new Float32Array(verts.length);
+      const orderedIdx = new Float32Array((verts.length / 12) | 0);
+      const startOf = new Map();
+      let at = 0;
+      const place = (c) => {
+        if (!c || c.vboStart == null || startOf.has(c)) return;
+        const from = c.vboStart | 0, count = c.count | 0;
+        ordered.set(verts.subarray(from * 12, (from + count) * 12), at * 12);
+        if (sidx) orderedIdx.set(sidx.subarray(from, from + count), at);
+        startOf.set(c, at);
+        at += count;
+      };
+      for (const op of drawList) place(op.chunk);
+      for (const c of chunks) place(c);
+      layout = { verts: ordered.subarray(0, at * 12), shapeIdx: orderedIdx.subarray(0, at), startOf, count: at };
+    }
+    bundle._drawOrderedCover = { drawList, verts, layout };
+    return layout;
+  }
+
   /** Upload cover-quad + matching shapeIdx planes onto the active handle.
    *  shapeIdx is always sized to the vert count — attrib 7 stays enabled. */
   function _uploadCoverMesh(h, bundle) {
+    h.coverDrawList = bundle.drawList;
+    const ordered = _drawOrderedCover(bundle);
+    h.coverStartOf = ordered ? ordered.startOf : null;
+    if (ordered) {
+      if (h._ensureCoverResources) h._ensureCoverResources();
+      gl.bindBuffer(gl.ARRAY_BUFFER, h.triBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, ordered.verts, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, h.shapeIdxBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, ordered.shapeIdx, gl.STATIC_DRAW);
+      h.coverVertCount = ordered.count;
+      h.coverStripped = true;
+      return;
+    }
     const vboVerts = bundle.coverQuadVboFloats || bundle.coverQuadFloats;
     if (!vboVerts) {
       h.coverVertCount = 0;
@@ -1237,6 +1293,10 @@ export function createRenderer(gl, shaderSources, opts = {}) {
   /** Chunk first-vert index for the currently uploaded cover VBO. */
   function _coverChunkStart(chunk) {
     if (!chunk) return -1;
+    if (_handle && _handle.coverStartOf) {
+      const start = _handle.coverStartOf.get(chunk);
+      return start === undefined ? -1 : start;
+    }
     if (_handle && _handle.coverStripped) {
       // Stripped uploads omit chunk headers, so the original `start` would
       // address beyond the compact VBO on large Slug fallbacks.
@@ -1558,6 +1618,12 @@ export function createRenderer(gl, shaderSources, opts = {}) {
       gl.clear(gl.STENCIL_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     }
     gl.depthMask(false);
+    // The occlusion cull (or its retirement) swapped the draw list: re-lay out the
+    // cover mesh when either the old or the new list needs draw-list order.
+    if (_handle.coverDrawList !== _handle.bundle.drawList) {
+      _handle.coverDrawList = _handle.bundle.drawList;
+      if (_handle.coverStartOf || _drawOrderedCover(_handle.bundle)) _handle.hybridMeshDirty = true;
+    }
     if (_handle.hybridMeshDirty && (_handle.bundle.coverQuadVboFloats || _handle.bundle.coverQuadFloats)) {
       // Re-upload the header-free VBO planes (see bundleHandle.js) so a
       // streamed / nine-sliced re-derive keeps chunk vboStart in sync.

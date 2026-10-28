@@ -19,13 +19,19 @@ export function attachInstancedFill(R) {
     // order. Depth is disabled: shapes are emitted in shapeIdx = z order, so
     // painter's order already matches the depth test — and depth can't be
     // reset between instances within one instanced draw.
+    // Bounded by GPU bytes, not entry count: a scene of many stamp assets
+    // (a forest of tree variants) alternates far more than a handful each
+    // frame, and a count cap smaller than that working set evicts every
+    // entry before its reuse — re-packing and re-uploading all of them per frame.
     const _instCompacts = new Map();
-    const MAX_INST_COMPACTS = 8;
+    const MAX_INST_COMPACT_BYTES = 16 * 1024 * 1024;
+    let _instCompactBytes = 0;
     const INST_FLOATS = 18;   // 3 vec3 worldM columns + alpha + rgba tint + rgba bias
     const COVER_STRIDE_F = 12; // floats per cover-quad vertex
 
     function _dropInstCompact(compact) {
       if (!compact) return;
+      _instCompactBytes -= compact.bytes | 0;
       if (compact.vao) R.gl.deleteVertexArray(compact.vao);
       if (compact.vbo) R.gl.deleteBuffer(compact.vbo);
       if (compact.shapeVbo) R.gl.deleteBuffer(compact.shapeVbo);
@@ -101,6 +107,7 @@ export function attachInstancedFill(R) {
         cullGen,
         invalidGen,
         count: total,
+        bytes: verts.byteLength + shapes.byteLength,
         vbo: R.gl.createBuffer(),
         shapeVbo: R.gl.createBuffer(),
         vao: null,
@@ -110,13 +117,19 @@ export function attachInstancedFill(R) {
       R.gl.bindBuffer(R.gl.ARRAY_BUFFER, compact.shapeVbo);
       R.gl.bufferData(R.gl.ARRAY_BUFFER, shapes, R.gl.STATIC_DRAW);
       compact.vao = _createInstCompactVao(compact);
-      while (_instCompacts.size >= MAX_INST_COMPACTS) {
+      for (const [cached, retired] of _instCompacts) {
+        if (!cached._disposed) continue;
+        _instCompacts.delete(cached);
+        _dropInstCompact(retired);
+      }
+      while (_instCompacts.size > 0 && _instCompactBytes + compact.bytes > MAX_INST_COMPACT_BYTES) {
         const oldest = _instCompacts.keys().next().value;
         const retired = _instCompacts.get(oldest);
         _instCompacts.delete(oldest);
         _dropInstCompact(retired);
       }
       _instCompacts.set(bundle, compact);
+      _instCompactBytes += compact.bytes;
       return compact;
     }
     // Compile+cache the instanced program for a given ENGINE (extra frag defines: [] = Slug,
