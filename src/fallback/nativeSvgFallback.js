@@ -297,6 +297,16 @@ export function createNativeScene(host, opts = {}) {
   // changes; trailing slots no longer drawn are removed.
   const _slots = [];           // persistent [{ kind, key, node, ... }]
   let _slotCursor = 0;         // next slot index to fill this frame
+  // Every live raster <image>, by href. A draw claims an unclaimed <image>
+  // of its href wherever it sits (moving it into its own wrapper) before
+  // creating one, so a raster joining or leaving the middle of the draw
+  // order creates at most its own <image>: a slow device decodes each new
+  // <image> again. endFrame detaches the <image>s no draw claimed, and keeps
+  // each for `IMAGE_KEPT_FRAMES` frames so a raster that blinks or hides a
+  // moment reattaches its own <image> instead of creating one.
+  const _imagesByHref = new Map();
+  const IMAGE_KEPT_FRAMES = 120;
+  let _imageFrame = 0;
 
   // Acquire the slot at the current cursor for (key, kind). If the existing
   // slot matches, reuse its mounted node (reused:true → caller updates attrs
@@ -633,6 +643,7 @@ export function createNativeScene(host, opts = {}) {
   function beginFrame(clearColor) {
     frameOpen = true;
     _slotCursor = 0;
+    _imageFrame++;
     // viewBox is set on the FIRST drawn bundle (so the <svg> user-space
     // matches that bundle's em/viewBox space, matching how worldMatrix
     // operates in em space). Background clear:
@@ -1258,6 +1269,34 @@ export function createNativeScene(host, opts = {}) {
   // in CANVAS PIXELS (top-left origin, y-down); placed in a nested <svg>
   // whose own viewBox = the viewport in px so the outer em/bbox viewBox
   // doesn't distort it. z-order = call order (painter's-algorithm).
+  function claimImage(href) {
+    let images = _imagesByHref.get(href);
+    if (!images) { images = []; _imagesByHref.set(href, images); }
+    for (const image of images) {
+      if (image.__mantleFrame !== _imageFrame) { image.__mantleFrame = _imageFrame; return image; }
+    }
+    const image = ownerDoc.createElementNS(SVGNS, 'image');
+    image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', href);
+    image.setAttribute('href', href);
+    image.__mantleAttrs = new Map();
+    image.__mantleBlend = '';
+    image.__mantleFrame = _imageFrame;
+    images.push(image);
+    return image;
+  }
+
+  function dropUnclaimedImages() {
+    for (const [href, images] of _imagesByHref) {
+      const kept = images.filter((image) => {
+        if (image.__mantleFrame === _imageFrame) return true;
+        if (image.parentNode) image.parentNode.removeChild(image);
+        return _imageFrame - image.__mantleFrame < IMAGE_KEPT_FRAMES;
+      });
+      if (kept.length) _imagesByHref.set(href, kept);
+      else _imagesByHref.delete(href);
+    }
+  }
+
   function drawImage(source, drawOpts = {}) {
     if (!frameOpen) throw new Error('drawImage called outside beginFrame/endFrame');
     const href = sourceToHref(source);
@@ -1283,32 +1322,33 @@ export function createNativeScene(host, opts = {}) {
     // folds in the coordinate space so a 'g'⇄'svg' switch rebuilds the node.
     const layerKind = viewportSpace ? 'g' : 'svg';
     const { slot, node: layer } = acquireSlot(
-      `img:${href}`, `image-${layerKind}`,
+      'img', `image-${layerKind}`,
       () => ownerDoc.createElementNS(SVGNS, layerKind));
     // Reuse one <image> element per live positional slot, not per href. A DOM
     // node can only have one parent, so sharing the same <image> across
     // same-source instances moves it to the last wrapper. Distinct elements
     // with the same href still reuse the browser's decoded resource cache.
-    let img = slot.imageEl;
-    if (!img || slot.imageHref !== href) {
-      img = ownerDoc.createElementNS(SVGNS, 'image');
-      img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', href);
-      img.setAttribute('href', href);
-      slot.imageEl = img;
-      slot.imageHref = href;
+    const img = claimImage(href);
+    // The <image> stays mounted in its wrapper across frames, and only the
+    // attributes that differ from what this slot last wrote are written: a
+    // slow device restyles and repaints for every DOM write, so a raster drawn
+    // in place again costs no DOM mutation. Transient clip/filter defs (a
+    // srcRect or recolor, rare) are regenerated per frame beside the image.
+    if (slot.imageDefs) {
+      for (const def of slot.imageDefs) if (def.parentNode === layer) layer.removeChild(def);
+      slot.imageDefs = null;
     }
-    // Rebuild the wrapper's children each frame (cheap: one slot-local <image>
-    // is re-appended below, transient clip/filter defs are regenerated).
-    while (layer.firstChild) layer.removeChild(layer.firstChild);
+    const attrs = new Map();
+    const want = (name, value) => attrs.set(name, value);
+    const defs = [];
     if (!viewportSpace) {
-      layer.setAttribute('x', '0'); layer.setAttribute('y', '0');
-      layer.setAttribute('width', String(vpW)); layer.setAttribute('height', String(vpH));
-      layer.setAttribute('viewBox', `0 0 ${vpW} ${vpH}`);
-      layer.setAttribute('preserveAspectRatio', 'none');
+      const layerAttrs = [['x', '0'], ['y', '0'], ['width', String(vpW)], ['height', String(vpH)],
+        ['viewBox', `0 0 ${vpW} ${vpH}`], ['preserveAspectRatio', 'none']];
+      for (const [name, value] of layerAttrs) if (layer.getAttribute(name) !== value) layer.setAttribute(name, value);
     }
 
     // `img` is this slot's <image> for this href (created/reused above; href
-    // already set). Update its placement attributes only.
+    // already set). Collect its placement attributes; written once below.
     // dstRect [x,y,w,h] in px; default = the source's natural size at the
     // origin (matches WebGL drawImage's [0,0,img.w,img.h]). For URL/<img>
     // sources without known dimensions and no dstRect we still emit the
@@ -1320,24 +1360,15 @@ export function createNativeScene(host, opts = {}) {
              && (rawSource.naturalWidth || rawSource.width))
       dst = [0, 0, rawSource.naturalWidth || rawSource.width, rawSource.naturalHeight || rawSource.height];
     if (dst) {
-      img.setAttribute('x', String(dst[0])); img.setAttribute('y', String(dst[1]));
-      img.setAttribute('width', String(dst[2])); img.setAttribute('height', String(dst[3]));
+      want('x', String(dst[0])); want('y', String(dst[1]));
+      want('width', String(dst[2])); want('height', String(dst[3]));
     }
     // Match WebGL drawImage semantics: the texture fills dstRect with NO
     // aspect preservation. An SVG <image> with explicit width/height still
     // defaults to preserveAspectRatio="xMidYMid meet" (letterbox), so without
     // this a non-source-aspect dstRect shows a source-aspect box with margins.
-    // Honor an explicit drawOpts.par when the caller asks for one. Set
-    // unconditionally each frame (a reused node can't carry a stale value).
-    img.setAttribute('preserveAspectRatio',
-      drawOpts.par ? parToAttr(drawOpts.par) : 'none');
-    // Reset per-frame styling that might have been set last frame (so a
-    // reused node doesn't carry stale opacity/filter/transform/clip).
-    img.removeAttribute('transform');
-    img.removeAttribute('opacity');
-    img.removeAttribute('filter');
-    img.removeAttribute('clip-path');
-    img.style.mixBlendMode = '';
+    // Honor an explicit drawOpts.par when the caller asks for one.
+    want('preserveAspectRatio', drawOpts.par ? parToAttr(drawOpts.par) : 'none');
     // srcRect (sub-image) → clip via a viewBox-on-image is not supported;
     // approximate with a clipPath when given.
     if (drawOpts.srcRect && dst) {
@@ -1348,10 +1379,10 @@ export function createNativeScene(host, opts = {}) {
       if (naturalSource && naturalSource.width && naturalSource.height) {
         const sx = dst[2] / sr[2], sy = dst[3] / sr[3];
         const fullW = naturalSource.width * sx, fullH = naturalSource.height * sy;
-        img.setAttribute('width', String(fullW));
-        img.setAttribute('height', String(fullH));
-        img.setAttribute('x', String(dst[0] - sr[0] * sx));
-        img.setAttribute('y', String(dst[1] - sr[1] * sy));
+        want('width', String(fullW));
+        want('height', String(fullH));
+        want('x', String(dst[0] - sr[0] * sx));
+        want('y', String(dst[1] - sr[1] * sy));
         const clip = ownerDoc.createElementNS(SVGNS, 'clipPath');
         const clipId = `mantleRasterClip${rasterClipSeq++}`;
         clip.setAttribute('id', clipId);
@@ -1360,17 +1391,15 @@ export function createNativeScene(host, opts = {}) {
         cr.setAttribute('width', String(dst[2])); cr.setAttribute('height', String(dst[3]));
         clip.appendChild(cr);
         layer.appendChild(clip);
-        img.setAttribute('clip-path', `url(#${clipId})`);
+        defs.push(clip);
+        want('clip-path', `url(#${clipId})`);
       }
     }
 
     // worldMatrix (px-space mat3) + alpha + tint + blend.
     const wmStr = worldMatrixToTransform(drawOpts.worldMatrix);
-    if (wmStr) img.setAttribute('transform', wmStr);
-    if (typeof drawOpts.alpha === 'number' && drawOpts.alpha < 1)
-      img.setAttribute('opacity', String(Math.max(0, drawOpts.alpha)));
-    const blend = BLEND_CSS[drawOpts.blendMode | 0];
-    if (blend) img.style.mixBlendMode = blend;
+    if (wmStr) want('transform', wmStr);
+    let opacity = typeof drawOpts.alpha === 'number' && drawOpts.alpha < 1 ? Math.max(0, drawOpts.alpha) : 1;
     // tint: SVG <image> has no native multiply-tint; honor an alpha-only
     // tint via opacity, and an RGB tint via an feColorMatrix filter.
     // A per-draw colorMatrix rides the same filter (feColorMatrix operates
@@ -1378,17 +1407,31 @@ export function createNativeScene(host, opts = {}) {
     let rgbTint = null;
     if (drawOpts.tint) {
       const t = drawOpts.tint;
-      if (t[3] != null && t[3] < 1) {
-        const cur = parseFloat(img.getAttribute('opacity') || '1');
-        img.setAttribute('opacity', String(cur * t[3]));
-      }
+      if (t[3] != null && t[3] < 1) opacity *= t[3];
       if ((t[0] !== 1 || t[1] !== 1 || t[2] !== 1)) rgbTint = t;
     }
+    if (opacity < 1) want('opacity', String(opacity));
     const cm = drawOpts.colorMatrix, cmo = drawOpts.colorMatrixOffset;
-    if (cm || cmo || rgbTint)
-      img.setAttribute('filter', rasterRecolorFilter(layer, cm, cmo, rgbTint));
+    if (cm || cmo || rgbTint) {
+      want('filter', rasterRecolorFilter(layer, cm, cmo, rgbTint));
+      defs.push(layer.lastChild);
+    }
+    if (defs.length) slot.imageDefs = defs;
 
-    layer.appendChild(img);
+    // Write only what differs from this slot's last frame, and remove what
+    // last frame set but this one doesn't (a reused node can't carry a stale
+    // transform, opacity, filter or clip).
+    const applied = img.__mantleAttrs;
+    for (const [name, value] of attrs) {
+      if (applied.get(name) !== value) { img.setAttribute(name, value); applied.set(name, value); }
+    }
+    for (const name of [...applied.keys()]) {
+      if (!attrs.has(name)) { img.removeAttribute(name); applied.delete(name); }
+    }
+    const blend = BLEND_CSS[drawOpts.blendMode | 0] || '';
+    if (img.__mantleBlend !== blend) { img.style.mixBlendMode = blend; img.__mantleBlend = blend; }
+
+    if (layer.lastChild !== img) layer.appendChild(img);
     // The wrapper is already mounted (slotted); nothing to push.
     return true;
   }
@@ -1619,8 +1662,31 @@ export function createNativeScene(host, opts = {}) {
   // ── createImage — return a token drawImage already accepts (the source
   // itself). No GPU upload; drawImage decodes lazily. Lets a renderer-
   // style `const img = createImage(src); drawImage(img)` flow work. ─────
+  // A canvas token resolves `ready` once the canvas is encoded to a blob: URL.
+  // Its <image>s then take that short href instead of a PNG data: URL, which
+  // a slow device parses and decodes again for every new <image>.
+  // `dispose()` revokes the blob URL.
   function createImage(source, _opts) {
-    return { __nativeImage: true, source, width: source && source.width, height: source && source.height, href: null };
+    const token = { __nativeImage: true, source, width: source && source.width, height: source && source.height, href: null, ready: null, dispose: () => {} };
+    const isCanvas = source && source.nodeType && source.tagName && source.tagName.toLowerCase() === 'canvas';
+    if (isCanvas && typeof source.toBlob === 'function' && typeof URL !== 'undefined' && URL.createObjectURL) {
+      let blobHref = null;
+      let disposed = false;
+      token.ready = new Promise((resolve) => {
+        source.toBlob((blob) => {
+          if (blob && !disposed) { blobHref = URL.createObjectURL(blob); token.href = blobHref; }
+          resolve(token);
+        }, 'image/png');
+      });
+      token.dispose = () => {
+        disposed = true;
+        if (blobHref) URL.revokeObjectURL(blobHref);
+        blobHref = null;
+      };
+    } else {
+      token.ready = Promise.resolve(token);
+    }
+    return token;
   }
 
   // ── createBundleHandle — the GL handle is a per-mount GPU cache. The
@@ -1665,12 +1731,14 @@ export function createNativeScene(host, opts = {}) {
       }
       _slots.pop();
     }
+    dropUnclaimedImages();
   }
 
   function dispose() {
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     _slots.length = 0;
     _slotCursor = 0;
+    _imagesByHref.clear();
     // Drop external-clip descriptors + the (now-removed) <defs> ref so a
     // disposed scene retains no DOM nodes or parsed clip markup.
     _extClips.clear();
