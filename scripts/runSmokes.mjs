@@ -22,6 +22,7 @@ const SMOKES = [
   // goldens shared with the C# port (TestGvarIup). No fixture needed.
   'test/font/gvarIupSmoke.mjs',
   'test/shaderGeneratedFreshSmoke.mjs',
+  'test/featuresToFillDefinesSmoke.mjs',
   'test/featureSetSmoke.mjs',
   'test/svg/closeDeterminismSmoke.mjs',
   // Signed endpoint curvature per segment type — groundwork for the SVG2

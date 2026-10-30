@@ -428,6 +428,15 @@ export function fillOmitDefines(omitFeatures) {
   return FILL_FEATURES.filter(f => safe.has(f)).map(f => `MANTLE_NO_${f.toUpperCase()}`);
 }
 
+/// Map an asset feature union (bundle inspect()/inspectAll bitfield) to the
+/// fill-shader omit defines a per-game build compiles with. Code-driven
+/// scenes (programmatic contours, recolor, setNodeClip) never appear in an
+/// asset scan, so omitting by asset features alone could drop code a game
+/// draws with. Omits nothing: the same full fill shader as a dev build.
+export function featuresToFillDefines(_features) {
+  return [];
+}
+
 /// Build the createRenderer-shaped dict from raw shader sources + a
 /// helpers dict. Synchronous; suitable for bundler-time inline use.
 ///
