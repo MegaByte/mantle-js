@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // nativeMaskGeometryMorphSmoke.mjs — an animated <mask>'s geometry
 // interpolates through a native morph (the reveal-wipe path).
 //
@@ -14,7 +17,7 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MROOT = path.resolve(__dirname, '..');
@@ -49,38 +52,60 @@ window.__out = out; window.__ready = true;
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.writeHead(200, {'content-type':'text/html'}); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(HTML);
+    return;
+  }
   let p = decodeURIComponent(req.url.split('?')[0]);
-  try { res.writeHead(200, {'content-type':'text/javascript'}); res.end(readFileSync(path.join(MROOT, p))); }
-  catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    res.writeHead(200, { 'content-type': 'text/javascript' });
+    res.end(readFileSync(path.join(MROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+const browser = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
 try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 30000 });
-  const got = await page.waitForFunction('window.__ready === true', { timeout: 30000 }).then(()=>1).catch(()=>0);
-  if (!got) { fail('page did not become ready'); }
-  else {
+  const got = await page
+    .waitForFunction('window.__ready === true', { timeout: 30000, polling: 100 })
+    .then(() => 1)
+    .catch(() => 0);
+  if (!got) {
+    fail('page did not become ready');
+  } else {
     const out = await page.evaluate('window.__out');
-    const ys = out.map(x => x.maskBottom);
+    const ys = out.map((x) => x.maskBottom);
     console.log('mask bottom edge across morph:', JSON.stringify(ys));
-    if (ys.every(y => y != null)) ok('mask child element addressed (geometry override landed)');
+    if (ys.every((y) => y != null)) ok('mask child element addressed (geometry override landed)');
     else fail('mask child not addressed: ' + ys);
-    if (new Set(ys).size >= 4) ok('mask geometry CHANGES per t — interpolates (not frozen/stepped)');
+    if (new Set(ys).size >= 4)
+      ok('mask geometry CHANGES per t — interpolates (not frozen/stepped)');
     else fail('mask geometry barely changes — frozen/snapping: ' + ys);
-    const mono = ys.every((y, i) => i === 0 || y >= ys[i-1] - 0.01);
-    if (mono && ys[0] < 20 && ys[ys.length-1] > 44)
-      ok(`mask bottom lerps 12→52 monotonically (${ys[0]}→${ys[ys.length-1]}) — smooth reveal wipe`);
+    const mono = ys.every((y, i) => i === 0 || y >= ys[i - 1] - 0.01);
+    if (mono && ys[0] < 20 && ys[ys.length - 1] > 44)
+      ok(
+        `mask bottom lerps 12→52 monotonically (${ys[0]}→${ys[ys.length - 1]}) — smooth reveal wipe`,
+      );
     else fail('mask bottom not monotonic 12→52: ' + ys);
   }
-} finally { await browser.close(); server.close(); }
+} finally {
+  await browser.close();
+  server.close();
+}
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nNATIVE-MASK-GEOMETRY-MORPH PASS');
 process.exit(failures ? 1 : 0);

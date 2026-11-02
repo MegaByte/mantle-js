@@ -1,10 +1,13 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // engineSwitchIndependenceSmoke — what an engine draws must not depend on WHAT YOU DREW BEFORE.
 //
-// This is the general form of a bug that shipped: the off-thread LB builder was registered through
-// a module-level singleton, so the LAST renderer created owned it — and the moment that renderer
-// was Slug-only (which is every non-LB engine: AAC, GWN, hard), no bundle created afterwards ever
-// got Loop-Blinn meshes. In the demo: pick LB, it works; pick AAC; pick LB again — declined, for
-// the rest of the session.
+// The general form of a real defect class: an off-thread LB builder registered through a
+// module-level singleton is owned by the LAST renderer created — and the moment that renderer is
+// Slug-only (which is every non-LB engine: AAC, GWN, hard), no bundle created afterwards ever gets
+// Loop-Blinn meshes. In the demo: pick LB, it works; pick AAC; pick LB again — declined, for the
+// rest of the session.
 //
 // Greping for singletons only finds the ones you already know about. So assert the INVARIANT
 // instead: render every engine in one order, then in another, and require identical pixels. Any
@@ -14,7 +17,7 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 import { emitFixture } from './_fixtures.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -49,10 +52,9 @@ const ENGINES = {
 };
 // Renderers are CACHED per engine and kept alive, which is what an app (and this repo's demo) does
 // — a renderer is expensive, so you build one per engine and switch between them. That is also what
-// makes the bug reachable: the second renderer only steals the module-level LB hook if it is still
-// alive when the next bundle is created. An earlier version of this smoke disposed each renderer
-// after drawing, so only one ever existed, the singleton was always the current one, and the test
-// passed on the broken build. It was measuring nothing.
+// makes the defect reachable: the second renderer only steals a module-level LB hook if it is still
+// alive when the next bundle is created. Disposing each renderer after drawing would leave only one
+// alive, the singleton would always be the current one, and the test would measure nothing.
 const _cache = {};
 async function draw(eng) {
   const [rOpts, impOpts, lbMode] = ENGINES[eng];
@@ -60,8 +62,27 @@ async function draw(eng) {
   r.setLoopBlinnFill(lbMode);
   const b = createBundle(gl, await importSvg(SVG, impOpts));
   if (lbMode !== 'off' && r.awaitLbReady) await r.awaitLbReady(b);   // NB: no prepareBundle — apps rely on the auto-build
+  r.prewarmBundle(b); r.precompileFills();   // the loading call: the first frames draw the programs a game has after loading
+  const frame = () => { r.setViewport(N,N); r.beginFrame([1,1,1,1]); r.drawBundle(b, {}); r.endFrame(); };
+  // WARM FIRST for the LB engine. While the LB-hosting fill variant is still
+  // linking, a bundle falls to the best non-LB engine (the ordinary fill pass
+  // re-runs its own selection) rather than into the classic coverage-RT routes —
+  // so frame 1 routes nothing to LB by design, and a one-frame measurement would
+  // report the ownership bug this smoke exists to catch even on a healthy build.
+  // Each bundle is fresh and its kind mask picks its own variant, so this warms
+  // per bundle rather than once.
+  if (lbMode !== 'off') {
+    for (let i = 0; i < 12; i++) {
+      const c = r.debugStats.loopBlinnRouteCount;
+      frame();
+      if (r.debugStats.loopBlinnRouteCount - c > 0) break;
+      if (r.precompileFills) { try { r.precompileFills(); } catch {} }
+      // rAF ALONE NEVER SETTLES in a headless page with no visible work. Timeout wins if rAF stalls.
+      await new Promise((res) => { const _t = setTimeout(res, 100); requestAnimationFrame(() => { clearTimeout(_t); res(); }); });
+    }
+  }
   const c0 = r.debugStats.loopBlinnRouteCount;
-  r.setViewport(N,N); r.beginFrame([1,1,1,1]); r.drawBundle(b, {}); r.endFrame();
+  frame();
   const routed = r.debugStats.loopBlinnRouteCount - c0;
   const px = new Uint8Array(N*N*4); gl.readPixels(0,0,N,N,gl.RGBA,gl.UNSIGNED_BYTE,px);
   let ink = 0, h = 0;
@@ -83,14 +104,21 @@ window.__ready = true;
 
 const server = http.createServer((q, res) => {
   try {
-    if (q.url === '/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(HTML); return; }
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
     const pp = decodeURIComponent(q.url.split('?')[0]);
     res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
     res.end(readFileSync(path.join(ROOT, pp)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const br = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
 const pg = await br.newPage();
 pg.on('pageerror', (e) => console.error(' [err]', e.message));
 await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
@@ -98,19 +126,28 @@ await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load',
 // (the page finishes but rAF never fires), timing out a passing test.
 await pg.waitForFunction(() => window.__ready === true, { timeout: 120000, polling: 250 });
 const { runA, runB } = await pg.evaluate(() => window.__out);
-await br.close(); server.close();
+await br.close();
+server.close();
 
 let fail = 0;
-const ok = (c, m) => c ? console.log('  ok ' + m) : (fail++, console.error('  FAIL ' + m));
+const ok = (c, m) => (c ? console.log('  ok ' + m) : (fail++, console.error('  FAIL ' + m)));
 
 console.log('  engine   order A (ink/routed)   order B (ink/routed)');
 for (const e of Object.keys(runA))
-  console.log(`  ${e.padEnd(8)} ${String(runA[e].ink).padStart(7)} / ${runA[e].routed}          ${String(runB[e].ink).padStart(7)} / ${runB[e].routed}`);
+  console.log(
+    `  ${e.padEnd(8)} ${String(runA[e].ink).padStart(7)} / ${runA[e].routed}          ${String(runB[e].ink).padStart(7)} / ${runB[e].routed}`,
+  );
 
 for (const e of Object.keys(runA)) {
-  const A = runA[e].px, B = runB[e].px;
-  let nd = 0, mx = 0;
-  for (let i = 0; i < A.length; i++) { const d = Math.abs(A[i]-B[i]); if (d > 0) nd++; if (d > mx) mx = d; }
+  const A = runA[e].px,
+    B = runB[e].px;
+  let nd = 0,
+    mx = 0;
+  for (let i = 0; i < A.length; i++) {
+    const d = Math.abs(A[i] - B[i]);
+    if (d > 0) nd++;
+    if (d > mx) mx = d;
+  }
   console.log(`  ${e}: ${nd} of ${A.length} bytes differ between the two orders (max delta ${mx})`);
   ok(runA[e].ink > 0, `${e} renders something (ink=${runA[e].ink})`);
   // THE INVARIANT: same engine, same asset, different history ⇒ the same PICTURE.
@@ -120,12 +157,23 @@ for (const e of Object.keys(runA)) {
   // differently between them. That is a single LSB and it is not a state leak. A leak — a hook one
   // renderer stole, a cache another poisoned — changes which ENGINE drew a shape, and that moves
   // whole edges, not one bit. So bound the delta, and bound how much of the image may move at all.
-  ok(mx <= 1, `${e} draws the same regardless of which engines ran before it (max delta ${mx}, LSB noise only)`);
-  ok(nd < A.length * 0.001, `${e}: at most a trace of the image differs across orders (${nd} bytes)`);
+  ok(
+    mx <= 1,
+    `${e} draws the same regardless of which engines ran before it (max delta ${mx}, LSB noise only)`,
+  );
+  ok(
+    nd < A.length * 0.001,
+    `${e}: at most a trace of the image differs across orders (${nd} bytes)`,
+  );
 }
 // The specific casualty of the singleton bug: LB visited AFTER a Slug-only renderer must still route.
-ok(runA.lb.routed > 0, 'LB still ROUTES when visited after AAC/GWN/hard (the builder-ownership bug)');
+ok(
+  runA.lb.routed > 0,
+  'LB still ROUTES when visited after AAC/GWN/hard (the builder-ownership bug)',
+);
 ok(runB.lb.routed > 0, 'LB still ROUTES when other engines ran first (reverse order)');
 
-console.log(fail ? `\nENGINE-SWITCH-INDEPENDENCE FAIL (${fail})` : '\nENGINE-SWITCH-INDEPENDENCE PASS');
+console.log(
+  fail ? `\nENGINE-SWITCH-INDEPENDENCE FAIL (${fail})` : '\nENGINE-SWITCH-INDEPENDENCE PASS',
+);
 process.exit(fail ? 1 : 0);

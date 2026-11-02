@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // bundle/featureManifest.js — turn an inspect() feature bitfield into the
 // list of side-effect module subpaths a consumer must import so the
 // registries (filter primitives, font readers/shapers) contain exactly
@@ -29,24 +32,33 @@ const PKG = '@kontek/mantle';
 // pulls the full primitive set. Single-kind filters pull only their kind.
 const FILT = `${PKG}/filterGraph/primitives`;
 
+// Heterogeneous pairs — annotate so the element type stays [bit, modules]
+// rather than widening to `bigint | string[]`.
+/** @type {[bigint, string[]][]} */
 const MAP = [
   // [bit, modules]
   // COLRv1 paint graph (color fonts / emoji). One module — a paint
   // graph can use any node type, so the granularity is COLR on/off.
-  [Features.ColrPaintGraph,    [`${PKG}/filterGraph/colr/paints`]],
+  [Features.ColrPaintGraph, [`${PKG}/filterGraph/colr/paints`]],
 
-  [Features.FilterBlur,        [`${FILT}/blur`]],
+  [Features.FilterBlur, [`${FILT}/blur`]],
   [Features.FilterColorMatrix, [`${FILT}/colorMatrix`]],
   // Drop-shadow / glow / bevel are synthesized from blur + offset +
   // flood + composite/merge in the graph; their single-kind fast paths
   // still exercise those primitives.
-  [Features.FilterDropShadow,  [`${FILT}/blur`, `${FILT}/offset`, `${FILT}/flood`, `${FILT}/composite`, `${FILT}/merge`]],
-  [Features.FilterGlow,        [`${FILT}/blur`, `${FILT}/flood`, `${FILT}/composite`, `${FILT}/merge`]],
-  [Features.FilterBevel,       [`${FILT}/blur`, `${FILT}/offset`, `${FILT}/lighting`, `${FILT}/composite`, `${FILT}/merge`]],
-  [Features.FilterMorphology,  [`${FILT}/morphology`]],
-  [Features.FilterConvolve,    [`${FILT}/convolve`]],
+  [
+    Features.FilterDropShadow,
+    [`${FILT}/blur`, `${FILT}/offset`, `${FILT}/flood`, `${FILT}/composite`, `${FILT}/merge`],
+  ],
+  [Features.FilterGlow, [`${FILT}/blur`, `${FILT}/flood`, `${FILT}/composite`, `${FILT}/merge`]],
+  [
+    Features.FilterBevel,
+    [`${FILT}/blur`, `${FILT}/offset`, `${FILT}/lighting`, `${FILT}/composite`, `${FILT}/merge`],
+  ],
+  [Features.FilterMorphology, [`${FILT}/morphology`]],
+  [Features.FilterConvolve, [`${FILT}/convolve`]],
   // Graph-mode filters can use any primitive — pull the full set.
-  [Features.FilterGraph,       [`${FILT}/all`]],
+  [Features.FilterGraph, [`${FILT}/all`]],
 ];
 
 /// Map a feature bitfield (from inspect / inspectAll) to the sorted,

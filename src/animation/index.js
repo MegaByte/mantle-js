@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // animation/ — renderer-side animation primitives. Three
 // building blocks composed by external drivers (SMIL / SWF / Lottie /
 // Rive / state machines):
@@ -29,12 +32,12 @@ export {
   monochrome,
   identity,
   combine,
-  unityChannelLerp,
-  dualTint    as colorMatrixDualTint,
-  tripleTint  as colorMatrixTripleTint,
-  monochrome  as colorMatrixMonochrome,
-  identity    as colorMatrixIdentity,
-  combine     as colorMatrixCombine,
+  channelLerpParams,
+  dualTint as colorMatrixDualTint,
+  tripleTint as colorMatrixTripleTint,
+  monochrome as colorMatrixMonochrome,
+  identity as colorMatrixIdentity,
+  combine as colorMatrixCombine,
 } from './colorMatrix.js';
 // Per-draw palette LUT — companion to the color matrix.
 export { createPalette } from './colorPalette.js';

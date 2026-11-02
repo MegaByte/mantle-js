@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // colorPaletteSmoke.mjs — per-draw palette LUT for indexed discrete
 // recoloring. Companion to colorMatrix.js: where matrix is continuous,
 // palette is discrete.
@@ -27,7 +30,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -41,7 +44,10 @@ mkdirSync(OUT, { recursive: true });
 //   shape 1: R=64  → index 1 (with paletteSize=4: 64/255 * 4 ≈ 1.003 → 1)
 //   shape 2: R=128 → index 2
 //   shape 3: R=192 → index 3
-const SVG = readFileSync(new URL('../examples/smoke/colorPalette__SVG.svg', import.meta.url), 'utf8');
+const SVG = readFileSync(
+  new URL('../examples/smoke/colorPalette__SVG.svg', import.meta.url),
+  'utf8',
+);
 
 const HTML = `<!DOCTYPE html><html><body style="margin:0;background:#000">
 <canvas id="c" width="100" height="100"></canvas>
@@ -120,7 +126,7 @@ out.T4_bulk_update = await drawAndSnapshot({
 // T5 state revert.
 out.T5_revert = await drawAndSnapshot({});
 
-// T6 palette + color matrix compose. Palette returns greys (T4
+// T6 palette + color matrix compose. Palette returns grays (T4
 // state). Color matrix then turns them into a yellow-tinted scale.
 {
   const { matrix, offset } = colorMatrixMonochrome([1, 1, 0, 1]);
@@ -144,54 +150,72 @@ const server = http.createServer((req, res) => {
     return;
   }
   let p = decodeURIComponent(u.pathname);
-  const mime = p.endsWith('.js') || p.endsWith('.mjs') ? 'text/javascript'
-             : p.endsWith('.glsl') ? 'text/plain' : 'application/octet-stream';
+  const mime =
+    p.endsWith('.js') || p.endsWith('.mjs')
+      ? 'text/javascript'
+      : p.endsWith('.glsl')
+        ? 'text/plain'
+        : 'application/octet-stream';
   try {
     res.writeHead(200, { 'content-type': mime + '; charset=utf-8' });
     res.end(readFileSync(path.join(ROOT, p)));
   } catch {
-    try { res.writeHead(404); res.end(); } catch {}
+    try {
+      res.writeHead(404);
+      res.end();
+    } catch {}
   }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${server.address().port}/`;
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { if (m.type() === 'error') console.error('  [console]', m.text()); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('  [console]', m.text());
+});
 await page.setViewport({ width: 200, height: 200 });
 await page.goto(url, { waitUntil: 'load', timeout: 10000 });
-await page.waitForFunction(() => window.__d === true, { timeout: 30000 });
+await page.waitForFunction(() => window.__d === true, { timeout: 30000, polling: 100 });
 const r = await page.evaluate(() => window.__r);
 await browser.close();
 server.close();
 
 for (const k of Object.keys(r)) {
-  writeFileSync(path.join(OUT, k + '.png'),
-    Buffer.from(r[k].pngDataUrl.slice('data:image/png;base64,'.length), 'base64'));
+  writeFileSync(
+    path.join(OUT, k + '.png'),
+    Buffer.from(r[k].pngDataUrl.slice('data:image/png;base64,'.length), 'base64'),
+  );
 }
 
 let failures = 0;
-const ok = m => console.log('ok', m);
-const fail = m => { failures++; console.error('FAIL', m); };
+const ok = (m) => console.log('ok', m);
+const fail = (m) => {
+  failures++;
+  console.error('FAIL', m);
+};
 const close = (a, b, tol = 6) =>
-  Math.abs(a[0] - b[0]) <= tol &&
-  Math.abs(a[1] - b[1]) <= tol &&
-  Math.abs(a[2] - b[2]) <= tol;
+  Math.abs(a[0] - b[0]) <= tol && Math.abs(a[1] - b[1]) <= tol && Math.abs(a[2] - b[2]) <= tol;
 
 // T1 baseline: the 4 rects show their authored R values (0, 64, 128, 192).
 {
   const t = r.T1_baseline;
   console.log('T1:', t.s0, t.s1, t.s2, t.s3);
-  if (close(t.s0, [0, 0, 0]))      ok('T1 s0 = #000');
-  else fail('T1 s0 got ' + t.s0.slice(0,3));
-  if (close(t.s1, [64, 0, 0]))     ok('T1 s1 = #400000');
-  else fail('T1 s1 got ' + t.s1.slice(0,3));
-  if (close(t.s2, [128, 0, 0]))    ok('T1 s2 = #800000');
-  else fail('T1 s2 got ' + t.s2.slice(0,3));
-  if (close(t.s3, [192, 0, 0]))    ok('T1 s3 = #C00000');
-  else fail('T1 s3 got ' + t.s3.slice(0,3));
+  if (close(t.s0, [0, 0, 0])) ok('T1 s0 = #000');
+  else fail('T1 s0 got ' + t.s0.slice(0, 3));
+  if (close(t.s1, [64, 0, 0])) ok('T1 s1 = #400000');
+  else fail('T1 s1 got ' + t.s1.slice(0, 3));
+  if (close(t.s2, [128, 0, 0])) ok('T1 s2 = #800000');
+  else fail('T1 s2 got ' + t.s2.slice(0, 3));
+  if (close(t.s3, [192, 0, 0])) ok('T1 s3 = #C00000');
+  else fail('T1 s3 got ' + t.s3.slice(0, 3));
 }
 
 // T2 palette: with the default paletteSize=256 (the LUT width), the
@@ -202,15 +226,15 @@ const close = (a, b, tol = 6) =>
 {
   const t = r.T2_palette;
   console.log('T2:', t.s0, t.s1, t.s2, t.s3);
-  if (close(t.s0, [255, 0, 0]))   ok('T2 s0 (R=0   → palette[0]=red)');
-  else fail('T2 s0 got ' + t.s0.slice(0,3));
+  if (close(t.s0, [255, 0, 0])) ok('T2 s0 (R=0   → palette[0]=red)');
+  else fail('T2 s0 got ' + t.s0.slice(0, 3));
   // s1..s3 fall outside the 4 entries we set → default black.
-  if (close(t.s1, [0, 0, 0]))     ok('T2 s1 (R=64 → palette[64]=unset=black)');
-  else fail('T2 s1 got ' + t.s1.slice(0,3));
-  if (close(t.s2, [0, 0, 0]))     ok('T2 s2 (R=128 → palette[128]=unset=black)');
-  else fail('T2 s2 got ' + t.s2.slice(0,3));
-  if (close(t.s3, [0, 0, 0]))     ok('T2 s3 (R=192 → palette[192]=unset=black)');
-  else fail('T2 s3 got ' + t.s3.slice(0,3));
+  if (close(t.s1, [0, 0, 0])) ok('T2 s1 (R=64 → palette[64]=unset=black)');
+  else fail('T2 s1 got ' + t.s1.slice(0, 3));
+  if (close(t.s2, [0, 0, 0])) ok('T2 s2 (R=128 → palette[128]=unset=black)');
+  else fail('T2 s2 got ' + t.s2.slice(0, 3));
+  if (close(t.s3, [0, 0, 0])) ok('T2 s3 (R=192 → palette[192]=unset=black)');
+  else fail('T2 s3 got ' + t.s3.slice(0, 3));
 }
 
 // T3 — after .set(0, cyan), shape 0 substitutes to cyan. The .set
@@ -219,12 +243,12 @@ const close = (a, b, tol = 6) =>
   const t = r.T3_mutated;
   console.log('T3:', t.s0, t.s1, t.s2, t.s3);
   if (close(t.s0, [0, 255, 255])) ok('T3 s0 (palette[0] mutated red → cyan)');
-  else fail('T3 s0 expected cyan, got ' + t.s0.slice(0,3));
+  else fail('T3 s0 expected cyan, got ' + t.s0.slice(0, 3));
   // The .set(2, magenta) call mutates palette[2] which no shape indexes
   // (shape 2's R=128 indexes palette[128]). So it's a no-op visually
   // but proves we can mutate ANY entry, not just used ones.
-  if (close(t.s2, [0, 0, 0]))     ok('T3 s2 (palette[128] unchanged → black)');
-  else fail('T3 s2 got ' + t.s2.slice(0,3));
+  if (close(t.s2, [0, 0, 0])) ok('T3 s2 (palette[128] unchanged → black)');
+  else fail('T3 s2 got ' + t.s2.slice(0, 3));
 }
 
 // T4 — bulk update: only the first 4 entries are written. shape 0
@@ -234,19 +258,19 @@ const close = (a, b, tol = 6) =>
   const t = r.T4_bulk_update;
   console.log('T4:', t.s0, t.s1, t.s2, t.s3);
   if (close(t.s0, [128, 128, 128])) ok('T4 s0 (palette[0] bulk → gray)');
-  else fail('T4 s0 got ' + t.s0.slice(0,3));
-  if (close(t.s1, [0, 0, 0]))       ok('T4 s1 (palette[64] reset to default black)');
-  else fail('T4 s1 got ' + t.s1.slice(0,3));
+  else fail('T4 s0 got ' + t.s0.slice(0, 3));
+  if (close(t.s1, [0, 0, 0])) ok('T4 s1 (palette[64] reset to default black)');
+  else fail('T4 s1 got ' + t.s1.slice(0, 3));
 }
 
 // T5 — state revert.
 {
   const t = r.T5_revert;
   console.log('T5:', t.s0, t.s1, t.s2, t.s3);
-  if (close(t.s0, [0, 0, 0]))       ok('T5 s0 reverted to baseline');
-  else fail('T5 s0 got ' + t.s0.slice(0,3));
-  if (close(t.s1, [64, 0, 0]))      ok('T5 s1 reverted to baseline');
-  else fail('T5 s1 got ' + t.s1.slice(0,3));
+  if (close(t.s0, [0, 0, 0])) ok('T5 s0 reverted to baseline');
+  else fail('T5 s0 got ' + t.s0.slice(0, 3));
+  if (close(t.s1, [64, 0, 0])) ok('T5 s1 reverted to baseline');
+  else fail('T5 s1 got ' + t.s1.slice(0, 3));
 }
 
 // T6 — palette + monochrome(yellow) matrix.
@@ -257,8 +281,8 @@ const close = (a, b, tol = 6) =>
 {
   const t = r.T6_palette_then_matrix;
   console.log('T6:', t.s0, t.s1, t.s2, t.s3);
-  if (close(t.s0, [128, 128, 0]))   ok('T6 palette → matrix: gray → yellow-luminance');
-  else fail('T6 s0 expected (128,128,0), got ' + t.s0.slice(0,3));
+  if (close(t.s0, [128, 128, 0])) ok('T6 palette → matrix: gray → yellow-luminance');
+  else fail('T6 s0 expected (128,128,0), got ' + t.s0.slice(0, 3));
 }
 
 console.log(`\nPNGs saved to ${OUT}`);

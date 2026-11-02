@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // dispatchRegistry.js — opt-in registries for the two renderer-side
 // filter-graph dispatchers: SVG <filter> primitives and COLRv1 paint
 // nodes. Handlers are absent by default and register themselves when their
@@ -9,16 +12,23 @@
 // register*() at import time. These modules are listed in
 // package.json#sideEffects, so importing them IS the registration.
 //
-// The graph evaluator (filterGraph.js) already tolerates a missing
-// entry: dispatch[node.type] === undefined falls through to passthrough.
-// So an asset that uses no filters / no COLR pulls in none of those
-// handlers; the rest are dead code the bundler drops.
+// The graph evaluator (filterGraph.js) tolerates a missing entry:
+// dispatch[node.type] === undefined routes to unhandledNode, which copies the
+// input through so the element renders UNFILTERED rather than vanishing. So an
+// asset that uses no filters / no COLR pulls in none of those handlers; the
+// rest are dead code the bundler drops.
+//
+// That degradation is only graceful for a primitive whose input is another
+// node's output. Leaving out a handler is still a visible change, not a
+// no-op — omit deliberately, and prefer primitives/all.js when unsure.
 //
 // SVG filters split per-primitive (assets commonly use one or two).
 // COLR paints register as a single set — a COLRv1 paint graph can use
 // any node type and you can't know which without parsing the font, so
 // the realistic granularity is "COLR on / off", matching the single
 // Features.ColrPaintGraph bit.
+
+import { warnMissingFeature } from '../core/missingFeature.js';
 
 // ── SVG filter primitives ──────────────────────────────────────────
 const _svgFilters = Object.create(null);
@@ -71,4 +81,45 @@ export function hasColrPaint(nodeType) {
 /// The COLR paint node types currently registered. Diagnostics only.
 export function registeredColrPaints() {
   return Object.keys(_colrPaints);
+}
+
+// ── Missing-handler reporting ──────────────────────────────────────
+// Which subpath registers a node type. The evaluator calls warnUnregisteredNode() when it meets a type with no handler, so the
+// element's passthrough comes with a message naming the exact import to add (once per type).
+const FILTER_MODULE = Object.freeze({
+  feGaussianBlur: 'blur',
+  feColorMatrix: 'colorMatrix',
+  feBlend: 'blend',
+  feConvolveMatrix: 'convolve',
+  feDisplacementMap: 'displacementMap',
+  feComponentTransfer: 'componentTransfer',
+  feComposite: 'composite',
+  feMerge: 'merge',
+  feDiffuseLighting: 'lighting',
+  feSpecularLighting: 'lighting',
+  feImage: 'image',
+  feFlood: 'flood',
+  feTile: 'tile',
+  feMorphology: 'morphology',
+  feTurbulence: 'turbulence',
+  feOffset: 'offset',
+});
+
+/// The subpath whose import registers `nodeType`, or null for a type Mantle has no handler module for.
+export function handlerModuleFor(nodeType) {
+  if (FILTER_MODULE[nodeType])
+    return `@kontek/mantle/filterGraph/primitives/${FILTER_MODULE[nodeType]}`;
+  if (typeof nodeType === 'string' && nodeType.startsWith('Paint'))
+    return '@kontek/mantle/filterGraph/colr/paints';
+  return null;
+}
+
+/// Warn once that a node type has no registered handler (its element draws unfiltered / its glyph layer is skipped).
+export function warnUnregisteredNode(nodeType) {
+  const sub = handlerModuleFor(nodeType);
+  if (!sub) return;
+  const what = nodeType.startsWith('Paint')
+    ? `a color-font paint graph uses ${nodeType}, which has no handler; the paint is not drawn`
+    : `a filter uses ${nodeType}, which has no handler; the filtered element draws without it`;
+  warnMissingFeature('node:' + nodeType, what, sub);
 }

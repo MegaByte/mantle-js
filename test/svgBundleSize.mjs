@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // svgBundleSize.mjs — measure per-section + per-shape byte cost of
 // an imported SVG bundle.
 //
@@ -14,13 +17,12 @@ import { fileURLToPath } from 'url';
 import { DOMParser } from '@xmldom/xmldom';
 if (typeof globalThis.DOMParser === 'undefined') globalThis.DOMParser = DOMParser;
 import { importSvg } from '../src/index.js';
+import { missingHint, noteSkip } from './_assets.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
-const FIXTURES = [
-  { label: 'tiger', svgPath: path.join(ROOT, 'examples/tiger.svg') },
-];
+const FIXTURES = [{ label: 'tiger', svgPath: path.join(ROOT, 'examples/tiger.svg') }];
 
 function fmtBytes(n) {
   if (n < 1024) return `${n} B`;
@@ -29,7 +31,10 @@ function fmtBytes(n) {
 }
 
 for (const f of FIXTURES) {
-  if (!existsSync(f.svgPath)) { console.log(`skip ${f.label}: ${f.svgPath} not present (drop a local copy to bench it)`); continue; }
+  if (!existsSync(f.svgPath)) {
+    noteSkip(missingHint(f.svgPath));
+    continue;
+  }
   const svg = readFileSync(f.svgPath, 'utf8');
   const b = await importSvg(svg);
 
@@ -47,15 +52,23 @@ for (const f of FIXTURES) {
   console.log();
   console.log(`== ${f.label} (${n} shapes) ==`);
   console.log();
-  console.log(`${'section'.padEnd(18)} ${'bytes'.padStart(10)}  ${'% total'.padStart(8)}  ${'B/shape'.padStart(8)}`);
+  console.log(
+    `${'section'.padEnd(18)} ${'bytes'.padStart(10)}  ${'% total'.padStart(8)}  ${'B/shape'.padStart(8)}`,
+  );
   console.log('-'.repeat(54));
   for (const r of rows) {
-    const pct = (r.bytes / total * 100).toFixed(1);
+    const pct = ((r.bytes / total) * 100).toFixed(1);
     const perShape = (r.bytes / n).toFixed(1);
-    console.log(`${r.field.padEnd(18)} ${String(r.bytes).padStart(10)}  ${pct.padStart(7)}%  ${perShape.padStart(8)}`);
+    console.log(
+      `${r.field.padEnd(18)} ${String(r.bytes).padStart(10)}  ${pct.padStart(7)}%  ${perShape.padStart(8)}`,
+    );
   }
   console.log('-'.repeat(54));
-  console.log(`${'TOTAL'.padEnd(18)} ${String(total).padStart(10)}  ${('100.0%').padStart(8)}  ${(total / n).toFixed(1).padStart(8)}`);
+  console.log(
+    `${'TOTAL'.padEnd(18)} ${String(total).padStart(10)}  ${'100.0%'.padStart(8)}  ${(total / n).toFixed(1).padStart(8)}`,
+  );
   console.log();
-  console.log(`pretty: total ${fmtBytes(total)} across ${n} shapes (${fmtBytes(total / n)}/shape avg)`);
+  console.log(
+    `pretty: total ${fmtBytes(total)} across ${n} shapes (${fmtBytes(total / n)}/shape avg)`,
+  );
 }

@@ -1,6 +1,9 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // nativeMorphPerfSmoke.mjs — quantifies the morph hot-path cost of the
 // native fallback reconciler. Morph re-applies a `d` (and friends) to the
-// SAME shapes every frame; the reconciler must do that WITHOUT a per-shape
+// same shapes every frame; the reconciler must do that WITHOUT a per-shape
 // querySelector tree-walk and WITHOUT redundant DOM writes, or frames drop.
 //
 // We instrument the cloned subtree's Element prototype to COUNT
@@ -14,7 +17,8 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { openReady } from './_pageReady.mjs';
 import { emitFixture } from './_fixtures.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -25,7 +29,8 @@ const ROOT = path.resolve(__dirname, '..');
 const N = 12;
 let shapes = '';
 for (let i = 0; i < N; i++) {
-  const x = (i % 4) * 25, y = Math.floor(i / 4) * 25;
+  const x = (i % 4) * 25,
+    y = Math.floor(i / 4) * 25;
   shapes += `<path id="s${i}" d="M${x} ${y}h20v20h-20Z" fill="#3366cc"/>`;
 }
 const PREFAB = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">${shapes}</svg>`;
@@ -92,43 +97,98 @@ window.__ready = true;
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(HTML);
+    return;
+  }
   let p = decodeURIComponent(req.url.split('?')[0]);
-  try { const b = readFileSync(path.join(ROOT, p)); res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' }); res.end(b); }
-  catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    const b = readFileSync(path.join(ROOT, p));
+    res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' });
+    res.end(b);
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
 try {
-  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await openReady(page, `http://127.0.0.1:${port}/`, { ready: 'flag' });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 const cm = await page.evaluate(() => window.__changingMorph());
 // querySelectorAll must NOT scale with frames — index is built once (during
 // warmup), so steady-state frames do zero subtree walks.
-if (cm.qsa === 0) ok('changing morph: ZERO querySelectorAll over ' + cm.frames + ' frames (id index reused)');
-else fail('querySelectorAll ran ' + cm.qsa + 'x in steady state — per-frame tree-walk not eliminated');
+if (cm.qsa === 0)
+  ok('changing morph: ZERO querySelectorAll over ' + cm.frames + ' frames (id index reused)');
+else
+  fail('querySelectorAll ran ' + cm.qsa + 'x in steady state — per-frame tree-walk not eliminated');
 // ~1 write per shape per frame (the new d). Allow a little slack but it must
 // be well under the 2x that revert-then-set would cost.
 const perFrame = cm.setAttr / cm.frames;
-if (perFrame <= cm.shapes * 1.2) ok('changing morph: ' + cm.setAttr + ' writes / ' + cm.frames + ' frames = ' + perFrame.toFixed(1) + '/frame (~1 per ' + cm.shapes + ' shapes, no revert-then-set)');
-else fail('too many writes: ' + perFrame.toFixed(1) + '/frame for ' + cm.shapes + ' shapes (revert-then-set not eliminated?)');
-if (cm.removeAttr === 0) ok('changing morph: zero removeAttribute churn'); else fail('unexpected removeAttribute: ' + cm.removeAttr);
+if (perFrame <= cm.shapes * 1.2)
+  ok(
+    'changing morph: ' +
+      cm.setAttr +
+      ' writes / ' +
+      cm.frames +
+      ' frames = ' +
+      perFrame.toFixed(1) +
+      '/frame (~1 per ' +
+      cm.shapes +
+      ' shapes, no revert-then-set)',
+  );
+else
+  fail(
+    'too many writes: ' +
+      perFrame.toFixed(1) +
+      '/frame for ' +
+      cm.shapes +
+      ' shapes (revert-then-set not eliminated?)',
+  );
+if (cm.removeAttr === 0) ok('changing morph: zero removeAttribute churn');
+else fail('unexpected removeAttribute: ' + cm.removeAttr);
 
 const pm = await page.evaluate(() => window.__pausedMorph());
-if (pm.setAttr === 0 && pm.removeAttr === 0) ok('paused morph: ZERO DOM writes over ' + pm.frames + ' identical frames (value diff)');
-else fail('paused morph wrote to DOM: setAttr=' + pm.setAttr + ' removeAttr=' + pm.removeAttr + ' (unchanged d should be a no-op)');
+if (pm.setAttr === 0 && pm.removeAttr === 0)
+  ok('paused morph: ZERO DOM writes over ' + pm.frames + ' identical frames (value diff)');
+else
+  fail(
+    'paused morph wrote to DOM: setAttr=' +
+      pm.setAttr +
+      ' removeAttr=' +
+      pm.removeAttr +
+      ' (unchanged d should be a no-op)',
+  );
 
 await browser.close();
 server.close();
-if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
+if (failures) {
+  console.error(`\n${failures} failure(s)`);
+  process.exit(1);
+}
 console.log('\nnativeMorphPerfSmoke: all checks passed');

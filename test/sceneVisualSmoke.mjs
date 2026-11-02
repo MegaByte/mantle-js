@@ -1,13 +1,16 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // sceneVisualSmoke.mjs — end-to-end Puppeteer proof that
 // createScene + sceneToBundle → createBundle → render produces actual
 // pixels. Two shapes: red rect filling [0..100, 0..100], blue
-// ellipse inscribed centred on (50, 50) r=30. Reads pixels at the
-// corner (should be RED) and centre (should be BLUE).
+// ellipse inscribed centerd on (50, 50) r=30. Reads pixels at the
+// corner (should be RED) and center (should be BLUE).
 import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -50,7 +53,7 @@ function readAt(x, y) {
 }
 window.__result = {
   corner: readAt(20, 100),  // inside red rect, outside blue ellipse
-  centre: readAt(100, 100), // inside blue ellipse (covers the centre)
+  center: readAt(100, 100), // inside blue ellipse (covers the center)
 };
 window.__done = true;
 </script>
@@ -64,38 +67,58 @@ const server = http.createServer((req, res) => {
     return;
   }
   let p = decodeURIComponent(u.pathname);
-  const mime = p.endsWith('.js') || p.endsWith('.mjs') ? 'text/javascript'
-             : p.endsWith('.glsl') ? 'text/plain' : 'application/octet-stream';
-  try { res.writeHead(200, { 'content-type': mime + '; charset=utf-8' });
-        res.end(readFileSync(path.join(ROOT, p))); }
-  catch { try { res.writeHead(404); res.end(); } catch {} }
+  const mime =
+    p.endsWith('.js') || p.endsWith('.mjs')
+      ? 'text/javascript'
+      : p.endsWith('.glsl')
+        ? 'text/plain'
+        : 'application/octet-stream';
+  try {
+    res.writeHead(200, { 'content-type': mime + '; charset=utf-8' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    try {
+      res.writeHead(404);
+      res.end();
+    } catch {}
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${server.address().port}/`;
 
-const browser = await puppeteer.launch({
-  headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'],
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
 });
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
 await page.setViewport({ width: 300, height: 300 });
 await page.goto(url, { waitUntil: 'load', timeout: 10000 });
-await page.waitForFunction(() => window.__done === true, { timeout: 10000 });
+await page.waitForFunction(() => window.__done === true, { timeout: 10000, polling: 100 });
 const result = await page.evaluate(() => window.__result);
 await browser.close();
 server.close();
 
 let failures = 0;
-const expectRed  = (px, name) => {
+const expectRed = (px, name) => {
   if (px[0] > 200 && px[1] < 30 && px[2] < 30) console.log('ok', name, 'is red', px);
-  else { failures++; console.error('FAIL', name, 'expected red, got', px); }
+  else {
+    failures++;
+    console.error('FAIL', name, 'expected red, got', px);
+  }
 };
 const expectBlue = (px, name) => {
   if (px[0] < 30 && px[1] < 30 && px[2] > 200) console.log('ok', name, 'is blue', px);
-  else { failures++; console.error('FAIL', name, 'expected blue, got', px); }
+  else {
+    failures++;
+    console.error('FAIL', name, 'expected blue, got', px);
+  }
 };
-expectRed (result.corner, 'sceneToBundle rect corner');
-expectBlue(result.centre, 'sceneToBundle ellipse centre');
+expectRed(result.corner, 'sceneToBundle rect corner');
+expectBlue(result.center, 'sceneToBundle ellipse center');
 
 console.log();
 console.log(failures === 0 ? 'SCENE-VISUAL PASS' : `SCENE-VISUAL FAIL (${failures})`);

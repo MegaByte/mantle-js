@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // anchorHrefSmoke.mjs — verify <a href> URLs propagate to per-shape
 // bundle.shapeHrefs so a hit-test consumer can map a hit position to
 // a link target.
@@ -7,8 +10,11 @@ globalThis.DOMParser = DP;
 import { importSvg } from '../../src/svg/importer.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL', msg); failures++; };
-const ok   = (msg) => console.log('ok', msg);
+const fail = (msg) => {
+  console.error('FAIL', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok', msg);
 
 // ----- T1: shape inside <a> carries the href -----------------------
 {

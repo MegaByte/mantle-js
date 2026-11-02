@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // nestedSvgSmoke.mjs — verify nested <svg> elements get viewport + viewBox
 // + preserveAspectRatio handling (SVG 1.1 §7.2, §7.8).
 //
@@ -9,8 +12,11 @@ globalThis.DOMParser = DP;
 import { importSvg } from '../../src/svg/importer.js';
 
 let failures = 0;
-const ok   = (m) => console.log('ok', m);
-const fail = (m) => { failures++; console.error('FAIL', m); };
+const ok = (m) => console.log('ok', m);
+const fail = (m) => {
+  failures++;
+  console.error('FAIL', m);
+};
 const approx = (a, b, eps = 1e-3) => Math.abs(a - b) <= eps;
 
 const META_STRIDE = 48;
@@ -32,8 +38,7 @@ async function bbox(svg) {
   const [x0, y0, x1, y1] = await bbox(svg);
   if (approx(x0, 50) && approx(y0, 20) && approx(x1, 60) && approx(y1, 30))
     ok(`T1 nested x/y offset → bbox (${x0},${y0},${x1},${y1})`);
-  else
-    fail(`T1 expected (50,20,60,30); got (${x0},${y0},${x1},${y1})`);
+  else fail(`T1 expected (50,20,60,30); got (${x0},${y0},${x1},${y1})`);
 }
 
 // === T2: nested viewBox scales coords =================================
@@ -49,8 +54,7 @@ async function bbox(svg) {
   const [x0, y0, x1, y1] = await bbox(svg);
   if (approx(x0, 20) && approx(y0, 20) && approx(x1, 40) && approx(y1, 40))
     ok(`T2 nested viewBox 2× scale → bbox (${x0},${y0},${x1},${y1})`);
-  else
-    fail(`T2 expected (20,20,40,40); got (${x0},${y0},${x1},${y1})`);
+  else fail(`T2 expected (20,20,40,40); got (${x0},${y0},${x1},${y1})`);
 }
 
 // === T3: preserveAspectRatio=none stretches independently =============
@@ -67,8 +71,7 @@ async function bbox(svg) {
   const [x0, y0, x1, y1] = await bbox(svg);
   if (approx(x0, 40) && approx(y0, 20) && approx(x1, 80) && approx(y1, 40))
     ok(`T3 PAR=none anisotropic scale → bbox (${x0},${y0},${x1},${y1})`);
-  else
-    fail(`T3 expected (40,20,80,40); got (${x0},${y0},${x1},${y1})`);
+  else fail(`T3 expected (40,20,80,40); got (${x0},${y0},${x1},${y1})`);
 }
 
 // === T4: PAR=xMidYMid meet centers within larger box ==================
@@ -86,8 +89,7 @@ async function bbox(svg) {
   const [x0, y0, x1, y1] = await bbox(svg);
   if (approx(x0, 70) && approx(y0, 20) && approx(x1, 90) && approx(y1, 40))
     ok(`T4 PAR=xMidYMid meet centers → bbox (${x0},${y0},${x1},${y1})`);
-  else
-    fail(`T4 expected (70,20,90,40); got (${x0},${y0},${x1},${y1})`);
+  else fail(`T4 expected (70,20,90,40); got (${x0},${y0},${x1},${y1})`);
 }
 
 // === T5: PAR=xMinYMin slice scales-to-cover, anchors min/min ==========
@@ -104,8 +106,7 @@ async function bbox(svg) {
   const [x0, y0, x1, y1] = await bbox(svg);
   if (approx(x0, 40) && approx(y0, 40) && approx(x1, 80) && approx(y1, 80))
     ok(`T5 PAR=xMinYMin slice → bbox (${x0},${y0},${x1},${y1})`);
-  else
-    fail(`T5 expected (40,40,80,80); got (${x0},${y0},${x1},${y1})`);
+  else fail(`T5 expected (40,40,80,80); got (${x0},${y0},${x1},${y1})`);
 }
 
 // === T6: doubly-nested SVG composes correctly =========================
@@ -124,8 +125,7 @@ async function bbox(svg) {
   const [x0, y0, x1, y1] = await bbox(svg);
   if (approx(x0, 12) && approx(y0, 2) && approx(x1, 20) && approx(y1, 10))
     ok(`T6 doubly-nested compose → bbox (${x0},${y0},${x1},${y1})`);
-  else
-    fail(`T6 expected (12,2,20,10); got (${x0},${y0},${x1},${y1})`);
+  else fail(`T6 expected (12,2,20,10); got (${x0},${y0},${x1},${y1})`);
 }
 
 // === T7: nested viewBox with non-zero min anchors at origin ==========
@@ -141,8 +141,7 @@ async function bbox(svg) {
   const [x0, y0, x1, y1] = await bbox(svg);
   if (approx(x0, 0) && approx(y0, 0) && approx(x1, 20) && approx(y1, 20))
     ok(`T7 non-zero viewBox min anchors at origin → bbox (${x0},${y0},${x1},${y1})`);
-  else
-    fail(`T7 expected (0,0,20,20); got (${x0},${y0},${x1},${y1})`);
+  else fail(`T7 expected (0,0,20,20); got (${x0},${y0},${x1},${y1})`);
 }
 
 console.log();

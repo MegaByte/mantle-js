@@ -1,28 +1,36 @@
-// lbWorkerPool.js — main-thread manager for the off-thread LB build worker.
-//
-// `requestLbBuild(bundle, onDone)` ships a bundle's curve/meta buffers to the
-// worker and calls `onDone({ packed, hasReal, hasSlug, overBudget })` when the
-// meshes come back (`packed[s] === null` ⇒ that shape is Slug). The heavy Loop-Blinn
-// triangulation runs entirely off the main thread; the draw path never builds.
-//
-// Curve/meta buffers are COPIED into the worker (structured clone, no transfer)
-// because the main thread keeps its own copies for the morph/stream/sync paths;
-// the returned vertex buffers are transferred back (zero-copy). Where `Worker`
-// is unavailable (native / SSR), it degrades to a deferred synchronous build via
-// the same GL-free core, so behaviour is identical, just on-thread.
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
 
-import { buildLbBundle } from './lbBuildCore.js';
+// Build static and paired-pose Loop-Blinn meshes in a worker. Curve/meta
+// inputs are cloned because rendering retains them; output vertex arrays are
+// transferred back. Without a worker, the same CPU cores run in a deferred task.
+
+import { buildLbBundle, packLbMeshForWire } from './lbBuildCore.js';
 import { buildMorphBundle } from './lbMorphCore.js';
+import { sdfPrimitivesDisabled } from '../geom/shapeRecognize.js';
+import { getLbShapeMemoryBudget } from './lbPack.js';
+import { workerFlags } from './workerFlags.js';
+import { spawnWorker, registerWorkerPool, describeWorkerError } from './workerConfig.js';
 
 let _worker = null;
 let _workerFailed = false;
 let _nextId = 1;
-const _pending = new Map();   // id → { input, onDone }
+const _pending = new Map(); // id → { input, onDone }
+
+/// Jobs waiting on the build worker and the bytes of their cloned inputs (the worker holds a copy of each until it answers).
+export function lbPoolStats() {
+  let inputBytes = 0;
+  for (const j of _pending.values()) {
+    const i = j.input;
+    if (!i) continue;
+    inputBytes += (i.curves && i.curves.byteLength) || 0;
+    inputBytes += (i.meta && i.meta.byteLength) || 0;
+  }
+  return { pending: _pending.size, inputBytes };
+}
 
 function _packForWire(res) {
-  return res.packed.map((pk) => (pk && !pk.slug && !pk.overBudget && (pk.vertexCount | 0) > 0)
-    ? { verts: pk.verts, vertexCount: pk.vertexCount, hasBezout: !!pk.hasBezout }
-    : null);
+  return res.packed.map(packLbMeshForWire);
 }
 
 function _errString(ex) {
@@ -34,18 +42,39 @@ function _scheduleSyncBuild(input, onDone, kind) {
     try {
       if (kind === 'morph') {
         const res = buildMorphBundle(input);
-        onDone({ meshes: res.meshes || null, hasSlug: !!res.hasSlug });
+        onDone({
+          meshes: res.meshes || null,
+          hasSlug: !!res.hasSlug,
+          why: res.why || null,
+          pairWhy: res.pairWhy || null,
+        });
         return;
       }
       // Sync path shares the main-thread lbPack module.
       const res = buildLbBundle({
-        curveFloats: input.curves, metaFloats: input.meta,
-        metaFloatsPerShape: input.metaFloatsPerShape, ranges: input.ranges, numShapes: input.numShapes,
+        curveFloats: input.curves,
+        metaFloats: input.meta,
+        metaFloatsPerShape: input.metaFloatsPerShape,
+        ranges: input.ranges,
+        numShapes: input.numShapes,
+        preferBezout: !!input.preferBezout,
+        skip: input.skip || null,
+        shapeMemBytes: input.shapeMemBytes || 0,
       });
-      onDone({ packed: _packForWire(res), hasReal: res.hasReal && !res.overBudget, hasSlug: res.hasSlug || !!res.overBudget, overBudget: !!res.overBudget });
+      onDone({
+        packed: _packForWire(res),
+        why: res.why || null,
+        memWants: res.memWants && res.memWants.length ? res.memWants : null,
+        hasReal: res.hasReal && !res.overBudget,
+        hasSlug: res.hasSlug || !!res.overBudget,
+        overBudget: !!res.overBudget,
+      });
     } catch (ex) {
-      onDone(kind === 'morph' ? { meshes: null, hasSlug: false, err: _errString(ex) }
-                              : { packed: [], hasReal: false, hasSlug: false, err: _errString(ex) });
+      onDone(
+        kind === 'morph'
+          ? { meshes: null, hasSlug: false, err: _errString(ex) }
+          : { packed: [], hasReal: false, hasSlug: false, err: _errString(ex) },
+      );
     }
   };
   (typeof queueMicrotask === 'function' ? queueMicrotask : (f) => setTimeout(f, 0))(run);
@@ -55,57 +84,137 @@ function _failWorker(ex) {
   const jobs = Array.from(_pending.values());
   _pending.clear();
   _workerFailed = true;
-  if (_worker) { try { _worker.terminate(); } catch { } }
+  if (_worker) {
+    try {
+      _worker.terminate();
+    } catch {}
+  }
   _worker = null;
   for (const job of jobs) _scheduleSyncBuild(job.input, job.onDone, job.kind);
 }
+
+// configureWorkers() stops the running worker and forgets a recorded failure; its pending builds finish on the main thread.
+registerWorkerPool('lb', () => {
+  const jobs = Array.from(_pending.values());
+  _pending.clear();
+  if (_worker) {
+    try {
+      _worker.terminate();
+    } catch {}
+  }
+  _worker = null;
+  _workerFailed = false;
+  for (const job of jobs) _scheduleSyncBuild(job.input, job.onDone, job.kind);
+});
 
 function _tryWorker() {
   if (_worker || _workerFailed) return _worker;
   // Guard the whole construction: bundlers that can't resolve the worker URL, or
   // runtimes without `Worker`, must fall through to the synchronous path.
   try {
-    if (typeof Worker === 'undefined') { _workerFailed = true; return null; }
-    _worker = new Worker(new URL('./lbBuild.worker.js', import.meta.url), { type: 'module' });
+    if (typeof Worker === 'undefined') {
+      _workerFailed = true;
+      return null;
+    }
+    _worker = spawnWorker(
+      'lb',
+      () => new Worker(new URL('./lbBuild.worker.js', import.meta.url), { type: 'module' }),
+    );
+    if (!_worker) {
+      _workerFailed = true;
+      return null;
+    } // workers disabled by configureWorkers
     _worker.onmessage = (e) => {
       const d = e.data || {};
       const job = _pending.get(d.id);
-      if (job && d.kind === 'morph') { _pending.delete(d.id); job.onDone({ meshes: d.meshes || null, hasSlug: !!d.hasSlug, err: d.err }); return; }
+      if (job && d.kind === 'morph') {
+        _pending.delete(d.id);
+        job.onDone({
+          meshes: d.meshes || null,
+          hasSlug: !!d.hasSlug,
+          why: d.why || null,
+          pairWhy: d.pairWhy || null,
+          err: d.err,
+        });
+        return;
+      }
       if (!job) return;
+      // Partial batches leave the job pending until its final result arrives.
+      if (d.kind === 'lbPartial') {
+        if (job.onPartial) job.onPartial(d);
+        return;
+      }
       _pending.delete(d.id);
-      job.onDone({ packed: d.packed, hasReal: d.hasReal, hasSlug: d.hasSlug, overBudget: !!d.overBudget, err: d.err });
+      // Preserve per-shape decline reasons and memory-budget diagnostics.
+      job.onDone({
+        packed: d.packed,
+        tail: d.tail,
+        streamed: !!d.streamed,
+        why: d.why || null,
+        memWants: d.memWants || null,
+        hasReal: d.hasReal,
+        hasSlug: d.hasSlug,
+        overBudget: !!d.overBudget,
+        err: d.err,
+      });
     };
     _worker.onerror = (e) => {
-      if (typeof console !== 'undefined') console.warn('[mantle] LB build worker died — builds fall back to the main thread:', (e && (e.message || e.filename)) || e);
+      if (typeof console !== 'undefined')
+        console.warn(
+          '[mantle] LB build worker died — builds fall back to the main thread:',
+          describeWorkerError(e),
+        );
       _failWorker(e);
     };
   } catch (ex) {
     // Report construction failure because subsequent LB builds fall back to the
     // main thread. A common cause is a dev server rejecting the worker URL.
-    if (typeof console !== 'undefined') console.warn('[mantle] LB build worker failed to construct — builds fall back to the main thread:', ex);
+    if (typeof console !== 'undefined')
+      console.warn(
+        '[mantle] LB build worker failed to construct — builds fall back to the main thread:',
+        ex,
+      );
     _workerFailed = true;
     _worker = null;
   }
   return _worker;
 }
 
-export function requestLbBuild(bundle, onDone) {
+// Worker flags travel with each request because workers have separate globals.
+// With adopt={ms, shapes, onPartial}, completed shapes arrive in batches and
+// onDone carries the remaining tail. Without adopt, onDone carries all shapes.
+export function requestLbBuild(bundle, onDone, adopt) {
+  const onPartial = adopt && typeof adopt.onPartial === 'function' ? adopt.onPartial : null;
   const input = {
     curves: bundle.curveFloats,
     meta: bundle.metaFloats || null,
     metaFloatsPerShape: bundle.metaFloatsPerShape | 0,
     ranges: bundle.curveRangesByShape,
     numShapes: bundle.numShapes | 0,
+    // Enable partial-result messages only when a consumer is registered.
+    adoptMs: onPartial ? Math.max(0, adopt.ms | 0) : 0,
+    adoptShapes: onPartial ? Math.max(0, adopt.shapes | 0) : 0,
+    // Capture renderer policy explicitly for the worker's separate modules.
+    preferBezout: !!bundle._preferBezout,
+    // null builds every row; otherwise skip rows excluded by per-shape policy.
+    skip: bundle._lbBuildSkip || null,
+    sdfPrimsOff: sdfPrimitivesDisabled(),
+    // Apply the memory limit before allocating worker mesh streams.
+    shapeMemBytes: getLbShapeMemoryBudget() < Infinity ? getLbShapeMemoryBudget() : 0,
   };
-  if (!input.curves || !input.ranges || input.numShapes < 1) { onDone({ packed: [], hasReal: false, hasSlug: false }); return; }
+  if (!input.curves || !input.ranges || input.numShapes < 1) {
+    onDone({ packed: [], hasReal: false, hasSlug: false });
+    return;
+  }
 
   const w = _tryWorker();
   if (w) {
     const id = _nextId++;
-    _pending.set(id, { input, onDone, kind: 'static' });
+    _pending.set(id, { input, onDone, onPartial, kind: 'static' });
     // No transfer list → curve/meta are cloned into the worker; main keeps its copies.
-    try { w.postMessage({ id, ...input }); }
-    catch (ex) {
+    try {
+      w.postMessage({ id, ...input, flags: workerFlags() });
+    } catch (ex) {
       _pending.delete(id);
       _failWorker(ex);
       _scheduleSyncBuild(input, onDone, 'static');
@@ -117,28 +226,46 @@ export function requestLbBuild(bundle, onDone) {
   _scheduleSyncBuild(input, onDone, 'static');
 }
 
-// MORPH-pair build, off the main thread — the counterpart to requestLbBuild for
-// the GPU-resident morph meshes (was an 8ms/frame main-thread build). Ships BOTH
-// endpoints' curve+meta; `onDone({ meshes, hasSlug })` returns per-shape interleaved
-// pair VBOs (or hasSlug:true when the bundle can't morph → renders via Slug). Same
-// worker; degrades to a deferred synchronous build where Worker is unavailable/failed.
-export function requestMorphBuild(bundle, onDone) {
+// Build interleaved endpoint meshes for GPU morphing. Results include per-shape
+// decline reasons; hasSlug requests whole-bundle fallback. Worker failure uses
+// the same deferred CPU fallback as static preparation.
+export function requestMorphBuild(bundle, onDone, opts) {
   const src = bundle._morphSrc;
-  if (!src || !src.mergedCurveF32 || !src.dstCurveF32 || !src.curveRanges || (bundle.numShapes | 0) < 1) {
-    onDone({ meshes: null, hasSlug: false }); return;
+  if (
+    !src ||
+    !src.mergedCurveF32 ||
+    !src.dstCurveF32 ||
+    !src.curveRanges ||
+    (bundle.numShapes | 0) < 1
+  ) {
+    onDone({ meshes: null, hasSlug: false });
+    return;
   }
   const input = {
     kind: 'morph',
-    srcCurve: src.mergedCurveF32, dstCurve: src.dstCurveF32,
-    srcMeta: src.mergedMetaF32, dstMeta: src.dstMetaF32,
-    metaStride: src.metaStride | 0, ranges: src.curveRanges, numShapes: bundle.numShapes | 0,
+    srcCurve: src.mergedCurveF32,
+    dstCurve: src.dstCurveF32,
+    srcMeta: src.mergedMetaF32,
+    dstMeta: src.dstMetaF32,
+    metaStride: src.metaStride | 0,
+    ranges: src.curveRanges,
+    numShapes: bundle.numShapes | 0,
+    sdfPrimsOff: sdfPrimitivesDisabled(),
+    // Charge all pose-interval meshes against the per-shape memory limit.
+    shapeMemBytes: getLbShapeMemoryBudget() < Infinity ? getLbShapeMemoryBudget() : 0,
+    declineIncomplete: !!(opts && opts.declineIncomplete),
   };
   const w = _tryWorker();
   if (w) {
     const id = _nextId++;
     _pending.set(id, { input, onDone, kind: 'morph' });
-    try { w.postMessage({ id, ...input }); }
-    catch (ex) { _pending.delete(id); _failWorker(ex); _scheduleSyncBuild(input, onDone, 'morph'); }
+    try {
+      w.postMessage({ id, ...input, flags: workerFlags() });
+    } catch (ex) {
+      _pending.delete(id);
+      _failWorker(ex);
+      _scheduleSyncBuild(input, onDone, 'morph');
+    }
     return;
   }
   _scheduleSyncBuild(input, onDone, 'morph');

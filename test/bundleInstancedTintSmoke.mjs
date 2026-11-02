@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // bundleInstancedTintSmoke.mjs — per-instance COLOR on drawBundleInstanced.
 //
 // Asserts:
@@ -19,7 +22,8 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { openReady } from './_pageReady.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -27,7 +31,10 @@ const ROOT = path.resolve(__dirname, '..');
 // Simple TWO-shape fill-only bundle (fast-path eligible): white field with a
 // mid-gray inner square. Two shapes exercise the compacted cover-quad +
 // per-instance painter order, and tints scale both predictably.
-const SIMPLE_SVG = readFileSync(new URL('../examples/smoke/bundleInstancedTint__SIMPLE_SVG.svg', import.meta.url), 'utf8');
+const SIMPLE_SVG = readFileSync(
+  new URL('../examples/smoke/bundleInstancedTint__SIMPLE_SVG.svg', import.meta.url),
+  'utf8',
+);
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="240" height="240"></canvas>
@@ -74,26 +81,56 @@ window.__ready = true;
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(HTML);
+    return;
+  }
   let p = decodeURIComponent(req.url.split('?')[0]);
   const ct = p.endsWith('.glsl') ? 'text/plain' : 'text/javascript';
-  try { res.writeHead(200, { 'content-type': ct + '; charset=utf-8' }); res.end(readFileSync(path.join(ROOT, p))); }
-  catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    res.writeHead(200, { 'content-type': ct + '; charset=utf-8' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
 try {
-  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await openReady(page, `http://127.0.0.1:${port}/`, { ready: 'flag' });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
+
+// The instanced program links in the background where the driver compiles in parallel; the per-instance loop draws until it is done.
+await page.evaluate(`(async () => {
+  for (let f = 0; f < 1200 && !(window.__fastCount() > 0); f++) {
+    window.__drawInst([{ worldMatrix: window.__T(0.45, -0.5, 0) }, { worldMatrix: window.__T(0.45, 0.5, 0) }]);
+    await new Promise((q) => setTimeout(q, 25));
+  }
+})()`);
 
 // Two side-by-side tiles: left tinted red, right tinted green. Tile centers:
 // clip x = ∓0.5 → px 60 / 180; white field sample at the tile center offset
@@ -113,12 +150,27 @@ const r1 = await page.evaluate(`(() => {
     leftWhite: window.__sample(30, 120), leftGray: window.__sample(60, 120),
     rightWhite: window.__sample(150, 120), rightGray: window.__sample(180, 120) };
 })()`);
-if (r1.n === 2 && r1.dFast === 1) ok('2 simple tinted instances take the GPU fast path (fastCount +1)');
+if (r1.n === 2 && r1.dFast === 1)
+  ok('2 simple tinted instances take the GPU fast path (fastCount +1)');
 else fail('fast path not taken: n=' + r1.n + ' dFast=' + r1.dFast);
-if (r1.leftWhite[0] > 220 && r1.leftWhite[1] < 30 && r1.leftGray[0] > 90 && r1.leftGray[0] < 170 && r1.leftGray[1] < 30)
-  ok('left instance tinted red (white→red ' + r1.leftWhite + ', gray→dark red ' + r1.leftGray + ')');
+if (
+  r1.leftWhite[0] > 220 &&
+  r1.leftWhite[1] < 30 &&
+  r1.leftGray[0] > 90 &&
+  r1.leftGray[0] < 170 &&
+  r1.leftGray[1] < 30
+)
+  ok(
+    'left instance tinted red (white→red ' + r1.leftWhite + ', gray→dark red ' + r1.leftGray + ')',
+  );
 else fail('left tint wrong: white=' + r1.leftWhite + ' gray=' + r1.leftGray);
-if (r1.rightWhite[1] > 220 && r1.rightWhite[0] < 30 && r1.rightGray[1] > 90 && r1.rightGray[1] < 170 && r1.rightGray[0] < 30)
+if (
+  r1.rightWhite[1] > 220 &&
+  r1.rightWhite[0] < 30 &&
+  r1.rightGray[1] > 90 &&
+  r1.rightGray[1] < 170 &&
+  r1.rightGray[0] < 30
+)
   ok('right instance tinted green independently (' + r1.rightWhite + ' / ' + r1.rightGray + ')');
 else fail('right tint wrong: white=' + r1.rightWhite + ' gray=' + r1.rightGray);
 
@@ -148,7 +200,8 @@ const r3 = await page.evaluate(`(() => {
   ]);
   return window.__grab(1);
 })()`);
-if (r3 <= 2) ok('instanced tint ≡ sequential drawBundle diag-colorMatrix baseline (Δmax=' + r3 + ')');
+if (r3 <= 2)
+  ok('instanced tint ≡ sequential drawBundle diag-colorMatrix baseline (Δmax=' + r3 + ')');
 else fail('instanced vs sequential baseline mismatch: Δmax=' + r3);
 
 // (4) per-instance FULL colorMatrix/offset → loop fallback, correct output.
@@ -175,20 +228,30 @@ const r4 = await page.evaluate(`(() => {
 })()`);
 if (r4.dFast === 0) ok('per-instance colorMatrix falls back to the per-instance loop');
 else fail('full colorMatrix wrongly took the fast path');
-if (r4.left[1] > 220 && r4.left[0] < 30) ok('tint→matrix compose order: red tint then R↔G swap = green (' + r4.left + ')');
+if (r4.left[1] > 220 && r4.left[0] < 30)
+  ok('tint→matrix compose order: red tint then R↔G swap = green (' + r4.left + ')');
 else fail('tint∘matrix compose wrong: ' + r4.left);
-if (r4.rightGray[2] > 220) ok('per-instance colorMatrixOffset applies (+blue → ' + r4.rightGray + ')');
+if (r4.rightGray[2] > 220)
+  ok('per-instance colorMatrixOffset applies (+blue → ' + r4.rightGray + ')');
 else fail('colorMatrixOffset not applied: ' + r4.rightGray);
-if (r4.dmax <= 2) ok('loop-path instanced CM ≡ sequential composed baseline (Δmax=' + r4.dmax + ')');
+if (r4.dmax <= 2)
+  ok('loop-path instanced CM ≡ sequential composed baseline (Δmax=' + r4.dmax + ')');
 else fail('instanced CM vs baseline mismatch: Δmax=' + r4.dmax);
 
 // (5) per-instance tint UNDER a shared colorMatrix — identical on both routes.
 const r5 = await page.evaluate(`(() => {
+  window.__f5 = window.__fastCount();
   const swapRG = new Float32Array([0,1,0,0, 1,0,0,0, 0,0,1,0, 0,0,0,1]);
   const insts = [
     { worldMatrix: window.__T(0.45, -0.5, 0), tint: [1,0,0,1] },
     { worldMatrix: window.__T(0.45,  0.5, 0), tint: [0,1,0,1] },
   ];
+  // (a shared matrix changes which features the program omits, so it is a new program that links in the background)
+  return (async () => {
+  for (let f = 0; f < 1200 && !(window.__fastCount() > window.__f5); f++) {
+    window.__drawInst(insts, { colorMatrix: swapRG });
+    await new Promise((q) => setTimeout(q, 25));
+  }
   const before = window.__fastCount();
   window.__drawInst(insts, { colorMatrix: swapRG });
   const dFast = window.__fastCount() - before;
@@ -198,10 +261,12 @@ const r5 = await page.evaluate(`(() => {
   window.__drawInst(insts, { colorMatrix: swapRG });
   window.__setFast(true);
   return { dFast, left, dmax: window.__grab(1) };
+  })();
 })()`);
 if (r5.dFast === 1) ok('tint + SHARED colorMatrix stays on the fast path');
 else fail('shared CM + tint did not take fast path');
-if (r5.left[1] > 220 && r5.left[0] < 30) ok('shared matrix applies AFTER the instance tint (red→swap→green: ' + r5.left + ')');
+if (r5.left[1] > 220 && r5.left[0] < 30)
+  ok('shared matrix applies AFTER the instance tint (red→swap→green: ' + r5.left + ')');
 else fail('shared∘tint order wrong: ' + r5.left);
 if (r5.dmax <= 2) ok('shared CM + tint: fast ≡ loop (Δmax=' + r5.dmax + ')');
 else fail('shared CM + tint fast vs loop mismatch: Δmax=' + r5.dmax);

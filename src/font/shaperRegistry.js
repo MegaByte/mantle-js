@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // shaperRegistry.js — opt-in registry for script-specific shapers.
 //
 // textRun.js reads from this registry instead of statically importing
@@ -27,26 +30,62 @@
 
 // Each hook is null until its module calls register*. textRun's
 // per-script branches check `!== null` before dereferencing.
-let _arabic = null;     // { isArabicCodepoint, resolveArabicForms, getArabicJoiningType, ArabicJoiningType }
-let _hangul = null;     // { isHangulJamo, classifyHangulJamo }
-let _math   = null;     // { isCodepointStretchy, isAlwaysStretchy, targetStretchHeight }
-let _indic  = null;     // { isIndicCodepoint, findIndicSyllables, reorderSyllable, reorderSyllableExplicitReph, hasInitialReph }
-let _thai   = null;     // { isThaiLaoCodepoint, isThaiLaoMark, decomposeSaraAm }
-let _use    = null;     // { isUseCodepoint, findUseClusters, reorderUseCluster }
+let _arabic = null; // { isArabicCodepoint, resolveArabicForms, getArabicJoiningType, ArabicJoiningType }
+let _hangul = null; // { isHangulJamo, classifyHangulJamo }
+let _math = null; // { isCodepointStretchy, isAlwaysStretchy, targetStretchHeight }
+let _indic = null; // { isIndicCodepoint, findIndicSyllables, reorderSyllable, reorderSyllableExplicitReph, hasInitialReph }
+let _thai = null; // { isThaiLaoCodepoint, isThaiLaoMark, decomposeSaraAm }
+let _use = null; // { isUseCodepoint, findUseClusters, reorderUseCluster }
+// Not a shaper: the Unicode script → OpenType script tag mapping that
+// tells textLayout which language system a run's features come from.
+// Every script entry registers it, so enabling any complex script also
+// resolves scripts per run; with none registered, layout leaves the
+// lookup finder on its Latin default.
+let _otScriptTags = null; // { otScriptTagsForScript, otScriptTagsPerCodepoint }
 
-export function registerArabicShaping(hook)  { _arabic = hook; }
-export function registerHangulShaping(hook)  { _hangul = hook; }
-export function registerMathStretchy(hook)   { _math   = hook; }
-export function registerIndicShaping(hook)   { _indic  = hook; }
-export function registerThaiShaping(hook)    { _thai   = hook; }
-export function registerUseShaping(hook)     { _use    = hook; }
+export function registerArabicShaping(hook) {
+  _arabic = hook;
+}
+export function registerHangulShaping(hook) {
+  _hangul = hook;
+}
+export function registerMathStretchy(hook) {
+  _math = hook;
+}
+export function registerIndicShaping(hook) {
+  _indic = hook;
+}
+export function registerThaiShaping(hook) {
+  _thai = hook;
+}
+export function registerUseShaping(hook) {
+  _use = hook;
+}
+export function registerOtScriptTags(hook) {
+  _otScriptTags = hook;
+}
 
 // Read-only accessors for textRun. Returning the hook (not individual
 // functions) lets each branch destructure at the call site without
 // re-checking each function for null.
-export function getArabicShaping()  { return _arabic; }
-export function getHangulShaping()  { return _hangul; }
-export function getMathStretchy()   { return _math; }
-export function getIndicShaping()   { return _indic; }
-export function getThaiShaping()    { return _thai; }
-export function getUseShaping()     { return _use; }
+export function getArabicShaping() {
+  return _arabic;
+}
+export function getHangulShaping() {
+  return _hangul;
+}
+export function getMathStretchy() {
+  return _math;
+}
+export function getIndicShaping() {
+  return _indic;
+}
+export function getThaiShaping() {
+  return _thai;
+}
+export function getUseShaping() {
+  return _use;
+}
+export function getOtScriptTags() {
+  return _otScriptTags;
+}

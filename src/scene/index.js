@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // scene/ — programmatic scene tree → Mantle bundle.
 //
 // Subpath: `@kontek/mantle/scene`. Pulls in the SVG importer

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // scene.js — programmatic scene tree → Mantle bundle.
 //
 // A scene tree (Scene / SceneNode / Shape / IFill / Stroke) is
@@ -41,7 +44,7 @@
 //     id?: string             // friendly name; round-trips to
 //                              // bundle.shapeIds + OverrideTable lookup.
 //                              // When omitted, the importer falls back
-//                              // to its auto-generated `shape_N_fill`
+//                              // to its auto-generated `shape_L<n>_fill`
 //                              // names (depend on emission order).
 //     contours: BezierContour[]
 //     fill?: SolidFill | GradientFill | null   // null = `fill="none"`
@@ -53,6 +56,18 @@
 //     CubicSegment { p0: [x,y], p1: [x,y], p2: [x,y] }
 //       (default — no `kind` field. C1, C2 are the cubic controls on
 //       the *outgoing* edge from p0 to the next segment's p0.)
+//     LineSegment { kind: 'line', p0: [x,y] }
+//       // Straight edge from p0 to the NEXT segment's p0. Emits SVG `L`
+//       // and stays a native SEG_LINE end-to-end. Prefer this over a
+//       // cubic with collinear controls: the degenerate cubic renders
+//       // the same line but still occupies a cubic curve texel and asks
+//       // the coverage walker for a cubic root-solve per sample, so it
+//       // is strictly more work and more buffer for the same edge.
+//     QuadSegment { kind: 'quad', p0: [x,y], p1: [x,y] }
+//       // Quadratic Bezier from p0 to the NEXT segment's p0, with the
+//       // single control point p1. Emits SVG `Q`, stays a native
+//       // SEG_QUAD. Degree-elevating a quad to a cubic is exact but
+//       // pointless — the walker has a closed-form quadratic solve.
 //     ArcSegment {
 //       kind: 'arc',
 //       p0: [x,y],                  // start point
@@ -68,7 +83,7 @@
 //       // Use this for circles / ellipses / pie wedges — no
 //       // cardinal-axis cancellation, smaller curve buffer.
 //   End-of-list segments connect back to segments[0].p0 when
-//   closed === true (same for both kinds).
+//   closed === true (same for every kind).
 //
 //   SolidFill    { kind: 'solid', color: [r,g,b,a], mode?: 'nonzero'|'evenodd', opacity? }
 //   GradientFill { kind: 'gradient', type: 'linear'|'radial',
@@ -83,18 +98,30 @@
 //                  corners?: 'tipped'|'round'|'beveled',
 //                  head?: 'chop'|'square'|'round',
 //                  tail?: 'chop'|'square'|'round' }
+//                  // The SVG the scene lowers to has ONE linecap, so `head` is the cap of both
+//                  // ends (`tail` is the cap when `head` is absent). A `tail` that differs from
+//                  // `head` cannot be expressed and warns once. `fill.opacity` multiplies the
+//                  // stroke color's alpha, as it does for a shape fill.
+//
+// Numbers: every coordinate, radius and width must be a finite number no larger than 1e15 in
+// magnitude; sceneToSvg / sceneToBundle / sceneToSections throw a clear error otherwise.
 //
 // All shapes inherit the SVG coordinate system used by importSvg:
 // +Y down, em-relative. The emitted SVG's viewBox is computed from
-// the scene-wide bbox so consumers don't have to set it. Contours
-// follow the BezierPathSegment chain convention (p0, c1, c2
-// per segment with the NEXT segment's p0 as the endpoint).
+// the scene-wide bbox so consumers don't have to set it. Every segment
+// kind follows the same chain convention: a segment carries its START
+// point (`p0`) plus whatever controls it needs, and its END point is
+// the NEXT segment's `p0` (or `segments[0].p0` on a closed contour).
 
-import importSvg from '../svg/importer.js';
+import importSvg, { originFor } from '../svg/importer.js';
+import { stampMetaHeader } from '../bundle/layout.js';
 import { makeBuildContext, emitShape as emitShapeToCtx } from '../svg/buildContext.js';
 import { packMetaBody } from '../svg/meta.js';
 import { texelToBytes } from '../svg/textures.js';
-import { SEG_CUBIC, mkLine } from '../primitives/seg.js';
+import { SEG_CUBIC, SEG_ARC, mkLine, mkQuad } from '../primitives/seg.js';
+import { arcToNative } from '../svg/segment.js';
+import { mantleWarn } from '../core/diagnostics.js';
+import { HIT_FILL } from '../svg/hitBits.js';
 
 /// Convenience constructor. Returns `{ root: { children: [], shapes: [] } }`.
 export function createScene() {
@@ -102,23 +129,18 @@ export function createScene() {
 }
 
 /// Build a contour for an axis-aligned rectangle. `x, y` is top-left,
-/// `w, h` extents. Returns a BezierContour with 4 line-as-cubic
-/// segments (each cubic has its controls collinear with the chord so
-/// the path renders as straight lines through the fill walker (ray-cast)).
+/// `w, h` extents. Returns a BezierContour of 4 native LINE segments —
+/// the corners are the only anchors, each edge is an SVG `L`.
 export function rectContour(x, y, w, h) {
-  const x1 = x + w, y1 = y + h;
+  const x1 = x + w,
+    y1 = y + h;
   return {
-    segments: [
-      linearSeg([x,  y ], [x1, y ]),
-      linearSeg([x1, y ], [x1, y1]),
-      linearSeg([x1, y1], [x,  y1]),
-      linearSeg([x,  y1], [x,  y ]),
-    ],
+    segments: [lineSeg([x, y]), lineSeg([x1, y]), lineSeg([x1, y1]), lineSeg([x, y1])],
     closed: true,
   };
 }
 
-/// Build a contour for a circle/ellipse centred at `(cx, cy)` with
+/// Build a contour for a circle/ellipse centerd at `(cx, cy)` with
 /// radii `(rx, ry)`. Emits TWO native SVG arc segments (`A` commands)
 /// which the importer keeps as SEG_ARC primitives end-to-end — the
 /// coverage walker renders TRUE ellipses via `evalArc`, no Bezier
@@ -127,14 +149,14 @@ export function rectContour(x, y, w, h) {
 ///
 /// Native arcs render via a parametric θ sweep (not t-roots of a
 /// cubic), so a circle has no "dead-axis cancellation" hairline at
-/// canvas widths where the centre column lands on an exact pixel centre.
+/// canvas widths where the center column lands on an exact pixel center.
 export function ellipseContour(cx, cy, rx, ry) {
   // Two semicircular arcs joined at the left + right cardinals.
   // sweep=true matches SVG's CW direction in y-down (positive area
   // for both arcs, NonZero fill renders inside as expected).
   return {
     segments: [
-      arcSeg([cx - rx, cy], rx, ry, /*rotation=*/0, /*largeArc=*/false, /*sweep=*/true),
+      arcSeg([cx - rx, cy], rx, ry, /*rotation=*/ 0, /*largeArc=*/ false, /*sweep=*/ true),
       arcSeg([cx + rx, cy], rx, ry, 0, false, true),
     ],
     closed: true,
@@ -162,31 +184,54 @@ export function arcSeg(p0, rx, ry, rotation = 0, largeArc = false, sweep = true)
   return {
     kind: 'arc',
     p0: [p0[0], p0[1]],
-    rx, ry, rotation, largeArc, sweep,
+    rx,
+    ry,
+    rotation,
+    largeArc,
+    sweep,
   };
 }
 
 /// Build a closed polygon contour from an [x,y] vertex list. Each
-/// edge becomes a linear cubic.
+/// vertex becomes one native line segment.
 export function polygonContour(points) {
   if (!Array.isArray(points) || points.length < 3)
     throw new Error('polygonContour: need ≥ 3 points');
-  const segs = [];
-  for (let i = 0; i < points.length; i++) {
-    const a = points[i];
-    const b = points[(i + 1) % points.length];
-    segs.push(linearSeg(a, b));
-  }
-  return { segments: segs, closed: true };
+  return { segments: points.map(lineSeg), closed: true };
 }
 
-/// Build a single-segment "linear" cubic — controls collinear with
-/// the chord so the path traces a straight line. Convenience for
-/// callers building contours manually.
+/// Build an OPEN polyline contour from an [x,y] vertex list — the last
+/// point is a bare anchor (it terminates the final edge and emits no
+/// segment of its own). Fill it and the contour closes implicitly, as
+/// SVG does; stroke it and it stays open.
+export function polylineContour(points) {
+  if (!Array.isArray(points) || points.length < 2)
+    throw new Error('polylineContour: need ≥ 2 points');
+  return { segments: points.map(lineSeg), closed: false };
+}
+
+/// Build a single straight-line segment starting at `p0`. The END point
+/// is the NEXT segment's `p0` (or `segments[0].p0` when the contour
+/// closes) — the same chain convention every segment kind uses.
+export function lineSeg(p0) {
+  return { kind: 'line', p0: [p0[0], p0[1]] };
+}
+
+/// Build a single quadratic-Bezier segment: starts at `p0`, bends
+/// toward the control `c`, ends at the NEXT segment's `p0`.
+export function quadSeg(p0, c) {
+  return { kind: 'quad', p0: [p0[0], p0[1]], p1: [c[0], c[1]] };
+}
+
+/// Straight edge from `p0`, as a cubic with collinear controls.
+///
+/// DEPRECATED — use `lineSeg(p0)`, which emits a native SEG_LINE. This
+/// builder predates line support in the scene schema and only *looks*
+/// like it takes an endpoint: a cubic's endpoint comes from the next
+/// segment's `p0`, so `p1` merely places the second
+/// control on the chord. Passing a `p1` that was NOT the next segment's
+/// `p0` silently produces a curve.
 export function linearSeg(p0, p1) {
-  // Controls coincident with the endpoints (C1 = p0, C2 = p1) lie on
-  // the chord, so the curve is collinear with it and renders as a
-  // straight line through the fill walker (ray-cast).
   return { p0: [p0[0], p0[1]], p1: [p0[0], p0[1]], p2: [p1[0], p1[1]] };
 }
 
@@ -236,46 +281,79 @@ export async function sceneToSections(scene, opts = {}) {
   // Anything the direct emit can't express → use the proven SVG round-trip.
   if (!sceneDirectEligible(scene.root)) return sceneToBundle(scene, opts);
 
-  const ctx = makeBuildContext();
+  const ctx = makeBuildContext({ curve64: false });
   const gidBox = { next: 1 };
   const bb = { xmin: Infinity, ymin: Infinity, xmax: -Infinity, ymax: -Infinity };
   walkSceneDirect(scene.root, IDENTITY, ctx, gidBox, bb);
+  // Art far from the document origin needs the importer's bundle origin (bundle/layout.js), which the direct emit does not apply:
+  // a scene whose content box is far from (0, 0) compared to its size takes the SVG round trip (importSvg picks the origin).
+  if (
+    opts.origin !== false &&
+    Number.isFinite(bb.xmin + bb.ymin + bb.xmax + bb.ymax) &&
+    originFor([bb.xmin, bb.ymin, bb.xmax - bb.xmin, bb.ymax - bb.ymin])
+  )
+    return sceneToBundle(scene, opts);
 
-  const vb = (Array.isArray(opts.viewBox) && opts.viewBox.length === 4
-    && opts.viewBox.every(v => Number.isFinite(v))) ? opts.viewBox : null;
+  const vb =
+    Array.isArray(opts.viewBox) &&
+    opts.viewBox.length === 4 &&
+    opts.viewBox.every((v) => Number.isFinite(v))
+      ? opts.viewBox
+      : null;
   const fin = Number.isFinite(bb.xmin) && Number.isFinite(bb.xmax);
   // globalBBox semantics MATCH importSvg: path-tight content bbox by default;
   // the viewBox only when opts.preserveViewport is set. (The viewBox is still
   // recorded as sections.viewBox for preserveAspectRatio either way.)
-  const cx = fin ? bb.xmin : 0, cy = fin ? bb.ymin : 0;
-  const cw = fin ? Math.max(bb.xmax - bb.xmin, 1) : 1;
-  const ch = fin ? Math.max(bb.ymax - bb.ymin, 1) : 1;
+  const cx = fin ? bb.xmin : 0,
+    cy = fin ? bb.ymin : 0;
+  const cw = fin ? boxSpan(bb.xmax - bb.xmin) : 1;
+  const ch = fin ? boxSpan(bb.ymax - bb.ymin) : 1;
   const pv = !!opts.preserveViewport && vb;
   const bx = pv ? vb[0] : cx;
   const by = pv ? vb[1] : cy;
-  const bw = pv ? Math.max(vb[2], 1) : cw;
-  const bh = pv ? Math.max(vb[3], 1) : ch;
+  const bw = pv ? boxSpan(vb[2]) : cw;
+  const bh = pv ? boxSpan(vb[3]) : ch;
 
+  // The derived tables importSvg builds, so the bundle answers hit tests and morph pairing like an
+  // imported one: each row's [begin, end) range into the curve floats, and what the pointer can
+  // target (every row here is a drawn, painted solid fill, so its fill region).
+  const curveRangesByShape = ctx.metas.map((m) => ({
+    begin: m._curveStartF | 0,
+    end: m._curveEndF | 0,
+  }));
+  const hitBits = new Uint8Array(ctx.metas.length).fill(HIT_FILL);
   const body = packMetaBody(ctx.metas);
   const meta = new ArrayBuffer(32 + body.byteLength);
   const dv = new DataView(meta);
   dv.setUint32(0, ctx.metas.length, true);
-  dv.setFloat32(4, bx, true); dv.setFloat32(8, by, true);
-  dv.setFloat32(12, bw, true); dv.setFloat32(16, bh, true);
+  stampMetaHeader(dv);
+  dv.setFloat32(4, bx, true);
+  dv.setFloat32(8, by, true);
+  dv.setFloat32(12, bw, true);
+  dv.setFloat32(16, bh, true);
   new Uint8Array(meta, 32).set(body);
   return {
     flags: 7, // HYBRID_MESH_IN_CGEOM | HYBRID_MESH_CHUNKED | WIDE_BAND_HEADERS
     numShapes: ctx.metas.length,
+    frameFixed: !!pv, // globalBBox is the viewBox: an update keeps it
     metaFloatsPerShape: 48,
     meta,
     curves: texelToBytes(ctx.curveBuf).buffer,
     bands: texelToBytes(ctx.bandBuf).buffer,
     curveGeom: new Float32Array(ctx.hybridFloats).buffer,
     shapeIds: ctx.shapeIds.slice(),
+    curveRangesByShape,
+    hitBits,
     // viewBox is the PAR frame (pinned or content-derived), independent of the
     // globalBBox the meta header carries above.
-    viewBox: vb ? [vb[0], vb[1], Math.max(vb[2], 1), Math.max(vb[3], 1)] : [cx, cy, cw, ch],
+    viewBox: vb ? [vb[0], vb[1], boxSpan(vb[2]), boxSpan(vb[3])] : [cx, cy, cw, ch],
   };
+}
+
+// The span of a box along one axis. Only a span with nothing in it stands in for 1: a scene in small units keeps its size (a floor
+// of 1 fitted a 0.01-wide scene into a box a hundred times its size on this route and not on the SVG one).
+function boxSpan(v) {
+  return v > 0 ? v : 1;
 }
 
 // True when every shape in the tree is a plain solid fill with no
@@ -287,17 +365,22 @@ function sceneDirectEligible(node) {
   if (Array.isArray(node.shapes)) {
     for (const s of node.shapes) {
       const f = s.fill;
-      if (f && f.kind && f.kind !== 'solid') return false;   // gradient / other paint
-      if (s.pathProps && s.pathProps.stroke) return false;   // stroke needs the importer
+      if (f && f.kind && f.kind !== 'solid') return false; // gradient / other paint
+      // A fully transparent fill draws no row but stays hit-testable (importSvg keeps it in the
+      // hit-only table); the importer owns that path.
+      if (f && f.kind === 'solid' && !(solidFillRgba(f)[3] > 0)) return false;
+      if (s.pathProps && s.pathProps.stroke) return false; // stroke needs the importer
       if (Array.isArray(s.contours)) {
         for (const c of s.contours) {
           const segs = c && c.segments;
-          if (Array.isArray(segs)) for (const seg of segs) if (seg && seg.kind === 'arc') return false;
+          if (Array.isArray(segs))
+            for (const seg of segs) if (seg && seg.kind === 'arc') return false;
         }
       }
     }
   }
-  if (Array.isArray(node.children)) for (const c of node.children) if (!sceneDirectEligible(c)) return false;
+  if (Array.isArray(node.children))
+    for (const c of node.children) if (!sceneDirectEligible(c)) return false;
   return true;
 }
 
@@ -310,14 +393,20 @@ function solidFillRgba(fill) {
   return [c[0], c[1], c[2], a];
 }
 
-// Convert a scene contour to importer-native cubic segs ({type, p1..p4}),
-// transformed by m. Segment i runs segs[i].p0 → segs[i+1].p0 (or segs[0].p0
-// when closed) with controls p1, p2 — the same threading emitPathData emits.
+// Convert a scene contour to importer-native segs, transformed by m.
+// Segment i runs segs[i].p0 → segs[i+1].p0 (or segs[0].p0 when closed) —
+// the same threading emitPathData emits. Line / quad / cubic each map to
+// their native primitive so the direct path and the SVG round-trip
+// produce identical geometry.
 function contourToSegs(contour, m, out) {
   const segs = contour && contour.segments;
   if (!Array.isArray(segs) || !segs.length) return;
   const useM = !isIdentity(m);
-  const tp = (p) => useM ? applyMat(m, p[0], p[1]) : [p[0], p[1]];
+  const tp = (p) => {
+    sceneNum(p[0], 'coordinate');
+    sceneNum(p[1], 'coordinate');
+    return useM ? applyMat(m, p[0], p[1]) : [p[0], p[1]];
+  };
   const start = tp(segs[0].p0);
   let pen = start;
   for (let i = 0; i < segs.length; i++) {
@@ -325,9 +414,11 @@ function contourToSegs(contour, m, out) {
     let end;
     if (i + 1 < segs.length) end = segs[i + 1].p0;
     else if (contour.closed) end = segs[0].p0;
-    else break;   // open contour: trailing anchor has no following segment
+    else break; // open contour: trailing anchor has no following segment
     const e = tp(end);
-    out.push({ type: SEG_CUBIC, p1: tp(cur.p0), p2: tp(cur.p1), p3: tp(cur.p2), p4: e });
+    if (cur.kind === 'line') out.push(mkLine(tp(cur.p0), e));
+    else if (cur.kind === 'quad') out.push(mkQuad(tp(cur.p0), tp(cur.p1), e));
+    else out.push({ type: SEG_CUBIC, p1: tp(cur.p0), p2: tp(cur.p1), p3: tp(cur.p2), p4: e });
     pen = e;
   }
   // Synthetic subpath-close edge for fill, mirroring the importer (which adds
@@ -342,22 +433,32 @@ function walkSceneDirect(node, parentM, ctx, gidBox, bb) {
   const m = multiplyMat(parentM, nodeTransform(node));
   if (Array.isArray(node.shapes)) {
     for (const s of node.shapes) {
+      const ordinal = ctx._sceneLeaf | 0;
+      ctx._sceneLeaf = ordinal + 1; // the element's document ordinal, as the importer names an unnamed shape
       const fill = solidFillRgba(s.fill);
-      if (!fill) continue;   // fill:none (eligible scenes carry no stroke) → nothing to draw
+      if (!fill) continue; // fill:none (eligible scenes carry no stroke) → nothing to draw
       const out = [];
       if (Array.isArray(s.contours)) for (const c of s.contours) contourToSegs(c, m, out);
       if (!out.length) continue;
-      emitShapeToCtx(ctx, out, {
-        fillRgba: fill,
-        shapeId: s.id || '',
-        // Forward the fill rule — eligibility admits evenodd solids, and
-        // defaulting to nonzero here made the direct path disagree with the
-        // sceneToBundle round-trip on self-intersecting shapes.
-        fillRule: (s.fill && s.fill.mode) || 'nonzero',
-      }, gidBox, bb);
+      emitShapeToCtx(
+        ctx,
+        out,
+        {
+          fillRgba: fill,
+          // The importer's name for a shape without an id.
+          shapeId: s.id || `shape_L${ordinal}_fill`,
+          // Forward the fill rule — eligibility admits evenodd solids, and
+          // defaulting to nonzero here made the direct path disagree with the
+          // sceneToBundle round-trip on self-intersecting shapes.
+          fillRule: (s.fill && s.fill.mode) || 'nonzero',
+        },
+        gidBox,
+        bb,
+      );
     }
   }
-  if (Array.isArray(node.children)) for (const ch of node.children) walkSceneDirect(ch, m, ctx, gidBox, bb);
+  if (Array.isArray(node.children))
+    for (const ch of node.children) walkSceneDirect(ch, m, ctx, gidBox, bb);
 }
 
 /// Compile a Scene into an SVG string. Exposed for advanced consumers
@@ -369,18 +470,32 @@ function walkSceneDirect(node, parentM, ctx, gidBox, bb) {
 /// from the scene's shape extents. Required for per-frame-rebuilt
 /// scenes whose shapes move — without it the auto-computed viewBox
 /// jitters and rendered coordinates appear to shift between frames.
+/**
+ * @param {any} scene
+ * @param {number[] | null} [viewBoxOverride]  `[x, y, w, h]`
+ * @returns {string}
+ */
 export function sceneToSvg(scene, viewBoxOverride) {
   if (!scene || !scene.root) throw new Error('sceneToSvg: scene.root required');
-  const ctx = { gradients: new Map(), gradientDefs: [], clippers: new Map(), clipDefs: [], gradId: 1, clipId: 1 };
+  const ctx = {
+    gradients: new Map(),
+    gradientDefs: [],
+    clippers: new Map(),
+    clipDefs: [],
+    gradId: 1,
+    clipId: 1,
+  };
   let x0, y0, w, h;
-  if (viewBoxOverride
-      && Array.isArray(viewBoxOverride)
-      && viewBoxOverride.length === 4
-      && viewBoxOverride.every(v => Number.isFinite(v))) {
+  if (
+    viewBoxOverride &&
+    Array.isArray(viewBoxOverride) &&
+    viewBoxOverride.length === 4 &&
+    viewBoxOverride.every((v) => Number.isFinite(v))
+  ) {
     x0 = viewBoxOverride[0];
     y0 = viewBoxOverride[1];
-    w  = Math.max(viewBoxOverride[2], 1);
-    h  = Math.max(viewBoxOverride[3], 1);
+    w = boxSpan(viewBoxOverride[2]);
+    h = boxSpan(viewBoxOverride[3]);
   } else {
     // First pass: compute scene-wide bbox so the emitted SVG's viewBox
     // fits the geometry exactly. Avoids the importer clipping anything
@@ -389,15 +504,26 @@ export function sceneToSvg(scene, viewBoxOverride) {
     const finite = isFinite(bb[0]) && isFinite(bb[2]);
     x0 = finite ? bb[0] : 0;
     y0 = finite ? bb[1] : 0;
-    w  = finite ? Math.max(bb[2] - bb[0], 1) : 1;
-    h  = finite ? Math.max(bb[3] - bb[1], 1) : 1;
+    w = finite ? boxSpan(bb[2] - bb[0]) : 1;
+    h = finite ? boxSpan(bb[3] - bb[1]) : 1;
   }
   // Second pass: register gradient + clipper defs (depth-first walk).
   collectDefs(scene.root, ctx);
   // Third pass: emit the SVG body.
-  let out = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="'
-    + F(x0) + ' ' + F(y0) + ' ' + F(w) + ' ' + F(h)
-    + '" width="' + F(w) + '" height="' + F(h) + '">';
+  let out =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="' +
+    F(x0) +
+    ' ' +
+    F(y0) +
+    ' ' +
+    F(w) +
+    ' ' +
+    F(h) +
+    '" width="' +
+    F(w) +
+    '" height="' +
+    F(h) +
+    '">';
   if (ctx.gradientDefs.length || ctx.clipDefs.length) {
     out += '<defs>' + ctx.gradientDefs.join('') + ctx.clipDefs.join('') + '</defs>';
   }
@@ -418,30 +544,28 @@ function multiplyMat(a, b) {
   // SVG matrix(a b c d e f) compose: a * b applied to (x, y) =
   // (a.a*x + a.c*y + a.e, a.b*x + a.d*y + a.f).
   return [
-    a[0]*b[0] + a[2]*b[1],
-    a[1]*b[0] + a[3]*b[1],
-    a[0]*b[2] + a[2]*b[3],
-    a[1]*b[2] + a[3]*b[3],
-    a[0]*b[4] + a[2]*b[5] + a[4],
-    a[1]*b[4] + a[3]*b[5] + a[5],
+    a[0] * b[0] + a[2] * b[1],
+    a[1] * b[0] + a[3] * b[1],
+    a[0] * b[2] + a[2] * b[3],
+    a[1] * b[2] + a[3] * b[3],
+    a[0] * b[4] + a[2] * b[5] + a[4],
+    a[1] * b[4] + a[3] * b[5] + a[5],
   ];
 }
 
 function applyMat(m, x, y) {
-  return [m[0]*x + m[2]*y + m[4], m[1]*x + m[3]*y + m[5]];
+  return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
 }
 
 function nodeTransform(n) {
-  return Array.isArray(n.transform) && n.transform.length === 6
-    ? n.transform : IDENTITY;
+  return Array.isArray(n.transform) && n.transform.length === 6 ? n.transform : IDENTITY;
 }
 
 function computeBbox(n, parent) {
   let bb = [Infinity, Infinity, -Infinity, -Infinity];
   if (!n) return bb;
   const local = multiplyMat(parent, nodeTransform(n));
-  if (Array.isArray(n.shapes))
-    for (const s of n.shapes) bb = unionBbox(bb, shapeBbox(s, local));
+  if (Array.isArray(n.shapes)) for (const s of n.shapes) bb = unionBbox(bb, shapeBbox(s, local));
   if (Array.isArray(n.children))
     for (const c of n.children) bb = unionBbox(bb, computeBbox(c, local));
   return bb;
@@ -450,8 +574,7 @@ function computeBbox(n, parent) {
 function unionBbox(a, b) {
   if (!isFinite(b[0])) return a;
   if (!isFinite(a[0])) return b;
-  return [Math.min(a[0], b[0]), Math.min(a[1], b[1]),
-          Math.max(a[2], b[2]), Math.max(a[3], b[3])];
+  return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])];
 }
 
 function shapeBbox(s, m) {
@@ -459,20 +582,40 @@ function shapeBbox(s, m) {
   if (!s || !Array.isArray(s.contours)) return bb;
   for (const c of s.contours) {
     if (!Array.isArray(c.segments)) continue;
-    for (const seg of c.segments) {
+    for (let i = 0; i < c.segments.length; i++) {
+      const seg = c.segments[i];
       bb = expand(bb, applyMat(m, seg.p0[0], seg.p0[1]));
       if (seg.kind === 'arc') {
-        // Loose bbox for an arc: expand p0 by (rx, ry) on each
-        // axis. Catches the full elliptical extent regardless of
-        // sweep direction or rotation. A loose bbox doesn't affect
-        // render correctness — it just makes the auto-computed viewBox
-        // slightly larger than tight; the importer recomputes anyway.
-        const cx = seg.p0[0], cy = seg.p0[1];
-        bb = expand(bb, applyMat(m, cx - seg.rx, cy - seg.ry));
-        bb = expand(bb, applyMat(m, cx + seg.rx, cy - seg.ry));
-        bb = expand(bb, applyMat(m, cx - seg.rx, cy + seg.ry));
-        bb = expand(bb, applyMat(m, cx + seg.rx, cy + seg.ry));
+        // The box of the arc's whole ellipse, whichever way it sweeps. Loose for a part of the ellipse, which does no harm, but it
+        // must hold the arc: the importer cuts the content box at this viewBox, and p0 plus or minus the radii does not hold a
+        // large arc, whose far side is a diameter from p0.
+        const end =
+          i + 1 < c.segments.length ? c.segments[i + 1].p0 : c.closed ? c.segments[0].p0 : null;
+        if (!end) continue; // an open contour's last segment is a bare anchor
+        const a = arcToNative(
+          seg.p0,
+          seg.rx,
+          seg.ry,
+          seg.rotation || 0,
+          seg.largeArc ? 1 : 0,
+          seg.sweep === false ? 0 : 1,
+          end,
+        );
+        if (a.type !== SEG_ARC) continue; // flat or empty: the anchors hold it
+        const cp = Math.cos(a.phi),
+          sp = Math.sin(a.phi);
+        const hw = Math.hypot(a.rx * cp, a.ry * sp),
+          hh = Math.hypot(a.rx * sp, a.ry * cp);
+        bb = expand(bb, applyMat(m, a.cx - hw, a.cy - hh));
+        bb = expand(bb, applyMat(m, a.cx + hw, a.cy - hh));
+        bb = expand(bb, applyMat(m, a.cx - hw, a.cy + hh));
+        bb = expand(bb, applyMat(m, a.cx + hw, a.cy + hh));
       } else {
+        // Control hull, whichever kind this is: cubic has p1 + p2, quad
+        // has p1 alone, line has neither (its extent is just the two
+        // anchors, and every anchor is some segment's p0). A hull bbox is
+        // loose for curves but never clips them, and the importer
+        // recomputes a tight one anyway.
         if (seg.p1) bb = expand(bb, applyMat(m, seg.p1[0], seg.p1[1]));
         if (seg.p2) bb = expand(bb, applyMat(m, seg.p2[0], seg.p2[1]));
       }
@@ -482,8 +625,12 @@ function shapeBbox(s, m) {
 }
 
 function expand(bb, p) {
-  return [Math.min(bb[0], p[0]), Math.min(bb[1], p[1]),
-          Math.max(bb[2], p[0]), Math.max(bb[3], p[1])];
+  return [
+    Math.min(bb[0], p[0]),
+    Math.min(bb[1], p[1]),
+    Math.max(bb[2], p[0]),
+    Math.max(bb[3], p[1]),
+  ];
 }
 
 function collectDefs(n, ctx) {
@@ -496,8 +643,7 @@ function collectDefs(n, ctx) {
       if (stroke && stroke.fill && stroke.fill.kind === 'gradient')
         registerGradient(stroke.fill, ctx);
     }
-  if (Array.isArray(n.children))
-    for (const c of n.children) collectDefs(c, ctx);
+  if (Array.isArray(n.children)) for (const c of n.children) collectDefs(c, ctx);
 }
 
 function registerGradient(g, ctx) {
@@ -526,10 +672,14 @@ function emitClipShapes(n, parent) {
   if (Array.isArray(n.shapes))
     for (const s of n.shapes) {
       if (!Array.isArray(s.contours) || s.contours.length === 0) continue;
-      out += '<path d="' + emitPathData(s.contours, local) + '"/>';
+      out +=
+        '<path d="' +
+        emitPathData(s.contours, local) +
+        '"' +
+        (s.fill && s.fill.mode === 'evenodd' ? ' clip-rule="evenodd"' : '') +
+        '/>';
     }
-  if (Array.isArray(n.children))
-    for (const c of n.children) out += emitClipShapes(c, local);
+  if (Array.isArray(n.children)) for (const c of n.children) out += emitClipShapes(c, local);
   return out;
 }
 
@@ -547,17 +697,28 @@ function emitNode(n, ctx) {
     }
     out += '>';
   }
-  if (Array.isArray(n.shapes))
-    for (const s of n.shapes) out += emitShape(s, ctx);
-  if (Array.isArray(n.children))
-    for (const c of n.children) out += emitNode(c, ctx);
+  if (Array.isArray(n.shapes)) for (const s of n.shapes) out += emitShape(s, ctx);
+  if (Array.isArray(n.children)) for (const c of n.children) out += emitNode(c, ctx);
   if (needsWrap) out += '</g>';
   return out;
 }
 
 function emitMatrix(m) {
-  return 'matrix(' + F(m[0]) + ' ' + F(m[1]) + ' ' + F(m[2]) + ' '
-                  + F(m[3]) + ' ' + F(m[4]) + ' ' + F(m[5]) + ')';
+  return (
+    'matrix(' +
+    F(m[0]) +
+    ' ' +
+    F(m[1]) +
+    ' ' +
+    F(m[2]) +
+    ' ' +
+    F(m[3]) +
+    ' ' +
+    F(m[4]) +
+    ' ' +
+    F(m[5]) +
+    ')'
+  );
 }
 
 function emitShape(s, ctx) {
@@ -596,38 +757,73 @@ function emitPathData(contours, m) {
       const cur = segs[i];
       let endpoint;
       if (i + 1 < segs.length) endpoint = segs[i + 1].p0;
-      else if (c.closed)       endpoint = segs[0].p0;
+      else if (c.closed) endpoint = segs[0].p0;
       else break;
-      if (cur.kind === 'arc') {
-        // SVG A rx ry rotation largeArc sweep endX endY. Note: the
-        // CTM applies to the endpoint but radii / rotation are in
-        // the local space — non-uniform CTM scaling of an arc would
-        // emit a wrong path, so error out loudly if we see one.
+      if (cur.kind === 'line') {
+        const ep = useM ? applyMat(m, endpoint[0], endpoint[1]) : endpoint;
+        out += 'L' + F(ep[0]) + ' ' + F(ep[1]);
+      } else if (cur.kind === 'quad') {
+        let c1 = cur.p1,
+          ep = endpoint;
+        if (useM) {
+          c1 = applyMat(m, c1[0], c1[1]);
+          ep = applyMat(m, ep[0], ep[1]);
+        }
+        out += 'Q' + F(c1[0]) + ' ' + F(c1[1]) + ' ' + F(ep[0]) + ' ' + F(ep[1]);
+      } else if (cur.kind === 'arc') {
         let ep = endpoint;
         let rScale = 1;
         if (useM) {
-          if (Math.abs(m[0] - m[3]) > 1e-7 || Math.abs(m[1]) > 1e-7 || Math.abs(m[2]) > 1e-7) {
-            throw new Error('sceneToSvg: arc segments inside a non-uniform-scaled <g> transform are not supported (decompose the arc to multiple sub-arcs at author time).');
+          // Relative to the matrix itself: an absolute 1e-7 let every group transform under that scale through as "uniform".
+          const mTol =
+            1e-7 * Math.max(Math.abs(m[0]), Math.abs(m[1]), Math.abs(m[2]), Math.abs(m[3]));
+          if (Math.abs(m[0] - m[3]) > mTol || Math.abs(m[1]) > mTol || Math.abs(m[2]) > mTol) {
+            throw new Error(
+              'sceneToSvg: arc segments inside a non-uniform-scaled <g> transform are not supported (decompose the arc to multiple sub-arcs at author time).',
+            );
           }
           ep = applyMat(m, ep[0], ep[1]);
-          rScale = Math.abs(m[0]);   // uniform by the guard above — radii scale with the endpoints
+          rScale = Math.abs(m[0]); // uniform by the guard above — radii scale with the endpoints
         }
         const lA = cur.largeArc ? 1 : 0;
-        const sw = (cur.sweep === false) ? 0 : 1;
-        out += 'A' + F(cur.rx * rScale) + ' ' + F(cur.ry * rScale) + ' ' + F(cur.rotation || 0)
-             + ' ' + lA + ' ' + sw + ' '
-             + F(ep[0]) + ' ' + F(ep[1]);
+        const sw = cur.sweep === false ? 0 : 1;
+        out +=
+          'A' +
+          F(cur.rx * rScale) +
+          ' ' +
+          F(cur.ry * rScale) +
+          ' ' +
+          F(cur.rotation || 0) +
+          ' ' +
+          lA +
+          ' ' +
+          sw +
+          ' ' +
+          F(ep[0]) +
+          ' ' +
+          F(ep[1]);
       } else {
         // Default: cubic Bezier.
-        let c1 = cur.p1, c2 = cur.p2;
+        let c1 = cur.p1,
+          c2 = cur.p2;
         if (useM) {
           c1 = applyMat(m, c1[0], c1[1]);
           c2 = applyMat(m, c2[0], c2[1]);
           endpoint = applyMat(m, endpoint[0], endpoint[1]);
         }
-        out += 'C' + F(c1[0]) + ' ' + F(c1[1]) + ' '
-                  + F(c2[0]) + ' ' + F(c2[1]) + ' '
-                  + F(endpoint[0]) + ' ' + F(endpoint[1]);
+        out +=
+          'C' +
+          F(c1[0]) +
+          ' ' +
+          F(c1[1]) +
+          ' ' +
+          F(c2[0]) +
+          ' ' +
+          F(c2[1]) +
+          ' ' +
+          F(endpoint[0]) +
+          ' ' +
+          F(endpoint[1]);
       }
     }
     if (c.closed) out += 'Z';
@@ -656,18 +852,32 @@ function emitFill(fill, ctx) {
 function emitStroke(stroke, ctx) {
   if (!stroke || !(stroke.halfThickness > 0) || !stroke.fill) return '';
   let out = '';
-  if (stroke.fill.kind === 'solid') {
-    const c = stroke.fill.color || [0, 0, 0, 1];
+  const sf = stroke.fill;
+  const sOpacity = sf.opacity != null ? sf.opacity : 1;
+  if (sf.kind === 'solid') {
+    const c = sf.color || [0, 0, 0, 1];
     out += ' stroke="' + emitColor(c) + '"';
-    if (c.length >= 4 && c[3] < 1) out += ' stroke-opacity="' + F(c[3]) + '"';
-  } else if (stroke.fill.kind === 'gradient') {
-    const id = registerGradient(stroke.fill, ctx);
+    const a = sOpacity * (c.length >= 4 ? c[3] : 1);
+    if (a < 1) out += ' stroke-opacity="' + F(a) + '"';
+  } else if (sf.kind === 'gradient') {
+    const id = registerGradient(sf, ctx);
     out += ' stroke="url(#g' + id + ')"';
+    if (sOpacity < 1) out += ' stroke-opacity="' + F(sOpacity) + '"';
   }
   out += ' stroke-width="' + F(stroke.halfThickness * 2) + '"';
-  out += ' stroke-linecap="' + capStr(stroke.head) + '"';
+  // SVG has one linecap. `head` caps both ends; `tail` stands in when `head` is absent.
+  if (stroke.head != null && stroke.tail != null && stroke.head !== stroke.tail && !_warnedTail) {
+    _warnedTail = true;
+    mantleWarn(
+      '[Mantle] sceneToSvg: stroke.tail differs from stroke.head, but SVG has one linecap; head is applied to both ends. (Warned once.)',
+    );
+  }
+  out += ' stroke-linecap="' + capStr(stroke.head != null ? stroke.head : stroke.tail) + '"';
   out += ' stroke-linejoin="' + joinStr(stroke.corners) + '"';
-  out += ' stroke-miterlimit="' + F(stroke.tippedCornerLimit != null ? stroke.tippedCornerLimit : 10) + '"';
+  out +=
+    ' stroke-miterlimit="' +
+    F(stroke.tippedCornerLimit != null ? stroke.tippedCornerLimit : 10) +
+    '"';
   if (Array.isArray(stroke.pattern) && stroke.pattern.length > 0) {
     out += ' stroke-dasharray="' + stroke.pattern.map(F).join(' ') + '"';
     if (stroke.patternOffset) out += ' stroke-dashoffset="' + F(stroke.patternOffset) + '"';
@@ -675,14 +885,15 @@ function emitStroke(stroke, ctx) {
   return out;
 }
 
+let _warnedTail = false;
 function capStr(end) {
-  if (end === 'round')  return 'round';
+  if (end === 'round') return 'round';
   if (end === 'square') return 'square';
   return 'butt';
 }
 
 function joinStr(corner) {
-  if (corner === 'round')   return 'round';
+  if (corner === 'round') return 'round';
   if (corner === 'beveled') return 'bevel';
   return 'miter';
 }
@@ -691,7 +902,12 @@ function emitColor(c) {
   const r = Math.max(0, Math.min(255, Math.round((c[0] || 0) * 255)));
   const g = Math.max(0, Math.min(255, Math.round((c[1] || 0) * 255)));
   const b = Math.max(0, Math.min(255, Math.round((c[2] || 0) * 255)));
-  return '#' + r.toString(16).padStart(2, '0') + g.toString(16).padStart(2, '0') + b.toString(16).padStart(2, '0');
+  return (
+    '#' +
+    r.toString(16).padStart(2, '0') +
+    g.toString(16).padStart(2, '0') +
+    b.toString(16).padStart(2, '0')
+  );
 }
 
 function buildGradientDef(g, id) {
@@ -719,8 +935,7 @@ function buildGradientDef(g, id) {
   if (Array.isArray(g.stops))
     for (const s of g.stops) {
       const c = s.color || [0, 0, 0, 1];
-      out += '<stop offset="' + F(s.position || 0) + '"'
-          + ' stop-color="' + emitColor(c) + '"';
+      out += '<stop offset="' + F(s.position || 0) + '"' + ' stop-color="' + emitColor(c) + '"';
       if (c.length >= 4 && c[3] < 1) out += ' stop-opacity="' + F(c[3]) + '"';
       out += '/>';
     }
@@ -728,13 +943,32 @@ function buildGradientDef(g, id) {
   return out;
 }
 
+// A scene number must be finite and printable: NaN and +-Infinity are errors, as is anything whose
+// magnitude (> 1e15) toFixed would print in exponent form, which path data and attributes reject.
+const SCENE_MAX = 1e15;
+function sceneNum(v, what) {
+  if (typeof v !== 'number' || !Number.isFinite(v) || Math.abs(v) > SCENE_MAX)
+    throw new Error(
+      'scene: ' +
+        what +
+        ' must be a finite number with magnitude at most 1e15, got ' +
+        (typeof v === 'number' ? v : JSON.stringify(v)),
+    );
+  return v;
+}
+
+// SVG number serialization: locale-invariant, trailing zeros stripped. Six decimals for |v| >= 1;
+// below 1 the digits follow the magnitude (seven significant), so a scene built in small units
+// (an em-scale glyph, 1e-4) keeps its precision instead of rounding to an absolute 1e-6.
 function F(v) {
-  // SVG number serialisation: short form, locale-invariant.
-  const n = Math.abs(v) < 1e-7 ? 0 : v;
-  let s = n.toFixed(6);
+  sceneNum(v, 'value');
+  const a = Math.abs(v);
+  if (a < 1e-30) return '0';
+  const decimals = a >= 1 ? 6 : Math.min(100, 6 - Math.floor(Math.log10(a)));
+  let s = v.toFixed(decimals);
   if (s.indexOf('.') >= 0) {
     s = s.replace(/0+$/, '');
     if (s.endsWith('.')) s = s.slice(0, -1);
   }
-  return s;
+  return s === '-0' ? '0' : s;
 }

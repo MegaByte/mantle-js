@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A structural stand-in for an illustration that is not in this
+     repository. Same shape class, none of that artwork:
+
+       * a viewBox far from the origin relative to its own extent (about 30x in x, 10x in y), which
+         is what the source asset has and what several tolerance families key on;
+       * one large closed cubic body and one small closed cubic blob;
+       * two OPEN subpaths that carry a fill, so the importer has to close them before anyone walks
+         a band (the source has exactly two of these);
+       * two straight strokes with ROUND caps under a reflecting transform, matrix(1, 0, 0, -1, ..),
+         which are the source's only non-fill rows.
+
+     WHY IT IS HERE. Wrong solid pixels shared by Slug AND AAC but not by Loop-Blinn point at the band
+     data or the shared walk; a band-hard arm tells them apart, since it shares the band data and the
+     walk too. Run on the CPU against the exact fill oracle (test/bandDiscriminatorSmoke.mjs), all three
+     read 0 on this twin, and this asset keeps that answer pinned: if band membership, the break-early
+     prune or a bounded loop ever drops a segment on this shape class, one of the three will move and
+     the other two will not.
+
+     The interior-skip occupancy grid, built from the two OPEN subpaths as authored rather than closed,
+     paints thousands of wrong solid pixels at 1024 on this shape class; the discriminator's `occ` arm
+     scores this twin with it. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="1714.4 651.75 57.83 165.53">
+  <path fill-rule="nonzero" fill="#ff9517" d="M 1743.3 802.7 C 1727.4 802.7 1714.5 789.7 1714.5 773.8 L 1714.5 680.6 C 1714.5 664.7 1727.4 651.8 1743.3 651.8 C 1759.3 651.8 1772.2 664.7 1772.2 680.6 L 1772.2 773.8 C 1772.2 789.7 1759.3 802.7 1743.3 802.7 Z"/>
+  <path fill-rule="nonzero" fill="#ffcc94" d="M 1763.7 682.9 C 1763.7 686.3 1760.9 689.1 1757.5 689.1 C 1754.0 689.1 1751.2 686.3 1751.2 682.9 C 1751.2 679.4 1754.0 676.6 1757.5 676.6 C 1760.9 676.6 1763.7 679.4 1763.7 682.9 Z"/>
+  <path fill="none" stroke-width="9.656" stroke-linecap="round" stroke-linejoin="miter" stroke="#ffcc94" stroke-miterlimit="10" d="M 0 0 L 0 -55.05" transform="matrix(1, 0, 0, -1, 1757.8, 713.1)"/>
+  <path fill-rule="nonzero" fill="#ff9517" d="M 1744.1 787.8 L 1729.5 817.3 L 1758.9 817.3 Z"/>
+  <path fill-rule="nonzero" fill="#db7200" d="M 1723.8 784.1 C 1724.2 799.9 1742.0 799.2 1742.0 799.2"/>
+  <path fill-rule="nonzero" fill="#db7200" d="M 1762.4 783.1 C 1762.1 799.2 1745.3 799.2 1745.3 799.2"/>
+  <path fill="none" stroke-width="7" stroke-linecap="round" stroke-linejoin="miter" stroke="#32c1d2" stroke-miterlimit="10" d="M 0 0 L 12.55 0" transform="matrix(1, 0, 0, -1, 1733.1, 800.8)"/>
+</svg>

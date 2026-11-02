@@ -1,10 +1,13 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // nativeFallbackSmoke.mjs — proof the no-WebGL fallback renders Mantle
 // bundles via the browser's native SVG engine, and that per-shape
 // overrides, animated clips (setClipper), and geometry MORPHS all drive
 // the DOM correctly.
 //
 // Runs in a real browser (puppeteer) so DOMParser / createElementNS /
-// the SVG rasterizer are all real — but it NEVER creates a WebGL
+// the SVG rasterizer are all real — but it never creates a WebGL
 // context: createNativeScene is the whole point. Pixels are sampled by
 // drawing the live <svg> into a 2D canvas (drawImage) and readback.
 //
@@ -23,21 +26,30 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 // Three solid shapes, each id'd so overrides can address them.
-const ART = readFileSync(new URL('../examples/smoke/nativeFallback__ART.svg', import.meta.url), 'utf8');
+const ART = readFileSync(
+  new URL('../examples/smoke/nativeFallback__ART.svg', import.meta.url),
+  'utf8',
+);
 
 // Two matched-topology sprites in one sheet for the morph (same rect
 // shape, different x + color), plus a non-sprite marker.
-const SHEET = readFileSync(new URL('../examples/smoke/nativeFallback__SHEET.svg', import.meta.url), 'utf8');
+const SHEET = readFileSync(
+  new URL('../examples/smoke/nativeFallback__SHEET.svg', import.meta.url),
+  'utf8',
+);
 
 // A clipped shape: a wide rect clipped by a small square; moving the
 // clip reveals different parts.
-const CLIPART = readFileSync(new URL('../examples/smoke/nativeFallback__CLIPART.svg', import.meta.url), 'utf8');
+const CLIPART = readFileSync(
+  new URL('../examples/smoke/nativeFallback__CLIPART.svg', import.meta.url),
+  'utf8',
+);
 
 const HTML = `<!DOCTYPE html><html><body>
 <div id="host"></div>
@@ -62,6 +74,15 @@ const host3 = document.createElement('div'); document.body.appendChild(host3);
 const withSrc = await importSvg(${JSON.stringify(ART)}, { retainSource: true });
 const noSrc   = await importSvg(${JSON.stringify(ART)});
 window.__retain = { withSrc: typeof withSrc.svgSource === 'string', noSrc: !!noSrc.svgSource };
+
+// Repeated template content with named SVG definitions. Both use an authored
+// id so the test proves the fast path keeps the clone's namespaced id, rather
+// than relying on document-global #sharedPaint / #tile lookup.
+const BLUE_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGMQ0TjxHwADXAIEAtgdbwAAAABJRU5ErkJggg==';
+const TEMPLATE_GRADIENT = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><defs><linearGradient id="sharedPaint"><stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/></linearGradient></defs><rect id="gradientRect" x="0" y="0" width="80" height="80" fill="url(#sharedPaint)"/></svg>';
+const TEMPLATE_IMAGE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><image id="tile" href="' + BLUE_PNG + '" x="0" y="0" width="80" height="80"/></svg>';
+const templateGradient = await importSvg(TEMPLATE_GRADIENT, { retainSource: true });
+const templateImage = await importSvg(TEMPLATE_IMAGE, { retainSource: true });
 
 // (2) build a native scene, draw the art once.
 const scene = createNativeScene(host);
@@ -196,9 +217,10 @@ window.__force = async () => {
   const auto    = chooseBackend(c, {}).backend;                 // WebGL here
   const opt     = chooseBackend(c, { forceNative: true }).backend;
   const hard     = chooseBackend(c, { backend: 'native' }).backend;
-  globalThis.__MANTLE_FORCE_NATIVE = true;
+  // No global (and no ?mantleNative URL query) forces it: setting one is inert.
+  globalThis.__MANTLE_FORCE_NATIVE = true; globalThis.__MANTLE_DEBUG__ = true;
   const glob    = chooseBackend(c, {}).backend;
-  globalThis.__MANTLE_FORCE_NATIVE = false;
+  delete globalThis.__MANTLE_FORCE_NATIVE; delete globalThis.__MANTLE_DEBUG__;
   // And the full factory returns a usable native scene under force.
   // createMantleScene is async (it dynamic-import()s the chosen backend),
   // so await it.
@@ -226,14 +248,102 @@ window.__drawRaster = async () => {
   rscene.beginFrame([1,1,1,1]);
   rscene.drawImage(greenPx, { dstRect: [40, 40, 20, 20] });   // green block at (40,40)
   rscene.endFrame();
+  const firstImage = rscene.svg.querySelector('image');
+  rscene.beginFrame([1,1,1,1]);
+  rscene.drawImage(greenPx, { dstRect: [40, 40, 20, 20] });
+  rscene.endFrame();
   await rast2();
   const at = (x,y) => { const p = rctx2.getImageData(x,y,1,1).data; return [p[0],p[1],p[2],p[3]]; };
-  return { inside: at(50,50), outside: at(10,10), hasImageEl: !!rscene.svg.querySelector('image') };
+  return {
+    inside: at(50,50), outside: at(10,10),
+    hasImageEl: !!rscene.svg.querySelector('image'),
+    reusedImage: firstImage === rscene.svg.querySelector('image'),
+  };
+};
+
+// (8a2) compatible repeated vectors use one defs template and lightweight
+// <use> slots; per-instance overrides deliberately retain the clone path.
+const instHost = document.createElement('div'); document.body.appendChild(instHost);
+const instScene = createNativeScene(instHost);
+instScene.setViewport(300, 100);
+const instMat = (tx) => new Float32Array([1,0,0, 0,1,0, tx,0,1]);
+window.__nativeInstances = () => {
+  instScene.beginFrame([1,1,1,1]);
+  instScene.drawBundleInstanced(withSrc, [
+    { worldMatrix: instMat(0) }, { worldMatrix: instMat(100) }, { worldMatrix: instMat(200) },
+  ]);
+  instScene.endFrame();
+  const uses = instScene.svg.querySelectorAll('use').length;
+  const templates = instScene.svg.querySelectorAll('defs > g[id^="mantleNativeInstance"]').length;
+  const fallbackHost = document.createElement('div'); document.body.appendChild(fallbackHost);
+  const fallback = createNativeScene(fallbackHost); fallback.setViewport(100, 100);
+  const local = createNativeOverrideTable(withSrc); local.set('box', { visibility: 0.5 });
+  fallback.beginFrame([1,1,1,1]);
+  fallback.drawBundleInstanced(withSrc, [{ overrides: local }, { overrides: local }]);
+  fallback.endFrame();
+  return { uses, templates, fallbackUses: fallback.svg.querySelectorAll('use').length };
+};
+
+// Gradient and image definitions deliberately remain on the clone path. The
+// source ids are deliberately generic so this also proves clone namespacing
+// remains correct when templates reject definition-bearing content.
+const defHost = document.createElement('div'); document.body.appendChild(defHost);
+const defScene = createNativeScene(defHost, { coordinateSpace: 'viewport' });
+defScene.setViewport(400, 100);
+const fallbackUses = (bundle, draw) => {
+  const h = document.createElement('div'); document.body.appendChild(h);
+  const s = createNativeScene(h); s.setViewport(100, 100);
+  s.beginFrame();
+  draw(s, bundle);
+  s.endFrame();
+  return s.svg.querySelectorAll('use').length;
+};
+window.__nativeDefinitionInstances = async () => {
+  defScene.beginFrame([1,1,1,1]);
+  defScene.drawBundleInstanced(templateGradient, [
+    { worldMatrix: instMat(0) }, { worldMatrix: instMat(100) },
+  ]);
+  defScene.drawBundleInstanced(templateImage, [
+    { worldMatrix: instMat(200) }, { worldMatrix: instMat(300) },
+  ]);
+  defScene.endFrame();
+  const gradient = defScene.svg.querySelector('defs linearGradient[data-oid="sharedPaint"]');
+  const gradientRect = defScene.svg.querySelector('defs [data-oid="gradientRect"]');
+  const image = defScene.svg.querySelector('defs image[data-oid="tile"]');
+  const cv = document.createElement('canvas'); cv.width = 400; cv.height = 100;
+  const ctx = cv.getContext('2d');
+  await rasterize(defScene.svg, 400, 100, ctx);
+  const pixel = (x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
+  const filterBundle = await importSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><defs><filter id="blur"><feGaussianBlur stdDeviation="1"/></filter></defs><rect x="0" y="0" width="80" height="80" fill="#f00" filter="url(#blur)"/></svg>', { retainSource: true });
+  const clipBundle = await importSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><defs><clipPath id="crop"><rect x="0" y="0" width="40" height="80"/></clipPath></defs><rect x="0" y="0" width="80" height="80" fill="#f00" clip-path="url(#crop)"/></svg>', { retainSource: true });
+  const maskBundle = await importSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><defs><mask id="fade"><rect x="0" y="0" width="80" height="80" fill="#fff"/></mask></defs><rect x="0" y="0" width="80" height="80" fill="#f00" mask="url(#fade)"/></svg>', { retainSource: true });
+  const spriteBundle = await importSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><g id="only"><rect x="0" y="0" width="80" height="80" fill="#f00"/></g></svg>', { retainSource: true });
+  const textBundle = await importSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><text x="4" y="40">x</text></svg>', { retainSource: true });
+  const streamBundle = await importSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><rect width="80" height="80" fill="#0f0"/></svg>', { retainSource: true }); streamBundle.__streamGen = 1;
+  const ovr = createNativeOverrideTable(withSrc); ovr.set('box', { visibility: 0.5 });
+  return {
+    uses: defScene.svg.querySelectorAll('use').length,
+    templates: defScene.svg.querySelectorAll('defs > g[id^="mantleNativeInstance"]').length,
+    namespacedGradient: !!gradient && gradient.id !== 'sharedPaint'
+      && !!gradientRect && gradientRect.getAttribute('fill') === 'url(#' + gradient.id + ')',
+    namespacedImage: !!image && image.id !== 'tile',
+    gradientPainted: pixel(20, 50)[0] > 120 && pixel(20, 50)[3] > 200,
+    imagePainted: pixel(220, 50)[2] > 120 && pixel(220, 50)[3] > 200,
+    cloneFallbacks: {
+      override: fallbackUses(withSrc, (s, b) => s.drawBundleInstanced(b, [{ overrides: ovr }, { overrides: ovr }])),
+      sprite: fallbackUses(spriteBundle, (s, b) => s.drawSpriteInstanced(b, 'only', [{}, {}])),
+      clip: fallbackUses(clipBundle, (s, b) => s.drawBundleInstanced(b, [{}, {}])),
+      mask: fallbackUses(maskBundle, (s, b) => s.drawBundleInstanced(b, [{}, {}])),
+      filter: fallbackUses(filterBundle, (s, b) => s.drawBundleInstanced(b, [{}, {}])),
+      text: fallbackUses(textBundle, (s, b) => s.drawBundleInstanced(b, [{}, {}])),
+      stream: fallbackUses(streamBundle, (s, b) => s.drawBundleInstanced(b, [{}, {}])),
+      blend: fallbackUses(withSrc, (s, b) => s.drawBundleInstanced(b, [{ blendMode: 1 }, { blendMode: 1 }])),
+    },
+  };
 };
 
 // (8b) a bundle whose <image> uses a data: URI renders verbatim (a 1x1
 // blue PNG scaled to fill).
-const BLUE_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGMQ0TjxHwADXAIEAtgdbwAAAABJRU5ErkJggg==';
 const imgSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><image id="pic" href="' + BLUE_PNG + '" x="20" y="20" width="60" height="60"/></svg>';
 const imgBundle = await importSvg(imgSvg, { retainSource: true });
 const iscene = createNativeScene(host3);
@@ -265,8 +375,21 @@ async function rast5() {
   rctx5.clearRect(0,0,300,100); rctx5.drawImage(img, 0, 0, 300, 100);
 }
 window.__surface = () => {
-  const need = ['drawSprite','drawSpriteInstanced','drawBundleInstanced','drawImageInstanced','drawInstance','createImage','createBundleHandle','setScissorRect','clearScissorRect','enableStaticCache','disableStaticCache','invalidateRenderState','setBundle','render','drawBundle','drawImage','setViewport','beginFrame','endFrame'];
+  const need = ['drawSprite','drawSpriteInstanced','drawBundleInstanced','drawImageInstanced','drawInstance','createImage','createBundleHandle','setScissorRect','clearScissorRect','enableStaticCache','disableStaticCache','invalidateRenderState','setBundle','render','drawBundle','submitBundle','drawImage','setViewport','beginFrame','endFrame'];
   return need.filter(m => typeof spScene[m] !== 'function');
+};
+const zRed = await importSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#ff0000"/></svg>', { retainSource: true });
+const zBlue = await importSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#0000ff"/></svg>', { retainSource: true });
+const zHost = document.createElement('div'); document.body.appendChild(zHost);
+const zScene = createNativeScene(zHost); zScene.setViewport(100, 100);
+window.__nativeSubmitOrder = () => {
+  zScene.beginFrame([1,1,1,1]);
+  zScene.submitBundle(zBlue, { zOrder: 10 });
+  zScene.submitBundle(zRed, { zOrder: 0 });
+  zScene.endFrame();
+  const groups = zScene.svg.querySelectorAll(':scope > g');
+  const last = groups[groups.length - 1];
+  return last && last.querySelector('rect') && last.querySelector('rect').getAttribute('fill');
 };
 window.__drawSpriteNative = async (id) => {
   spScene.beginFrame([1,1,1,1]);
@@ -313,7 +436,7 @@ window.__drawSpriteStroked = async (id) => {
 // fill (rows 0/1 both belong to the first rect), not the third element.
 window.__overrideStroked = async () => {
   const ovr = createNativeOverrideTable(sheetStroked);
-  ovr.set('shape_2_fill', { fill: [1, 0, 1, 1] });   // magenta → right rect
+  ovr.set(sheetStroked.shapeIds[2], { fill: [1, 0, 1, 1] });   // magenta → right rect
   spScene.beginFrame([1,1,1,1]);
   spScene.drawBundle(sheetStroked, { overrides: ovr });
   spScene.endFrame();
@@ -466,67 +589,116 @@ window.__ready = true;
 
 const FONT_PATH = '/System/Library/Fonts/Supplemental/Arial.ttf';
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(HTML);
+    return;
+  }
   if (req.url === '/__font') {
-    try { res.writeHead(200, { 'content-type': 'font/ttf' }); res.end(readFileSync(FONT_PATH)); }
-    catch { res.writeHead(404); res.end(); }
+    try {
+      res.writeHead(200, { 'content-type': 'font/ttf' });
+      res.end(readFileSync(FONT_PATH));
+    } catch {
+      res.writeHead(404);
+      res.end();
+    }
     return;
   }
   let p = decodeURIComponent(req.url.split('?')[0]);
   const ct = p.endsWith('.glsl') ? 'text/plain' : 'text/javascript';
-  try { res.writeHead(200, { 'content-type': ct + '; charset=utf-8' }); res.end(readFileSync(path.join(ROOT, p))); }
-  catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    res.writeHead(200, { 'content-type': ct + '; charset=utf-8' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { const t = m.text(); if (/Mantle\]|err/i.test(t)) console.log('  [page]', t); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  const t = m.text();
+  if (/Mantle\]|err/i.test(t)) console.log('  [page]', t);
+});
 try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 30000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  // polling MUST be an interval here. waitForFunction defaults to 'raf', and
+  // this page never paints — it is the DOM-only native fallback, with no
+  // canvas and nothing driving frames — so requestAnimationFrame is never
+  // serviced and the wait times out even though __ready was set within
+  // milliseconds.
+  await page.waitForFunction(() => window.__ready === true, { timeout: 30000, polling: 200 });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 // (1) retention opt-in.
 const retain = await page.evaluate(() => window.__retain);
-if (retain.withSrc) ok('retainSource:true attaches svgSource'); else fail('svgSource not attached with retainSource');
-if (!retain.noSrc) ok('default import does NOT retain source (regular consumers pay nothing)'); else fail('svgSource leaked into default import');
+if (retain.withSrc) ok('retainSource:true attaches svgSource');
+else fail('svgSource not attached with retainSource');
+if (!retain.noSrc) ok('default import does NOT retain source (regular consumers pay nothing)');
+else fail('svgSource leaked into default import');
 
 // (2) single <svg>, one <g>, rasterizes.
 const info = await page.evaluate(() => window.__svgInfo());
-if (info.groups === 1) ok('one <g> per drawBundle (single-<svg> composition)'); else fail('expected 1 <g>, got ' + info.groups);
-if (info.hasBox && info.hasDot) ok('source shapes present in the <svg> by id'); else fail('source shapes missing: ' + JSON.stringify(info));
-const boxPx = await page.evaluate(() => window.__sample100(25, 25));   // inside the red box
-if (boxPx[0] > 180 && boxPx[1] < 100) ok('native <svg> rasterizes: red box pixel = ' + JSON.stringify(boxPx));
+if (info.groups === 1) ok('one <g> per drawBundle (single-<svg> composition)');
+else fail('expected 1 <g>, got ' + info.groups);
+if (info.hasBox && info.hasDot) ok('source shapes present in the <svg> by id');
+else fail('source shapes missing: ' + JSON.stringify(info));
+const boxPx = await page.evaluate(() => window.__sample100(25, 25)); // inside the red box
+if (boxPx[0] > 180 && boxPx[1] < 100)
+  ok('native <svg> rasterizes: red box pixel = ' + JSON.stringify(boxPx));
 else fail('box did not rasterize red: ' + JSON.stringify(boxPx));
 
 // (3) overrides by id.
 const ov = await page.evaluate(() => window.__drawOverride());
-if (/255,255,0|rgba\(255,255,0/.test(ov.boxFill || '')) ok('override recolored #box to yellow'); else fail('box fill override wrong: ' + ov.boxFill);
-if (ov.barHidden) ok('override hid #bar (visibility 0)'); else fail('bar not hidden');
-if (ov.dotXform && /translate\(-40/.test(ov.dotXform)) ok('override translated #dot: ' + ov.dotXform); else fail('dot transform wrong: ' + ov.dotXform);
+if (/255,255,0|rgba\(255,255,0/.test(ov.boxFill || '')) ok('override recolored #box to yellow');
+else fail('box fill override wrong: ' + ov.boxFill);
+if (ov.barHidden) ok('override hid #bar (visibility 0)');
+else fail('bar not hidden');
+if (ov.dotXform && /translate\(-40/.test(ov.dotXform))
+  ok('override translated #dot: ' + ov.dotXform);
+else fail('dot transform wrong: ' + ov.dotXform);
 
 // (4) clipper.
-if (await page.evaluate(() => window.__hasClipRange)) ok('clipperRows has the clip range'); else fail('no clipperRows.win');
+if (await page.evaluate(() => window.__hasClipRange)) ok('clipperRows has the clip range');
+else fail('no clipperRows.win');
 const clipX0 = await page.evaluate(() => window.__drawClip(0));
 const clipX30 = await page.evaluate(() => window.__drawClip(30));
-if (clipX30 && /translate\(30/.test(clipX30)) ok('setClipper transforms the live clip element: ' + clipX30);
+if (clipX30 && /translate\(30/.test(clipX30))
+  ok('setClipper transforms the live clip element: ' + clipX30);
 else fail('clipper transform not applied: ' + clipX30);
 
 // (5) curveRangeToPathD round-trip.
 const pd = await page.evaluate(() => window.__pathD());
-if (pd.d && pd.closed && pd.moves >= 1) ok('curveRangeToPathD decoded the rect: ' + JSON.stringify(pd.d).slice(0, 80));
+if (pd.d && pd.closed && pd.moves >= 1)
+  ok('curveRangeToPathD decoded the rect: ' + JSON.stringify(pd.d).slice(0, 80));
 else fail('pathD decode wrong: ' + JSON.stringify(pd));
 
 // (6) morph rewrites geometry.
 const mi = await page.evaluate(() => window.__morphInfo);
-if (mi.matched >= 1) ok('morph matched the two poses\' rects (' + mi.matched + ')'); else fail('morph matched nothing: ' + JSON.stringify(mi));
+if (mi.matched >= 1) ok("morph matched the two poses' rects (" + mi.matched + ')');
+else fail('morph matched nothing: ' + JSON.stringify(mi));
 const d0 = await page.evaluate(() => window.__morphD(0));
 const d1 = await page.evaluate(() => window.__morphD(1));
 const dm = await page.evaluate(() => window.__morphD(0.5));
@@ -541,26 +713,32 @@ else fail('morph d at 0.5 not between: ' + JSON.stringify({ d0, dm, d1 }));
 const cx0 = await page.evaluate(() => window.__morphCentroidX(0));
 const cx5 = await page.evaluate(() => window.__morphCentroidX(0.5));
 const cx1 = await page.evaluate(() => window.__morphCentroidX(1));
-if (cx0 < 100 && cx1 > 200) ok(`morph slides A→B (centroid x: t0=${cx0|0} t1=${cx1|0})`);
-else fail(`morph endpoints wrong (t0=${cx0|0} t1=${cx1|0})`);
-if (cx5 > cx0 + 30 && cx5 < cx1 - 30) ok(`morph t=0.5 rasterizes between (centroid x=${cx5|0})`);
-else fail(`morph midpoint not between (t0=${cx0|0} t0.5=${cx5|0} t1=${cx1|0})`);
+if (cx0 < 100 && cx1 > 200) ok(`morph slides A→B (centroid x: t0=${cx0 | 0} t1=${cx1 | 0})`);
+else fail(`morph endpoints wrong (t0=${cx0 | 0} t1=${cx1 | 0})`);
+if (cx5 > cx0 + 30 && cx5 < cx1 - 30) ok(`morph t=0.5 rasterizes between (centroid x=${cx5 | 0})`);
+else fail(`morph midpoint not between (t0=${cx0 | 0} t0.5=${cx5 | 0} t1=${cx1 | 0})`);
 
 // (7) forcing the fallback for testing.
 const fb = await page.evaluate(() => window.__force());
 if (fb.auto === 'webgl') ok('chooseBackend auto-picks webgl when available');
 else fail('expected auto=webgl (WebGL should be available in test), got ' + fb.auto);
-if (fb.opt === 'native' && fb.hard === 'native' && fb.glob === 'native')
-  ok('force flags select native (forceNative / backend:native / __MANTLE_FORCE_NATIVE)');
-else fail('force flags did not select native: ' + JSON.stringify(fb));
+if (fb.opt === 'native' && fb.hard === 'native')
+  ok('force options select native (forceNative / backend:native)');
+else fail('force options did not select native: ' + JSON.stringify(fb));
+if (fb.glob === 'webgl') ok('the removed __MANTLE_FORCE_NATIVE global is inert, debug on or off');
+else fail('__MANTLE_FORCE_NATIVE still forces native: ' + JSON.stringify(fb));
 if (fb.sceneBackend === 'native' && fb.drewSvg)
   ok('createMantleScene(forceNative) builds a usable native scene');
 else fail('forced factory not native: ' + JSON.stringify(fb));
 
 // (8) raster compositing.
 const rb = await page.evaluate(() => window.__drawRaster());
-if (rb.hasImageEl) ok('scene.drawImage appended an <image> element'); else fail('no <image> from drawImage');
-if (rb.inside[1] > 150 && rb.inside[0] < 120) ok(`drawImage raster composited green at dstRect (px=${JSON.stringify(rb.inside)})`);
+if (rb.hasImageEl) ok('scene.drawImage appended an <image> element');
+else fail('no <image> from drawImage');
+if (rb.reusedImage) ok('native drawImage reuses its persistent image slot');
+else fail('native drawImage replaced its image slot');
+if (rb.inside[1] > 150 && rb.inside[0] < 120)
+  ok(`drawImage raster composited green at dstRect (px=${JSON.stringify(rb.inside)})`);
 else fail('raster not green inside dstRect: ' + JSON.stringify(rb.inside));
 // "outside" is empty if transparent (alpha 0) or white (clear). Either is
 // fine — what matters is it's NOT the green raster.
@@ -568,17 +746,43 @@ const outIsGreen = rb.outside[3] > 10 && rb.outside[1] > 150 && rb.outside[0] < 
 if (!outIsGreen) ok('drawImage raster confined to dstRect (not green outside)');
 else fail('raster bled outside dstRect: ' + JSON.stringify(rb.outside));
 
+const ni = await page.evaluate(() => window.__nativeInstances());
+if (ni.uses === 3 && ni.templates === 1) ok('compatible native instances share one SVG template');
+else fail('native instance template structure wrong: ' + JSON.stringify(ni));
+if (ni.fallbackUses === 0) ok('per-instance overrides retain clone parity path');
+else fail('override instance unexpectedly used shared template: ' + JSON.stringify(ni));
+
+const di = await page.evaluate(() => window.__nativeDefinitionInstances());
+if (di.uses === 0 && di.templates === 0)
+  ok('definition-bearing native instances retain namespaced clone fallback');
+else fail('native definition fallback structure wrong: ' + JSON.stringify(di));
+if (di.gradientPainted && di.imagePainted) ok('definition-bearing clone fallbacks rasterize');
+else fail('instanced definitions did not rasterize: ' + JSON.stringify(di));
+if (Object.values(di.cloneFallbacks).every((n) => n === 0))
+  ok('overrides, sprites, clips/masks, and filters retain clone fallback');
+else
+  fail(
+    'effectful native instances unexpectedly used shared templates: ' +
+      JSON.stringify(di.cloneFallbacks),
+  );
+
 const ib = await page.evaluate(() => window.__drawImgBundle());
-if (ib.hasImg) ok('bundle <image data:> re-hosted as <image>'); else fail('bundle image element missing');
-if (ib.center[2] > 150 && ib.center[0] < 120) ok(`bundle data: <image> rasterizes (blue center px=${JSON.stringify(ib.center)})`);
+if (ib.hasImg) ok('bundle <image data:> re-hosted as <image>');
+else fail('bundle image element missing');
+if (ib.center[2] > 150 && ib.center[0] < 120)
+  ok(`bundle data: <image> rasterizes (blue center px=${JSON.stringify(ib.center)})`);
 else fail('bundle data: image did not render blue: ' + JSON.stringify(ib.center));
 
 // (9) renderer-parity (drop-in surface) on the native backend.
 const missing = await page.evaluate(() => window.__surface());
 if (missing.length === 0) ok('native scene exposes the full renderer method surface (drop-in)');
 else fail('native scene MISSING renderer methods: ' + missing.join(', '));
+const nativeZTop = await page.evaluate(() => window.__nativeSubmitOrder());
+if (nativeZTop === '#0000ff') ok('native submitBundle sorts lower z underneath');
+else fail('native submitBundle z-order wrong: ' + nativeZTop);
 const spL = await page.evaluate(() => window.__drawSpriteNative('left'));
-if (spL.leftPainted && !spL.rightPainted) ok('native drawSprite renders REAL subset geometry (left sprite only)');
+if (spL.leftPainted && !spL.rightPainted)
+  ok('native drawSprite renders REAL subset geometry (left sprite only)');
 else fail('native drawSprite subset wrong: ' + JSON.stringify(spL));
 const spR = await page.evaluate(() => window.__drawSpriteNative('right'));
 if (spR.rightPainted && !spR.leftPainted) ok('native drawSprite isolates the right sprite too');
@@ -586,12 +790,20 @@ else fail('native drawSprite right subset wrong: ' + JSON.stringify(spR));
 
 // (9b) ID-LESS sprite sheet — the subset hide must be positional.
 const spIdless = await page.evaluate(() => window.__drawSpriteIdless('left'));
-const innerSynthetic = (spIdless.innerIds || []).every((id) => /^shape_\d+_(fill|stroke)$/.test(id));
-if (innerSynthetic) ok('id-less sheet: inner shapes have synthetic ids (' + JSON.stringify(spIdless.innerIds) + ')');
+const innerSynthetic = (spIdless.innerIds || []).every((id) =>
+  /^shape_(?:L)?\d+_(fill|stroke)$/.test(id),
+);
+if (innerSynthetic)
+  ok('id-less sheet: inner shapes have synthetic ids (' + JSON.stringify(spIdless.innerIds) + ')');
 else fail('id-less sheet fixture has authored inner ids: ' + JSON.stringify(spIdless.innerIds));
 if (spIdless.leftPainted && !spIdless.rightPainted)
-  ok('native drawSprite subsets an ID-LESS sheet (positional hide — left only, sheet not fully drawn)');
-else fail('ID-LESS drawSprite drew the whole sheet (positional hide broken): ' + JSON.stringify(spIdless));
+  ok(
+    'native drawSprite subsets an ID-LESS sheet (positional hide — left only, sheet not fully drawn)',
+  );
+else
+  fail(
+    'ID-LESS drawSprite drew the whole sheet (positional hide broken): ' + JSON.stringify(spIdless),
+  );
 
 // (9c) STROKED sheet — meta rows (2/shape) outnumber DOM elements; the
 // subset must isolate by sprite id, not by positional row index.
@@ -601,7 +813,13 @@ if (JSON.stringify(spStroked.domIndex) === '[0,0,1,1]')
 else fail('shapeDomIndex wrong for stroked sheet: ' + JSON.stringify(spStroked.domIndex));
 if (spStroked.leftPainted && !spStroked.rightPainted)
   ok('native drawSprite subsets a STROKED sheet (id isolation — meta-row drift immune)');
-else fail('STROKED drawSprite subset wrong (ranges ' + JSON.stringify(spStroked.ranges) + '): ' + JSON.stringify(spStroked));
+else
+  fail(
+    'STROKED drawSprite subset wrong (ranges ' +
+      JSON.stringify(spStroked.ranges) +
+      '): ' +
+      JSON.stringify(spStroked),
+  );
 const spStrokedR = await page.evaluate(() => window.__drawSpriteStroked('right'));
 if (spStrokedR.rightPainted && !spStrokedR.leftPainted)
   ok('native drawSprite isolates the stroked right sprite too');
@@ -616,8 +834,9 @@ else fail('positional override drifted on stroked sheet: ' + JSON.stringify(ovS)
 // (10) WebGL passthrough: the factory returns the REAL renderer with every
 // GL-only method, so a createRenderer consumer is a one-line drop-in.
 const wp = await page.evaluate(() => window.__webglPassthrough());
-if (wp.skipped) { ok('(webgl passthrough skipped — no WebGL2 in this run)'); }
-else if (wp.backend === 'webgl' && wp.missing.length === 0 && wp.hasToScene)
+if (wp.skipped) {
+  ok('(webgl passthrough skipped — no WebGL2 in this run)');
+} else if (wp.backend === 'webgl' && wp.missing.length === 0 && wp.hasToScene)
   ok('createMantleScene(webgl) returns the real renderer — all GL-only methods present (drop-in)');
 else fail('webgl passthrough incomplete: ' + JSON.stringify(wp));
 
@@ -625,44 +844,165 @@ else fail('webgl passthrough incomplete: ' + JSON.stringify(wp));
 const bf = await page.evaluate(() => window.__bindingFactories());
 if (bf.ovHasSet && bf.ovApplied) ok('scene.createOverrideTable(bundle) — no gl, applies on native');
 else fail('scene.createOverrideTable wrong: ' + JSON.stringify(bf));
-if (bf.morphHasSetT && bf.morphMovedD) ok('scene.createMorph(src,dst,{sprites}) — sprite morph tweens on native');
+if (bf.morphHasSetT && bf.morphMovedD)
+  ok('scene.createMorph(src,dst,{sprites}) — sprite morph tweens on native');
 else fail('scene.createMorph wrong: ' + JSON.stringify(bf));
-if (bf.tlHasSetTime && bf.tlOk) ok('scene.createTimeline(refs,keys) — sprite timeline runs on native');
+if (bf.tlHasSetTime && bf.tlOk)
+  ok('scene.createTimeline(refs,keys) — sprite timeline runs on native');
 else fail('scene.createTimeline wrong: ' + JSON.stringify(bf));
 
 // (12) native text bundle — glyph outlines render.
 const tx = await page.evaluate(() => window.__textBundle());
-if (tx.hasSource && tx.glyphPaths >= 2) ok('native text bundle emits glyph <path>s (' + tx.glyphPaths + ')');
+if (tx.hasSource && tx.glyphPaths >= 2)
+  ok('native text bundle emits glyph <path>s (' + tx.glyphPaths + ')');
 else fail('native text bundle no glyph paths: ' + JSON.stringify(tx));
 if (tx.darkPixels > 50) ok('native text rasterizes glyph outlines (' + tx.darkPixels + ' dark px)');
 else fail('native text did not render: ' + JSON.stringify(tx));
 // (12a) glyph curves normalized to (0,0)-origin (matches GL probe-shift)
 // so text isn't offset down under a worldMatrix.
 const near0 = (v) => Math.abs(v) < 1e-4;
-if (near0(tx.bboxXmin) && near0(tx.bboxYmin)) ok('native text globalBBox normalized to (0,0) origin (xmin=' + tx.bboxXmin + ' ymin=' + tx.bboxYmin + ')');
-else fail('text globalBBox NOT (0,0)-origin → offset vs GL: xmin=' + tx.bboxXmin + ' ymin=' + tx.bboxYmin);
-if (near0(tx.vbXmin) && near0(tx.vbYmin)) ok('native text svg viewBox starts at (0,0) (no baseline-relative offset): "' + tx.vbRaw + '"');
-else fail('text viewBox not (0,0)-origin: "' + tx.vbRaw + '" (xmin=' + tx.vbXmin + ' ymin=' + tx.vbYmin + ')');
+if (near0(tx.bboxXmin) && near0(tx.bboxYmin))
+  ok(
+    'native text globalBBox normalized to (0,0) origin (xmin=' +
+      tx.bboxXmin +
+      ' ymin=' +
+      tx.bboxYmin +
+      ')',
+  );
+else
+  fail(
+    'text globalBBox NOT (0,0)-origin → offset vs GL: xmin=' + tx.bboxXmin + ' ymin=' + tx.bboxYmin,
+  );
+if (near0(tx.vbXmin) && near0(tx.vbYmin))
+  ok('native text svg viewBox starts at (0,0) (no baseline-relative offset): "' + tx.vbRaw + '"');
+else
+  fail(
+    'text viewBox not (0,0)-origin: "' +
+      tx.vbRaw +
+      '" (xmin=' +
+      tx.vbXmin +
+      ' ymin=' +
+      tx.vbYmin +
+      ')',
+  );
 
 // (12c) vertical placement under worldMatrix: ink lands in the TOP band
-// (the bug was "offset down" — glyphs sinking below their placement rect).
+// (not "offset down" — glyphs sinking below their placement rect).
 const tp = await page.evaluate(() => window.__textPlacement());
-if (tp.topDark > 0 && tp.topDark >= tp.botDark) ok('text placed at top rect renders in TOP band (topDark=' + tp.topDark + ' botDark=' + tp.botDark + ', y=' + tp.minY + '..' + tp.maxY + ')');
+if (tp.topDark > 0 && tp.topDark >= tp.botDark)
+  ok(
+    'text placed at top rect renders in TOP band (topDark=' +
+      tp.topDark +
+      ' botDark=' +
+      tp.botDark +
+      ', y=' +
+      tp.minY +
+      '..' +
+      tp.maxY +
+      ')',
+  );
 else fail('TEXT OFFSET DOWN — ink sank below placement rect: ' + JSON.stringify(tp));
 
 // (12b) degenerate text never yields NaN / negative globalBBox.
 const tbb = await page.evaluate(() => window.__textBboxFinite());
-const bad = tbb.filter(r => !r.finite || !r.whNonNeg || !r.svgViewBoxFinite);
-if (bad.length === 0) ok('empty/whitespace text → finite, non-negative globalBBox + valid svg viewBox');
+const bad = tbb.filter((r) => !r.finite || !r.whNonNeg || !r.svgViewBoxFinite);
+if (bad.length === 0)
+  ok('empty/whitespace text → finite, non-negative globalBBox + valid svg viewBox');
 else fail('degenerate text bbox NaN/invalid: ' + JSON.stringify(bad));
 
 // (13) native timeline exposes currentMorph (the consumer read path).
 const tm = await page.evaluate(() => window.__timeline());
-if (tm.hasCurrentMorph && tm.currentMorphOverrides) ok('native timeline exposes currentMorph.overrides (timeline parity)');
+if (tm.hasCurrentMorph && tm.currentMorphOverrides)
+  ok('native timeline exposes currentMorph.overrides (timeline parity)');
 else fail('native timeline currentMorph missing: ' + JSON.stringify(tm));
-if (tm.hasBundle) ok('native timeline exposes a live bundle'); else fail('no timeline bundle');
+if (tm.hasBundle) ok('native timeline exposes a live bundle');
+else fail('no timeline bundle');
+
+// Primitive replacement preserves overrides written by an earlier metadata row.
+// A fill+stroke leaf with opacity below 1 is one composited group (group begin, fill, stroke and group end rows), so the opacity
+// override lands on the group row while the fill row is converted; a fill-only leaf has one row and both writes address it.
+const conversion = await page.evaluate(async () => {
+  const { importSvg, createNativeScene, createNativeOverrideTable } = await import('/src/index.js');
+  const results = [];
+  for (const both of [true, false])
+    for (const named of [false, true]) {
+      const b = await importSvg(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect ' +
+          (named ? 'id="leaf" ' : '') +
+          'x="8" y="8" width="48" height="48" fill="red"' +
+          (both ? ' stroke="blue" stroke-width="4"' : '') +
+          ' opacity="0.5"/></svg>',
+        { retainSource: true, preserveViewport: true },
+      );
+      const rows = both ? 4 : 1,
+        groupRow = 0,
+        fillRow = both ? 1 : 0;
+      if (b.numShapes !== rows)
+        throw Error(
+          'expected ' +
+            (both ? 'group begin, fill, stroke and group end rows' : 'one row') +
+            ', got ' +
+            b.numShapes,
+        );
+      const scene = createNativeScene(document.createElement('div'), { coordinateSpace: 'bundle' });
+      scene.setViewport(64, 64);
+      const table = createNativeOverrideTable(b);
+      table.update(groupRow, { groupOpacity: 0.75 });
+      table.update(fillRow, { pathD: 'M8 8L56 8L56 56L8 56Z' });
+      const draw = async () => {
+        scene.beginFrame([0, 0, 0, 0]);
+        scene.drawBundle(b, { overrides: table });
+        scene.endFrame();
+        const image = new Image();
+        image.src =
+          'data:image/svg+xml;charset=utf-8,' +
+          encodeURIComponent(new XMLSerializer().serializeToString(scene.svg));
+        await image.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 64;
+        const context = canvas.getContext('2d');
+        context.drawImage(image, 0, 0);
+        return Array.from(context.getImageData(32, 32, 1, 1).data);
+      };
+      const first = await draw(),
+        cached = await draw();
+      table.clear(groupRow);
+      const restored = await draw();
+      table.update(groupRow, { groupOpacity: 0.25 });
+      const changed = await draw();
+      results.push({ both, named, rows: b.numShapes, first, cached, restored, changed });
+      table.dispose();
+      scene.dispose();
+    }
+  return results;
+});
+for (const item of conversion) {
+  const label =
+    (item.both ? 'fill+stroke group' : 'fill-only') + ', ' + (item.named ? 'named' : 'unnamed');
+  if (
+    Math.abs(item.first[3] - 191) <= 1 &&
+    item.first.join() === item.cached.join() &&
+    Math.abs(item.restored[3] - 128) <= 1 &&
+    Math.abs(item.changed[3] - 64) <= 1
+  )
+    ok(
+      'primitive replacement preserves first/cached opacity and authored restoration (' +
+        label +
+        ')',
+    );
+  else
+    fail(
+      'primitive replacement loses current-frame ownership (' +
+        label +
+        '): ' +
+        JSON.stringify(item),
+    );
+}
 
 await browser.close();
 server.close();
-if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
+if (failures) {
+  console.error(`\n${failures} failure(s)`);
+  process.exit(1);
+}
 console.log('\nnativeFallbackSmoke: all checks passed');

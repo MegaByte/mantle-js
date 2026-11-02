@@ -1,0 +1,215 @@
+{
+  "verified": true,
+  "held": true,
+  "members": 1128,
+  "successfulGpuReports": 181,
+  "sourceHashChecks": 154393,
+  "completeRenderedPixels": 175978496,
+  "firstReadyPixelComparisons": 83691520,
+  "independentWhitePixels": 58053,
+  "whiteContinuousMax": 1.222993402783004,
+  "whiteContinuousOverOne": 15,
+  "independentOrderedPaintPixels": 49861,
+  "independentAffinePixels": 10524,
+  "retainedProjectiveDiagnosticPixels": 7943,
+  "maps": [
+    {
+      "name": "map-shear-32",
+      "worstContinuousBytes": {
+        "baselineCP": 32.92441535409924,
+        "cpatch": 0.8219428264207238,
+        "rawAAC": 0.9481233239222462
+      }
+    },
+    {
+      "name": "map-shear-512",
+      "worstContinuousBytes": {
+        "baselineCP": 26.078190352472056,
+        "cpatch": 0.997164740745518,
+        "rawAAC": 2.315618889070913
+      }
+    },
+    {
+      "name": "map-reflected-32",
+      "worstContinuousBytes": {
+        "baselineCP": 14.9103732455401,
+        "cpatch": 0.5670805992866406,
+        "rawAAC": 0.8258068211528098
+      }
+    },
+    {
+      "name": "map-reflected-512",
+      "worstContinuousBytes": {
+        "baselineCP": 14.279419621483527,
+        "cpatch": 0.9436788843683246,
+        "rawAAC": 0.8809807134720273
+      }
+    },
+    {
+      "name": "map-thin-32",
+      "worstContinuousBytes": {
+        "baselineCP": 90.69892390028127,
+        "cpatch": 0.6521689764597909,
+        "rawAAC": 76.87351485368596
+      }
+    },
+    {
+      "name": "map-thin-512",
+      "worstContinuousBytes": {
+        "baselineCP": 103.56829851507615,
+        "cpatch": 0.8083587573156166,
+        "rawAAC": 85.98055996009144
+      }
+    },
+    {
+      "name": "map-projective-32",
+      "worstContinuousBytes": {
+        "baselineCP": 255,
+        "cpatch": 255,
+        "rawAAC": 255
+      }
+    },
+    {
+      "name": "map-projective-512",
+      "worstContinuousBytes": {
+        "baselineCP": 255,
+        "cpatch": 255,
+        "rawAAC": 255
+      }
+    },
+    {
+      "name": "map-projective-strong-32",
+      "worstContinuousBytes": {
+        "baselineCP": 255,
+        "cpatch": 255,
+        "rawAAC": 255
+      }
+    },
+    {
+      "name": "map-projective-strong-512",
+      "worstContinuousBytes": {
+        "baselineCP": 255,
+        "cpatch": 255,
+        "rawAAC": 255
+      }
+    }
+  ],
+  "morphControls": 4,
+  "pairedTimingCells": 138,
+  "retainedTextRegressions": [
+    {
+      "size": 32,
+      "changed": 27,
+      "worse": 3,
+      "maxWorsening": 10
+    },
+    {
+      "size": 512,
+      "changed": 168,
+      "worse": 51,
+      "maxWorsening": 1
+    }
+  ],
+  "finalPrep": [
+    {
+      "count": 2,
+      "medians": {
+        "baseline": 6.546375000000012,
+        "candidate": 4.58725000000004,
+        "baselineAA": 6.533042000000023,
+        "candidateAA": 4.584604000000013
+      },
+      "geometry": {
+        "baseline": {
+          "shapes": 2,
+          "vertices": 60,
+          "meshBytes": 5760,
+          "authoredCurvePlaneBytes": 5232,
+          "coefficientUploadPlaneBytes": 65536
+        },
+        "candidate": {
+          "shapes": 2,
+          "vertices": 12,
+          "meshBytes": 1152,
+          "authoredCurvePlaneBytes": 5232,
+          "coefficientUploadPlaneBytes": 65536
+        }
+      }
+    },
+    {
+      "count": 16,
+      "medians": {
+        "baseline": 53.79662550000012,
+        "candidate": 31.70310399999994,
+        "baselineAA": 53.54679149999947,
+        "candidateAA": 31.554562499999747
+      },
+      "geometry": {
+        "baseline": {
+          "shapes": 16,
+          "vertices": 1038,
+          "meshBytes": 99648,
+          "authoredCurvePlaneBytes": 38032,
+          "coefficientUploadPlaneBytes": 65536
+        },
+        "candidate": {
+          "shapes": 16,
+          "vertices": 96,
+          "meshBytes": 9216,
+          "authoredCurvePlaneBytes": 38032,
+          "coefficientUploadPlaneBytes": 65536
+        }
+      }
+    },
+    {
+      "count": 64,
+      "medians": {
+        "baseline": 88.1893955000005,
+        "candidate": 35.122833499999615,
+        "baselineAA": 88.03895799999964,
+        "candidateAA": 35.20877100000007
+      },
+      "geometry": {
+        "baseline": {
+          "shapes": 64,
+          "vertices": 4152,
+          "meshBytes": 398592,
+          "authoredCurvePlaneBytes": 152080,
+          "coefficientUploadPlaneBytes": 262144
+        },
+        "candidate": {
+          "shapes": 64,
+          "vertices": 384,
+          "meshBytes": 36864,
+          "authoredCurvePlaneBytes": 152080,
+          "coefficientUploadPlaneBytes": 196608
+        }
+      }
+    },
+    {
+      "count": 256,
+      "medians": {
+        "baseline": 222.3283124999998,
+        "candidate": 48.987333500000204,
+        "baselineAA": 222.5903750000016,
+        "candidateAA": 49.00060400000075
+      },
+      "geometry": {
+        "baseline": {
+          "shapes": 256,
+          "vertices": 16608,
+          "meshBytes": 1594368,
+          "authoredCurvePlaneBytes": 608272,
+          "coefficientUploadPlaneBytes": 851968
+        },
+        "candidate": {
+          "shapes": 256,
+          "vertices": 1536,
+          "meshBytes": 147456,
+          "authoredCurvePlaneBytes": 608272,
+          "coefficientUploadPlaneBytes": 786432
+        }
+      }
+    }
+  ]
+}

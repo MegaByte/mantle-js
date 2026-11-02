@@ -1,16 +1,19 @@
-// lbRoadRingParitySmoke.mjs — full Highway-Hazards ring repro (multi-band).
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// lbRoadRingParitySmoke.mjs — a full racing-road ring (multi-band).
 //
-// Ports roadRing.ts's band layout (16 ring slots × 5 shapes: road, 2 rumble,
-// 2 lane) and a curving perspective road, builds it as a lightweight stream,
+// Builds a ring-buffer road's band layout (16 ring slots × 5 shapes: road, 2 rumble,
+// 2 lane) on a curving perspective road as a lightweight stream,
 // scrolls a few frames (exercising refreshLoopBlinnMesh topology reuse), then
-// compares the combined-route LB render against the Slug ground truth at an
+// compares the LB render against the Slug ground truth at an
 // IDENTICAL pinned globalBBox. Reports where they diverge (per-row diff) so a
 // "wrong wedge" / seam / blank shows up as a concrete pixel delta, not a vibe.
 import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -108,7 +111,7 @@ for (const ph of FRAMES) {
   // create time). Then stream with { lightweight:true } + handle.invalidate()
   // — the engine's streamGeometry — and draw THROUGH THE HANDLE.
   const lB = createBundle(gl, buildStreamableSections(shapes, VBOX));
-  lB._lbStreamRamp = false;   // Highway's opaque road/rough-band streaming mode
+  lB._lbStreamRamp = false;   // a road's opaque road/rough-band streaming mode
   const handle = renderer.createBundleHandle(lB);     // uploads stale unit-band cover-quads
   updateBundleGeometry(gl, lB, buildFrame(ph-7), { lightweight: true });   // prior frame
   updateBundleGeometry(gl, lB, fr, { lightweight: true });                 // refresh to target
@@ -128,37 +131,78 @@ window.__out = out; window.__ready = true;
 
 const server = http.createServer((req, res) => {
   try {
-    if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML);
+      return;
+    }
     const p = decodeURIComponent(req.url.split('?')[0]);
-    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' }); res.end(readFileSync(path.join(ROOT, p)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { if (m.type() === 'error') console.error('  [console]', m.text()); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('  [console]', m.text());
+});
 try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await page.waitForFunction(() => window.__ready === true, { timeout: 10000, polling: 100 });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 const o = await page.evaluate(() => window.__out);
 for (const f of o.frames) console.log('   frame', JSON.stringify(f));
 
 for (const f of o.frames) {
-  if (!f.lbStream || !f.routed) { fail('phase ' + f.ph + ' did not LB-stream/route: ' + JSON.stringify(f)); continue; }
+  if (!f.lbStream || !f.routed) {
+    fail('phase ' + f.ph + ' did not LB-stream/route: ' + JSON.stringify(f));
+    continue;
+  }
   if (f.iou > 0.96) ok('phase ' + f.ph + ' road matches Slug (IoU ' + f.iou.toFixed(4) + ')');
-  else fail('phase ' + f.ph + ' road DIVERGES from Slug (IoU ' + f.iou.toFixed(4) + ', delta ' + f.delta + 'px)');
+  else
+    fail(
+      'phase ' +
+        f.ph +
+        ' road DIVERGES from Slug (IoU ' +
+        f.iou.toFixed(4) +
+        ', delta ' +
+        f.delta +
+        'px)',
+    );
 }
 
 await browser.close();
 server.close();
-if (failures) { console.error('\\n' + failures + ' failure(s)'); process.exit(1); }
-console.log('\\nlbRoadRingParitySmoke: multi-band scrolling road matches Slug through the combined route');
+if (failures) {
+  console.error('\\n' + failures + ' failure(s)');
+  process.exit(1);
+}
+console.log(
+  '\\nlbRoadRingParitySmoke: multi-band scrolling road matches Slug through the combined route',
+);

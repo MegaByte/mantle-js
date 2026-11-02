@@ -1,4 +1,7 @@
-// lbBandCurveFlipParitySmoke.mjs — the "wrong wedges" root cause.
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// lbBandCurveFlipParitySmoke.mjs — a streamed band reuses a triangulation only for the same rim structure.
 //
 // A road band's LB rim inserts a curved edge's CONTROL POINT only when that
 // edge is CONCAVE to the fill. Curving right ⇒ the LEFT edge is concave (rim =
@@ -8,15 +11,16 @@
 //
 // refreshLoopBlinnMesh (the streaming fast path after frame 1) reuses the
 // cached earcut triangulation when the rim LENGTHS match. Streaming from a
-// curve-right frame to a curve-left frame keeps every length identical, so the
-// stale triangulation is reused — but its vertex indices now connect the wrong
-// rim points → a folded / wrong-wedge interior. This reproduces it and asserts
-// the streamed band matches a freshly-built band of the SAME geometry.
+// curve-right frame to a curve-left frame keeps every length identical, so a
+// length check alone would reuse the stale triangulation, whose vertex indices
+// then connect the wrong rim points → a folded / wrong-wedge interior. This
+// asserts the streamed band matches a freshly-built band of the same geometry.
 import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { openReady } from './_pageReady.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -73,33 +77,69 @@ window.__ready = true;
 
 const server = http.createServer((req, res) => {
   try {
-    if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML);
+      return;
+    }
     const p = decodeURIComponent(req.url.split('?')[0]);
-    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' }); res.end(readFileSync(path.join(ROOT, p)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { if (m.type() === 'error') console.error('  [console]', m.text()); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('  [console]', m.text());
+});
 try {
-  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await openReady(page, `http://127.0.0.1:${port}/`, { ready: 'flag' });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 const o = await page.evaluate(() => window.__out);
 console.log('  ', JSON.stringify(o));
-if (o.iou > 0.98) ok('streamed curve-flip band matches a fresh build (IoU ' + o.iou.toFixed(4) + ')');
-else fail('streamed curve-flip band is WRONG (IoU ' + o.iou.toFixed(4) + ', delta ' + o.delta + 'px) — stale triangulation reused across a concave-edge flip');
+if (o.iou > 0.98)
+  ok('streamed curve-flip band matches a fresh build (IoU ' + o.iou.toFixed(4) + ')');
+else
+  fail(
+    'streamed curve-flip band is WRONG (IoU ' +
+      o.iou.toFixed(4) +
+      ', delta ' +
+      o.delta +
+      'px) — stale triangulation reused across a concave-edge flip',
+  );
 
 await browser.close();
 server.close();
-if (failures) { console.error('\\n' + failures + ' failure(s)'); process.exit(1); }
-console.log('\\nlbBandCurveFlipParitySmoke: refreshLoopBlinnMesh rebuilds when the concave edge moves');
+if (failures) {
+  console.error('\\n' + failures + ' failure(s)');
+  process.exit(1);
+}
+console.log(
+  '\\nlbBandCurveFlipParitySmoke: refreshLoopBlinnMesh rebuilds when the concave edge moves',
+);

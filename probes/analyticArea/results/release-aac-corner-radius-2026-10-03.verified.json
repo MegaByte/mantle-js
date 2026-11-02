@@ -1,0 +1,12 @@
+{
+  "scope": "Source/image integrity and targeted warm GPU comparison; measurable train cost and composition negatives retained. No wider/morph/runtime integration claim.",
+  "members": 5280,
+  "reports": 2,
+  "cases": 8,
+  "sourceChecks": 1672,
+  "renderedPixels": 4210688,
+  "timingCells": 8,
+  "inconclusive": 7,
+  "slower": 1,
+  "nativeChangedPixels": 2
+}

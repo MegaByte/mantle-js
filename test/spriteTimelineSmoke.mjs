@@ -1,8 +1,11 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // spriteTimelineSmoke.mjs — createSpriteTimeline proof.
 // One sheet with three pose sprites of matched topology (a single rect that
 // recolors + moves). A 3-key timeline plays poseA → poseB → poseC. Asserts:
 //   1. setTime at each key time shows that key's pose (red / green / blue).
-//   2. Between keys the active sprite interpolates (geometry + colour).
+//   2. Between keys the active sprite interpolates (geometry + color).
 //   3. The bracket morph is reused on the hot path (same bracket → no
 //      rebuild) and rebuilds when crossing a key.
 //   4. Clamping before key 0 / after key N holds the end pose.
@@ -11,13 +14,17 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { openReady } from './_pageReady.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
-// Three poses, each a single rect (matched topology), at distinct x + colour.
-const SHEET = readFileSync(new URL('../examples/smoke/spriteTimeline__SHEET.svg', import.meta.url), 'utf8');
+// Three poses, each a single rect (matched topology), at distinct x + color.
+const SHEET = readFileSync(
+  new URL('../examples/smoke/spriteTimeline__SHEET.svg', import.meta.url),
+  'utf8',
+);
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="300" height="100"></canvas>
@@ -49,7 +56,7 @@ window.__draw = (time) => {
 window.__morphId = () => tl.currentMorph;   // identity check for hot-path reuse
 window.__sample = (x, yTop) => { const b = new Uint8Array(4); gl.readPixels(x, 100-1-yTop, 1,1, gl.RGBA, gl.UNSIGNED_BYTE, b); return [b[0],b[1],b[2],b[3]]; };
 window.__glErr = () => gl.getError();
-// scan for the dominant colour + its x position
+// scan for the dominant color + its x position
 window.__scan = () => {
   let best = { x:-1, ch:'.', v:0 };
   for (let x = 0; x < 300; x += 4) {
@@ -64,70 +71,126 @@ window.__ready = true;
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(HTML);
+    return;
+  }
   let p = decodeURIComponent(req.url.split('?')[0]);
   const ct = p.endsWith('.glsl') ? 'text/plain' : 'text/javascript';
-  try { res.writeHead(200, { 'content-type': ct + '; charset=utf-8' }); res.end(readFileSync(path.join(ROOT, p))); }
-  catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    res.writeHead(200, { 'content-type': ct + '; charset=utf-8' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { const t = m.text(); if (/Mantle\]/.test(t)) console.log('  [page]', t); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  const t = m.text();
+  if (/Mantle\]/.test(t)) console.log('  [page]', t);
+});
 try {
-  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await openReady(page, `http://127.0.0.1:${port}/`, { ready: 'flag' });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 if (await page.evaluate(() => window.__hasFn)) ok('createSpriteTimeline exported');
 else fail('createSpriteTimeline not exported');
-if (await page.evaluate(() => window.__duration) === 2.0) ok('duration = 2.0 (last key - first key)');
-else fail('duration wrong: ' + await page.evaluate(() => window.__duration));
+if ((await page.evaluate(() => window.__duration)) === 2.0)
+  ok('duration = 2.0 (last key - first key)');
+else fail('duration wrong: ' + (await page.evaluate(() => window.__duration)));
 
 // (1) key times → each pose. (Hold at exact key times: lo===hi.)
-const ka = await page.evaluate(() => { window.__draw(0.0); return window.__scan(); });
-if (ka.ch === 'R') ok('t=0.0: pose A (red) at x=' + ka.x); else fail('t=0.0 not red: ' + JSON.stringify(ka));
-const kb = await page.evaluate(() => { window.__draw(1.0); return window.__scan(); });
-if (kb.ch === 'G') ok('t=1.0: pose B (green) at x=' + kb.x); else fail('t=1.0 not green: ' + JSON.stringify(kb));
-const kc = await page.evaluate(() => { window.__draw(2.0); return window.__scan(); });
-if (kc.ch === 'B') ok('t=2.0: pose C (blue) at x=' + kc.x); else fail('t=2.0 not blue: ' + JSON.stringify(kc));
+const ka = await page.evaluate(() => {
+  window.__draw(0.0);
+  return window.__scan();
+});
+if (ka.ch === 'R') ok('t=0.0: pose A (red) at x=' + ka.x);
+else fail('t=0.0 not red: ' + JSON.stringify(ka));
+const kb = await page.evaluate(() => {
+  window.__draw(1.0);
+  return window.__scan();
+});
+if (kb.ch === 'G') ok('t=1.0: pose B (green) at x=' + kb.x);
+else fail('t=1.0 not green: ' + JSON.stringify(kb));
+const kc = await page.evaluate(() => {
+  window.__draw(2.0);
+  return window.__scan();
+});
+if (kc.ch === 'B') ok('t=2.0: pose C (blue) at x=' + kc.x);
+else fail('t=2.0 not blue: ' + JSON.stringify(kc));
 
 // position ordering: A left of B left of C.
-if (ka.x < kb.x && kb.x < kc.x) ok('poses advance left→right across the timeline (' + ka.x + ' < ' + kb.x + ' < ' + kc.x + ')');
+if (ka.x < kb.x && kb.x < kc.x)
+  ok('poses advance left→right across the timeline (' + ka.x + ' < ' + kb.x + ' < ' + kc.x + ')');
 else fail('pose positions not ordered: ' + ka.x + ',' + kb.x + ',' + kc.x);
 
-// (2) between keys: t=0.5 blends A→B (rect between them, colour red↔green).
-const mid = await page.evaluate(() => { window.__draw(0.5); return window.__scan(); });
+// (2) between keys: t=0.5 blends A→B (rect between them, color red↔green).
+const mid = await page.evaluate(() => {
+  window.__draw(0.5);
+  return window.__scan();
+});
 if (mid.x > ka.x && mid.x < kb.x) ok('t=0.5: active sprite between A and B (x=' + mid.x + ')');
 else fail('t=0.5 not between A,B: ' + JSON.stringify(mid));
 
-// (3) hot-path reuse: two times in the SAME bracket → same morph object;
+// (3) hot-path reuse: two times in the same bracket → same morph object;
 // crossing a key → different morph object.
 const reuse = await page.evaluate(() => {
-  window.__draw(0.3); const m1 = window.__morphId();
-  window.__draw(0.7); const m2 = window.__morphId();   // same bracket [0,1]
-  window.__draw(1.5); const m3 = window.__morphId();   // bracket [1,2]
+  window.__draw(0.3);
+  const m1 = window.__morphId();
+  window.__draw(0.7);
+  const m2 = window.__morphId(); // same bracket [0,1]
+  window.__draw(1.5);
+  const m3 = window.__morphId(); // bracket [1,2]
   return { sameBracket: m1 === m2, crossedBracket: m2 !== m3 };
 });
-if (reuse.sameBracket) ok('same bracket reuses the morph (no rebuild on hot path)'); else fail('morph rebuilt within one bracket');
-if (reuse.crossedBracket) ok('crossing a key rebuilds the morph for the new bracket'); else fail('morph not rebuilt across keys');
+if (reuse.sameBracket) ok('same bracket reuses the morph (no rebuild on hot path)');
+else fail('morph rebuilt within one bracket');
+if (reuse.crossedBracket) ok('crossing a key rebuilds the morph for the new bracket');
+else fail('morph not rebuilt across keys');
 
 // (4) clamp before/after.
-const before = await page.evaluate(() => { window.__draw(-1); return window.__scan(); });
-if (before.ch === 'R') ok('t<0 clamps to pose A (red)'); else fail('clamp-before wrong: ' + JSON.stringify(before));
-const after = await page.evaluate(() => { window.__draw(99); return window.__scan(); });
-if (after.ch === 'B') ok('t>duration clamps to pose C (blue)'); else fail('clamp-after wrong: ' + JSON.stringify(after));
+const before = await page.evaluate(() => {
+  window.__draw(-1);
+  return window.__scan();
+});
+if (before.ch === 'R') ok('t<0 clamps to pose A (red)');
+else fail('clamp-before wrong: ' + JSON.stringify(before));
+const after = await page.evaluate(() => {
+  window.__draw(99);
+  return window.__scan();
+});
+if (after.ch === 'B') ok('t>duration clamps to pose C (blue)');
+else fail('clamp-after wrong: ' + JSON.stringify(after));
 
 // (5) dispose clean.
 const derr = await page.evaluate(() => window.__disposeAndErr());
-if (derr === 0) ok('dispose() ran clean (no GL error)'); else fail('GL error after dispose: ' + derr);
+if (derr === 0) ok('dispose() ran clean (no GL error)');
+else fail('GL error after dispose: ' + derr);
 
 await browser.close();
 server.close();

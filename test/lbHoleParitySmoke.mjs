@@ -1,20 +1,26 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // lbHoleParitySmoke.mjs — a fill WITH A HOLE (ring) must render through the LB
 // route matching Slug: the hole stays EMPTY. Guards the static↔morph unification
 // for holes — multi-contour CURVED-holed static shapes take the CDT partition path
 // (the same one the morph route uses), because the additive single-pass mesh only
-// ADDS coverage (MAX/OVER) and would fill the hole. Pre-fix this rendered ~2× ink.
+// ADDS coverage (MAX/OVER) and would fill the hole (~2× ink).
 import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 // A thick ring: outer circle + concentric inner circle (the hole), one path with
 // two subpaths (nonzero winding → annulus). Cubic-arc curves throughout.
-const SVG = readFileSync(new URL('../examples/smoke/lbHoleParity__SVG.svg', import.meta.url), 'utf8');
+const SVG = readFileSync(
+  new URL('../examples/smoke/lbHoleParity__SVG.svg', import.meta.url),
+  'utf8',
+);
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="100" height="100"></canvas>
@@ -22,7 +28,12 @@ const HTML = `<!DOCTYPE html><html><body>
 import { importSvg, createBundle, createRenderer, loadShaders, createShapeMorph } from '/src/index.js';
 const gl = document.getElementById('c').getContext('webgl2', { antialias: false, premultipliedAlpha: true, preserveDrawingBuffer: true });
 const shaders = await loadShaders(new URL('/src/shaders/', location.href).href);
-const renderer = createRenderer(gl, shaders);
+const renderer = createRenderer(gl, shaders, { staticUnified: true });
+// PRIMITIVES OFF, before any bundle exists. This ring is concentric circles, so shapeRecognize claims it as an SDF
+// annulus, and a primitive is a peer of the analytic engines that setLoopBlinnFill('off') deliberately keeps -- with it on,
+// the 'off' frame routes the annulus (loopBlinnRouteCount +1, an identical picture) and the 'on' frame never reaches the
+// CDT hole partition this smoke exists to check.
+renderer.setSdfPrimitives(false);
 renderer.setViewport(100, 100);
 const bundle = createBundle(gl, await importSvg(${JSON.stringify(SVG)}));
 renderer.prepareBundle(bundle);
@@ -48,7 +59,10 @@ const drawM = (mode) => { renderer.setLoopBlinnFill(mode); const r = renderer.de
   return { px: readAll(), routed: renderer.debugStats.loopBlinnMorphRouteCount - r }; };
 const slug = draw('off');
 const lb = draw('on');
-const morphLb = drawM('auto');
+// The morph route needs its variant linked. A frame drawn before that falls back to another engine with the same
+// picture, but not through the route this checks, so wait for the route rather than counting frames.
+let morphLb = drawM('auto');
+for (let w = 0; w < 200 && !morphLb.routed; w++) { await new Promise((r) => setTimeout(r, 10)); morphLb = drawM('auto'); }
 window.__out = { slugRouted: slug.routed, lbRouted: lb.routed, slugInk: ink(slug.px), lbInk: ink(lb.px),
   center: { slug: at(slug.px, 50, 50), lb: at(lb.px, 50, 50) }, maxDiff: diff(slug.px, lb.px),
   morphRouted: morphLb.routed, morphInk: ink(morphLb.px), morphCenter: at(morphLb.px, 50, 50), morphDiff: diff(slug.px, morphLb.px) };
@@ -57,48 +71,102 @@ window.__ready = true;
 
 const server = http.createServer((req, res) => {
   try {
-    if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML);
+      return;
+    }
     const p = decodeURIComponent(req.url.split('?')[0]);
-    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' }); res.end(readFileSync(path.join(ROOT, p)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { if (m.type() === 'error') console.error('  [console]', m.text()); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('  [console]', m.text());
+});
 try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  // 60s. The page above awaits TWO off-thread LB builds and then
+  // renders three times before it sets __ready, so this budget covers real work,
+  // not just navigation.
+  //
+  // Be careful reading a timeout here as a renderer defect. On a machine
+  // under memory pressure this smoke slows by more than an order of magnitude
+  // while light smokes stay at 1-2s, and it then fails at ANY timeout. Check
+  // free swap first.
+  await page.waitForFunction(() => window.__ready === true, { timeout: 60000, polling: 100 });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 const o = await page.evaluate(() => window.__out);
 console.log('  ', JSON.stringify(o));
-const isBg = c => c[0] > 230 && c[1] > 230 && c[2] > 230;
+const isBg = (c) => c[0] > 230 && c[1] > 230 && c[2] > 230;
 
-if (!o.slugRouted) ok('Slug used with LB off'); else fail('LB routed with fill off');
-if (o.lbRouted) ok('ring routes through LB'); else fail('ring did NOT route to LB');
-if (isBg(o.center.slug)) ok('Slug leaves the hole empty'); else fail('Slug reference filled the hole?? ' + JSON.stringify(o.center.slug));
+if (!o.slugRouted) ok('Slug used with LB off');
+else fail('LB routed with fill off');
+if (o.lbRouted) ok('ring routes through LB');
+else fail('ring did NOT route to LB');
+if (isBg(o.center.slug)) ok('Slug leaves the hole empty');
+else fail('Slug reference filled the hole?? ' + JSON.stringify(o.center.slug));
 if (isBg(o.center.lb)) ok('LB leaves the hole EMPTY (CDT partition)');
-else fail('LB FILLED the hole (center ' + JSON.stringify(o.center.lb) + ') — CDT hole-removal not engaged');
-if (Math.abs(o.lbInk - o.slugInk) <= o.slugInk * 0.05) ok('LB ink matches Slug within 5% (' + o.lbInk + ' vs ' + o.slugInk + ')');
+else
+  fail(
+    'LB FILLED the hole (center ' +
+      JSON.stringify(o.center.lb) +
+      ') — CDT hole-removal not engaged',
+  );
+if (Math.abs(o.lbInk - o.slugInk) <= o.slugInk * 0.05)
+  ok('LB ink matches Slug within 5% (' + o.lbInk + ' vs ' + o.slugInk + ')');
 else fail('LB ink != Slug (' + o.lbInk + ' vs ' + o.slugInk + ') — hole fill / overfill');
 if (o.maxDiff <= 6) ok('interior fill matches Slug (mean channel diff ' + o.maxDiff + ')');
 else fail('interior != Slug (mean channel diff ' + o.maxDiff + ')');
 // MORPH route (single-pose timeline) must also apply signed coverage to the hole.
-if (o.morphRouted) ok('ring routes through the MORPH route'); else fail('ring did NOT route to the morph route');
+if (o.morphRouted) ok('ring routes through the MORPH route');
+else fail('ring did NOT route to the morph route');
 if (isBg(o.morphCenter)) ok('MORPH route leaves the hole EMPTY (signed)');
-else fail('MORPH route FILLED the hole (center ' + JSON.stringify(o.morphCenter) + ') — multi-contour not forced signed');
-if (Math.abs(o.morphInk - o.slugInk) <= o.slugInk * 0.05) ok('morph ink matches Slug (' + o.morphInk + ' vs ' + o.slugInk + ')');
-else fail('morph ink != Slug (' + o.morphInk + ' vs ' + o.slugInk + ') — hole fill via morph route');
+else
+  fail(
+    'MORPH route FILLED the hole (center ' +
+      JSON.stringify(o.morphCenter) +
+      ') — multi-contour not forced signed',
+  );
+if (Math.abs(o.morphInk - o.slugInk) <= o.slugInk * 0.05)
+  ok('morph ink matches Slug (' + o.morphInk + ' vs ' + o.slugInk + ')');
+else
+  fail('morph ink != Slug (' + o.morphInk + ' vs ' + o.slugInk + ') — hole fill via morph route');
 
 await browser.close();
 server.close();
-if (failures) { console.error('\\n' + failures + ' failure(s)'); process.exit(1); }
-console.log('\\nlbHoleParitySmoke: a holed fill renders through the signed LB path with the hole empty');
+if (failures) {
+  console.error('\\n' + failures + ' failure(s)');
+  process.exit(1);
+}
+console.log(
+  '\\nlbHoleParitySmoke: a holed fill renders through the signed LB path with the hole empty',
+);

@@ -1,11 +1,17 @@
-// _lbImageBatch — do <image> shapes ride LB's one-draw combined route, each with its OWN
-// rect + atlas slot? Images used to force the per-shape route, like gradients did.
-// Images are ~0% of the corpus; this closes the paint-batching story (gradient + image).
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// _lbImageBatch — do <image> shapes ride LB's one-draw combined route, each with its own
+// rect + atlas slot, rather than forcing the per-shape route?
+// Images are ~0% of the corpus; with gradients, this covers paint batching (gradient + image).
 import { readFileSync } from 'fs';
-import http from 'http'; import path from 'path'; import { fileURLToPath } from 'url'; import puppeteer from 'puppeteer';
-const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const N=256;
-const HTML=`<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas><script type="module">
+import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { launchBrowser } from '../test/_launch.mjs';
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const N = 256;
+const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas><script type="module">
 import { importSvg, createBundle, createRenderer, loadShaders } from '/src/index.js';
 const gl=document.getElementById('c').getContext('webgl2',{antialias:false,premultipliedAlpha:true,preserveDrawingBuffer:true});
 const shaders=await loadShaders(new URL('/src/shaders/',location.href).href);
@@ -41,14 +47,37 @@ for(const Kn of [4,16]){
   b.dispose();
 }}catch(e){ window.__err=String(e)+'\\n'+e.stack; }
 window.__out=out; window.__ready=true;</script></body></html>`;
-const server=http.createServer((q,res)=>{try{if(q.url==='/'){res.writeHead(200,{'content-type':'text/html'});res.end(HTML);return;}const pp=decodeURIComponent(q.url.split('?')[0]);res.writeHead(200,{'content-type':pp.endsWith('.glsl')?'text/plain':'text/javascript'});res.end(readFileSync(path.join(ROOT,pp)));}catch{if(!res.headersSent)res.writeHead(404);res.end();}});
-await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const br=await puppeteer.launch({headless:'new',args:['--no-sandbox']});
-const pg=await br.newPage(); pg.on('pageerror',e=>console.error(' [err]',e.message));
-await pg.goto(`http://127.0.0.1:${server.address().port}/`,{waitUntil:'load',timeout:90000});
-await pg.waitForFunction(()=>window.__ready===true,{timeout:180000});
-const err=await pg.evaluate(()=>window.__err); const o=await pg.evaluate(()=>window.__out);
-await br.close(); server.close();
-if(err){console.error('threw:',err);process.exit(1);}
+const server = http.createServer((q, res) => {
+  try {
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
+    const pp = decodeURIComponent(q.url.split('?')[0]);
+    res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, pp)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
+const pg = await br.newPage();
+pg.on('pageerror', (e) => console.error(' [err]', e.message));
+await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
+await pg.waitForFunction(() => window.__ready === true, { timeout: 180000 });
+const err = await pg.evaluate(() => window.__err);
+const o = await pg.evaluate(() => window.__out);
+await br.close();
+server.close();
+if (err) {
+  console.error('threw:', err);
+  process.exit(1);
+}
 console.log('case         atlas mfps combined routed | lbOff  lbOn  speedup | meanDiff maxDiff');
-for(const r of o) console.log(`${r.name.padEnd(12)} ${String(r.hasAtlas).padStart(5)} ${String(r.mfps).padStart(4)} ${String(r.combined).padStart(8)} ${String(r.routed).padStart(6)} | ${r.off.toFixed(3)} ${r.on.toFixed(3)} ${(r.off/r.on).toFixed(2)}x  | ${r.meanDiff.toFixed(3).padStart(8)} ${String(r.maxDiff).padStart(7)}`);
+for (const r of o)
+  console.log(
+    `${r.name.padEnd(12)} ${String(r.hasAtlas).padStart(5)} ${String(r.mfps).padStart(4)} ${String(r.combined).padStart(8)} ${String(r.routed).padStart(6)} | ${r.off.toFixed(3)} ${r.on.toFixed(3)} ${(r.off / r.on).toFixed(2)}x  | ${r.meanDiff.toFixed(3).padStart(8)} ${String(r.maxDiff).padStart(7)}`,
+  );

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 140">
+<defs><clipPath id="band"><rect x="40" y="0" width="60" height="140"/></clipPath></defs>
+<rect x="10" y="40" width="220" height="60" fill="#3a4654" clip-path="url(#band)"/>
+<circle cx="170" cy="70" r="30" fill="#f05a28"/>
+</svg>

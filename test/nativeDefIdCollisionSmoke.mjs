@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // nativeDefIdCollisionSmoke.mjs — cross-bundle <defs> id collision on the
 // native (no-WebGL) backend.
 //
@@ -17,25 +20,30 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { openReady } from './_pageReady.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 // Mask shows the LEFT half (x 0..50). Red fill.
-const A = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">'
-  + '<mask id="m1"><rect x="0" y="0" width="50" height="100" fill="#fff"/></mask>'
-  + '<rect x="0" y="0" width="100" height="100" fill="#ff0000" mask="url(#m1)"/></svg>';
-// SAME id m1, but mask shows the RIGHT half (x 50..100). Blue fill.
-const B = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">'
-  + '<mask id="m1"><rect x="50" y="0" width="50" height="100" fill="#fff"/></mask>'
-  + '<rect x="0" y="0" width="100" height="100" fill="#0000ff" mask="url(#m1)"/></svg>';
+const A =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">' +
+  '<mask id="m1"><rect x="0" y="0" width="50" height="100" fill="#fff"/></mask>' +
+  '<rect x="0" y="0" width="100" height="100" fill="#ff0000" mask="url(&quot;#m1&quot;)"/></svg>';
+// same id m1, but mask shows the RIGHT half (x 50..100). Blue fill.
+const B =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">' +
+  '<mask id="m1"><rect x="50" y="0" width="50" height="100" fill="#fff"/></mask>' +
+  '<rect x="0" y="0" width="100" height="100" fill="#0000ff" style="mask:url(&apos;#m1&apos;)"/></svg>';
 
 const HTML = `<!DOCTYPE html><html><body>
 <div id="host"></div>
 <canvas id="cv" width="100" height="100"></canvas>
 <script type="module">
 import { importSvg, createNativeScene } from '/src/index.js';
+import { nativeResourcePixels } from '/test/_nativeResources.mjs';
+window.__generatedResources = nativeResourcePixels;
 const a = await importSvg(${JSON.stringify(A)}, { retainSource: true });
 const b = await importSvg(${JSON.stringify(B)}, { retainSource: true });
 const scene = createNativeScene(document.getElementById('host'), { coordinateSpace: 'viewport' });
@@ -67,40 +75,74 @@ window.__ready = true;
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(HTML);
+    return;
+  }
   let p = decodeURIComponent(req.url.split('?')[0]);
-  try { const x = readFileSync(path.join(ROOT, p)); res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' }); res.end(x); }
-  catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    const x = readFileSync(path.join(ROOT, p));
+    res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' });
+    res.end(x);
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
-const isRed  = (px) => px[0] > 150 && px[1] < 90 && px[2] < 90;
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
+const isRed = (px) => px[0] > 150 && px[1] < 90 && px[2] < 90;
 const isBlue = (px) => px[2] > 150 && px[0] < 90 && px[1] < 90;
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
 try {
-  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await openReady(page, `http://127.0.0.1:${port}/`, { ready: 'flag' });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 const r = await page.evaluate(() => window.__run());
 // Two masks, UNIQUE ids (namespaced), not one shared "m1".
 if (r.maskIds.length === 2 && new Set(r.maskIds).size === 2)
   ok('two bundles → two UNIQUE mask ids (' + JSON.stringify(r.maskIds) + '), no collision');
 else fail('mask ids collided/missing: ' + JSON.stringify(r.maskIds));
-// Each bundle masked by its OWN def: A shows left-red, B shows right-blue.
+// Each bundle masked by its own def: A shows left-red, B shows right-blue.
 if (isRed(r.left)) ok('left half is RED — bundle A masked by ITS m1 (left-half) (' + r.left + ')');
 else fail('left not red — A masked by wrong def: ' + r.left);
-if (isBlue(r.right)) ok('right half is BLUE — bundle B masked by ITS m1 (right-half) (' + r.right + ')');
+if (isBlue(r.right))
+  ok('right half is BLUE — bundle B masked by ITS m1 (right-half) (' + r.right + ')');
 else fail('right not blue — B bound the FIRST m1 (collision): ' + r.right);
+
+const generated = await page.evaluate(() => window.__generatedResources());
+for (const row of generated) {
+  if (!row.duplicates.length && row.wrongPoints === 0)
+    ok('generated resources ' + row.mode + ': unique ids and exact authored pixels');
+  else fail('generated resources ' + JSON.stringify(row));
+}
 
 await browser.close();
 server.close();
-if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
+if (failures) {
+  console.error(`\n${failures} failure(s)`);
+  process.exit(1);
+}
 console.log('\nnativeDefIdCollisionSmoke: all checks passed');

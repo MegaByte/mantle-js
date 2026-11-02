@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Verifies feDiffuseLighting / feSpecularLighting honor world scale.
 // These derive a surface normal from the input alpha treated as a
 // height field, sampling the gradient over device texels; without
@@ -17,8 +20,11 @@
 import { feLightingDispatch } from '../src/filterGraph/primitives/lighting.js';
 
 let failures = 0;
-const ok   = (m) => console.log('ok', m);
-const fail = (m) => { failures++; console.error('FAIL', m); };
+const ok = (m) => console.log('ok', m);
+const fail = (m) => {
+  failures++;
+  console.error('FAIL', m);
+};
 
 // Minimal recording fake-GL: captures uniform2f(loc, x, y) by location.
 function makeGl() {
@@ -26,23 +32,49 @@ function makeGl() {
   const noop = () => {};
   return {
     _u2f: u2f,
-    useProgram: noop, activeTexture: noop, bindTexture: noop,
-    bindVertexArray: noop, drawArrays: noop, bindFramebuffer: noop,
-    viewport: noop, disable: noop, enable: noop,
-    clearColor: noop, clear: noop,
-    uniform1i: noop, uniform1f: noop, uniform4f: noop, uniform3f: noop,
-    uniform2f: (loc, x, y) => { u2f.set(loc, [x, y]); },
-    FRAMEBUFFER: 0, DEPTH_TEST: 0, STENCIL_TEST: 0, BLEND: 0,
-    TEXTURE0: 0, TEXTURE_2D: 0, COLOR_BUFFER_BIT: 0, TRIANGLE_STRIP: 0,
+    useProgram: noop,
+    activeTexture: noop,
+    bindTexture: noop,
+    bindVertexArray: noop,
+    drawArrays: noop,
+    bindFramebuffer: noop,
+    viewport: noop,
+    disable: noop,
+    enable: noop,
+    clearColor: noop,
+    clear: noop,
+    uniform1i: noop,
+    uniform1f: noop,
+    uniform4f: noop,
+    uniform3f: noop,
+    uniform2f: (loc, x, y) => {
+      u2f.set(loc, [x, y]);
+    },
+    FRAMEBUFFER: 0,
+    DEPTH_TEST: 0,
+    STENCIL_TEST: 0,
+    BLEND: 0,
+    TEXTURE0: 0,
+    TEXTURE_2D: 0,
+    COLOR_BUFFER_BIT: 0,
+    TRIANGLE_STRIP: 0,
   };
 }
 
 // Uniform-location sentinels (any unique objects/strings work).
 const U = {
-  uIn: 'uIn', uTexel: 'uTexel', uWorldScale: 'uWorldScale',
-  uSurfaceScale: 'uSurfaceScale', uK: 'uK', uExponent: 'uExponent',
-  uLightColor: 'uLightColor', uMode: 'uMode', uLightType: 'uLightType',
-  uLightPos: 'uLightPos', uSpotAt: 'uSpotAt', uSpotExp: 'uSpotExp',
+  uIn: 'uIn',
+  uTexel: 'uTexel',
+  uWorldScale: 'uWorldScale',
+  uSurfaceScale: 'uSurfaceScale',
+  uK: 'uK',
+  uExponent: 'uExponent',
+  uLightColor: 'uLightColor',
+  uMode: 'uMode',
+  uLightType: 'uLightType',
+  uLightPos: 'uLightPos',
+  uSpotAt: 'uSpotAt',
+  uSpotExp: 'uSpotExp',
   uSpotCosCone: 'uSpotCosCone',
 };
 
@@ -50,16 +82,18 @@ function runDispatch(worldScale) {
   const gl = makeGl();
   const ctx = {
     gl,
-    pool: { get: () => ({ tex: {}, fbo: {} }) },
-    feLightingProg: {},            // truthy → dispatch runs the shader path
+    // `size` is required: filter RTs gained canvas-space rect addressing
+    // (svgFilterShared.rectOfRT), and an RT without one throws there.
+    pool: { get: () => ({ tex: {}, fbo: {}, size: [16, 16] }) },
+    feLightingProg: {}, // truthy → dispatch runs the shader path
     feLightingU: U,
     coverVao: {},
     sourceRT: { tex: {}, fbo: {}, size: [16, 16] },
   };
   if (worldScale !== undefined) ctx.worldScale = worldScale;
-  const node   = { type: 'feDiffuseLighting', params: { surfaceScale: 2 } };
+  const node = { type: 'feDiffuseLighting', params: { surfaceScale: 2 } };
   const inputs = [{ kind: 'rt', idx: 0 }];
-  const outRT  = { fbo: {}, size: [16, 16] };
+  const outRT = { fbo: {}, size: [16, 16] };
   feLightingDispatch(node, inputs, outRT, ctx);
   return gl._u2f.get('uWorldScale');
 }
@@ -70,7 +104,9 @@ function runDispatch(worldScale) {
   if (ws && Math.abs(ws[0] - 0.5) < 1e-9 && Math.abs(ws[1] - 0.5) < 1e-9)
     ok(`T1 worldScale [0.5,0.5] reaches uWorldScale (${ws[0]}, ${ws[1]})`);
   else
-    fail(`T1 uWorldScale = ${ws ? `(${ws[0]}, ${ws[1]})` : 'UNSET'} (expected 0.5,0.5) — plumbing dropped`);
+    fail(
+      `T1 uWorldScale = ${ws ? `(${ws[0]}, ${ws[1]})` : 'UNSET'} (expected 0.5,0.5) — plumbing dropped`,
+    );
 }
 
 // ---- T2: anisotropic world scale preserved per-axis ---------------
@@ -78,8 +114,7 @@ function runDispatch(worldScale) {
   const ws = runDispatch([2, 0.25]);
   if (ws && Math.abs(ws[0] - 2) < 1e-9 && Math.abs(ws[1] - 0.25) < 1e-9)
     ok(`T2 anisotropic worldScale preserved per-axis (${ws[0]}, ${ws[1]})`);
-  else
-    fail(`T2 uWorldScale = ${ws ? `(${ws[0]}, ${ws[1]})` : 'UNSET'} (expected 2, 0.25)`);
+  else fail(`T2 uWorldScale = ${ws ? `(${ws[0]}, ${ws[1]})` : 'UNSET'} (expected 2, 0.25)`);
 }
 
 // ---- T3: missing ctx.worldScale defaults to identity [1,1] --------
@@ -89,10 +124,11 @@ function runDispatch(worldScale) {
   const ws = runDispatch(undefined);
   if (ws && ws[0] === 1 && ws[1] === 1)
     ok('T3 absent worldScale defaults to identity [1,1] (no accidental flatten)');
-  else
-    fail(`T3 uWorldScale = ${ws ? `(${ws[0]}, ${ws[1]})` : 'UNSET'} (expected 1,1 default)`);
+  else fail(`T3 uWorldScale = ${ws ? `(${ws[0]}, ${ws[1]})` : 'UNSET'} (expected 1,1 default)`);
 }
 
 console.log();
-console.log(failures === 0 ? 'FE-LIGHTING-WORLD-SCALE PASS' : `FE-LIGHTING-WORLD-SCALE FAIL (${failures})`);
+console.log(
+  failures === 0 ? 'FE-LIGHTING-WORLD-SCALE PASS' : `FE-LIGHTING-WORLD-SCALE FAIL (${failures})`,
+);
 process.exit(failures === 0 ? 0 : 1);

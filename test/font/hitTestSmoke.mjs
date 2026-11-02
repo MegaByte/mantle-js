@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // hitTestSmoke.mjs — Bbox hit test against a hand-crafted bundle.
 // No font / sfnt needed; we build the meta array directly and
 // inject it into a bundle-shaped dict.
@@ -8,8 +11,11 @@ import { DOMParser } from '@xmldom/xmldom';
 if (typeof globalThis.DOMParser === 'undefined') globalThis.DOMParser = DOMParser;
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // Build a bundle dict with N shapes. Each shape:
 //   bbox = (xmin, ymin, xmax, ymax) at slot 0..3
@@ -55,8 +61,8 @@ function makeBundle(shapes) {
 // Shape 1 (front) = small blue rect 12..18 × 12..18 (entirely inside 0)
 {
   const b = makeBundle([
-    { bbox: [0,  10, 30, 20], fill: [1,0,0,1], id: 'red'  },
-    { bbox: [12, 12, 18, 18], fill: [0,0,1,1], id: 'blue' },
+    { bbox: [0, 10, 30, 20], fill: [1, 0, 0, 1], id: 'red' },
+    { bbox: [12, 12, 18, 18], fill: [0, 0, 1, 1], id: 'blue' },
   ]);
   if (fillHitShape(b, 15, 15) !== 1) fail('T2 overlap hits front (blue) shape 1');
   else if (fillHitShape(b, 5, 15) !== 0) fail('T2 outside-blue-inside-red hits 0');
@@ -68,9 +74,9 @@ function makeBundle(shapes) {
 // T3: fillHits returns all shapes in front-to-back order.
 {
   const b = makeBundle([
-    { bbox: [0, 0, 100, 100] },  // big background
-    { bbox: [40, 40, 60, 60] },  // mid layer
-    { bbox: [45, 45, 55, 55] },  // tiny top
+    { bbox: [0, 0, 100, 100] }, // big background
+    { bbox: [40, 40, 60, 60] }, // mid layer
+    { bbox: [45, 45, 55, 55] }, // tiny top
   ]);
   const hits = fillHits(b, 50, 50);
   if (hits.length !== 3) fail(`T3 expected 3 hits, got ${hits.length}`);
@@ -87,8 +93,8 @@ function makeBundle(shapes) {
 // T4: minAlpha skips low-α shapes.
 {
   const b = makeBundle([
-    { bbox: [0, 0, 100, 100], fill: [1, 0, 0, 0.2] },  // 20% red
-    { bbox: [50, 50, 60, 60], fill: [0, 1, 0, 1.0] },  // opaque green
+    { bbox: [0, 0, 100, 100], fill: [1, 0, 0, 0.2] }, // 20% red
+    { bbox: [50, 50, 60, 60], fill: [0, 1, 0, 1.0] }, // opaque green
   ]);
   // At (10, 10) only the 20% red covers it.
   if (fillHitShape(b, 10, 10, HitMode.Auto, 0.5) !== -1)
@@ -96,8 +102,7 @@ function makeBundle(shapes) {
   // At (55, 55) the green covers it through the red.
   if (fillHitShape(b, 55, 55, HitMode.Auto, 0.5) !== 1)
     fail('T4 minAlpha=0.5 should still hit opaque green at (55,55)');
-  if (fillHitShape(b, 10, 10, HitMode.Auto, 0.0) !== 0)
-    fail('T4 minAlpha=0 should hit 20% red');
+  if (fillHitShape(b, 10, 10, HitMode.Auto, 0.0) !== 0) fail('T4 minAlpha=0 should hit 20% red');
   ok('T4 minAlpha gates low-α shapes');
 }
 
@@ -143,10 +148,10 @@ function makeBundle(shapes) {
   // hitTest's metaView() handles the 32-byte meta header. The sections
   // output carries no shapeIds (a createBundle/runtime concern), so
   // hits are tested by INDEX here.
-  const leftIdx  = fillHitShape(sections, 10, 50);
+  const leftIdx = fillHitShape(sections, 10, 50);
   const rightIdx = fillHitShape(sections, 80, 50);
-  const midIdx   = fillHitShape(sections, 50, 50);  // in the gap
-  if (leftIdx !== 0)  fail(`T8 left click → idx ${leftIdx}`);
+  const midIdx = fillHitShape(sections, 50, 50); // in the gap
+  if (leftIdx !== 0) fail(`T8 left click → idx ${leftIdx}`);
   else if (rightIdx !== 1) fail(`T8 right click → idx ${rightIdx}`);
   else if (midIdx !== -1) fail(`T8 gap click → idx ${midIdx} (expected -1)`);
   else ok(`T8 importSvg round-trip: left→0, right→1, gap→miss`);

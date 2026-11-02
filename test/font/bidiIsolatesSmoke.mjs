@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Verifies UAX #9 isolate consumption.
 //
 // Isolates (LRI U+2066, RLI U+2067, FSI U+2068, terminated by PDI
@@ -7,10 +10,13 @@
 import { BaseDirection, resolveLevels } from '../../src/font/bidi.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
-const cps = (s) => Array.from(s).map(c => c.codePointAt(0));
+const cps = (s) => Array.from(s).map((c) => c.codePointAt(0));
 
 // ----- T1: bare paragraph with no isolates - same as before ---------
 {
@@ -24,7 +30,8 @@ const cps = (s) => Array.from(s).map(c => c.codePointAt(0));
 // ----- T2: RLI...PDI isolates Hebrew so EN inside stays Arabic-like
 // "abc ⁧ 1 הברית ⁩ def" — RLI sets isolation to RTL.
 {
-  const RLI = '⁧', PDI = '⁩';
+  const RLI = '⁧',
+    PDI = '⁩';
   const text = `abc ${RLI}1 הברית${PDI} def`;
   const levels = resolveLevels(cps(text), BaseDirection.Ltr);
   // Outer 'abc' = 0, 'def' = 0, RLI itself = 0.
@@ -44,7 +51,10 @@ const cps = (s) => Array.from(s).map(c => c.codePointAt(0));
     let hebLvl = -1;
     for (let i = hebStart; i < pdiIdx; i++) {
       const cp = codepoints[i];
-      if (cp >= 0x0590 && cp <= 0x05FF) { hebLvl = levels[i]; break; }
+      if (cp >= 0x0590 && cp <= 0x05ff) {
+        hebLvl = levels[i];
+        break;
+      }
     }
     if (hebLvl !== 1) fail(`T2 Hebrew inside RLI expected level 1, got ${hebLvl}`);
     else ok('T2 RLI...PDI isolates Hebrew run as level 1 inside LTR paragraph');
@@ -54,7 +64,8 @@ const cps = (s) => Array.from(s).map(c => c.codePointAt(0));
 // ----- T3: LRI...PDI isolates English inside RTL paragraph ----------
 // Hebrew paragraph wrapping an LTR isolate: outer is RTL (1), inner LTR (2).
 {
-  const LRI = '⁦', PDI = '⁩';
+  const LRI = '⁦',
+    PDI = '⁩';
   const text = `הברית ${LRI}abc${PDI} שלום`;
   const levels = resolveLevels(cps(text), BaseDirection.Rtl);
   const codepoints = cps(text);
@@ -73,7 +84,8 @@ const cps = (s) => Array.from(s).map(c => c.codePointAt(0));
 // ----- T4: FSI auto-detects base direction --------------------------
 // FSI with first strong = Hebrew → behaves like RLI.
 {
-  const FSI = '⁨', PDI = '⁩';
+  const FSI = '⁨',
+    PDI = '⁩';
   const text = `abc ${FSI}הברית${PDI} def`;
   const levels = resolveLevels(cps(text), BaseDirection.Ltr);
   const codepoints = cps(text);
@@ -83,7 +95,10 @@ const cps = (s) => Array.from(s).map(c => c.codePointAt(0));
   let hebLvl = -1;
   for (let i = fsiIdx + 1; i < pdiIdx; i++) {
     const cp = codepoints[i];
-    if (cp >= 0x0590 && cp <= 0x05FF) { hebLvl = levels[i]; break; }
+    if (cp >= 0x0590 && cp <= 0x05ff) {
+      hebLvl = levels[i];
+      break;
+    }
   }
   if (hebLvl !== 1) fail(`T4 Hebrew inside FSI (detected RTL) expected level 1, got ${hebLvl}`);
   else ok('T4 FSI auto-detects RTL when first strong is Hebrew');
@@ -102,7 +117,9 @@ const cps = (s) => Array.from(s).map(c => c.codePointAt(0));
 // Inner RLI inside outer LRI in RTL paragraph.
 // "הבר ⁦ abc ⁧ def ⁩ ghi ⁩ שלום"
 {
-  const LRI = '⁦', RLI = '⁧', PDI = '⁩';
+  const LRI = '⁦',
+    RLI = '⁧',
+    PDI = '⁩';
   const text = `הבר${LRI}abc${RLI}def${PDI}ghi${PDI} שלום`;
   const levels = resolveLevels(cps(text), BaseDirection.Rtl);
   if (levels.length !== text.length) fail('T6 nested isolates crashed');

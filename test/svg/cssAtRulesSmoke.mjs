@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // cssAtRulesSmoke.mjs — verify @media / @supports parsing.
 //
 // The parser balances braces, evaluates @media/@supports conditions
@@ -7,11 +10,14 @@
 import { parseCss } from '../../src/svg/stylesheet.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL', msg); failures++; };
-const ok   = (msg) => console.log('ok', msg);
+const fail = (msg) => {
+  console.error('FAIL', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok', msg);
 
 function ruleDecls(rules) {
-  return rules.map(r => r.decls);
+  return rules.map((r) => r.decls);
 }
 
 // ----- T1: @media screen applies (we render to screen) -------------
@@ -27,7 +33,8 @@ function ruleDecls(rules) {
   const rules = [];
   parseCss('@media print { rect { fill: red; } } circle { fill: blue; }', rules);
   if (rules.length !== 1) fail(`T2 expected 1 rule (only circle), got ${rules.length}`);
-  else if (rules[0].decls.fill !== 'blue') fail(`T2 unexpected decl: ${JSON.stringify(rules[0].decls)}`);
+  else if (rules[0].decls.fill !== 'blue')
+    fail(`T2 unexpected decl: ${JSON.stringify(rules[0].decls)}`);
   else ok('T2 @media print correctly skipped');
 }
 
@@ -43,7 +50,8 @@ function ruleDecls(rules) {
 {
   const rules = [];
   parseCss('@media (max-width: 600px) { rect { fill: red; } } circle { fill: blue; }', rules);
-  if (rules.length !== 1) fail(`T4 feature query should be conservatively skipped, got ${rules.length}`);
+  if (rules.length !== 1)
+    fail(`T4 feature query should be conservatively skipped, got ${rules.length}`);
   else ok('T4 @media (max-width) conservatively skipped');
 }
 
@@ -99,13 +107,17 @@ function ruleDecls(rules) {
 // ----- T11: @font-face / @keyframes / @import → silently skipped --
 {
   const rules = [];
-  parseCss(`
+  parseCss(
+    `
     @font-face { font-family: foo; src: url(foo.ttf); }
     @keyframes spin { from {transform:rotate(0)} to {transform:rotate(360deg)} }
     @import url("ext.css");
     rect { fill: red; }
-  `, rules);
-  if (rules.length !== 1) fail(`T11 non-applicable at-rules should be skipped, got ${rules.length}`);
+  `,
+    rules,
+  );
+  if (rules.length !== 1)
+    fail(`T11 non-applicable at-rules should be skipped, got ${rules.length}`);
   else ok('T11 @font-face / @keyframes / @import safely skipped');
 }
 
@@ -120,13 +132,41 @@ function ruleDecls(rules) {
 // ----- T13: rules outside @media still parse -----------------------
 {
   const rules = [];
-  parseCss(`
+  parseCss(
+    `
     rect { fill: red; }
     @media print { circle { fill: green; } }
     path { stroke: blue; }
-  `, rules);
+  `,
+    rules,
+  );
   if (rules.length !== 2) fail(`T13 expected 2 (rect+path, no circle), got ${rules.length}`);
   else ok('T13 rules outside @media unaffected');
+}
+
+// ----- T14: @supports reports the color-space control the renderer HAS ----
+// KNOWN_CSS_PROPS is an honesty list: it reports what style lookup actually consults. color-interpolation-filters is read (the filter
+// graph works in linearRGB by default and honors the property), so it is claimed; color-interpolation (gradients, masks) is unread, so
+// claiming it would send an author down a branch this renderer ignores instead of letting their fallback run.
+{
+  const yes = [],
+    no = [];
+  parseCss('@supports (color-interpolation-filters: linearRGB) { rect { fill: red; } }', yes);
+  parseCss('@supports (color-interpolation: linearRGB) { rect { fill: red; } }', no);
+  if (yes.length !== 1)
+    fail(
+      'T14 @supports (color-interpolation-filters) should claim support: the filter graph reads it',
+    );
+  if (no.length !== 0)
+    fail('T14 @supports (color-interpolation) claimed support — nothing reads that property');
+  // Guard the guard: if the whole @supports path were broken every query would answer false.
+  const ctl = [];
+  parseCss('@supports (fill: red) { rect { fill: red; } }', ctl);
+  if (ctl.length !== 1) fail('T14 control failed — @supports rejects everything, above is vacuous');
+  else if (failures === 0)
+    ok(
+      'T14 @supports claims color-interpolation-filters and not color-interpolation (control passes)',
+    );
 }
 
 if (failures > 0) {

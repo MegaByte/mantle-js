@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Minimal sfnt with an OpenType 'SVG ' table so SVG-in-OT tests need
 // no external color-font binary.
 //
@@ -5,67 +8,136 @@
 // gid 1 carries a circle-shaped SVG document. The cmap maps a chosen
 // codepoint (default 'A') to gid 1.
 
-const TAG = (s) => (s.charCodeAt(0) << 24) | (s.charCodeAt(1) << 16) | (s.charCodeAt(2) << 8) | s.charCodeAt(3);
+const TAG = (s) =>
+  (s.charCodeAt(0) << 24) | (s.charCodeAt(1) << 16) | (s.charCodeAt(2) << 8) | s.charCodeAt(3);
 
 class Be {
-  constructor() { this.bytes = []; }
-  u8(n)  { this.bytes.push(n & 0xff); }
-  u16(n) { this.bytes.push((n >> 8) & 0xff, n & 0xff); }
-  s16(n) { this.u16(n & 0xffff); }
-  u32(n) { this.bytes.push((n >>> 24) & 0xff, (n >>> 16) & 0xff,
-                           (n >>>  8) & 0xff,  n         & 0xff); }
-  fixed(major, minor) { this.u16(major); this.u16(minor); }
-  longDateTime() { this.u32(0); this.u32(0); }
-  raw(arr) { for (const b of arr) this.bytes.push(b & 0xff); }
-  pad4()   { while (this.bytes.length & 3) this.bytes.push(0); }
-  get length() { return this.bytes.length; }
-  toUint8() { return new Uint8Array(this.bytes); }
+  constructor() {
+    this.bytes = [];
+  }
+  u8(n) {
+    this.bytes.push(n & 0xff);
+  }
+  u16(n) {
+    this.bytes.push((n >> 8) & 0xff, n & 0xff);
+  }
+  s16(n) {
+    this.u16(n & 0xffff);
+  }
+  u32(n) {
+    this.bytes.push((n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff);
+  }
+  fixed(major, minor) {
+    this.u16(major);
+    this.u16(minor);
+  }
+  longDateTime() {
+    this.u32(0);
+    this.u32(0);
+  }
+  raw(arr) {
+    for (const b of arr) this.bytes.push(b & 0xff);
+  }
+  pad4() {
+    while (this.bytes.length & 3) this.bytes.push(0);
+  }
+  get length() {
+    return this.bytes.length;
+  }
+  toUint8() {
+    return new Uint8Array(this.bytes);
+  }
 }
 
 function buildHead(unitsPerEm) {
   const b = new Be();
-  b.fixed(1, 0); b.fixed(1, 0); b.u32(0); b.u32(0x5F0F3CF5);
-  b.u16(0); b.u16(unitsPerEm); b.longDateTime(); b.longDateTime();
-  b.s16(0); b.s16(-200); b.s16(unitsPerEm); b.s16(unitsPerEm);
-  b.u16(0); b.u16(8); b.s16(2); b.s16(0); b.s16(0);
+  b.fixed(1, 0);
+  b.fixed(1, 0);
+  b.u32(0);
+  b.u32(0x5f0f3cf5);
+  b.u16(0);
+  b.u16(unitsPerEm);
+  b.longDateTime();
+  b.longDateTime();
+  b.s16(0);
+  b.s16(-200);
+  b.s16(unitsPerEm);
+  b.s16(unitsPerEm);
+  b.u16(0);
+  b.u16(8);
+  b.s16(2);
+  b.s16(0);
+  b.s16(0);
   return b.toUint8();
 }
 function buildHhea(unitsPerEm, numHMetrics) {
   const b = new Be();
-  b.fixed(1, 0); b.s16(unitsPerEm); b.s16(-200); b.s16(0);
-  b.u16(unitsPerEm); b.s16(0); b.s16(0); b.s16(unitsPerEm);
-  b.s16(1); b.s16(0); b.s16(0); b.s16(0); b.s16(0); b.s16(0); b.s16(0); b.s16(0);
+  b.fixed(1, 0);
+  b.s16(unitsPerEm);
+  b.s16(-200);
+  b.s16(0);
+  b.u16(unitsPerEm);
+  b.s16(0);
+  b.s16(0);
+  b.s16(unitsPerEm);
+  b.s16(1);
+  b.s16(0);
+  b.s16(0);
+  b.s16(0);
+  b.s16(0);
+  b.s16(0);
+  b.s16(0);
+  b.s16(0);
   b.u16(numHMetrics);
   return b.toUint8();
 }
 function buildHmtx(adv, lsb) {
   const b = new Be();
-  for (let i = 0; i < adv.length; i++) { b.u16(adv[i]); b.s16(lsb[i] || 0); }
+  for (let i = 0; i < adv.length; i++) {
+    b.u16(adv[i]);
+    b.s16(lsb[i] || 0);
+  }
   return b.toUint8();
 }
 function buildMaxp(n) {
   const b = new Be();
-  b.fixed(1, 0); b.u16(n);
+  b.fixed(1, 0);
+  b.u16(n);
   for (let i = 0; i < 13; i++) b.u16(0);
   return b.toUint8();
 }
 function buildCmap(codepoint) {
   const sub = new Be();
   const length = 16 + 8 * 2;
-  sub.u16(4); sub.u16(length); sub.u16(0); sub.u16(4); sub.u16(4); sub.u16(1); sub.u16(0);
-  sub.u16(codepoint); sub.u16(0xFFFF);
+  sub.u16(4);
+  sub.u16(length);
   sub.u16(0);
-  sub.u16(codepoint); sub.u16(0xFFFF);
-  sub.s16((1 - codepoint) & 0xffff); sub.s16(1);
-  sub.u16(0); sub.u16(0);
+  sub.u16(4);
+  sub.u16(4);
+  sub.u16(1);
+  sub.u16(0);
+  sub.u16(codepoint);
+  sub.u16(0xffff);
+  sub.u16(0);
+  sub.u16(codepoint);
+  sub.u16(0xffff);
+  sub.s16((1 - codepoint) & 0xffff);
+  sub.s16(1);
+  sub.u16(0);
+  sub.u16(0);
   const b = new Be();
-  b.u16(0); b.u16(1); b.u16(3); b.u16(1); b.u32(12);
+  b.u16(0);
+  b.u16(1);
+  b.u16(3);
+  b.u16(1);
+  b.u32(12);
   b.raw(Array.from(sub.toUint8()));
   return b.toUint8();
 }
 function buildGlyfAndLoca() {
-  // gid 0 + gid 1 are empty outlines (the SVG table carries the visuals).
-  const offs = [0, 0];
+  // gid 0 + gid 1 are empty outlines (the SVG table carries the visuals);
+  // loca holds numGlyphs + 1 offsets.
+  const offs = [0, 0, 0];
   const glyf = new Uint8Array(0);
   const loca = new Be();
   for (const o of offs) loca.u16(o >> 1);
@@ -73,8 +145,15 @@ function buildGlyfAndLoca() {
 }
 function buildPost() {
   const b = new Be();
-  b.fixed(3, 0); b.u32(0); b.s16(-100); b.s16(50); b.u32(1);
-  b.u32(0); b.u32(0); b.u32(0); b.u32(0);
+  b.fixed(3, 0);
+  b.u32(0);
+  b.s16(-100);
+  b.s16(50);
+  b.u32(1);
+  b.u32(0);
+  b.u32(0);
+  b.u32(0);
+  b.u32(0);
   return b.toUint8();
 }
 
@@ -85,15 +164,16 @@ function buildPost() {
 function buildSvgTable(svgText) {
   const docBytes = new TextEncoder().encode(svgText);
   const b = new Be();
-  b.u16(0);                  // version
+  b.u16(0); // version
   const listOffPos = b.length;
-  b.u32(0);                  // svgDocumentListOffset
-  b.u32(0);                  // reserved
+  b.u32(0); // svgDocumentListOffset
+  b.u32(0); // reserved
   const listStart = b.length;
-  b.u16(1);                  // numEntries
+  b.u16(1); // numEntries
   const recStart = b.length;
-  b.u16(1); b.u16(1);        // startGid, endGid
-  b.u32(0);                  // docOff (patched)
+  b.u16(1);
+  b.u16(1); // startGid, endGid
+  b.u32(0); // docOff (patched)
   b.u32(docBytes.byteLength);
   const docOff = b.length - listStart;
   b.raw(Array.from(docBytes));
@@ -122,8 +202,12 @@ function tableDir(records) {
   const dv = new DataView(out.buffer);
   dv.setUint32(0, 0x00010000, false);
   dv.setUint16(4, n, false);
-  let pow = 1, log = 0;
-  while ((pow << 1) <= n) { pow <<= 1; log++; }
+  let pow = 1,
+    log = 0;
+  while (pow << 1 <= n) {
+    pow <<= 1;
+    log++;
+  }
   dv.setUint16(6, pow * 16, false);
   dv.setUint16(8, log, false);
   dv.setUint16(10, n * 16 - pow * 16, false);
@@ -141,15 +225,11 @@ function tableDir(records) {
 
 /// Returns a Uint8Array containing the synthesized SVG-in-OT sfnt.
 /// gid 1 renders the supplied svgText (default = a red circle, 1000em).
-export function buildSvgInOtTestFont({
-  codepoint = 0x41,
-  unitsPerEm = 1000,
-  svgText = null,
-} = {}) {
+export function buildSvgInOtTestFont({ codepoint = 0x41, unitsPerEm = 1000, svgText = null } = {}) {
   const text = svgText ?? defaultGlyphSvg(unitsPerEm);
   const numGlyphs = 2;
   const advances = [unitsPerEm, unitsPerEm];
-  const lsbs     = [0, 0];
+  const lsbs = [0, 0];
   const { glyf, loca } = buildGlyfAndLoca();
   const records = [
     { tag: TAG('head'), bytes: buildHead(unitsPerEm) },
@@ -173,7 +253,9 @@ export function buildSvgInOtTestFont({
 // flip Y back into Mantle's +Y down convention.
 function defaultGlyphSvg(upem) {
   // Use <path> instead of <circle> so the path parser is exercised.
-  const cx = upem / 2, cy = upem / 2, r = upem / 4;
+  const cx = upem / 2,
+    cy = upem / 2,
+    r = upem / 4;
   // Cubic arcs approximating the circle (enough to verify the pipeline).
   const k = 0.5522847498; // unit-circle Bezier handle length
   const h = r * k;

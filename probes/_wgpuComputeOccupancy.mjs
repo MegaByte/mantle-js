@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // _wgpuComputeOccupancy — can the occupancy-grid build (occupancy.worker.js) move to a
 // WebGPU compute shader for a real win?
 //
@@ -28,11 +31,12 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const HTML = String.raw`<!DOCTYPE html><html><body><canvas id="c" width="8" height="8"></canvas>
+const HTML =
+  String.raw`<!DOCTYPE html><html><body><canvas id="c" width="8" height="8"></canvas>
 <script type="module">
 import { buildOccupancyGrid } from '/src/svg/occupancy.js';
 import { mkQuad } from '/src/svg/segment.js';
@@ -81,7 +85,9 @@ function prep(segs, bbox, G) {
 //   boundK    — one workgroup per seg; each chord atomicOr's the cells its bbox spans.
 //   cellK     — one thread per cell; 3x3 erosion gate, then the ray-crossing walk over every
 //               chord. THIS is the O(G²·segs) kernel the whole hypothesis rests on.
-const WGSL = ` + '`' + `
+const WGSL = ` +
+  '`' +
+  `
 struct P {
   x0: f32, y0: f32, cw: f32, ch: f32,
   G: u32, nSeg: u32, nPts: u32, evenOdd: u32,
@@ -280,7 +286,9 @@ fn cellB(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (J0.evenOdd == 1u) { inside = (cross & 1) == 1; } else { inside = wind != 0; }
   if (inside) { bits[gid.x] = 1u; }
 }
-` + '`' + `;
+` +
+  '`' +
+  `;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -513,35 +521,69 @@ catch (e) { window.__err = e.message + String.fromCharCode(10) + (e.stack || '')
 // COOP/COEP → crossOriginIsolated → performance.now() at ~5µs instead of the 100µs clamp.
 // Without this every number below quantizes to 100µs and the whole probe is junk.
 const server = http.createServer((q, res) => {
-  const H = { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' };
+  const H = {
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Cross-Origin-Embedder-Policy': 'require-corp',
+  };
   try {
-    if (q.url === '/') { res.writeHead(200, { ...H, 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+    if (q.url === '/') {
+      res.writeHead(200, { ...H, 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML);
+      return;
+    }
     const pp = decodeURIComponent(q.url.split('?')[0]);
-    res.writeHead(200, { ...H, 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.writeHead(200, {
+      ...H,
+      'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript',
+    });
     res.end(readFileSync(path.join(ROOT, pp)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 
 // navigator.gpu is absent on about:blank — the page MUST be served over http://127.0.0.1.
-const browser = await puppeteer.launch({ headless: false, args: ['--no-sandbox', '--use-angle=metal', '--enable-unsafe-webgpu'] });
+// HEADLESS EVEN ON THE GPU. Headless Chrome reaches the real GPU: ANGLE (Apple, ANGLE Metal
+// Renderer) reports and TIMES the same headless or headful.
+// A window is not free to the person running this: macOS CLAMPS --window-position (measured:
+// screenX/Y 83,65 whatever you pass), so a headful run cannot be put out of the way and lands
+// on whichever desktop is in front.
+const browser = await launchBrowser({
+  headless: 'new',
+  args: ['--no-sandbox', '--use-angle=metal', '--enable-unsafe-webgpu'],
+});
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.error('[page-err]', e.message));
-page.on('console', (m) => { if (m.type() === 'error') console.error('[console]', m.text()); });
-await page.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 60000 });
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('[console]', m.text());
+});
+await page.goto(`http://127.0.0.1:${server.address().port}/`, {
+  waitUntil: 'load',
+  timeout: 60000,
+});
 await page.waitForFunction(() => window.__ready === true, { timeout: 480000, polling: 50 });
 const err = await page.evaluate(() => window.__err);
 const out = await page.evaluate(() => window.__out);
-await browser.close(); server.close();
-if (err) { console.error('FAILED:\n' + err); process.exit(1); }
+await browser.close();
+server.close();
+if (err) {
+  console.error('FAILED:\n' + err);
+  process.exit(1);
+}
 
 const f3 = (n) => n.toFixed(3);
 if (out.gpuErr) console.error('*** WebGPU device error: ' + out.gpuErr);
 console.log(`adapter: ${out.adapter}    crossOriginIsolated(5µs timer)=${out.iso}`);
 console.log('');
 console.log('── 1) GPU round-trip FLOOR (empty dispatch) ─────────────────────────');
-console.log(`  dispatch + mapAsync readback   min ${f3(out.floor.min)}ms   p50 ${f3(out.floor.p50)}ms   p90 ${f3(out.floor.p90)}ms`);
-console.log(`  dispatch + onSubmittedWorkDone min ${f3(out.floorNoReadback.min)}ms   p50 ${f3(out.floorNoReadback.p50)}ms`);
+console.log(
+  `  dispatch + mapAsync readback   min ${f3(out.floor.min)}ms   p50 ${f3(out.floor.p50)}ms   p90 ${f3(out.floor.p90)}ms`,
+);
+console.log(
+  `  dispatch + onSubmittedWorkDone min ${f3(out.floorNoReadback.min)}ms   p50 ${f3(out.floorNoReadback.p50)}ms`,
+);
 console.log('');
 console.log('── 2) occupancy grid: CPU (real occupancy.js) vs GPU (WGSL), full round trip ──');
 console.log('  segs    G   cells   pts  |   CPU ms    GPU ms   speedup |  bit-diff');
@@ -549,18 +591,30 @@ let anyDiff = 0;
 for (const r of out.sweep) {
   anyDiff += r.diff;
   const sp = r.cpu / r.gpu;
-  console.log(`  ${String(r.nSeg).padStart(4)} ${String(r.G).padStart(4)} ${String(r.cells).padStart(6)} ${String(r.nPts).padStart(6)}  |  ${f3(r.cpu).padStart(7)}  ${f3(r.gpu).padStart(8)}   ${(sp).toFixed(2).padStart(6)}× |  ${String(r.diff).padStart(4)}${r.diff ? '  <-- MISMATCH' : ''}`);
+  console.log(
+    `  ${String(r.nSeg).padStart(4)} ${String(r.G).padStart(4)} ${String(r.cells).padStart(6)} ${String(r.nPts).padStart(6)}  |  ${f3(r.cpu).padStart(7)}  ${f3(r.gpu).padStart(8)}   ${sp.toFixed(2).padStart(6)}× |  ${String(r.diff).padStart(4)}${r.diff ? '  <-- MISMATCH' : ''}`,
+  );
 }
 console.log('');
-console.log(anyDiff === 0
-  ? '  CORRECTNESS: PASS — GPU grid bit-identical to occupancy.js on every sweep point.'
-  : `  CORRECTNESS: **FAIL** — ${anyDiff} cell(s) differ. Any timing below is meaningless.`);
+console.log(
+  anyDiff === 0
+    ? '  CORRECTNESS: PASS — GPU grid bit-identical to occupancy.js on every sweep point.'
+    : `  CORRECTNESS: **FAIL** — ${anyDiff} cell(s) differ. Any timing below is meaningless.`,
+);
 console.log('');
-console.log('── 3) batched: tiger.svg\'s real job list (37 grids, G=24, 18 segs each) ──');
+console.log("── 3) batched: tiger.svg's real job list (37 grids, G=24, 18 segs each) ──");
 console.log(`  CPU total (off-thread, real impl)     ${f3(out.batch.cpuTot)}ms`);
-console.log(`  GPU, one dispatch per grid (naive)    ${f3(out.batch.gpuSeq)}ms   (${(out.batch.cpuTot / out.batch.gpuSeq).toFixed(2)}×)`);
-console.log(`    ^ floor paid ${out.batch.N}× =                  ${f3(out.floor.p50 * out.batch.N)}ms  <- irreducible for a per-grid dispatch`);
-console.log(`  GPU, ALL 37 grids in ONE dispatch     ${f3(out.batch.gpuBatch)}ms   (${(out.batch.cpuTot / out.batch.gpuBatch).toFixed(2)}×)   bit-diff ${out.batch.bdiff}${out.batch.bdiff ? '  <-- MISMATCH' : ''}`);
+console.log(
+  `  GPU, one dispatch per grid (naive)    ${f3(out.batch.gpuSeq)}ms   (${(out.batch.cpuTot / out.batch.gpuSeq).toFixed(2)}×)`,
+);
+console.log(
+  `    ^ floor paid ${out.batch.N}× =                  ${f3(out.floor.p50 * out.batch.N)}ms  <- irreducible for a per-grid dispatch`,
+);
+console.log(
+  `  GPU, ALL 37 grids in ONE dispatch     ${f3(out.batch.gpuBatch)}ms   (${(out.batch.cpuTot / out.batch.gpuBatch).toFixed(2)}×)   bit-diff ${out.batch.bdiff}${out.batch.bdiff ? '  <-- MISMATCH' : ''}`,
+);
 console.log('');
 console.log(`  Absolute stake: the ENTIRE occupancy workload for tiger.svg (the heaviest asset in`);
-console.log(`  examples/) is ${f3(out.batch.cpuTot)}ms of off-thread, deferred, once-per-load work.`);
+console.log(
+  `  examples/) is ${f3(out.batch.cpuTot)}ms of off-thread, deferred, once-per-load work.`,
+);

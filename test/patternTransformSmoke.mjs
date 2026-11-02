@@ -1,16 +1,20 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // <pattern patternTransform="rotate(θ)"> must rotate the tile lattice. The
 // inverse linear part is stored in the carrier's texel 5; the sample coord is
 // mapped into pattern space before the wrap.
 //
 // Discriminator: a 45° stripe pattern's stripes run diagonally, so a VERTICAL
-// scan-line crosses them and hits BOTH colors. An un-transformed pattern is
+// scan-line crosses them and hits both colors. An un-transformed pattern is
 // vertical stripes, so a vertical scan-line is a SINGLE color. We assert the
 // rotated case shows both colors and the control shows one.
 import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { openReady } from './_pageReady.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -18,10 +22,10 @@ const ROOT = path.resolve(__dirname, '..');
 // 26px tile: white, with the left 13px an OPAQUE cyan stripe → vertical stripes
 // when un-transformed. The fill rect is the whole 100×100 viewport.
 const tile = (xform) =>
-  '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><defs>'
-  + `<pattern id="p" width="26" height="26" patternUnits="userSpaceOnUse"${xform}>`
-  + '<rect width="26" height="26" fill="#ffffff"/><rect width="13" height="26" fill="#0090ff"/></pattern>'
-  + '</defs><rect x="0" y="0" width="100" height="100" fill="url(#p)"/></svg>';
+  '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><defs>' +
+  `<pattern id="p" width="26" height="26" patternUnits="userSpaceOnUse"${xform}>` +
+  '<rect width="26" height="26" fill="#ffffff"/><rect width="13" height="26" fill="#0090ff"/></pattern>' +
+  '</defs><rect x="0" y="0" width="100" height="100" fill="url(#p)"/></svg>';
 const ROTATED = tile(' patternTransform="rotate(45)"');
 const CONTROL = tile('');
 
@@ -48,42 +52,70 @@ window.__ready = true;
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(HTML);
+    return;
+  }
   let p = decodeURIComponent(req.url.split('?')[0]);
   const ct = p.endsWith('.glsl') ? 'text/plain' : 'text/javascript';
-  try { res.writeHead(200, { 'content-type': ct + '; charset=utf-8' }); res.end(readFileSync(path.join(ROOT, p))); }
-  catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    res.writeHead(200, { 'content-type': ct + '; charset=utf-8' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 const isCyan = (p) => p[2] > 150 && p[0] < 90;
 const isWhite = (p) => p[0] > 200 && p[1] > 200 && p[2] > 200;
-const countColors = (col) => ({ cyan: col.filter(isCyan).length, white: col.filter(isWhite).length });
+const countColors = (col) => ({
+  cyan: col.filter(isCyan).length,
+  white: col.filter(isWhite).length,
+});
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
 try {
-  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await openReady(page, `http://127.0.0.1:${port}/`, { ready: 'flag' });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 const r = await page.evaluate(() => window.__run());
-const rc = countColors(r.rotated), cc = countColors(r.control);
+const rc = countColors(r.rotated),
+  cc = countColors(r.control);
 console.log('  rotated vertical scan:', JSON.stringify(rc), '| control:', JSON.stringify(cc));
 
-// Rotated (45°): the vertical scan-line crosses diagonal stripes → BOTH colors.
+// Rotated (45°): the vertical scan-line crosses diagonal stripes → both colors.
 if (rc.cyan >= 3 && rc.white >= 3)
   ok('rotate(45) pattern: vertical scan hits BOTH stripe colors (diagonal lattice)');
 else fail('rotated pattern not diagonal (vertical scan one color): ' + JSON.stringify(rc));
 
 // Control (no transform): vertical stripes → the x=50 scan-line is ONE color.
 if (cc.cyan === 0 || cc.white === 0)
-  ok('control (no patternTransform): vertical scan is a single color (vertical stripes) — test discriminates');
+  ok(
+    'control (no patternTransform): vertical scan is a single color (vertical stripes) — test discriminates',
+  );
 else fail('control not vertical stripes — discriminator weak: ' + JSON.stringify(cc));
 
 await browser.close();

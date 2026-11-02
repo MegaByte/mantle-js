@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- feConvolveMatrix at order 5 on large shapes: a lone primitive (the single-primitive
+       route, kind 6) on the top row, the same kernel inside a graph (with feComposite) below, and a
+       preserveAlpha variant. Time with shaderArmAB with its move flag so the convolve runs every frame. -->
+  <defs>
+    <filter id="k5" x="-5%" y="-5%" width="110%" height="110%">
+      <feConvolveMatrix order="5" kernelMatrix="1 1 2 1 1  1 2 4 2 1  2 4 8 4 2  1 2 4 2 1  1 1 2 1 1" divisor="52"/>
+    </filter>
+    <filter id="k5g" x="-5%" y="-5%" width="110%" height="110%">
+      <feConvolveMatrix order="5" kernelMatrix="0 0 -1 0 0  0 -1 -2 -1 0  -1 -2 17 -2 -1  0 -1 -2 -1 0  0 0 -1 0 0" divisor="1" result="sharp"/>
+      <feComposite in="sharp" in2="SourceGraphic" operator="in"/>
+    </filter>
+    <filter id="k5p" x="-5%" y="-5%" width="110%" height="110%">
+      <feConvolveMatrix order="5" kernelMatrix="1 1 2 1 1  1 2 4 2 1  2 4 8 4 2  1 2 4 2 1  1 1 2 1 1" divisor="52" preserveAlpha="true"/>
+    </filter>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e63946"/><stop offset="0.5" stop-color="#f1faee"/><stop offset="1" stop-color="#1d3557"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="#ececec"/>
+  <circle cx="180" cy="180" r="150" fill="url(#g)" filter="url(#k5)"/>
+  <rect x="370" y="40" width="280" height="280" rx="40" fill="url(#g)" filter="url(#k5)"/>
+  <path d="M700 60 C900 20 1000 200 960 300 C900 360 760 340 700 260 Z" fill="#2a9d8f" filter="url(#k5)"/>
+  <circle cx="180" cy="520" r="150" fill="url(#g)" filter="url(#k5g)"/>
+  <rect x="370" y="380" width="280" height="280" rx="40" fill="url(#g)" filter="url(#k5g)"/>
+  <path d="M700 400 C900 360 1000 540 960 640 C900 700 760 680 700 600 Z" fill="#e9c46a" filter="url(#k5g)"/>
+  <rect x="40" y="720" width="940" height="260" rx="60" fill="url(#g)" fill-opacity="0.8" filter="url(#k5p)"/>
+</svg>

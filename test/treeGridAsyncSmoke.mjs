@@ -1,6 +1,9 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // treeGridAsyncSmoke — the async GWN tier-3 occupancy grid (auto tree-hard path).
 //
-// A stroke-covered cubic bundle routes tree-hard (noaa-tree). Its winding tree is
+// A stroke-covered cubic bundle imported with { noAaTree: true } routes tree-hard (hard-tree). Its winding tree is
 // baked synchronously, but the TIER-3 interior grid (85% of the bake) is RESERVED
 // zeroed and filled by a post-load idle pass. Zeroed cells have margin 0 so the
 // shader falls through to tier-2 — correct, unaccelerated — until the real cells
@@ -11,7 +14,8 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { pageTimeoutFor } from './_laneBudget.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -32,51 +36,90 @@ const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+N+' '+N+'" w
 const rAuto = createRenderer(gl, shaders, { aacFill: 'auto' }); rAuto.setLoopBlinnFill('off');
 const rSlug = createRenderer(gl, shaders, {}); rSlug.setLoopBlinnFill('off');
 const grab = () => { const p=new Uint8Array(N*N*4); gl.readPixels(0,0,N,N,gl.RGBA,gl.UNSIGNED_BYTE,p); return p; };
+gl.getExtension("EXT_color_buffer_float");
 const draw = (r, b) => { r.setViewport(N,N); gl.viewport(0,0,N,N); r.beginFrame([1,1,1,1]); r.drawBundle(b); r.endFrame(); const s=new Uint8Array(4); gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,s); return grab(); };
 const diff = (a,b) => { let mx=0,n=0; for(let i=0;i<a.length;i++){const d=Math.abs(a[i]-b[i]); if(d>mx)mx=d; if(d>16)n++;} return {mx, n:Math.round(n/4)}; };
+const until = async (pred, ms) => { const t0 = performance.now(); while (!pred() && performance.now() - t0 < ms) await new Promise((r) => setTimeout(r, 10)); return pred(); };
 window.__run = async () => {
-  const secAuto = await importSvg(SVG);           // auto tree-hard → async tier-3
+  const secAuto = await importSvg(SVG, { noAaTree: true });   // opt-in tree-hard → async tier-3
   const hadPending = !!(secAuto.pendingTier3 && secAuto.pendingTier3.length);
   const bAuto = createBundle(gl, secAuto);
   const bSlug = createBundle(gl, await importSvg(SVG, { occupancyGrid: false }));
   const before = draw(rAuto, bAuto);              // tier-3 dormant
+  // GROUND TRUTH for the patch itself: the same art imported with the grid built SYNCHRONOUSLY (gwnTree keeps tier-3 inline)
+  // has the finished band plane. The dormant bundle must NOT have it yet; the patched one must match it exactly, on the CPU
+  // plane AND in the uploaded texture. Pixel identity cannot tell these apart -- a dormant grid and an active one render the same.
+  const bRef = createBundle(gl, await importSvg(SVG, { noAaTree: true, gwnTree: true }));
+  const planeDiff = (a, b) => { if (!a || !b || a.length !== b.length) return -1; let n = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++; return n; };
+  const texRead = (b) => { const W = 4096; const H = Math.ceil(b.bandFloats.length / 4 / W); const fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, b.bandTex, 0); const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE; const out = new Float32Array(W * H * 4); if (ok) gl.readPixels(0, 0, W, H, gl.RGBA, gl.FLOAT, out); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.deleteFramebuffer(fb); return ok ? out.subarray(0, b.bandFloats.length) : null; };
+  const planeBefore = planeDiff(bAuto.bandFloats, bRef.bandFloats), texBefore = planeDiff(texRead(bAuto), texRead(bRef));
   const engine = rAuto.debugStats.autoEngine;
   const slug = draw(rSlug, bSlug);
-  await new Promise((res) => { let k=0; const t=()=>{ if(++k>30) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
-  await new Promise((res) => setTimeout(res, 300));
+  // Tier-3 cells arrive from the occupancy worker: wait for its completion flag, not for frames and a fixed delay.
+  await until(() => !bAuto._occupancyBuildPending, ${pageTimeoutFor(120000)});
   const after = draw(rAuto, bAuto);               // tier-3 active
-  return { hadPending, engine, dBeforeAfter: diff(before, after), dBeforeSlug: diff(before, slug), dAfterSlug: diff(after, slug) };
+  const planeAfter = planeDiff(bAuto.bandFloats, bRef.bandFloats), texAfter = planeDiff(texRead(bAuto), texRead(bRef));
+  return { hadPending, engine, planeBefore, planeAfter, texBefore, texAfter, dBeforeAfter: diff(before, after), dBeforeSlug: diff(before, slug), dAfterSlug: diff(after, slug) };
 };
 window.__ready = true;
 </script></body></html>`;
 
 const server = http.createServer((q, res) => {
-  try { if (q.url === '/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(HTML); return; }
-    const pp = decodeURIComponent(q.url.split('?')[0]); res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' }); res.end(readFileSync(path.join(ROOT, pp)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
+    const pp = decodeURIComponent(q.url.split('?')[0]);
+    res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, pp)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const br = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
 const pg = await br.newPage();
 pg.on('pageerror', (e) => console.error(' [err]', e.message));
 await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
 await pg.waitForFunction(() => window.__ready === true, { timeout: 120000, polling: 50 });
 const o = await pg.evaluate(() => window.__run());
-await br.close(); server.close();
+await br.close();
+server.close();
 
 let fail = 0;
-const ok = (c, m) => c ? console.log('  ok ' + m) : (fail++, console.error('  FAIL ' + m));
+const ok = (c, m) => (c ? console.log('  ok ' + m) : (fail++, console.error('  FAIL ' + m)));
 console.log('  result:', JSON.stringify(o));
 ok(o.hadPending, 'auto tree-hard import produced a pending (async) tier-3 grid');
-ok(o.engine === 'noaa-tree', `routed tree-hard (got ${o.engine})`);
-ok(o.dBeforeSlug.n < 60, `dormant tier-3 render matches Slug (${o.dBeforeSlug.n} px differ >16, max ${o.dBeforeSlug.mx})`);
+ok(o.engine === 'hard-tree', `routed tree-hard (got ${o.engine})`);
+ok(
+  o.dBeforeSlug.n < 60,
+  `dormant tier-3 render matches Slug (${o.dBeforeSlug.n} px differ >16, max ${o.dBeforeSlug.mx})`,
+);
 // The grid skip must be output-identical to the full walk. The winding is integer-exact, so a
 // mis-certified cell would flip 0<->255 (caught by n). Allow a 1/255 tolerance on the single worst
 // pixel: the two paths compute the AA-transition pixel's coverage through different FP expression
 // trees, and swiftshader's codegen rounds one knife-edge pixel nondeterministically by 1 ulp
-// (reproducible on HEAD by adding any never-taken branch to renderFillGWNSDF's leaf loop).
-ok(o.dBeforeAfter.mx <= 1 && o.dBeforeAfter.n === 0,
-   `idle tier-3 patch is pixel-identical (dormant == active, max ${o.dBeforeAfter.mx}, ${o.dBeforeAfter.n} px >16)`);
-ok(o.dAfterSlug.n < 60, `active tier-3 render matches Slug (${o.dAfterSlug.n} px differ >16, max ${o.dAfterSlug.mx})`);
+// (reproducible by adding any never-taken branch to renderFillGWNSDF's leaf loop).
+ok(
+  o.dBeforeAfter.mx <= 1 && o.dBeforeAfter.n === 0,
+  `idle tier-3 patch is pixel-identical (dormant == active, max ${o.dBeforeAfter.mx}, ${o.dBeforeAfter.n} px >16)`,
+);
+// THE PATCH ITSELF, against the synchronously built ground truth (pixel identity above cannot see it: dormant and active render the same).
+ok(
+  o.planeBefore > 0 && o.texBefore > 0,
+  `before the idle pass the band plane and texture still LACK the tier-3 cells (${o.planeBefore} plane / ${o.texBefore} texture floats differ from the synchronous build) -- so the reference discriminates`,
+);
+ok(
+  o.planeAfter === 0,
+  `after it the CPU band plane equals the synchronous build exactly (${o.planeAfter} floats differ)`,
+);
+ok(o.texAfter === 0, `and so does the uploaded band texture (${o.texAfter} floats differ)`);
+ok(
+  o.dAfterSlug.n < 60,
+  `active tier-3 render matches Slug (${o.dAfterSlug.n} px differ >16, max ${o.dAfterSlug.mx})`,
+);
 console.log(fail ? `\nTREE-GRID-ASYNC FAIL (${fail})` : '\nTREE-GRID-ASYNC PASS');
 process.exit(fail ? 1 : 0);

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // baseReader.js — OpenType 'BASE' (Baseline) table.
 //
 // Provides per-script baseline alignment data — which baseline a
@@ -14,12 +17,12 @@
 
 /** Common baseline tags (4-char ASCII). */
 export const BaselineTag = Object.freeze({
-  Romn: 0x726F6D6E, // alphabetic (Latin)
-  Ideo: 0x6964656F, // ideographic-low
+  Romn: 0x726f6d6e, // alphabetic (Latin)
+  Ideo: 0x6964656f, // ideographic-low
   Idce: 0x69646365, // ideographic-center
   Idtp: 0x69647470, // ideographic-top
-  Hang: 0x68616E67, // hanging
-  Math: 0x6D617468, // mathematical
+  Hang: 0x68616e67, // hanging
+  Math: 0x6d617468, // mathematical
 });
 
 export class BaseReader {
@@ -34,14 +37,20 @@ export class BaseReader {
     this._tableOff = off;
     // u16 majorVersion, u16 minorVersion, u16 horizAxisOff, u16 vertAxisOff
     const horizRel = v.getUint16(off + 4, false);
-    const vertRel  = v.getUint16(off + 6, false);
+    const vertRel = v.getUint16(off + 6, false);
     this._horizAxisOff = horizRel ? off + horizRel : -1;
-    this._vertAxisOff  = vertRel  ? off + vertRel  : -1;
+    this._vertAxisOff = vertRel ? off + vertRel : -1;
   }
 
-  get hasTable() { return this._tableOff >= 0; }
-  get hasHorizontalAxis() { return this._horizAxisOff >= 0; }
-  get hasVerticalAxis() { return this._vertAxisOff >= 0; }
+  get hasTable() {
+    return this._tableOff >= 0;
+  }
+  get hasHorizontalAxis() {
+    return this._horizAxisOff >= 0;
+  }
+  get hasVerticalAxis() {
+    return this._vertAxisOff >= 0;
+  }
 
   /// Returns the list of baseline tags (4-char ASCII numbers) the
   /// horizontal axis supports, in declaration order. Index N is the

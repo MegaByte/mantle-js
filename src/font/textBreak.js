@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // textBreak.js — CJK soft-wrap predicates, glyph resolution across fallbacks
 // (incl. variation selectors), and Arabic kashida justification planning.
 // Split out of textLayout.js; a leaf module (no dependency on the layout
@@ -5,7 +8,7 @@
 // (vertical emit) import from here.
 
 import { verticalOrientation, Vo } from './unicode/tables/verticalOrientation.js';
-import { getArabicShaping } from './shaperRegistry.js';
+import { getArabicShaping, getOtScriptTags } from './shaperRegistry.js';
 
 /// True iff `cp` stays upright in `text-orientation: mixed`, per UAX #50
 /// Vertical_Orientation: U (Upright) and Tu (Transformed_Upright) stay
@@ -18,15 +21,17 @@ export function isCjkOrUprightCodepoint(cp) {
 // CJK soft-wrap predicates. A pragmatic predicate set rather than a
 // full UCD trie.
 export function isCjkCore(cp) {
-  return (cp >= 0x3000 && cp <= 0x303F) ||
-         (cp >= 0x3040 && cp <= 0x309F) ||
-         (cp >= 0x30A0 && cp <= 0x30FF) ||
-         (cp >= 0x3400 && cp <= 0x4DBF) ||
-         (cp >= 0x4E00 && cp <= 0x9FFF) ||
-         (cp >= 0xAC00 && cp <= 0xD7AF) ||
-         (cp >= 0xF900 && cp <= 0xFAFF) ||
-         (cp >= 0xFF00 && cp <= 0xFFEF) ||
-         (cp >= 0x20000 && cp <= 0x2FFFF);
+  return (
+    (cp >= 0x3000 && cp <= 0x303f) ||
+    (cp >= 0x3040 && cp <= 0x309f) ||
+    (cp >= 0x30a0 && cp <= 0x30ff) ||
+    (cp >= 0x3400 && cp <= 0x4dbf) ||
+    (cp >= 0x4e00 && cp <= 0x9fff) ||
+    (cp >= 0xac00 && cp <= 0xd7af) ||
+    (cp >= 0xf900 && cp <= 0xfaff) ||
+    (cp >= 0xff00 && cp <= 0xffef) ||
+    (cp >= 0x20000 && cp <= 0x2ffff)
+  );
 }
 
 // CJK/fullwidth characters forbidden at line start (TR#14): closing
@@ -35,34 +40,73 @@ export function isCjkCore(cp) {
 // must stay with the preceding glyph.
 export function isCjkClosing(cp) {
   switch (cp) {
-    case 0xFF09: case 0xFF3D: case 0xFF5D:
-    case 0xFF0C: case 0xFF0E:
-    case 0xFF1A: case 0xFF1B:
-    case 0xFF1F: case 0xFF01:
-    case 0x3001: case 0x3002:
-    case 0x3009: case 0x300B: case 0x300D:
-    case 0x300F: case 0x3011: case 0x3015:
-    case 0x3017: case 0x3019: case 0x301B:
-    case 0x3041: case 0x3043: case 0x3045: case 0x3047: case 0x3049:
-    case 0x3063: case 0x3083: case 0x3085: case 0x3087: case 0x308E:
-    case 0x30A1: case 0x30A3: case 0x30A5: case 0x30A7: case 0x30A9:
-    case 0x30C3: case 0x30E3: case 0x30E5: case 0x30E7: case 0x30EE:
-    case 0x309B: case 0x309C:
-    case 0x30FB: case 0x30FC:
+    case 0xff09:
+    case 0xff3d:
+    case 0xff5d:
+    case 0xff0c:
+    case 0xff0e:
+    case 0xff1a:
+    case 0xff1b:
+    case 0xff1f:
+    case 0xff01:
+    case 0x3001:
+    case 0x3002:
+    case 0x3009:
+    case 0x300b:
+    case 0x300d:
+    case 0x300f:
+    case 0x3011:
+    case 0x3015:
+    case 0x3017:
+    case 0x3019:
+    case 0x301b:
+    case 0x3041:
+    case 0x3043:
+    case 0x3045:
+    case 0x3047:
+    case 0x3049:
+    case 0x3063:
+    case 0x3083:
+    case 0x3085:
+    case 0x3087:
+    case 0x308e:
+    case 0x30a1:
+    case 0x30a3:
+    case 0x30a5:
+    case 0x30a7:
+    case 0x30a9:
+    case 0x30c3:
+    case 0x30e3:
+    case 0x30e5:
+    case 0x30e7:
+    case 0x30ee:
+    case 0x309b:
+    case 0x309c:
+    case 0x30fb:
+    case 0x30fc:
       return true;
-    default: return false;
+    default:
+      return false;
   }
 }
 
-// CJK OPENING punctuation — don't break AFTER these (TR#14 LB14).
 export function isCjkOpening(cp) {
   switch (cp) {
-    case 0xFF08: case 0xFF3B: case 0xFF5B:
-    case 0x3008: case 0x300A: case 0x300C:
-    case 0x300E: case 0x3010: case 0x3014:
-    case 0x3016: case 0x3018: case 0x301A:
+    case 0xff08:
+    case 0xff3b:
+    case 0xff5b:
+    case 0x3008:
+    case 0x300a:
+    case 0x300c:
+    case 0x300e:
+    case 0x3010:
+    case 0x3014:
+    case 0x3016:
+    case 0x3018:
+    case 0x301a:
       return true;
-    default: return false;
+    default:
+      return false;
   }
 }
 
@@ -87,58 +131,140 @@ export function resolveGlyph(cp, primary, fallbacks) {
   return [primary, 0];
 }
 
-/// JSTF Arabic kashida justification plan for one visual line.
+// Scripts whose letters join and whose lines read right to left; the others that join (Mongolian, Phags-pa) read left to right
+// (top to bottom in a vertical line). The order decides which of two neighbors is the one that must join forward.
+const RTL_JOINING_SCRIPTS = new Set([
+  'arab',
+  'syrc',
+  'nko ',
+  'mand',
+  'adlm',
+  'rohg',
+  'mani',
+  'phlp',
+  'sogd',
+  'sogo',
+  'chrs',
+]);
+
+const tagString = (t) => String.fromCharCode(t >>> 24, (t >>> 16) & 255, (t >>> 8) & 255, t & 255);
+
+/// JSTF extender (kashida, tatweel) justification plan for one visual line: connectors inserted where two letters join.
 ///
-/// Returns null when the line can't use kashida (no Arabic shaper, no
-/// font with 'arab' JSTF extenders, no eligible cursive join, or the
-/// widest extender doesn't fit the slack). Otherwise returns
-///   { counts: Map<visualIndex,count>, gid, advEm, font, total }
-/// where a kashida (tatweel) connector is inserted AFTER each listed
-/// visual slot, `total` kashidas in all, distributed round-robin across
-/// the eligible joins. Eligible joins are adjacent same-font Arabic
-/// dual-joining letters — these always connect, so a connector slots in
-/// cleanly regardless of LTR/RTL visual ordering.
-export function planKashida(lineSlots, slack) {
+/// A join is where the logically earlier letter joins forward (joining type D or L) and the later one joins back (D or R), in
+/// any script whose font lists extender glyphs for it. The extender takes the width it has along the line: its horizontal
+/// advance, or in an upright vertical line the vertical one.
+export function planKashida(lineSlots, slack, varCoords = null, inlineVertical = null) {
   const _arabic = getArabicShaping();
   if (!_arabic || slack <= 0) return null;
-  const D = _arabic.ArabicJoiningType.D;
-  let extFont = null, gid = 0, advEm = 0;
-  const points = [];
+  const T = _arabic.ArabicJoiningType;
+  if (!Number.isFinite(slack)) return null;
+  const registry = getOtScriptTags();
+  const scriptOf = (slot) => {
+    const tags =
+      registry && slot.codepoint ? registry.otScriptTagsPerCodepoint([slot.codepoint])[0] : null;
+    return tags && tags.length ? tags.map(tagString) : ['arab'];
+  };
+  const joinsForward = (type) => type === T.D || type === T.L;
+  const joinsBack = (type) => type === T.D || type === T.R;
+  const extenders = new Map(),
+    points = [];
   for (let i = 0; i + 1 < lineSlots.length; i++) {
-    const a = lineSlots[i], b = lineSlots[i + 1];
-    if (a.font !== b.font || a.glyphId === 0 || b.glyphId === 0) continue;
-    if (_arabic.getArabicJoiningType(a.codepoint) !== D) continue;
-    if (_arabic.getArabicJoiningType(b.codepoint) !== D) continue;
-    // Resolve (and cache) this font's widest extender glyph.
-    if (extFont !== a.font) {
-      const exts = a.font.jstf.getExtenderGlyphs('arab');
-      if (!exts) continue;
-      let best = 0, bestAdv = 0;
-      for (const g of exts) {
-        const adv = a.font.getMetricsByGid(g).advance;
-        if (adv > bestAdv) { bestAdv = adv; best = g; }
+    const a = lineSlots[i],
+      b = lineSlots[i + 1];
+    if (a.font !== b.font || !a.glyphId || !b.glyphId) continue;
+    const scripts = scriptOf(a);
+    const rtl = scripts.some((name) => RTL_JOINING_SCRIPTS.has(name));
+    // visual neighbors; the logical order is the reverse of the visual one in a right-to-left script
+    const first = rtl ? b : a,
+      second = rtl ? a : b;
+    if (
+      !joinsForward(_arabic.getArabicJoiningType(first.codepoint)) ||
+      !joinsBack(_arabic.getArabicJoiningType(second.codepoint))
+    )
+      continue;
+    const upright =
+      inlineVertical === 'upright' ||
+      (inlineVertical === 'mixed' && isCjkOrUprightCodepoint(a.codepoint | 0));
+    const cacheKey = scripts.join(',') + (upright ? '|v' : '');
+    let perFont = extenders.get(a.font);
+    if (!perFont) extenders.set(a.font, (perFont = new Map()));
+    let extender = perFont.get(cacheKey);
+    if (extender === undefined) {
+      extender = null;
+      let list = null;
+      for (const name of scripts) {
+        list = a.font.jstf.getExtenderGlyphs(name);
+        if (list) break;
       }
-      if (bestAdv <= 0) continue;
-      extFont = a.font; gid = best; advEm = bestAdv;
+      for (const gid of list || []) {
+        let advance,
+          cross = 0;
+        if (upright && typeof a.font.getVerticalMetricsByGid === 'function') {
+          const vm = a.font.getVerticalMetricsByGid(gid);
+          advance = vm && vm.advanceHeight ? vm.advanceHeight : a.font.getMetricsByGid(gid).advance;
+        } else {
+          advance =
+            varCoords != null && a.font.isVariable
+              ? a.font.getGlyphAdvanceVar(gid, varCoords)
+              : a.font.getMetricsByGid(gid).advance;
+        }
+        cross = a.font.getMetricsByGid(gid).advance;
+        if (advance > 0 && Number.isFinite(advance) && (!extender || advance > extender.advance))
+          extender = { gid, advance, cross };
+      }
+      perFont.set(cacheKey, extender);
     }
-    if (a.font === extFont) points.push(i);
+    if (!extender) continue;
+    const scale = (a.style?.sizeScale ?? 1) * (a.style?.widthScale > 0 ? a.style.widthScale : 1);
+    const advEm = extender.advance * (upright ? (a.style?.sizeScale ?? 1) : scale);
+    if (advEm > 0 && Number.isFinite(advEm))
+      points.push({
+        index: i,
+        gid: extender.gid,
+        font: a.font,
+        advEm,
+        crossEm: extender.cross * scale,
+        count: 0,
+      });
   }
-  if (points.length === 0 || advEm <= 0) return null;
-  const total = Math.floor(slack / advEm);
-  if (total <= 0) return null;
-  const counts = new Map();
-  for (let k = 0; k < total; k++) {
-    const p = points[k % points.length];
-    counts.set(p, (counts.get(p) || 0) + 1);
+  let remaining = slack,
+    active = points,
+    total = 0;
+  // Allocate complete rounds in one step, then drop joins whose next extender
+  // no longer fits. Work depends on join count rather than inserted glyph count.
+  while (active.length) {
+    active = active.filter((p) => p.advEm <= remaining);
+    if (!active.length) break;
+    const round = active.reduce((sum, p) => sum + p.advEm, 0),
+      rounds = Math.floor(remaining / round);
+    if (rounds > 0) {
+      for (const p of active) p.count += rounds;
+      total += rounds * active.length;
+      remaining = Math.max(0, remaining - rounds * round);
+    } else {
+      for (const p of active)
+        if (p.advEm <= remaining) {
+          p.count++;
+          total++;
+          remaining = Math.max(0, remaining - p.advEm);
+        }
+    }
   }
-  return { counts, gid, advEm, font: extFont, total };
+  if (!total) return null;
+  return {
+    counts: new Map(points.map((p) => [p.index, p.count])),
+    insertions: new Map(points.map((p) => [p.index, p])),
+    total,
+    usedAdvance: slack - remaining,
+  };
 }
 
 /// Registered Unicode variation selectors: VS1–16 (U+FE00–FE0F) for
 /// emoji/text presentation + standardized variants, and VS17–256
 /// (U+E0100–E01EF) for CJK ideographic variation sequences.
 export function isVariationSelector(cp) {
-  return (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0xE0100 && cp <= 0xE01EF);
+  return (cp >= 0xfe00 && cp <= 0xfe0f) || (cp >= 0xe0100 && cp <= 0xe01ef);
 }
 
 /// Resolve a base codepoint that's immediately followed by a variation

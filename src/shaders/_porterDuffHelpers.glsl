@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Shared Porter-Duff compositing math on PREMULTIPLIED RGBA (SVG feComposite
 // and COLRv1 PaintComposite).
 //
@@ -20,25 +23,16 @@
 //   9  SrcAtop    Fa=Ad      Fb=1-As
 //   10 DstAtop    Fa=1-Ad    Fb=As
 //   11 Xor        Fa=1-Ad    Fb=1-As
-//   12 Plus       Fa=1       Fb=1   (clamped to [0,1])
+//   12 Plus       Fa=1       Fb=1   (clamped to [0,1] -- by the caller)
+//
+// The mode is the same for a whole pass, so it arrives as the weights' coefficients rather than as
+// a number the pixel dispatches on through a 13-way chain:
+//   Fa = k.x + k.y·Ad,   Fb = k.z + k.w·As
+// set on the CPU by src/filterGraph/porterDuff.js. Every weight is exact in this form (0 + 0·a,
+// 1 + 0·a, 0 + 1·a, 1 + -1·a), so the result is the chain's.
 
-vec4 porterDuff(int mode, vec4 src, vec4 dst) {
-  float as = src.a, ad = dst.a;
-  float Fa, Fb;
-  if      (mode ==  0) { Fa = 0.0;       Fb = 0.0;       }  // clear
-  else if (mode ==  1) { Fa = 1.0;       Fb = 0.0;       }  // src
-  else if (mode ==  2) { Fa = 0.0;       Fb = 1.0;       }  // dst
-  else if (mode ==  3) { Fa = 1.0;       Fb = 1.0 - as;  }  // src over
-  else if (mode ==  4) { Fa = 1.0 - ad;  Fb = 1.0;       }  // dst over
-  else if (mode ==  5) { Fa = ad;        Fb = 0.0;       }  // src in
-  else if (mode ==  6) { Fa = 0.0;       Fb = as;        }  // dst in
-  else if (mode ==  7) { Fa = 1.0 - ad;  Fb = 0.0;       }  // src out
-  else if (mode ==  8) { Fa = 0.0;       Fb = 1.0 - as;  }  // dst out
-  else if (mode ==  9) { Fa = ad;        Fb = 1.0 - as;  }  // src atop
-  else if (mode == 10) { Fa = 1.0 - ad;  Fb = as;        }  // dst atop
-  else if (mode == 11) { Fa = 1.0 - ad;  Fb = 1.0 - as;  }  // xor
-  else                 { Fa = 1.0;       Fb = 1.0;       }  // plus (12)
-  vec4 outc = Fa * src + Fb * dst;
-  if (mode == 12) outc = clamp(outc, vec4(0.0), vec4(1.0));
-  return outc;
+vec4 porterDuffK(vec4 k, vec4 src, vec4 dst) {
+  float Fa = k.x + k.y * dst.a;
+  float Fb = k.z + k.w * src.a;
+  return Fa * src + Fb * dst;
 }

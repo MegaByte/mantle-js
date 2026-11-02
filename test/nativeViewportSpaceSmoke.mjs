@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // The native fallback's PIXEL-VIEWPORT coordinate mode (multi-bundle
 // compositor contract).
 //
@@ -10,14 +13,16 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { openReady } from './_pageReady.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 // A 1-unit bundle with a NON-pixel em-box (viewBox -50 0 200 100) so the
 // "first bundle's em-box ≠ viewport" mismatch would be obvious if present.
-const PREFAB = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 0 200 100" width="200" height="100"><rect id="r" x="-50" y="0" width="200" height="100" fill="#c0392b"/></svg>';
+const PREFAB =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 0 200 100" width="200" height="100"><rect id="r" x="-50" y="0" width="200" height="100" fill="#c0392b"/></svg>';
 
 const HTML = `<!DOCTYPE html><html><body>
 <div id="host"></div>
@@ -101,45 +106,80 @@ window.__ready = true;
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(HTML);
+    return;
+  }
   let p = decodeURIComponent(req.url.split('?')[0]);
-  try { const b = readFileSync(path.join(ROOT, p)); res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' }); res.end(b); }
-  catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    const b = readFileSync(path.join(ROOT, p));
+    res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' });
+    res.end(b);
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
 try {
-  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await openReady(page, `http://127.0.0.1:${port}/`, { ready: 'flag' });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 const info = await page.evaluate(() => window.__draw());
-if (info.space === 'viewport') ok('scene.coordinateSpace === viewport'); else fail('space wrong: ' + info.space);
-if (info.viewBox === '0 0 400 300') ok('root viewBox is the PIXEL VIEWPORT, not the bundle em-box (' + info.viewBox + ')');
+if (info.space === 'viewport') ok('scene.coordinateSpace === viewport');
+else fail('space wrong: ' + info.space);
+if (info.viewBox === '0 0 400 300')
+  ok('root viewBox is the PIXEL VIEWPORT, not the bundle em-box (' + info.viewBox + ')');
 else fail('viewBox is not the viewport: ' + info.viewBox);
-if (info.par === 'none') ok('preserveAspectRatio=none (1:1 pixel mapping)'); else fail('par wrong: ' + info.par);
-if (info.groups === 2) ok('two bundles → two <g> in one <svg>'); else fail('group count: ' + info.groups);
+if (info.par === 'none') ok('preserveAspectRatio=none (1:1 pixel mapping)');
+else fail('par wrong: ' + info.par);
+if (info.groups === 2) ok('two bundles → two <g> in one <svg>');
+else fail('group count: ' + info.groups);
 
 const s = await page.evaluate(() => window.__sample());
-if (s.insideA) ok('bundle A lands at its pixel rect (top-left)'); else fail('A mispositioned');
-if (s.insideB) ok('bundle B lands at its DISTINCT pixel rect (bottom-right)'); else fail('B mispositioned');
-if (s.gapBetween) ok('the two bundles are separately placed (gap between)'); else fail('bundles overlap/fill — em-space mismatch not fixed');
-if (s.cornerEmpty) ok('no stray fill outside the placed rects'); else fail('stray content in corner');
+if (s.insideA) ok('bundle A lands at its pixel rect (top-left)');
+else fail('A mispositioned');
+if (s.insideB) ok('bundle B lands at its DISTINCT pixel rect (bottom-right)');
+else fail('B mispositioned');
+if (s.gapBetween) ok('the two bundles are separately placed (gap between)');
+else fail('bundles overlap/fill — em-space mismatch');
+if (s.cornerEmpty) ok('no stray fill outside the placed rects');
+else fail('stray content in corner');
 
 const ra = await page.evaluate(() => window.__rasterAlign());
 if (ra.greenAtRect) ok('viewport-mode raster lands at its dstRect (aligns with bundles)');
 else fail('raster mispositioned in viewport mode: ' + JSON.stringify(ra));
-if (ra.greenNotAtA) ok('raster confined (not over the bundle)'); else fail('raster bled: ' + JSON.stringify(ra));
+if (ra.greenNotAtA) ok('raster confined (not over the bundle)');
+else fail('raster bled: ' + JSON.stringify(ra));
 
 await browser.close();
 server.close();
-if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
+if (failures) {
+  console.error(`\n${failures} failure(s)`);
+  process.exit(1);
+}
 console.log('\nnativeViewportSpaceSmoke: all checks passed');

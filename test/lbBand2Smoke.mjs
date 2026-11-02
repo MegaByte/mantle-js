@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // lbBand2Smoke — guards the LB unified curve band (kind 12, always-on).
 //
 // Kind-12 replaces the legacy kind-9 bbox strip + kind-8 corner cap zoo for
@@ -11,30 +14,62 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
-const N = 192, SS = 4;
-const wrap = (d) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${N} ${N}" width="${N}" height="${N}"><path fill="#000000" d="${d}"/></svg>`;
-const wrapHi = (d) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${N * SS} ${N * SS}" width="${N * SS}" height="${N * SS}"><path fill="#000000" d="${d}"/></svg>`;
-function quadRing(n) { const c = n / 2, r = n * 0.36, K = 8;
-  const P = (i) => { const a = (i / K) * 2 * Math.PI; return [c + r * Math.cos(a), c + r * Math.sin(a)]; };
+const N = 192,
+  SS = 4;
+const wrap = (d) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${N} ${N}" width="${N}" height="${N}"><path fill="#000000" d="${d}"/></svg>`;
+const wrapHi = (d) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${N * SS} ${N * SS}" width="${N * SS}" height="${N * SS}"><path fill="#000000" d="${d}"/></svg>`;
+function quadRing(n) {
+  const c = n / 2,
+    r = n * 0.36,
+    K = 8;
+  const P = (i) => {
+    const a = (i / K) * 2 * Math.PI;
+    return [c + r * Math.cos(a), c + r * Math.sin(a)];
+  };
   let d = `M ${P(0)[0].toFixed(4)} ${P(0)[1].toFixed(4)} `;
-  for (let i = 0; i < K; i++) { const A = P(i), B = P(i + 1);
-    const mx = (A[0] + B[0]) / 2 + (B[1] - A[1]) * 0.35, my = (A[1] + B[1]) / 2 - (B[0] - A[0]) * 0.35;
-    d += `Q ${mx.toFixed(4)} ${my.toFixed(4)} ${B[0].toFixed(4)} ${B[1].toFixed(4)} `; }
-  return d + 'Z'; }
-function quadLineBox(n) { const a = 0.18 * n, b = 0.82 * n, bulge = 0.14 * n, m = n / 2;
-  return `M ${a} ${a} Q ${m} ${a - bulge} ${b} ${a} L ${b} ${b} Q ${m} ${b + bulge} ${a} ${b} Z`; }
-function quadStar(n) { const c = n / 2, R = n * 0.42, r = n * 0.19, K = 5; let pts = [];
-  for (let i = 0; i < 2 * K; i++) { const a = -Math.PI / 2 + i * Math.PI / K, rad = (i % 2 ? r : R);
-    pts.push([c + rad * Math.cos(a), c + rad * Math.sin(a)]); }
+  for (let i = 0; i < K; i++) {
+    const A = P(i),
+      B = P(i + 1);
+    const mx = (A[0] + B[0]) / 2 + (B[1] - A[1]) * 0.35,
+      my = (A[1] + B[1]) / 2 - (B[0] - A[0]) * 0.35;
+    d += `Q ${mx.toFixed(4)} ${my.toFixed(4)} ${B[0].toFixed(4)} ${B[1].toFixed(4)} `;
+  }
+  return d + 'Z';
+}
+function quadLineBox(n) {
+  const a = 0.18 * n,
+    b = 0.82 * n,
+    bulge = 0.14 * n,
+    m = n / 2;
+  return `M ${a} ${a} Q ${m} ${a - bulge} ${b} ${a} L ${b} ${b} Q ${m} ${b + bulge} ${a} ${b} Z`;
+}
+function quadStar(n) {
+  const c = n / 2,
+    R = n * 0.42,
+    r = n * 0.19,
+    K = 5;
+  let pts = [];
+  for (let i = 0; i < 2 * K; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI) / K,
+      rad = i % 2 ? r : R;
+    pts.push([c + rad * Math.cos(a), c + rad * Math.sin(a)]);
+  }
   let d = `M ${pts[0][0].toFixed(4)} ${pts[0][1].toFixed(4)} `;
-  for (let i = 0; i < 2 * K; i++) { const A = pts[i], B = pts[(i + 1) % (2 * K)];
-    const mx = (A[0] + B[0]) / 2 + (B[1] - A[1]) * 0.12, my = (A[1] + B[1]) / 2 - (B[0] - A[0]) * 0.12;
-    d += `Q ${mx.toFixed(4)} ${my.toFixed(4)} ${B[0].toFixed(4)} ${B[1].toFixed(4)} `; }
-  return d + 'Z'; }
+  for (let i = 0; i < 2 * K; i++) {
+    const A = pts[i],
+      B = pts[(i + 1) % (2 * K)];
+    const mx = (A[0] + B[0]) / 2 + (B[1] - A[1]) * 0.12,
+      my = (A[1] + B[1]) / 2 - (B[0] - A[0]) * 0.12;
+    d += `Q ${mx.toFixed(4)} ${my.toFixed(4)} ${B[0].toFixed(4)} ${B[1].toFixed(4)} `;
+  }
+  return d + 'Z';
+}
 const SHAPES = {
   ring: [wrap(quadRing(N)), wrapHi(quadRing(N * SS))],
   box: [wrap(quadLineBox(N)), wrapHi(quadLineBox(N * SS))],
@@ -81,30 +116,65 @@ window.__run = async (shapes) => {
 };
 window.__ready=true;</script></body></html>`;
 
-const server = http.createServer((q, res) => { try { if (q.url === '/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(HTML); return; } const pp = decodeURIComponent(q.url.split('?')[0]); res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' }); res.end(readFileSync(path.join(ROOT, pp))); } catch { if (!res.headersSent) res.writeHead(404); res.end(); } });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
-const br = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
-const pg = await br.newPage(); pg.on('pageerror', e => console.error(' [err]', e.message));
+const server = http.createServer((q, res) => {
+  try {
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
+    const pp = decodeURIComponent(q.url.split('?')[0]);
+    res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, pp)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
+const pg = await br.newPage();
+pg.on('pageerror', (e) => console.error(' [err]', e.message));
 await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
-await pg.waitForFunction(() => window.__ready === true, { timeout: 120000 });
+await pg.waitForFunction(() => window.__ready === true, { timeout: 120000, polling: 100 });
 const band2 = await pg.evaluate((s) => window.__run(s), SHAPES);
-await pg.close(); await br.close(); server.close();
+await pg.close();
+await br.close();
+server.close();
 
 let fail = 0;
-const check = (ok, msg) => { console.log(`  ${ok ? 'ok' : 'FAIL'} ${msg}`); if (!ok) fail++; };
+const check = (ok, msg) => {
+  console.log(`  ${ok ? 'ok' : 'FAIL'} ${msg}`);
+  if (!ok) fail++;
+};
 for (const n of ['ring', 'box', 'star']) {
   check(band2[n].routed === 1, `${n}: LB routed`);
 }
 check((band2.star.kinds[12] || 0) > 0, `star emits kind-12 (${band2.star.kinds[12] || 0} verts)`);
-check((band2.star.kinds[9] || 0) === 0, `star emits no kind-9 strips (${band2.star.kinds[9] || 0})`);
-check((band2.star.kinds[1] || 0) === 0, `star emits no kind-1 crescents (${band2.star.kinds[1] || 0})`);
-check((band2.star.kinds[11] || 0) === 0, `star emits no kind-11 (${band2.star.kinds[11] || 0}; integral→kind-5)`);
-check((band2.star.kinds[5] || 0) > 0, `star emits kind-5 fill crescents (${band2.star.kinds[5] || 0})`);
+check(
+  (band2.star.kinds[9] || 0) === 0,
+  `star emits no kind-9 strips (${band2.star.kinds[9] || 0})`,
+);
+check(
+  (band2.star.kinds[1] || 0) === 0,
+  `star emits no kind-1 crescents (${band2.star.kinds[1] || 0})`,
+);
+check(
+  (band2.star.kinds[11] || 0) === 0,
+  `star emits no kind-11 (${band2.star.kinds[11] || 0}; integral→kind-5)`,
+);
+check(
+  (band2.star.kinds[5] || 0) > 0,
+  `star emits kind-5 fill crescents (${band2.star.kinds[5] || 0})`,
+);
 check((band2.star.kinds[8] || 0) === 0, `star emits no kind-8 caps (${band2.star.kinds[8] || 0})`);
 check(band2.star.e.nBad <= 12, `star bad px small (${band2.star.e.nBad} <= 12)`);
 check(band2.star.e.mean < 2.0, `star mean err (${band2.star.e.mean.toFixed(3)} < 2.0 /255)`);
 check(band2.ring.e.nBad === 0, `ring zero bad px (${band2.ring.e.nBad})`);
 check(band2.ring.e.mean < 0.8, `ring mean err (${band2.ring.e.mean.toFixed(3)} < 0.8 /255)`);
 check(band2.box.e.nBad <= 4, `box bad px bounded (${band2.box.e.nBad} <= 4)`);
-if (fail) { console.error(`LB-BAND2 FAIL (${fail})`); process.exit(1); }
+if (fail) {
+  console.error(`LB-BAND2 FAIL (${fail})`);
+  process.exit(1);
+}
 console.log('LB-BAND2 PASS');

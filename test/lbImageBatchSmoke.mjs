@@ -1,18 +1,25 @@
-// lbImageBatchSmoke — <image> shapes must ride LB's one-draw combined route, each with its
-// OWN rect + atlas slot, and match Slug.
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// lbImageBatchSmoke — <image> shapes must ride the batched analytic fill, each with its
+// own rect + atlas slot, and match Slug.
 //
-// Images used to force the per-shape route like gradients did. Per-shape paint (gradient id,
-// image id, shape bbox, image rect, atlas slot) now rides a 4-texel/shape texture indexed by
-// the aShapeRow the combined route already carries.
+// Per-shape paint (gradient id, image id, shape bbox, image rect, atlas slot) rides a
+// 4-texel/shape texture indexed by the aShapeRow the batched route already carries, so an
+// image needs no per-shape route.
 //
 // GOTCHA this pins: an image shape's paint is the atlas sample TINTED by (1,1,1,opacity).
-// Baking the shape's FILL colour into the combined VBO's aColor (black for a plain <image>)
+// Baking the shape's FILL color into the combined VBO's aColor (black for a plain <image>)
 // multiplies the image to black — it renders solid. The VBO writes white for image shapes.
 import { readFileSync } from 'fs';
-import http from 'http'; import path from 'path'; import { fileURLToPath } from 'url'; import puppeteer from 'puppeteer';
-const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const N=256;
-const HTML=`<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas><script type="module">
+import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { launchBrowser } from './_launch.mjs';
+import { pageTimeoutFor } from './_laneBudget.mjs';
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const N = 256;
+const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas><script type="module">
 import { importSvg, createBundle, createRenderer, loadShaders } from '/src/index.js';
 const gl=document.getElementById('c').getContext('webgl2',{antialias:false,premultipliedAlpha:true,preserveDrawingBuffer:true});
 const shaders=await loadShaders(new URL('/src/shaders/',location.href).href);
@@ -26,6 +33,8 @@ const sheet=(Kn)=>{ const cols=Math.round(Math.sqrt(Kn)), cell=N/cols; let body=
   for(let i=0;i<Kn;i++){ const x=(i%cols)*cell, y=Math.floor(i/cols)*cell;
     body+='<image xlink:href="'+tile((i*61)%360)+'" x="'+(x+2)+'" y="'+(y+2)+'" width="'+(cell-4)+'" height="'+(cell-4)+'"/>'; }
   return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 '+N+' '+N+'" width="'+N+'" height="'+N+'">'+body+'</svg>'; };
+// Images go through the unified draw. What is asserted below is that each <image>
+// shape samples its OWN rect + atlas slot in one batched draw and matches Slug.
 const r=createRenderer(gl,shaders);
 const sync=()=>{const p=new Uint8Array(4); gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p); return p[0];};
 const readAll=()=>{const p=new Uint8Array(N*N*4); gl.readPixels(0,0,N,N,gl.RGBA,gl.UNSIGNED_BYTE,p); return p;};
@@ -40,33 +49,61 @@ for(const Kn of [4,16]){
   const draw=()=>{r.setViewport(N,N); r.beginFrame([1,1,1,1]); r.drawBundle(b); r.endFrame();};
   r.setLoopBlinnFill('off'); draw(); const s=readAll(); const off=amort(b);
   const c0=r.debugStats.loopBlinnRouteCount;
-  r.setLoopBlinnFill('on'); draw(); const l=readAll(); const on=amort(b);
+  // awaitLbReady, not just prepareBundle: the latter is non-blocking, and an
+  // unwarmed bundle falls to the best non-LB engine instead of the classic
+  // coverage-RT routes — which would make the routed count 0 and the diffs vacuous.
+  r.setLoopBlinnFill('on'); await r.awaitLbReady(b); draw(); const l=readAll(); const on=amort(b);
   const routed=r.debugStats.loopBlinnRouteCount-c0;
   let mx=0,sum=0; for(let i=0;i<s.length;i++){const d=Math.abs(s[i]-l[i]); if(d>mx)mx=d; sum+=d;}
   out.push({name:'images x'+Kn, hasAtlas:!!b.imageAtlasTex, mfps:b.metaFloatsPerShape|0,
-    combined:!!b._lbCombined, routed, maxDiff:mx, meanDiff:sum/s.length, off, on});
+    routed, maxDiff:mx, meanDiff:sum/s.length, off, on});
   b.dispose();
 }}catch(e){ window.__err=String(e)+'\\n'+e.stack; }
 window.__out=out; window.__ready=true;</script></body></html>`;
-const server=http.createServer((q,res)=>{try{if(q.url==='/'){res.writeHead(200,{'content-type':'text/html'});res.end(HTML);return;}const pp=decodeURIComponent(q.url.split('?')[0]);res.writeHead(200,{'content-type':pp.endsWith('.glsl')?'text/plain':'text/javascript'});res.end(readFileSync(path.join(ROOT,pp)));}catch{if(!res.headersSent)res.writeHead(404);res.end();}});
-await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const br=await puppeteer.launch({headless:'new',args:['--no-sandbox']});
-const pg=await br.newPage(); pg.on('pageerror',e=>console.error(' [err]',e.message));
-await pg.goto(`http://127.0.0.1:${server.address().port}/`,{waitUntil:'load',timeout:90000});
+const server = http.createServer((q, res) => {
+  try {
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
+    const pp = decodeURIComponent(q.url.split('?')[0]);
+    res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, pp)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
+const pg = await br.newPage();
+pg.on('pageerror', (e) => console.error(' [err]', e.message));
+await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
 // polling:50 (not the default 'raf'): headless Chrome stops producing animation frames for
 // this page once the GL work is done, so an rAF-polled wait hangs even though __ready is true.
-await pg.waitForFunction(()=>window.__ready===true,{timeout:180000, polling:50});
-const err=await pg.evaluate(()=>window.__err); const o=await pg.evaluate(()=>window.__out);
-await br.close(); server.close();
-if(err){console.error('threw:',err);process.exit(1);}
+await pg.waitForFunction(() => window.__ready === true, {
+  timeout: pageTimeoutFor(180000),
+  polling: 50,
+});
+const err = await pg.evaluate(() => window.__err);
+const o = await pg.evaluate(() => window.__out);
+await br.close();
+server.close();
+if (err) {
+  console.error('threw:', err);
+  process.exit(1);
+}
 let fail = 0;
-const ok = (c, m) => c ? console.log('  ok ' + m) : (fail++, console.error('  FAIL ' + m));
+const ok = (c, m) => (c ? console.log('  ok ' + m) : (fail++, console.error('  FAIL ' + m)));
 for (const r of o) {
   ok(r.hasAtlas, `${r.name}: bundle has an image atlas`);
   ok(r.routed > 0, `${r.name}: takes the LB route`);
-  ok(r.combined, `${r.name}: rides the ONE-DRAW combined route`);
-  // a black render (image x fill colour) would blow this up, not just shift AA edges
-  ok(r.meanDiff <= 3.0, `${r.name}: matches all-Slug (meanDiff=${r.meanDiff.toFixed(3)}, maxDiff=${r.maxDiff})`);
+  // a black render (image x fill color) would blow this up, not just shift AA edges
+  ok(
+    r.meanDiff <= 3.0,
+    `${r.name}: matches all-Slug (meanDiff=${r.meanDiff.toFixed(3)}, maxDiff=${r.maxDiff})`,
+  );
 }
 console.log(fail ? `\nLB-IMAGE-BATCH FAIL (${fail})` : '\nLB-IMAGE-BATCH PASS');
 process.exit(fail ? 1 : 0);

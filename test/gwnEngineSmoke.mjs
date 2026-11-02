@@ -1,21 +1,23 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // gwnEngineSmoke — the GWN+SDF fill engine renders, and matches Slug.
 //
-// GWN had NO smoke. It was covered only by probes, which are run by hand, so nobody noticed
-// that the engine is TWO decisions and the demo was making one of them:
+// The engine is TWO decisions, and making only one of them fails silently:
 //
-//   1. the #defines pick the kernel  — MANTLE_GWN alone is the WINDING-ONLY tier (what the
+//   1. the #defines pick the kernel  — MANTLE_GWN alone is the WINDING-only tier (what the
 //      hard engines ride); the AA'd path needs MANTLE_GWN_SDF as well;
 //   2. the IMPORTER bakes the run tree — importSvg(svg, { gwnTree: true }).
 //
-// Miss (2) and the kernel walks a tree header that was never written: it renders NOTHING, in
+// Miss (2) and the kernel walks a tree header nothing wrote: it renders nothing, in
 // silence, on a blank canvas. This pins the working config against Slug, pins the empty
-// failure so it cannot be mistaken for a rendering bug, and pins the warning that now names
+// failure so it cannot be mistaken for a rendering bug, and pins the warning that names
 // the cause.
 import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 import { emitFixture } from './_fixtures.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -33,6 +35,7 @@ emitFixture('gwnEngine__SVG', SVG);
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="${N}" height="${N}"></canvas>
 <script type="module">
+globalThis.__MANTLE_DEBUG__ = true;   // createRenderer's fillDefines is a test hook, read only under it
 import { importSvg, createBundle, createRenderer, loadShaders } from '/src/index.js';
 const gl = document.getElementById('c').getContext('webgl2', { antialias: false, premultipliedAlpha: true, preserveDrawingBuffer: true });
 const shaders = await loadShaders(new URL('/src/shaders/', location.href).href);
@@ -70,7 +73,7 @@ const inter = (px) => { let n = 0;
 
 // Are the Slug/GWN differences on EDGES (both engines antialias, differently) or in the body
 // (one of them is filling the wrong region)? Only the second is a bug.
-const edgeish = (px, i) => {   // is any 8-neighbour a different colour? then this is an edge px
+const edgeish = (px, i) => {   // is any 8-neighbor a different color? then this is an edge px
   const x = (i/4) % N, y = ((i/4) / N) | 0;
   for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
     const nx = x+dx, ny = y+dy; if (nx<0||ny<0||nx>=N||ny>=N) continue;
@@ -94,40 +97,57 @@ window.__ready = true;
 
 const server = http.createServer((q, res) => {
   try {
-    if (q.url === '/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(HTML); return; }
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
     const pp = decodeURIComponent(q.url.split('?')[0]);
     res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
     res.end(readFileSync(path.join(ROOT, pp)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const br = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
 const pg = await br.newPage();
 const warns = [];
 pg.on('console', (m) => warns.push(m.type() + ': ' + m.text()));
 pg.on('pageerror', (e) => console.error(' [err]', e.message));
 await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
-await pg.waitForFunction(() => window.__ready === true, { timeout: 90000 });
+await pg.waitForFunction(() => window.__ready === true, { timeout: 90000, polling: 100 });
 const o = await pg.evaluate(() => window.__out);
-await br.close(); server.close();
+await br.close();
+server.close();
 
 let fail = 0;
-const ok = (c, m) => c ? console.log('  ok ' + m) : (fail++, console.error('  FAIL ' + m));
+const ok = (c, m) => (c ? console.log('  ok ' + m) : (fail++, console.error('  FAIL ' + m)));
 
 console.log(`  ink: slug=${o.inkSlug} gwn=${o.inkGwn} gwn-without-tree=${o.inkNoTree}`);
 ok(o.inkGwn > 0, `GWN+SDF renders (ink=${o.inkGwn})`);
 // The whole point of the engine: same picture as Slug, computed without bands.
-ok(o.bodyDiff === 0, `fills the same REGION as Slug (${o.bodyDiff} non-edge px differ; ${o.gwnVsSlug.n} incl. AA edges)`);
-ok(Math.abs(o.aaGwn - o.aaSlug) / Math.max(1, o.aaSlug) < 0.35,
-   `antialiases like Slug (${o.aaGwn} intermediate px vs Slug's ${o.aaSlug})`);
+ok(
+  o.bodyDiff === 0,
+  `fills the same REGION as Slug (${o.bodyDiff} non-edge px differ; ${o.gwnVsSlug.n} incl. AA edges)`,
+);
+ok(
+  Math.abs(o.aaGwn - o.aaSlug) / Math.max(1, o.aaSlug) < 0.35,
+  `antialiases like Slug (${o.aaGwn} intermediate px vs Slug's ${o.aaSlug})`,
+);
 // MANTLE_GWN without MANTLE_GWN_SDF is the winding-only tier — a HARD fill. If this ever
 // starts producing AA, the two tiers have been conflated and the demo's engine list is lying.
-ok(o.aaWindingOnly < o.aaSlug * 0.35,
-   `MANTLE_GWN alone stays the winding-only (hard) tier (${o.aaWindingOnly} intermediate px)`);
+ok(
+  o.aaWindingOnly < o.aaSlug * 0.35,
+  `MANTLE_GWN alone stays the winding-only (hard) tier (${o.aaWindingOnly} intermediate px)`,
+);
 // The trap, pinned: no tree ⇒ nothing renders. Silent blank output must at least be LOUD.
 ok(o.inkNoTree === 0, `a GWN kernel without its run tree renders EMPTY (ink=${o.inkNoTree})`);
-ok(warns.some((w) => /gwnTree/.test(w)),
-   'and the renderer warns, naming importSvg({gwnTree:true}) as the fix');
+ok(
+  warns.some((w) => /gwnTree/.test(w)),
+  'and the renderer warns, naming importSvg({gwnTree:true}) as the remedy',
+);
 
 console.log(fail ? `\nGWN-ENGINE FAIL (${fail})` : '\nGWN-ENGINE PASS');
 process.exit(fail ? 1 : 0);

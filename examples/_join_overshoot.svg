@@ -6,9 +6,9 @@
        stroke-width=12 → halfW=6; the last Q's end-to-prev-vertex
        distance is ~1.7 → halfW exceeds the tail length.
        Expected: flat butt cap at the TOP endpoint (and at the bottom).
-       Actual (Mantle, pre-fix): the previous interior round join's
-       natural body envelope distance leaks past the path's true end,
-       producing a round-cap-like envelope on the TOP. -->
+       The failure this guards against: the previous interior round
+       join's natural body envelope distance leaks past the path's true
+       end, producing a round-cap-like envelope on the TOP. -->
   <path d="M -12.0 18.0
            Q -12.0 13.5 -10.4 7.6
            Q -9.5 4.0  -8.1 1.0
@@ -18,8 +18,8 @@
 
   <!-- (B) Control: same path but with stroke-linejoin="miter".
        Expected: sharp behavior, no overshoot at the end (miter has
-       its own length clamp). Render-cleanly side-by-side to confirm
-       the bug is specific to ROUND/BEVEL joins on short-tail paths. -->
+       its own length clamp). Side by side, it shows whether an
+       overshoot is specific to ROUND/BEVEL joins on short-tail paths. -->
   <path d="M 8.0 18.0
            Q 8.0 13.5 9.6 7.6
            Q 10.5 4.0 11.9 1.0

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // bidiN0Smoke.mjs — verifies UAX #9 N0 paired brackets resolution.
 //
 // N0 is the rule that resolves bracket *pairs* together to the
@@ -8,11 +11,14 @@
 import { BidiClass, getBidiClass, resolveLevels, BaseDirection } from '../../src/font/bidi.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // Helper: build codepoints from a string.
-const cps = (s) => Array.from(s).map(c => c.codePointAt(0));
+const cps = (s) => Array.from(s).map((c) => c.codePointAt(0));
 
 // ----- T1: simple LTR with brackets - parens stay at base level -----
 // "(abc)" under LTR base: both brackets at level 0.
@@ -45,7 +51,9 @@ const cps = (s) => Array.from(s).map(c => c.codePointAt(0));
   const levels = resolveLevels(cps(text), BaseDirection.Ltr);
   const got = Array.from(levels);
   if (got[0] !== 0 || got[6] !== 0)
-    fail(`T2b LTR base brackets should stay at 0 per N0 establish-context rule, got [${got[0]}, ${got[6]}]`);
+    fail(
+      `T2b LTR base brackets should stay at 0 per N0 establish-context rule, got [${got[0]}, ${got[6]}]`,
+    );
   else ok('T2b LTR base, Hebrew in parens: brackets stay at 0 (N0 establish-context = embed)');
 }
 
@@ -55,7 +63,7 @@ const cps = (s) => Array.from(s).map(c => c.codePointAt(0));
   const text = '(abc) (def)';
   const levels = resolveLevels(cps(text), BaseDirection.Ltr);
   const got = Array.from(levels);
-  if (got.every(l => l === 0)) ok('T3 LTR (abc) (def) all level 0');
+  if (got.every((l) => l === 0)) ok('T3 LTR (abc) (def) all level 0');
   else fail(`T3 LTR brackets around English: got ${got}, expected all 0`);
 }
 
@@ -74,7 +82,7 @@ const cps = (s) => Array.from(s).map(c => c.codePointAt(0));
 {
   const text = '(   )';
   const levels = resolveLevels(cps(text), BaseDirection.Ltr);
-  if (levels.every(l => l === 0)) ok('T5 empty parens LTR keep level 0');
+  if (levels.every((l) => l === 0)) ok('T5 empty parens LTR keep level 0');
   else fail(`T5 (   ) LTR: got ${Array.from(levels)}, expected all 0`);
 }
 

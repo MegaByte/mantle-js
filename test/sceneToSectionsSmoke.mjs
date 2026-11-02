@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // sceneToSectionsSmoke.mjs — Architecture B: direct scene→sections build,
 // skipping the sceneToSvg → SVG-string → importSvg round-trip.
 //
@@ -14,7 +17,7 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -78,40 +81,90 @@ window.__out = out; window.__ready = true;
 
 const server = http.createServer((req, res) => {
   try {
-    if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML);
+      return;
+    }
     const p = decodeURIComponent(req.url.split('?')[0]);
     const buf = readFileSync(path.join(ROOT, p));
-    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' }); res.end(buf);
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(buf);
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { if (m.type() === 'error') console.error('  [console]', m.text()); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('  [console]', m.text());
+});
 try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await page.waitForFunction(() => window.__ready === true, { timeout: 10000, polling: 100 });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 const o = await page.evaluate(() => window.__out);
 
-if (o.directNoVersion && o.svgHasVersion) ok('sceneToSections built directly (no SVG round-trip — version omitted; round-trip stamps version:3)');
-else fail('direct-path detection wrong: ' + JSON.stringify({ direct: o.directNoVersion, svg: o.svgHasVersion }));
-if (o.directShapes === o.svgShapes && o.directShapes === 2) ok('direct + round-trip agree on shape count (' + o.directShapes + ')');
+if (o.directNoVersion && o.svgHasVersion)
+  ok(
+    'sceneToSections built directly (no SVG round-trip — version omitted; round-trip stamps version:3)',
+  );
+else
+  fail(
+    'direct-path detection wrong: ' +
+      JSON.stringify({ direct: o.directNoVersion, svg: o.svgHasVersion }),
+  );
+if (o.directShapes === o.svgShapes && o.directShapes === 2)
+  ok('direct + round-trip agree on shape count (' + o.directShapes + ')');
 else fail('shape-count mismatch: direct=' + o.directShapes + ' svg=' + o.svgShapes);
-if (o.parityIoU > 0.95 && o.directPx > 500) ok('render parity: direct == round-trip (IoU ' + o.parityIoU.toFixed(3) + ', ' + o.directPx + ' px)');
-else fail('render parity failed: IoU ' + o.parityIoU.toFixed(3) + ' directPx=' + o.directPx + ' svgPx=' + o.svgPx);
+if (o.parityIoU > 0.95 && o.directPx > 500)
+  ok(
+    'render parity: direct == round-trip (IoU ' +
+      o.parityIoU.toFixed(3) +
+      ', ' +
+      o.directPx +
+      ' px)',
+  );
+else
+  fail(
+    'render parity failed: IoU ' +
+      o.parityIoU.toFixed(3) +
+      ' directPx=' +
+      o.directPx +
+      ' svgPx=' +
+      o.svgPx,
+  );
 if (o.fallbackVersion === 3) ok('gradient scene falls back to the SVG round-trip (version:3)');
 else fail('gradient scene did not fall back: version=' + o.fallbackVersion);
 
 await browser.close();
 server.close();
-if (failures) { console.error('\\n' + failures + ' failure(s)'); process.exit(1); }
+if (failures) {
+  console.error('\\n' + failures + ' failure(s)');
+  process.exit(1);
+}
 console.log('\\nsceneToSectionsSmoke: all assertions passed');

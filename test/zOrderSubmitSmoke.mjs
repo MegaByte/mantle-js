@@ -1,9 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // zOrderSubmitSmoke.mjs — renderer.submitBundle(): deferred, stacking-ordered draws.
 //
-// Mantle paints in painter's order, so before this the stacking order WAS the mount order —
-// unstable the moment anything mounts asynchronously (an overlay that loads a font late, a
-// feedback flash). Consumers each kept their own sorted mount list and called drawBundle in
-// sequence. submitBundle owns that: queue the draws, paint them at endFrame in
+// Mantle paints in painter's order, so with drawBundle alone the stacking order IS the mount
+// order — unstable the moment anything mounts asynchronously (an overlay that loads a font
+// late, a feedback flash), unless each consumer keeps its own sorted mount list and calls
+// drawBundle in sequence. submitBundle owns that: queue the draws, paint them at endFrame in
 // (zOrder asc, submission asc) order.
 //
 // Guards the four properties the API promises:
@@ -13,19 +16,20 @@
 //   4. Immediate drawBundle still paints when called → lands UNDER anything submitted.
 // Plus: submitBundle outside a frame must not silently drop the draw.
 //
-// Two full-canvas opaque squares of different colours; whichever paints last owns the pixel.
+// Two full-canvas opaque squares of different colors; whichever paints last owns the pixel.
 import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
-const sq = (color) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="${color}"/></svg>`;
-const RED = sq('#ff0000');    // 255,0,0
-const BLUE = sq('#0000ff');   // 0,0,255
+const sq = (color) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="${color}"/></svg>`;
+const RED = sq('#ff0000'); // 255,0,0
+const BLUE = sq('#0000ff'); // 0,0,255
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="100" height="100"></canvas>
@@ -40,7 +44,7 @@ const blue = createBundle(gl, await importSvg(${JSON.stringify(BLUE)}));
 r.prepareBundle && r.prepareBundle(red); r.prepareBundle && r.prepareBundle(blue);
 if (r.awaitLbReady) { await r.awaitLbReady(red); await r.awaitLbReady(blue); }
 
-// Centre pixel: 'red' | 'blue' | other. Whichever bundle painted LAST owns it.
+// Center pixel: 'red' | 'blue' | other. Whichever bundle painted LAST owns it.
 const top = () => {
   const px = new Uint8Array(4);
   gl.readPixels(50, 50, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
@@ -103,26 +107,40 @@ window.__ready = true;
 
 const server = http.createServer((req, res) => {
   try {
-    if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML);
+      return;
+    }
     const p = decodeURIComponent(req.url.split('?')[0]);
     res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
     res.end(readFileSync(path.join(ROOT, p)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
-const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--enable-unsafe-swiftshader'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
+});
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.error('[page-err]', e.message));
 await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 60000 });
-await page.waitForFunction(() => window.__ready === true, { timeout: 60000 });
+await page.waitForFunction(() => window.__ready === true, { timeout: 60000, polling: 100 });
 const out = await page.evaluate(() => window.__out);
-await browser.close(); server.close();
+await browser.close();
+server.close();
 
 let fail = 0;
 const expect = (name, got, want) => {
   if (got === want) console.log('ok', name, '=', got);
-  else { console.log('FAIL', name, '— got', got, 'want', want); fail++; }
+  else {
+    console.log('FAIL', name, '— got', got, 'want', want);
+    fail++;
+  }
 };
 expect('low zOrder paints underneath (submitted last)', out.lowZUnderneath, 'blue');
 expect('equal zOrder keeps submission order', out.equalZFirstSubmitted, 'blue');
@@ -132,5 +150,8 @@ expect('immediate drawBundle lands under submitted', out.immediateUnderSubmitted
 expect('submit outside a frame is not dropped', out.submitOutsideFrame, 'red');
 expect('default zOrder is 0', out.defaultZeroZ, 'blue');
 
-if (fail) { console.log(`\nZORDER-SUBMIT FAIL (${fail})`); process.exit(1); }
+if (fail) {
+  console.log(`\nZORDER-SUBMIT FAIL (${fail})`);
+  process.exit(1);
+}
 console.log('\nZORDER-SUBMIT PASS');

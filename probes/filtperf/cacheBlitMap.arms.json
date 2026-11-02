@@ -1,0 +1,9 @@
+[
+  {
+    "name": "baseline cacheBlit",
+    "file": {
+      "cacheBlitVert": "probes/filtperf/pre-cacheBlitMap.cacheBlit.vert.glsl",
+      "cacheBlitFrag": "probes/filtperf/pre-cacheBlitMap.cacheBlit.frag.glsl"
+    }
+  }
+]

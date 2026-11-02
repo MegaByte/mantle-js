@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // svgImportBench.mjs — measure SVG import throughput.
 //
 // Drives the importer against tiger.svg and other fixtures.
@@ -8,31 +11,30 @@
 // Reports per-file: average ms across N runs, # shapes produced.
 
 import { readFileSync, existsSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 import { performance } from 'perf_hooks';
 
 import { DOMParser } from '@xmldom/xmldom';
 if (typeof globalThis.DOMParser === 'undefined') globalThis.DOMParser = DOMParser;
 
 import { importSvg } from '../src/svg/importer.js';
+import { example, missingHint, noteSkip } from './_assets.mjs';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = join(HERE, '..', '..');
-
-const FIXTURES = [
-  { label: 'tiger',       path: join(REPO, 'examples/tiger.svg') },
-];
+// examples/ is the PACKAGE's, which is where fetchTestFixtures writes the tiger (not test/../..,
+// the monorepo root one level above the package, where the fetched asset is never found).
+const FIXTURES = [{ label: 'tiger', path: example('tiger.svg') }];
 
 const N_WARMUP = 5;
-const N_RUNS   = 50;
+const N_RUNS = 50;
 
-console.log(`${'fixture'.padEnd(20)}  ${'bytes'.padStart(7)}  ${'shapes'.padStart(7)}  ${'avg(ms)'.padStart(8)}  ${'min(ms)'.padStart(8)}  ${'max(ms)'.padStart(8)}`);
+console.log(
+  `${'fixture'.padEnd(20)}  ${'bytes'.padStart(7)}  ${'shapes'.padStart(7)}  ${'avg(ms)'.padStart(8)}  ${'min(ms)'.padStart(8)}  ${'max(ms)'.padStart(8)}`,
+);
 console.log('-'.repeat(70));
 
 for (const fx of FIXTURES) {
   if (!existsSync(fx.path)) {
-    console.log(`${fx.label.padEnd(20)}  SKIP (missing: ${fx.path})`);
+    console.log(`${fx.label.padEnd(20)}  SKIP`);
+    noteSkip(missingHint(fx.path));
     continue;
   }
   const text = readFileSync(fx.path, 'utf8');
@@ -57,7 +59,7 @@ for (const fx of FIXTURES) {
 
   console.log(
     `${fx.label.padEnd(20)}  ${String(text.length).padStart(7)}  ${String(shapes).padStart(7)}  ` +
-    `${avg.toFixed(2).padStart(8)}  ${min.toFixed(2).padStart(8)}  ${max.toFixed(2).padStart(8)}`
+      `${avg.toFixed(2).padStart(8)}  ${min.toFixed(2).padStart(8)}  ${max.toFixed(2).padStart(8)}`,
   );
 }
 

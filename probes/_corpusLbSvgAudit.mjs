@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
 // probes/_corpusLbSvgAudit.mjs — LB vs Slug pixel audit on an external SVG corpus.
 // Flags hard ink disagreements (LB-only / Slug-only) on shapes that actually
 // routed through Loop-Blinn. Soft (mean) diffs are reported but not fatal.
@@ -6,24 +8,26 @@ import { readFileSync, readdirSync, statSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 
 const HERE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ROOT = process.env.MANTLE_ROOT
-  ? path.resolve(process.env.MANTLE_ROOT)
-  : HERE_ROOT;
+const ROOT = process.env.MANTLE_ROOT ? path.resolve(process.env.MANTLE_ROOT) : HERE_ROOT;
 const CORPUS_ROOT = process.env.CORPUS_ROOT && path.resolve(process.env.CORPUS_ROOT);
 if (!CORPUS_ROOT) throw new Error('CORPUS_ROOT must name an external SVG corpus');
 const N = +(process.env.N || 256);
 const MAX_BYTES = +(process.env.MAX_BYTES || 180_000);
 const LIMIT = +(process.env.LIMIT || 48);
-const HARD_FAIL = +(process.env.HARD_FAIL || 12);  // solid-xor px (ink vs empty)
+const HARD_FAIL = +(process.env.HARD_FAIL || 12); // solid-xor px (ink vs empty)
 const MEAN_INK_FAIL = +(process.env.MEAN_INK_FAIL || 0.02); // mean |Δ|/255 on inked px
-const XOR_PCT_FAIL = +(process.env.XOR_PCT_FAIL || 0.5);    // solid-xor as % of max(ink)
+const XOR_PCT_FAIL = +(process.env.XOR_PCT_FAIL || 0.5); // solid-xor as % of max(ink)
 
 function walkSvg(dir, out = []) {
   let ents;
-  try { ents = readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  try {
+    ents = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
   for (const e of ents) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) {
@@ -33,7 +37,9 @@ function walkSvg(dir, out = []) {
       try {
         const st = statSync(p);
         if (st.size > 400 && st.size <= MAX_BYTES) out.push(p);
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
   }
   return out;
@@ -170,27 +176,39 @@ const server = http.createServer((q, res) => {
   }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const br = await puppeteer.launch(process.env.GPU === '1'
-  ? { headless: false, args: ['--no-sandbox', '--use-angle=metal', '--enable-gpu'] }
-  : { headless: 'new', args: ['--no-sandbox'] });
+// HEADLESS EVEN ON THE GPU. Headless Chrome reaches the real GPU: ANGLE (Apple, ANGLE Metal
+// Renderer) reports and TIMES the same headless or headful.
+// A window is not free to the person running this: macOS CLAMPS --window-position (measured:
+// screenX/Y 83,65 whatever you pass), so a headful run cannot be put out of the way and lands
+// on whichever desktop is in front.
+const br = await launchBrowser(
+  process.env.GPU === '1'
+    ? { headless: 'new', args: ['--no-sandbox', '--use-angle=metal', '--enable-gpu'] }
+    : { headless: 'new', args: ['--no-sandbox'] },
+);
 const pg = await br.newPage();
 pg.on('pageerror', (e) => console.error('[page]', String(e.message).slice(0, 240)));
 await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
 await pg.waitForFunction(() => window.__ready === true, { timeout: 120000 });
 
 const bad = [];
-let routedN = 0, skipN = 0, errN = 0;
+let routedN = 0,
+  skipN = 0,
+  errN = 0;
 for (const f of FILES) {
   const rel = path.relative(CORPUS_ROOT, f);
   let txt;
-  try { txt = readFileSync(f, 'utf8'); } catch (e) {
+  try {
+    txt = readFileSync(f, 'utf8');
+  } catch (e) {
     console.log(`SKIP ${rel} read:${e.message}`);
     skipN++;
     continue;
   }
   let o;
-  try { o = await pg.evaluate((s) => window.__run(s), txt); }
-  catch (e) {
+  try {
+    o = await pg.evaluate((s) => window.__run(s), txt);
+  } catch (e) {
     console.log(`ERR  ${rel} evaluate:${String(e.message || e).slice(0, 120)}`);
     errN++;
     continue;
@@ -204,13 +222,13 @@ for (const f of FILES) {
   if (usedLb) routedN++;
   const hardBad = usedLb && (o.hard > HARD_FAIL || o.xorPct > XOR_PCT_FAIL);
   const softBad = usedLb && o.mean > MEAN_INK_FAIL;
-  const tag = hardBad ? ' BAD' : (softBad ? ' soft' : '');
+  const tag = hardBad ? ' BAD' : softBad ? ' soft' : '';
   if (hardBad || softBad || process.env.VERBOSE) {
     console.log(
       `${hardBad ? 'FAIL' : 'ok  '} ${rel}` +
-      ` route=${o.routed} v=${o.verts} hard=+${o.lbOnly}/-${o.slugOnly}` +
-      ` (${o.xorPct.toFixed(2)}%) mean=${o.mean.toFixed(4)} maxD=${o.maxD}` +
-      ` k12=${o.kinds[12] | 0} k10=${o.kinds[10] | 0}${tag}`
+        ` route=${o.routed} v=${o.verts} hard=+${o.lbOnly}/-${o.slugOnly}` +
+        ` (${o.xorPct.toFixed(2)}%) mean=${o.mean.toFixed(4)} maxD=${o.maxD}` +
+        ` k12=${o.kinds[12] | 0} k10=${o.kinds[10] | 0}${tag}`,
     );
   } else {
     process.stdout.write('.');
@@ -218,12 +236,24 @@ for (const f of FILES) {
   if (hardBad) bad.push({ rel, ...o });
 }
 console.log('');
-console.log(`done: ${FILES.length} files, LB-routed ${routedN}, err ${errN}, skip ${skipN}, hard-fail ${bad.length} (thresh hard>${HARD_FAIL} or xor%>${XOR_PCT_FAIL})`);
+console.log(
+  `done: ${FILES.length} files, LB-routed ${routedN}, err ${errN}, skip ${skipN}, hard-fail ${bad.length} (thresh hard>${HARD_FAIL} or xor%>${XOR_PCT_FAIL})`,
+);
 if (bad.length) {
   console.log('HARD FAILURES:');
   for (const b of bad) {
-    console.log(`  ${b.rel} hard=+${b.lbOnly}/-${b.slugOnly} (${b.xorPct.toFixed(2)}%) mean=${b.mean.toFixed(4)} verts=${b.verts}`);
+    console.log(
+      `  ${b.rel} hard=+${b.lbOnly}/-${b.slugOnly} (${b.xorPct.toFixed(2)}%) mean=${b.mean.toFixed(4)} verts=${b.verts}`,
+    );
   }
+}
+// KEEP_OPEN=1 leaves the browser and the server up so the rendered page can be
+// inspected by hand. The process stays alive until it is killed.
+if (process.env.KEEP_OPEN === '1') {
+  console.log(
+    '\n[KEEP_OPEN] browser left open — inspect the canvas; Ctrl-C or kill this process to close.',
+  );
+  await new Promise(() => {});
 }
 await br.close();
 server.close();

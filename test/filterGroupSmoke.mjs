@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Filtered shape INSIDE an opacity group — the group-compositing path.
 //
 // examples/_filtergroup.svg: a solid blue rect outside the group, then
@@ -13,7 +16,8 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { openReady } from './_pageReady.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -28,42 +32,60 @@ function mime(p) {
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost');
   let p = decodeURIComponent(u.pathname === '/' ? '/mantleDemo.html' : u.pathname);
-  try { res.writeHead(200, { 'content-type': mime(p) }); res.end(readFileSync(path.join(ROOT, p))); }
-  catch (e) { try { res.writeHead(404); res.end(); } catch {} }
+  try {
+    res.writeHead(200, { 'content-type': mime(p) });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch (e) {
+    try {
+      res.writeHead(404);
+      res.end();
+    } catch {}
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
-const fail = (msg) => { failures++; console.error('FAIL:', msg); };
-const ok   = (msg) => console.log('  ok ' + msg);
+const fail = (msg) => {
+  failures++;
+  console.error('FAIL:', msg);
+};
+const ok = (msg) => console.log('  ok ' + msg);
 
-const browser = await puppeteer.launch({
-  headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'],
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
 });
 const page = await browser.newPage();
 await page.setViewport({ width: 400, height: 400 });
-page.on('pageerror', e => console.error('  [page-err]', e.message));
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
 
 const target = `http://127.0.0.1:${port}/mantleDemo.html?svg=/${encodeURIComponent('examples/_filtergroup.svg')}`;
 try {
-  await page.goto(target, { waitUntil: 'load', timeout: 10000 });
-  await page.waitForFunction(() => {
-    const st = document.getElementById('status');
-    return st && !/Fetching|Converting/.test(st.textContent);
-  }, { timeout: 8000 });
+  await openReady(page, target, { ready: 'demoSvg' });
 
   const s = await page.evaluate(() => {
     const cnv = document.getElementById('glcanvas');
-    const gl = window.__mantleGl, renderer = window.__mantleRenderer;
+    const gl = window.__mantleGl,
+      renderer = window.__mantleRenderer;
     if (!cnv || !gl || !renderer) return null;
     renderer.render();
-    const w = cnv.width, h = cnv.height;
+    const w = cnv.width,
+      h = cnv.height;
     const px = new Uint8Array(w * h * 4);
     gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
-    let solidBlue = 0, halfRed = 0, halfGreen = 0, fullRed = 0, fullGreen = 0;
+    let solidBlue = 0,
+      halfRed = 0,
+      halfGreen = 0,
+      fullRed = 0,
+      fullGreen = 0;
     for (let i = 0; i < px.length; i += 4) {
-      const r = px[i], g = px[i + 1], b = px[i + 2];
+      const r = px[i],
+        g = px[i + 1],
+        b = px[i + 2];
       if (b > 200 && r < 80 && g < 80) solidBlue++;
       // 50% red over white ≈ (255, 127, 127); blur softens edges, so
       // accept a generous band around the plateau.
@@ -76,7 +98,9 @@ try {
     return { w, h, solidBlue, halfRed, halfGreen, fullRed, fullGreen };
   });
   if (!s) throw new Error('no canvas / WebGL2 context');
-  console.log(`  diag: blue=${s.solidBlue} halfRed=${s.halfRed} halfGreen=${s.halfGreen} fullRed=${s.fullRed} fullGreen=${s.fullGreen}`);
+  console.log(
+    `  diag: blue=${s.solidBlue} halfRed=${s.halfRed} halfGreen=${s.halfGreen} fullRed=${s.fullRed} fullGreen=${s.fullGreen}`,
+  );
 
   if (s.solidBlue > 500) ok(`blue rect outside the group survives (${s.solidBlue} px)`);
   else fail(`blue backdrop lost (${s.solidBlue} px) — the in-group filter clobbered the canvas`);
@@ -85,10 +109,17 @@ try {
   else fail(`no half-opacity red (${s.halfRed} px) — filtered shape missing or at wrong alpha`);
 
   if (s.halfGreen > 500) ok(`plain sibling renders at group opacity (${s.halfGreen} px)`);
-  else fail(`no half-opacity green (${s.halfGreen} px) — group content clobbered by the filter branch`);
+  else
+    fail(
+      `no half-opacity green (${s.halfGreen} px) — group content clobbered by the filter branch`,
+    );
 
-  if (s.fullRed < 50) ok(`no full-opacity red (${s.fullRed} px) — the filter did not escape the group`);
-  else fail(`${s.fullRed} full-opacity red px — the filtered shape composited to the canvas, escaping the group`);
+  if (s.fullRed < 50)
+    ok(`no full-opacity red (${s.fullRed} px) — the filter did not escape the group`);
+  else
+    fail(
+      `${s.fullRed} full-opacity red px — the filtered shape composited to the canvas, escaping the group`,
+    );
 
   if (s.fullGreen < 50) ok(`no full-opacity green (${s.fullGreen} px)`);
   else fail(`${s.fullGreen} full-opacity green px — group opacity not applied`);

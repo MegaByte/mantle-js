@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // l0Smoke.mjs — default-OT-shaper smoke.
 //
 // Verifies GSUB lookups 1 + 2 + GPOS lookup 1 plumbing. The positive
@@ -9,28 +12,36 @@ import { MantleFontAsset } from '../../src/font/fontAsset.js';
 import { buildStyled, buildFromMarkup, buildTextRun } from '../../src/font/textRun.js';
 import { parseMarkup, defaultStyle } from '../../src/font/markupParser.js';
 
-const stix  = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/STIXTwoText.ttf')));
-const arial = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')));
+const stix = new MantleFontAsset(
+  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/STIXTwoText.ttf')),
+);
+const arial = new MantleFontAsset(
+  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')),
+);
 
 // Force parse so .gsub is populated.
-stix.getMetrics(0x41); arial.getMetrics(0x41);
+stix.getMetrics(0x41);
+arial.getMetrics(0x41);
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // ---- T1: hasSmallCaps capability is correct ----
 {
-  if (!stix.gsub.hasSmallCaps)  fail(`T1 STIX should have smallCaps`);
-  if (arial.gsub.hasSmallCaps)  fail(`T1 Arial should not have smallCaps`);
-  if (!stix.gsub.hasSmallCaps || arial.gsub.hasSmallCaps) {}
-  else ok(`T1 hasSmallCaps STIX=${stix.gsub.hasSmallCaps} Arial=${arial.gsub.hasSmallCaps}`);
+  if (!stix.gsub.hasSmallCaps) fail(`T1 STIX should have smallCaps`);
+  if (arial.gsub.hasSmallCaps) fail(`T1 Arial should not have smallCaps`);
+  if (!stix.gsub.hasSmallCaps || arial.gsub.hasSmallCaps) {
+  } else ok(`T1 hasSmallCaps STIX=${stix.gsub.hasSmallCaps} Arial=${arial.gsub.hasSmallCaps}`);
 }
 
 // ---- T2: smcp substitutes lowercase glyphs in STIX ----
 {
   const gidA = stix.codepointToGlyphId(0x61); // 'a'
-  const sub  = stix.gsub.substituteSmallCap(gidA);
+  const sub = stix.gsub.substituteSmallCap(gidA);
   if (sub === gidA) fail(`T2 'a' not substituted (gid=${gidA})`);
   else ok(`T2 'a' substituted ${gidA} → ${sub}`);
 }
@@ -38,7 +49,7 @@ const ok   = (msg) => console.log('ok ' + msg);
 // ---- T3: c2sc substitutes uppercase glyphs in STIX ----
 {
   const gidA = stix.codepointToGlyphId(0x41); // 'A'
-  const sub  = stix.gsub.substituteSmallCap(gidA);
+  const sub = stix.gsub.substituteSmallCap(gidA);
   if (sub === gidA) fail(`T3 'A' not substituted (gid=${gidA})`);
   else ok(`T3 'A' substituted ${gidA} → ${sub}`);
 }
@@ -46,7 +57,7 @@ const ok   = (msg) => console.log('ok ' + msg);
 // ---- T4: smcp no-op on Arial (no smcp feature) ----
 {
   const gidA = arial.codepointToGlyphId(0x61);
-  const sub  = arial.gsub.substituteSmallCap(gidA);
+  const sub = arial.gsub.substituteSmallCap(gidA);
   if (sub !== gidA) fail(`T4 Arial smcp shouldn't change gid (${gidA} → ${sub})`);
   else ok(`T4 Arial 'a' unchanged (gid=${gidA})`);
 }
@@ -64,7 +75,8 @@ const ok   = (msg) => console.log('ok ' + msg);
   // Smallcaps versions have cap-style height with no descenders / ascenders.
   const lo = await buildTextRun('abc', stix);
   const sc = await buildFromMarkup('<smallcaps>abc</smallcaps>', stix);
-  if (lo.numShapes !== sc.numShapes) fail(`T6 shape count mismatch ${lo.numShapes} vs ${sc.numShapes}`);
+  if (lo.numShapes !== sc.numShapes)
+    fail(`T6 shape count mismatch ${lo.numShapes} vs ${sc.numShapes}`);
   else ok(`T6 STIX <smallcaps> renders, ${sc.numShapes} shapes`);
 }
 
@@ -95,13 +107,18 @@ const ok   = (msg) => console.log('ok ' + msg);
   else ok(`T9 GSUB-2 API returns null when no feature`);
 }
 
-// ---- T10: <smallcaps> on Arial is a no-op (font has no feature) ----
+// ---- T10: <smallcaps> on Arial (no smcp feature) is synthesized: each lowercase letter is its capital at 0.7 of the size ----
 {
   const a = await buildTextRun('hello', arial);
   const b = await buildFromMarkup('<smallcaps>hello</smallcaps>', arial);
-  if (a.numShapes !== b.numShapes) fail(`T10 Arial smcp shape count changed ${a.numShapes} → ${b.numShapes}`);
-  else if (Math.abs(a.globalBBox[2] - b.globalBBox[2]) > 1e-3) fail(`T10 Arial smcp width changed`);
-  else ok(`T10 Arial <smallcaps> is no-op (no smcp feature)`);
+  const c = await buildTextRun('HELLO', arial);
+  if (a.numShapes !== b.numShapes)
+    fail(`T10 Arial smcp shape count changed ${a.numShapes} → ${b.numShapes}`);
+  else if (!(Math.abs(b.globalBBox[2] / c.globalBBox[2] - 0.7) < 0.02))
+    fail(
+      `T10 Arial synthesized small caps are not 0.7 of the capitals (${b.globalBBox[2]} vs ${c.globalBBox[2]})`,
+    );
+  else ok(`T10 Arial <smallcaps> is synthesized at 0.7 of the capitals (no smcp feature)`);
 }
 
 console.log();

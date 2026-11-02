@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Shared GLSL helpers for CSS Compositing & Blending Level 1 blend modes
 // (feBlend, COLRv1 PaintComposite, final-FB mix-blend-mode compositor).
 //
@@ -44,11 +47,10 @@ vec3 blendSeparable(int mode, vec3 src, vec3 dst) {
   }
   if (mode == 10) return abs(dst - src);                         // difference
   if (mode == 11) return src + dst - 2.0 * src * dst;            // exclusion
-  // Flash AS3 BlendMode extensions (also CSS Compositing 2's
-  // "plus-lighter" / "plus-darker"). Saturating arithmetic — keep the
+  // Flash AS3 BlendMode extensions. Saturating arithmetic keeps the
   // output in [0,1] so the src-over downstream stays well-defined.
-  if (mode == 16) return min(src + dst, vec3(1.0));               // plus-lighter / add
-  if (mode == 17) return max(dst - src, vec3(0.0));               // plus-darker / subtract
+  if (mode == 16) return min(src + dst, vec3(1.0));               // add
+  if (mode == 17) return max(dst - src, vec3(0.0));               // subtract
   if (mode == 18) return vec3(1.0) - dst;                         // invert (ignores src.rgb)
   return src;  // normal fallback (mode 0)
 }
@@ -83,7 +85,7 @@ vec3 blendNonSeparable(int mode, vec3 src, vec3 dst) {
 //   0          = normal (pass-through src)
 //   1..11      = separable (CSS Compositing 1)
 //   12..15     = non-separable (HSL — hue/saturation/color/luminosity)
-//   16..18     = Flash AS3 extras (plus-lighter, plus-darker, invert)
+//   16..18     = Flash AS3 extras (add, subtract, invert)
 vec3 blendDispatch(int mode, vec3 src, vec3 dst) {
   return (mode >= 12 && mode <= 15)
     ? blendNonSeparable(mode, src, dst)

@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"><defs><filter id="f" x="-60%" y="-60%" width="220%" height="220%"><feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="3" result="d"/><feGaussianBlur in="d" stdDeviation="2" result="b"/><feComposite in="b" in2="SourceGraphic" operator="over"/></filter></defs><rect width="256" height="256" fill="#eee"/><circle cx="128" cy="128" r="14" fill="#c33" filter="url(#f)"/></svg>

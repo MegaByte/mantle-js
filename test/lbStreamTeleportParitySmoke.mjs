@@ -1,14 +1,17 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // lbStreamTeleportParitySmoke.mjs — refreshLoopBlinnMesh must stay correct when
 // a streamed shape's geometry TELEPORTS, not just when it deforms smoothly.
 //
-// The ring-buffer road (roadRing.ts) reuses a fixed set of shape slots: when
+// A ring-buffer road reuses a fixed set of shape slots: when
 // scroll crosses a group boundary, a slot is reassigned to a DIFFERENT depth
 // band, so its geometry jumps discontinuously. The streaming refresh reuses the
 // cached earcut triangulation across that jump; if the new polygon's
 // convex/reflex structure differs from the cached one, the stale triangulation
-// no longer tiles it → under-fill gaps / "wrong wedges" (the live Highway
-// Hazards bug — and it slips past a rim-LENGTH-only validity check because the
-// jumped-to band can have the same rim length).
+// does not tile it → under-fill gaps / "wrong wedges" (and it slips past a
+// rim-LENGTH-only validity check because the jumped-to band can have the same
+// rim length).
 //
 // This streams a sequence of structurally-varied curved road bands through ONE
 // bundle and asserts each streamed frame matches a FRESH build of the same
@@ -18,7 +21,7 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -81,34 +84,67 @@ window.__out=out; window.__ready=true;
 
 const server = http.createServer((req, res) => {
   try {
-    if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML);
+      return;
+    }
     const p = decodeURIComponent(req.url.split('?')[0]);
-    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' }); res.end(readFileSync(path.join(ROOT, p)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { if (m.type() === 'error') console.error('  [console]', m.text()); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('  [console]', m.text());
+});
 try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await page.waitForFunction(() => window.__ready === true, { timeout: 10000, polling: 100 });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 const o = await page.evaluate(() => window.__out);
 for (const r of o) {
-  if (r.iou > 0.99) ok(`teleport step ${r.i} streamed == fresh (IoU ${r.iou.toFixed(4)}, ${r.streamCount}px)`);
-  else fail(`teleport step ${r.i} streamed != fresh (IoU ${r.iou.toFixed(4)}, stream ${r.streamCount} vs fresh ${r.freshCount}) — stale triangulation reused across a structural jump`);
+  if (r.iou > 0.99)
+    ok(`teleport step ${r.i} streamed == fresh (IoU ${r.iou.toFixed(4)}, ${r.streamCount}px)`);
+  else
+    fail(
+      `teleport step ${r.i} streamed != fresh (IoU ${r.iou.toFixed(4)}, stream ${r.streamCount} vs fresh ${r.freshCount}) — stale triangulation reused across a structural jump`,
+    );
 }
 
 await browser.close();
 server.close();
-if (failures) { console.error('\\n' + failures + ' failure(s)'); process.exit(1); }
-console.log('\\nlbStreamTeleportParitySmoke: streaming refresh stays correct across geometry teleports');
+if (failures) {
+  console.error('\\n' + failures + ' failure(s)');
+  process.exit(1);
+}
+console.log(
+  '\\nlbStreamTeleportParitySmoke: streaming refresh stays correct across geometry teleports',
+);

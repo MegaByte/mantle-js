@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 160">
+<defs><clipPath id="cd" clipPathUnits="objectBoundingBox"><rect x="0.25" y="0" width="0.5" height="1"/></clipPath>
+<clipPath id="cd2" clipPathUnits="objectBoundingBox"><rect x="0.1" y="0" width="0.4" height="1"/></clipPath></defs>
+<rect x="0" y="0" width="420" height="160" fill="#101418"/>
+<g transform="translate(40 60)"><rect x="0" y="0" width="40" height="20" fill="#3a4654"/><rect x="0" y="0" width="40" height="20" fill="#f05a28" clip-path="url(#cd)"/></g>
+<g transform="translate(140 60) rotate(30)"><rect x="0" y="0" width="40" height="20" fill="#3a4654"/><rect x="0" y="0" width="40" height="20" fill="#f05a28" clip-path="url(#cd)"/></g>
+<g transform="translate(240 60) skewX(30)"><rect x="0" y="0" width="40" height="20" fill="#3a4654"/><rect x="0" y="0" width="40" height="20" fill="#f05a28" clip-path="url(#cd)"/></g>
+<g transform="translate(360 60) scale(-1 1)"><rect x="0" y="0" width="40" height="20" fill="#3a4654"/><rect x="0" y="0" width="40" height="20" fill="#f05a28" clip-path="url(#cd2)"/></g>
+</svg>

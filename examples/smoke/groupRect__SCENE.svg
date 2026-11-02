@@ -11,7 +11,7 @@
     <rect x="270" y="40" width="90" height="70" fill="#ecf0f1" stroke="#c0392b" stroke-width="14"/>
     <circle cx="315" cy="150" r="34" fill="#1abc9c" filter="url(#s)"/>
   </g>
-  <!-- A BLENDED LEAF, outside any group. It takes its own offscreen route and paid the
+  <!-- A BLENDED LEAF, outside any group. It takes its own offscreen route and would pay the
        same four full-canvas passes; the rect bounds those too. -->
   <circle cx="80" cy="90" r="55" fill="#f39c12" style="mix-blend-mode: multiply"/>
   <!-- ...and one INSIDE a group, which composites against the group's local backdrop

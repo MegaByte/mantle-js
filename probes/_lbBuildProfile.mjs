@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // _lbBuildProfile — where does the LB mesh build actually spend its time?
 //
 // Motivation: relaying out cdt.js's delaunay to flat typed arrays made
@@ -27,8 +30,10 @@ const bundle = await importSvg(svg);
 // Passing the ArrayBuffer straight through makes every shape bail to Slug and the whole build
 // "finish" in 0.3ms — a silent no-op that looks like a fast build.
 const input = {
+  // bundle.meta carries a 32-BYTE HEADER; wrapping it whole shifts every meta row by 8 floats and sends most
+  // shapes down the CDT partition, so a build measured that way is 20x the real one. Strip it, as the tests do.
   curveFloats: new Float32Array(bundle.curves),
-  metaFloats: bundle.meta ? new Float32Array(bundle.meta) : null,
+  metaFloats: bundle.meta ? new Float32Array(bundle.meta, 32) : null,
   metaFloatsPerShape: bundle.metaFloatsPerShape,
   ranges: bundle.curveRangesByShape,
   numShapes: bundle.numShapes,
@@ -36,7 +41,8 @@ const input = {
 
 const session = new Session();
 session.connect();
-const post = (m, p) => new Promise((res, rej) => session.post(m, p, (e, r) => (e ? rej(e) : res(r))));
+const post = (m, p) =>
+  new Promise((res, rej) => session.post(m, p, (e, r) => (e ? rej(e) : res(r))));
 
 // NO warmup, and exactly ONE build. lbPack.js keeps a module-level canonical-similarity mesh
 // cache, so a second build of the same content is a cache hit that measures nothing (the first
@@ -44,7 +50,7 @@ const post = (m, p) => new Promise((res, rej) => session.post(m, p, (e, r) => (e
 // cold build is also the honest case: the worker builds a given bundle once.
 
 await post('Profiler.enable');
-await post('Profiler.setSamplingInterval', { interval: 100 });   // 100us — fine enough to separate modules
+await post('Profiler.setSamplingInterval', { interval: 100 }); // 100us — fine enough to separate modules
 await post('Profiler.start');
 const t0 = performance.now();
 buildLbBundle(input);
@@ -66,7 +72,9 @@ for (const s of profile.samples) {
 }
 const rows = [...self.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
 
-console.log(`tiger LB build: ${wall.toFixed(1)}ms (Node, ONE cold build — the cache makes a second one meaningless)\n`);
+console.log(
+  `tiger LB build: ${wall.toFixed(1)}ms (Node, ONE cold build — the cache makes a second one meaningless)\n`,
+);
 console.log('  self-time by file (top 12):');
 console.log('  file                          |   share');
 for (const [file, cnt] of rows) {

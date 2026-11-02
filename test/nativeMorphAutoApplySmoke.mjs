@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // nativeMorphAutoApplySmoke.mjs — drawBundle(morph.bundle) draws the
 // tween on native even when the caller does not forward morph.overrides.
 //
@@ -15,11 +18,12 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { fontFixture, requireAsset } from './_assets.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MROOT = path.resolve(__dirname, '..');
-const fontB64 = readFileSync(new URL('./font/fixtures/roboto-regular.ttf', import.meta.url)).toString('base64');
+const fontB64 = readFileSync(requireAsset(fontFixture('roboto-regular.ttf'))).toString('base64');
 
 const pose = (apexY) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 60">
   <defs><mask id="m"><rect x="0" y="0" width="120" height="60" fill="#fff"/></mask></defs>
@@ -56,39 +60,58 @@ window.__out = out; window.__ready = true;
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.writeHead(200, {'content-type':'text/html'}); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(HTML);
+    return;
+  }
   let p = decodeURIComponent(req.url.split('?')[0]);
-  try { res.writeHead(200, {'content-type':'text/javascript'}); res.end(readFileSync(path.join(MROOT, p))); }
-  catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    res.writeHead(200, { 'content-type': 'text/javascript' });
+    res.end(readFileSync(path.join(MROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+const browser = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
 try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 30000 });
-  const got = await page.waitForFunction('window.__ready === true', { timeout: 30000 }).then(()=>1).catch(()=>0);
-  if (!got) { fail('page did not become ready'); }
-  else {
+  const got = await page
+    .waitForFunction('window.__ready === true', { timeout: 30000, polling: 100 })
+    .then(() => 1)
+    .catch(() => 0);
+  if (!got) {
+    fail('page did not become ready');
+  } else {
     const out = await page.evaluate('window.__out');
-    const ys = out.map(x => x.boxApexY);
+    const ys = out.map((x) => x.boxApexY);
     console.log('box apex Y (no overrides passed):', JSON.stringify(ys));
-    if (ys.every(y => y != null)) ok('box element addressed at every t');
+    if (ys.every((y) => y != null)) ok('box element addressed at every t');
     else fail('box apex Y missing: ' + ys);
     const distinct = new Set(ys).size;
     if (distinct >= 4) ok('geometry changes per t — tween auto-applied (not snapping to src pose)');
     else fail('box apex Y barely changes — morph NOT auto-applied (snapping): ' + ys);
-    const mono = ys.every((y, i) => i === 0 || y >= ys[i-1] - 0.01);
-    if (mono && ys[0] < 5 && ys[ys.length-1] > 15)
-      ok(`monotonic 2→20 without forwarding overrides (${ys[0]}→${ys[ys.length-1]})`);
+    const mono = ys.every((y, i) => i === 0 || y >= ys[i - 1] - 0.01);
+    if (mono && ys[0] < 5 && ys[ys.length - 1] > 15)
+      ok(`monotonic 2→20 without forwarding overrides (${ys[0]}→${ys[ys.length - 1]})`);
     else fail('not monotonic 2→20: ' + ys);
   }
-} finally { await browser.close(); server.close(); }
+} finally {
+  await browser.close();
+  server.close();
+}
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nNATIVE-MORPH-AUTO-APPLY PASS');
 process.exit(failures ? 1 : 0);

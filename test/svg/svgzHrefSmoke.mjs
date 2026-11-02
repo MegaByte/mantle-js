@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // svgzHrefSmoke.mjs — verify .svgz href decompression helpers
 // (gunzipBytes / isGzipped / decodeSvgzBytes).
 
@@ -8,10 +11,14 @@ import { isSvgHref, isGzipped, gunzipBytes, decodeSvgzBytes } from '../../src/sv
 import zlib from 'zlib';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL', msg); failures++; };
-const ok   = (msg) => console.log('ok', msg);
+const fail = (msg) => {
+  console.error('FAIL', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok', msg);
 
-const innerSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="purple"/></svg>';
+const innerSvg =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="purple"/></svg>';
 const innerBytes = new Uint8Array(Buffer.from(innerSvg, 'utf8'));
 const gzipped = new Uint8Array(zlib.gzipSync(innerBytes));
 

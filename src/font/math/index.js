@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // font/math — opt-in registration for the MATH table reader.
 //
 //   import { registerMathReader } from '@kontek/mantle/font/math';

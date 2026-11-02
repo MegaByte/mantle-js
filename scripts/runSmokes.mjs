@@ -1,125 +1,720 @@
 #!/usr/bin/env node
-// runSmokes.mjs — curated fast smoke tests for CI / prepublish.
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
-
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+// CPU production-code tests and static/API checks. Shader models run separately.
+import { runNodeChecks } from './runNodeChecks.mjs';
 const SMOKES = [
-  'test/morphCullCertifierSmoke.mjs',   // morphCull: the analytic no-crossing certificate vs brute force over (u,v,t)
+  'test/spdxHeaderSmoke.mjs',
+  'test/exitDeadlockRunnerSmoke.mjs', // a smoke deadlocked in process.exit is counted by the code it asked for: no timeout, no retry
+  'test/strokeWalkSiteBudgetSmoke.mjs', // the stroke walk is compiled once per call site: sites per variant, one entry, source budget (cold pipeline cost)
+  'test/memoryLedgerSmoke.mjs', // getMemoryStats(): GPU bytes exact against a spy on texImage2D / texImage3D / texStorage / bufferData / renderbufferStorage, per category and bundle, zero after dispose
+  'test/memoryBudgetSmoke.mjs', // memoryBudgetBytes: eviction order, nothing in use evicted, optional resources refused with one warning, budget respected at frame ends, preparation brackets
+  'test/glStateLifetimeSmoke.mjs',
+  'test/turbulenceLatticeSmoke.mjs',
+  'test/gradientTablePackingSmoke.mjs',
+  'test/scaleRangeSmoke.mjs', // fallback path data, miter-limit reach ceiling, sub-ulp gradient vectors, scene arc guard and self-overlap resolve at 2^-40..2^40
+  'test/obbGradientRowsSmoke.mjs', // every rotated/skewed objectBoundingBox carrier gets its own placement row at any count (no 2048 cap)
+  'test/tableLayoutSmoke.mjs', // per-item tables wrap in 4096-row bands; GLSL helpers == JS map; no raw fetch; the hard check's message
+  'test/cpatchConversionSupersedeSmoke.mjs',
+  'test/fillCancelledGeometrySmoke.mjs', // builders on geometry that cancels or coincides: no hairline mesh, an empty CPatch pack, one walk per coincident edge, a bounded fast resolve
+  'test/cpatchCycleAreaSmoke.mjs', // extracted cycles that certify take the complete-paint area; node coordinates snap by a few ulps of the paint's scale
+  'test/cpatchAreaGateSmoke.mjs', // the area cost gate -- a complete-paint area over 3e6 curve-pixels of box yields its cover quad, decided in device pixels
+  'test/lbPipeSceneOverflowSmoke.mjs',
+  'test/lbBandHookMidNormalSmoke.mjs', // the curve band's hook partition: the normal line at the arc point that bisects the end normals, in closed form, against a bisection
+  'test/trackedCleanSmoke.mjs',
+  'test/exportOverridesSmoke.mjs', // fill+stroke rows, composed local transforms, non-finite numbers
+  'test/nativeMorphGroupSpaceSmoke.mjs', // a native morph draws in the coordinates of the element it lands on (groups, own transform, <use>, stroke width, overrides)
+  'test/staticCacheMorphHashSmoke.mjs', // the static-cache draw-state hash covers a morph t without the optional hook
+  'test/opaquePrepassNineSliceSmoke.mjs', // the opaque prepass is off for a nine-sliced bundle
+  'test/bakeDeferredClassSmoke.mjs', // filter caches and the mask slot refuse an incomplete (deferred) result
+  'test/cacheBakeDeferredSmoke.mjs', // a static-cache bake with a deferred fill is not kept as the valid cache (it would draw black where the deferred fill belongs)
+  'test/opaquePrepassOptOutSmoke.mjs', // the opaque prepass runs by default; opaquePrepass:false opts out
+  'test/instancedSpriteRangeSmoke.mjs', // the instanced fast path draws only a sprite's rows
+  'test/occlusionCullListRefreshSmoke.mjs', // the uncut draw list follows applyNineSlice and the full stream rebuild
+  'test/occlusionCullRetiredSmoke.mjs', // a cull an override or a sprite draw retired stays retired (late worker cull, kill-switch tick, instanced route)
+  'test/nativeDstRectSmoke.mjs', // native drawBundle dstRect/fit/clipToRect place the content bbox where WebGL does
+  'test/exportIsolationSmoke.mjs', // scoped CSS, stripped active content, deterministic ids, shared instances
+  'test/exportReplaySmoke.mjs', // scissor and node-clip replay, recovered text anchors, declined image draws
+  'test/sceneSurfaceSmoke.mjs', // toScene memo, native args, sceneToSections parity, scene numbers, wire validation
+  'test/readmeSamplesSmoke.mjs', // the README samples run
+  'test/browserSafeImportsSmoke.mjs', // no literal Node builtin specifier in src; the three decompress paths
+  'test/shaderLoadPathsSmoke.mjs', // fromPackage/loadShaders bundled default, file: via fs, loud URL failures, no loadShadersSync
+  'test/workerConfigSmoke.mjs', // configureWorkers disables/relocates workers; readable worker error text
+  'test/importSpecEdgesSmoke.mjs', // a zero viewBox disables rendering; marker content; selector backtracking, style media and type, non-ASCII identifiers; concurrent compat; a fallback for an unusable gradient
+  'test/importTextElementSmoke.mjs', // text: blend and isolation, paint-order, <a>, elements that do not render, a url() to nothing, objectBoundingBox references
+  'test/importDefContentSmoke.mjs', // clip and mask content keeps what it inherits and matches when the def is folded; a binary mask over a leaf that names a mask
+  'test/importLeafCascadeSmoke.mjs', // blend, isolation, vector-effect, filter and paint-order on a leaf read the whole cascade; initial and unset; a group row does not widen the box
+  'test/importAuthoredNamesSmoke.mjs', // names that spell Object.prototype members are data; a sprite allow-list keeps a kept sprite's clip and mask; a group over a very long path
+  'test/hitSpriteSmoke.mjs', // hit tests take a sprite id or [first, last] range
+  'test/morphHitBitsOneSidedSmoke.mjs', // a morph with a table-less side keeps that side's rows targetable
+  'test/viewCullMorphTrimSmoke.mjs', // a morph draw never view-cull-trims (rows move between poses)
+  'test/metaHeaderTagSmoke.mjs', // the meta header carries a magic and a version word
+  'test/originSmoke.mjs', // the per-bundle origin: float32 store at 1e4..1e8, header v3, corpus under forced origins, overrides pivot, morph/stream/scene, converter input
+  'test/readmeTypesSmoke.mjs', // every documented sample type-checks under strict against the published declarations
+  'test/bundleSizeClaimsSmoke.mjs', // every documented bundle size is marked, measured and within 20%
+  'test/tarballContentsSmoke.mjs', // npm pack contents (must-have / must-not-have), no private reference, NOTICE/UCD truth
+  'test/consumerInstallSmoke.mjs', // pack + install into a scratch consumer, import every exports subpath, fromPackage in Node, TS consumer
+  'test/nativeEntrySmoke.mjs', // @kontek/mantle/native reaches no GL module (graph + bundle metafile), draws in node with no WebGL, webgl backend throws naming the import
+  'test/missingRegistrationSmoke.mjs', // a feature used without its registration throws/warns naming the exact import (renderer features, filter/COLR nodes, scripts, bidi, readers, SVG-in-OT)
+  'test/buildMatrixSmoke.mjs', // usage matrix: minimal entries reach only what they use; sizes within 8% of test/data/buildMatrix.json; relations; rollup/webpack/Vite when installed
+  'test/importMapSmoke.mjs', // the generated import map covers every export and every specifier in src
+  'test/cdnComposeSmoke.mjs', // two games on one CDN-served unbundled package share one registry/pool set; separately bundled copies stay independent and say so
+  'test/smokeAssetsFreshSmoke.mjs',
+  'test/rendererTypesGateSmoke.mjs',
+  'test/morphCullCertifierSmoke.mjs',
+  'test/occlusionCullEvenOddSmoke.mjs',
+  'test/occlusionCullSmallHoleSmoke.mjs',
+  'test/imageExportInstancedSmoke.mjs',
+  'test/nodeClipBundleDisposeSmoke.mjs',
+  'test/incrementalStrokeDotNanSmoke.mjs',
+  'test/streamFillsCheckSmoke.mjs',
+  'test/imageWorldMatrixCheckSmoke.mjs',
+  'test/occlusionCullScaleInvariantSmoke.mjs',
+  'test/occlusionCullPerturbationSmoke.mjs',
+  'test/strokeSubpathTouchSmoke.mjs',
+  'test/strokeDashSeamHitSmoke.mjs', // the CPU stroke hit test agrees with the SVG 2 oracle at the seam of a closed dashed contour (straight edges exact; curves reported)
+  'test/strokeDashSeamMorphSmoke.mjs', // a morph of a closed dashed contour writes the contour's length (-L) with each pose's startDists, as a fresh import of the pose does
+  'test/spriteMorphApiSmoke.mjs', // sprite/morph: nine-slice hits + options, submit copy + zOrder, sprite ids, morph chain, streaming input, override table, cull retire, prepare
+  'test/perfRowsSmoke.mjs', // the SVG-image document budget (loader and data: fan-out), 20000 gradients fit the wrapped table
+  'test/strokeInkBBoxSmoke.mjs', // globalBBox holds miter tips and square-cap corners; the row bbox and the wire sections do not move
+  'test/importerGeometryAuditSmoke.mjs', // importer geometry: records, dash table, clamp, LB decline, GWN marker
+  'test/filterLeafGroupSmoke.mjs', // a filtered fill+stroke leaf and a <use filter> are one group (the filter runs once)
+  'test/compositingGroupSmoke.mjs', // compositing: a mask on a group, markers under the element's opacity / filter / mask, context paints
+  'test/singularPaintTransformSmoke.mjs', // a gradientTransform / patternTransform with no inverse is no paint server: the url() fallback, else nothing
+  'test/radialFrSmoke.mjs', // radial gradient fr: record encoding in the spread slot, the two-circle solver against brute force
+  'test/patternStrokeSmoke.mjs', // a vector pattern as a stroke paint is the pattern masked by the stroked outline; unsupported cases paint the fallback
+  'test/patternShareSmoke.mjs', // pattern content that depends on the referencing box is stored once (canonical space; each carrier an ordinary pattern in it): O(1) rows, the control's picture in tile units, no flag
+  'test/atlasDedupeSmoke.mjs', // one picture embedded by several <image> elements decodes once and shares one atlas region
+  'test/useBudgetSmoke.mjs', // the <use> expansion budget (maxUseInstances): a doubling chain is refused loudly, exact boundary, option validation
+  'test/maskGroupCostSmoke.mjs', // a masked group's accumulator, masked copy and composite stay inside the rect it paints (pass counts and scissors on the fake GL)
+  'test/fillNormalizePerturbationSmoke.mjs',
   'test/predicateTiersSmoke.mjs',
   'test/lbTransformRawFieldsSmoke.mjs',
+  'test/unifiedFillVertsSmoke.mjs',
+  'test/curveCoefUnitMaskSmoke.mjs',
+  'test/graphDegenerateSmoke.mjs',
+  'test/cpatchBoundarySmoke.mjs',
+  'test/lbSharedApexContourSmoke.mjs',
+  'test/lbShapePolicySmoke.mjs',
+  'test/lbPartialAdoptionSmoke.mjs',
+  'test/lbPrepareRoutesSmoke.mjs',
+  'test/lbDeclineCensusSmoke.mjs',
+  'test/lbWorkerPoolCauseSmoke.mjs',
+  'test/lbShapeMemBudgetSmoke.mjs',
+  'test/lbBuildGateSmoke.mjs',
+  'test/engineSelectionTermsSmoke.mjs',
+  'test/engineSwitchPathsSmoke.mjs',
+  'test/forcedCoverNoPrimitiveSmoke.mjs',
+  'test/strokeExactOptInSmoke.mjs',
+  'test/lbHookOwnershipSmoke.mjs',
+  'test/fillPrewarmOwnershipSmoke.mjs',
+  'test/bundleDisposeForgetsPrewarmSmoke.mjs',
+  'test/shapeMorphSourceReleaseSmoke.mjs',
+  'test/morphSourcePrewarmSmoke.mjs',
+  'test/filterPoolTrimSmoke.mjs',
+  'test/importCapacityHintSmoke.mjs',
+  'test/curveBuf32Smoke.mjs',
+  'test/unifiedNarrowDirectSmoke.mjs',
+  'test/psoWarmQueueSmoke.mjs',
+  'test/fillUsageRegistrationSmoke.mjs',
+  'test/fillBezoutOmitSmoke.mjs',
+  'test/submitQueueAllocSmoke.mjs',
+  'test/autoSceneDepthAttribSmoke.mjs',
+  'test/lbAdoptIntegritySmoke.mjs',
+  'test/aacBandLevelsSmoke.mjs',
+  'test/lbWorkerWireParitySmoke.mjs',
+  'test/lbAirFaceCrescentSmoke.mjs',
+  'test/lbNotchAirFaceSmoke.mjs',
+  'test/lbHolePieceFaceSmoke.mjs',
+  'test/lbPartitionConformSmoke.mjs',
+  'test/lbQuadHullCrossSmoke.mjs',
+  'test/lbPairBadFaceSplitSmoke.mjs',
+  'test/lbPairQuadHullSplitSmoke.mjs',
+  'test/lbPairCubicPlanSmoke.mjs',
+  'test/lbMorphPairDeclineCensusSmoke.mjs',
+  'test/lbInkProbeExactSmoke.mjs',
+  'test/lbPairOrientationSmoke.mjs',
+  'test/lbKlmnRowsSmoke.mjs',
+  'test/lbOpenContourSmoke.mjs',
+  'test/lbMorphGroupMetadataSmoke.mjs',
+  'test/lbBandFootprintSmoke.mjs',
+  'test/bandSegmentCountBoundSmoke.mjs',
+  'test/smallRadiusAaSmoke.mjs',
+  'test/sourceTextSmoke.mjs',
+  'test/testLaneBackendSmoke.mjs',
+  'test/ucdFixturePinSmoke.mjs',
+  'test/coverKernelSmoke.mjs',
+  'test/coverKernelPresenceSmoke.mjs',
+  'test/variantFirstOptInSmoke.mjs',
+  'test/noBaseFillProgramSmoke.mjs',
+  'test/universalProgramsSmoke.mjs', // no universal program (fill base, AAC base, instanced base + AAC, drawImage pair) in a default session; the options that can draw one build it; need-miss policy
+  'test/warmPolicySmoke.mjs', // the warm policy: likelihood order, game start/resize/end, declared needs and need misses, API reach (every public mutation API vs the variant-key axes)
+  'test/warmBuiltSetSmoke.mjs', // the guard: after the loading call every draw state binds a program built in the loading window (as drawn, recolor asserted; rotated states listed as an open gap)
+  'test/aacPresenceSmoke.mjs',
+  'test/fillRouteClassSmoke.mjs',
+  'test/coefTexWarmSmoke.mjs',
+  'test/cpatchMorphBudgetHeadroomSmoke.mjs',
+  'test/cpatchCurveCutSmoke.mjs',
+  'test/cpatchMorphPlanSmoke.mjs',
+  'test/cpatchMorphCertificationSmoke.mjs',
+  'test/cpatchRationalCertificateSmoke.mjs',
+  'test/cpatchMorphPlanCostSmoke.mjs',
+  'test/cpatchMorphPlanBoundSmoke.mjs',
+  'test/cpatchMorphBlendStateSmoke.mjs',
+  'test/cpatchPinnedRationalQuadSmoke.mjs', // a pinned CPatch build packs native arcs (rational quads); the auto policy still declines
+  'test/cpatchTraceSmoke.mjs',
+  'test/cpatchConvStallSmoke.mjs',
+  'test/cpatchWorkerFlagSmoke.mjs',
+  'test/cpatchPoolWarmReadinessSmoke.mjs',
+  'test/debugHookGateSmoke.mjs',
+  'test/workerFlagsSmoke.mjs',
+  'test/switchCensusSmoke.mjs',
+  'test/fillDefinesGateSmoke.mjs',
+  'test/sharedRendererOptionsSmoke.mjs',
+  'test/rendererUnknownOptionSmoke.mjs',
+  'test/cpatchBezoutCriticalSmoke.mjs',
   'test/font/hitTestSmoke.mjs',
   'test/font/hitTestWorldMatrixSmoke.mjs',
   'test/font/coverageHitSmoke.mjs',
   'test/font/robustnessSmoke.mjs',
-  // HVAR-less variable-font advances via gvar phantom points.
-  // CPU-only, golden-checked against the C# port; skips gracefully when the
-  // NewYork.ttf fixture is absent (e.g. non-macOS CI).
   'test/font/hvarlessAdvanceSmoke.mjs',
-  // gvar IUP (Interpolation of Untouched Points) inference — synthetic-contour
-  // goldens shared with the C# port (TestGvarIup). No fixture needed.
   'test/font/gvarIupSmoke.mjs',
+  'test/font/ligatureMarkSmoke.mjs',
+  'test/font/bidiConformanceSmoke.mjs',
+  'test/font/nfcConformanceSmoke.mjs',
+  'test/font/breakConformanceSmoke.mjs',
+  'test/font/textLayoutAuditSmoke.mjs', // per-cluster NFC, UAX #14 wrap, hard breaks, per-paragraph alignment, rebuild race, emoji clusters, vertical wrap, line scale, letter-spacing, space fallbacks, glyph budget, validation (hb-shape values frozen in test/fixtures/text-layout-hb.json)
+  'test/font/gsubNestedShiftSmoke.mjs',
   'test/shaderGeneratedFreshSmoke.mjs',
   'test/featureSetSmoke.mjs',
+  'test/svg/filterBboxReachSmoke.mjs',
+  'test/svg/filterRouteSmoke.mjs',
+  'test/svg/filterOwnerPaintImportSmoke.mjs',
+  'test/svg/filterOwnerGradientImportSmoke.mjs',
+  'test/svg/filterLinearBlurImportSmoke.mjs',
+  'test/filterOwnerPaintCostSmoke.mjs',
   'test/svg/closeDeterminismSmoke.mjs',
-  // Signed endpoint curvature per segment type — groundwork for the SVG2
-  // `arcs` line join. Analytic goldens; the C# port must match.
+  'test/svg/malformedAttrSmoke.mjs',
+  'test/svg/cssDeclarationSmoke.mjs',
+  'test/svg/lengthUnitsSmoke.mjs',
+  'test/svg/paintImageMaskAuditSmoke.mjs',
+  'test/svg/paintReferenceSmoke.mjs',
+  'test/svg/markerPlacementSmoke.mjs',
+  'test/svg/markerContentSmoke.mjs',
+  'test/svg/useSwitchGroupSmoke.mjs',
+  'test/svg/cssTransformSmoke.mjs',
+  'test/svg/filterSemanticsImportSmoke.mjs',
+  'test/svg/structureSemanticsSmoke.mjs',
+  'test/svg/cssSpecificitySmoke.mjs',
   'test/svg/curvatureSmoke.mjs',
   'test/svg/degenerateArcSmoke.mjs',
   'test/workerFallbackSmoke.mjs',
-  // Static guard for renderer cross-module bare refs and local/R.x shadows.
-  // Fast, no browser. The puppeteer RENDER smokes (which exercise the modules
-  // at runtime) run via scripts/runRenderSmokes.mjs in the browser-capable CI
-  // stage.
+  'test/staticCacheDynamicStateSmoke.mjs',
+  'test/textStyleWeightSmoke.mjs',
+  'test/markupSpacingSmoke.mjs',
   'test/rendererModuleContractSmoke.mjs',
-  // The LB mesh a shape builds must not depend on its absolute position — the
-  // quantized identity keys are origin-relative, else a glyph in a word triangulates
-  // differently than alone (dropped crescents → a diagonal fill slash on 'v').
+  'test/lbPackReuseSmoke.mjs', // a frame packed over the last frame's buffer equals a fresh pack: no stale second chain
   'test/lbPositionIndependenceSmoke.mjs',
-  // Node-side route coverage across the LB satellite modules: each fixture
-  // exercises a distinct builder route; a missing cross-module import shows
-  // up here as the builder's swallowed ReferenceError instead of a silent
-  // per-shape Slug fallback in the browser render smokes.
+  'test/lbCpatchScaleEquivarianceSmoke.mjs',
+  'test/lbUnderCoverAnnulusSmoke.mjs',
+  'test/lbMeshCacheExactKeySmoke.mjs',
+  'test/lbPrepareWorkerParitySmoke.mjs',
+  'test/lbEmTunedLengthScaleSmoke.mjs',
+  'test/lbTranslationInvarianceSmoke.mjs',
+  'test/cpatchRowGateSmoke.mjs',
+  'test/cpatchCoverGuardSmoke.mjs',
+  'test/cpatchFrameInvarianceSmoke.mjs',
+  'test/cpatchSeamSplitSmoke.mjs',
+  'test/cpatchConvexAreaCertificateSmoke.mjs',
+  'test/cpatchCubicAreaCertificateSmoke.mjs',
+  'test/cpatchCubicAreaPresenceSmoke.mjs',
+  'test/cpatchNormalizedBakeSmoke.mjs',
+  'test/cpatchPoolSplitParitySmoke.mjs',
+  'test/cpatchConvKeyExactSmoke.mjs',
+  'test/cpatchLensSmoke.mjs',
+  'test/cpatchCurveCutCloseSmoke.mjs',
+  'test/cpatchNestedHolesSmoke.mjs',
+  'test/cpatchSkirtReachSmoke.mjs',
+  'test/cpatchCrossExactSmoke.mjs',
+  'test/morphScaleEquivarianceSmoke.mjs',
+  'test/morphJoinTangentScaleSmoke.mjs',
+  'test/morphBandPlaneSizeSmoke.mjs',
+  'test/cpatchLeakWidthSmoke.mjs',
+  'test/lbInvisibleBoundaryScaleSmoke.mjs',
   'test/lbBuildRoutesSmoke.mjs',
-  // A concave-outline curved shape must fill via the fast
-  // mesh, not under-fill: the earcut's interior-spanning tris must NOT be curve-ramped
-  // (chord-edge requirement in splitInteriorByCurve). Reproduces on swiftshader.
-  'test/lbConcaveCurveFillSmoke.mjs',
-  // A non-deferrable loop/cusp sentinel (one a later LB shape paints over) must take the
-  // batched SPLIT route — each contiguous LB run is ONE combined-VBO segment, each
-  // contiguous sentinel run ONE Slug pass, interleaved in painter order — not a per-shape
-  // draw storm and not a whole-bundle Slug bail. Asserts the split ran + Slug-matching ink.
-  'test/lbSplitRouteSmoke.mjs',
-  // Near-degenerate cubic pieces (a hull collapsed toward a point — ~0-length curve
-  // sub-slivers) are DROPPED from the partition mesh before the self-audit: kept, they
-  // destabilize the implicit into a spurious f<0 that falsely declines the whole shape
-  // to Slug (and grows into a zoom-scaling over-paint). A/Bs the drop on the tiger.
-  'test/lbDegenerateCubicDropSmoke.mjs',
-  // The apex-tangent supporting-line clip (opt-in __LB_APEX_CLIP) recovers the FAT-POKE
-  // decline class: over-painting Bezout crescents clipped to the chord side of their arc
-  // apex tangent, re-audited so no over-paint ships. A/Bs the clip on the tiger.
-  'test/lbApexClipSmoke.mjs',
-  // A straight corner tri with ≥2 boundary edges must subdivide so every edge ramps
-  // (else translucent rects — HUD slots — get a bright over-fill ring, defect #11).
+  'test/lbFastPathDeclineSmoke.mjs',
   'test/lbBoundaryTriSubdivSmoke.mjs',
-  // Travel-frame interiorSign verification on LINE-LESS contours: raw calibrateInterior
-  // inverted the kind-10/12 end metadata on glyph bowls (the '8'-waist band holes).
   'test/lbInteriorSignSmoke.mjs',
-  // Winding tree (windingTree.js): exact agreement with rayWinding/pointInFill on thousands
-  // of probes (all seg types, seam rows, both fill rules) + stroke-prune completeness +
-  // the it-actually-wins timing gate. Accelerates lbPartition inkAt and hit tests.
+  'test/lbZeroLengthCloseSmoke.mjs',
   'test/windingTreeSmoke.mjs',
-  // The CDT's orientation predicate is adaptive-EXACT (Shewchuk); this validates
-  // it against a BigInt oracle incl. near-collinear inputs where the naive double
-  // determinant flips sign — the class that caused the cavity-livelock dead stripe.
+  'test/lbHullRejectDegenerateSmoke.mjs',
+  'test/slugArcRayToleranceSmoke.mjs',
+  'test/slugQuadRootScaleSmoke.mjs',
+  'test/slugArcEndpointOnRaySmoke.mjs',
+  'test/slugArcRadiusScaleSmoke.mjs',
+  'test/bandArcEndpointMembershipSmoke.mjs',
+  'test/probeArmKernelSmoke.mjs',
+  'test/fusedChecksListSmoke.mjs',
+  'test/shaderVariantCompileSmoke.mjs',
+  'test/rotatedMapVariantSmoke.mjs',
+  'test/instancedAsyncSpecializationSmoke.mjs',
+  'test/streamDerivedStatsSmoke.mjs',
+  'test/aacPointsPerShapeGateSmoke.mjs',
+  'test/aacPointsGateWhySmoke.mjs',
+  'test/aacPointsBucketSmoke.mjs',
+  'test/aacPointsGateSmoke.mjs',
+  'test/aacPointsRowGateSmoke.mjs',
+  'test/lbPickDeterminismSmoke.mjs',
+  'test/aacClipConfoundSmoke.mjs',
+  'test/morphSegTailDriftSmoke.mjs',
+  'test/renderTimeoutBudgetSmoke.mjs',
+  'test/lbResearchSwitchSmoke.mjs',
+  'test/bandWindingCubicSplitSmoke.mjs',
+  'test/hitStrokeJoinSvgShapeSmoke.mjs',
+  'test/hitStrokeEndCapSmoke.mjs',
+  'test/filterStrokeRtPadSmoke.mjs',
+  'test/hitTestScaleInvariantSmoke.mjs',
+  'test/hitTestBoxRoundingSmoke.mjs',
+  'test/hitTestClipMaskSmoke.mjs',
+  'test/basicShapeClipSmoke.mjs', // CSS basic-shape clip-path regions, the stroke box in closed form, nested <svg> clips, layered clips
+  'test/dstRectPlacementSmoke.mjs',
+  'test/slugCubicApexScaleSmoke.mjs',
+  'test/slugCubicVertexTouchSmoke.mjs',
+  'test/lbQuadArcContainmentSmoke.mjs',
+  'test/lbCurveTriExactSmoke.mjs',
   'test/predicatesExactSmoke.mjs',
-  // earcut 3.x `deviation()` area self-check: proves our ear-clip port exactly
-  // tiles the polygon (the "wrong wedges" mis-threading class shows up as a large
-  // deviation), and that the metric is non-vacuous.
   'test/earcutDeviationSmoke.mjs',
-  // Exact-predicate CDT robustness on near-degenerate input (microscopic edges,
-  // near-collinear / near-cocircular / near-duplicate) — the class CGAL 6.2
-  // hardened for; must stay valid or clean-null, never throw/hang/invert.
   'test/cdtDegenerateStressSmoke.mjs',
-  // G4: opt-in intersecting-constraint resolution (split crossing constraints at a
-  // shared inserted vertex). Off by default, so the default CDT path is unchanged.
   'test/cdtIntersectResolveSmoke.mjs',
-  // G4 wired: self-CROSSING straight outlines (bowtie/pentagram) render via the LB
-  // CDT partition (crossing constraints split) with the correct even-odd/nonzero
-  // fill shape, instead of dropping to Slug.
   'test/cdtSelfIntersectFillSmoke.mjs',
-  // G1 (parallel build): exact signed-area coverage module — matches ground-truth
-  // clipping and is conflation-free at abutting-triangle junctions.
   'test/signedAreaCoverageSmoke.mjs',
-  // G1 stage 3: end-to-end mesh-free fill on a holed curved glyph (no CDT/mesh/
-  // per-primitive coverage) vs supersampled truth; conflation-free.
   'test/meshFreeGlyphSmoke.mjs',
-  // Production CPU rasterizer (shader twin): all curve types incl. exact rational.
   'test/meshFreeRasterSmoke.mjs',
-  // Mesh-free handles every case Slug exists for (loops/cusps/degenerate/self-
-  // intersection) — the cases LB cannot render. Proof it can replace Slug.
   'test/meshFreeSlugCasesSmoke.mjs',
-  // The SUPPORTED text metrics surface: sections.runMetrics (typoBBox +
-  // baselines + lineCount) — shape and semantics games lay out against.
-  // GL-free; skips when the Roboto fixture isn't fetched.
   'test/textRunMetricsSmoke.mjs',
-  // buildNineSliceMesh: pure cover-quad 3x3 rewrite (borders, clamps,
-  // passthroughs, aEmCoord pinning).
   'test/nineSliceSmoke.mjs',
-  // Morph hit tests must evaluate geometry at the current t (CPU planes stay
-  // at t=0 while the GPU lerps). Also honors override visibility.
   'test/morphHitPoseSmoke.mjs',
   'test/lbCanonicalHashesSmoke.mjs',
-];
+  'test/cssClassFillSmoke.mjs',
+  'test/cssConcurrentImportSmoke.mjs',
+  'test/gzipBombSmoke.mjs',
+  'test/feLightingWorldScaleSmoke.mjs',
+  'test/filterGraphBboxSmoke.mjs',
+  'test/filterFrameSmoke.mjs', // filter frame: reach of a graph, frame geometry at every scale, the compensated world matrix
+  'test/filterGraphColrSmoke.mjs',
+  'test/font/aatKerxSmoke.mjs',
+  'test/font/aatMortSmoke.mjs',
+  'test/font/aatMorxSmoke.mjs',
+  'test/font/arabicFormSubstSmoke.mjs',
+  'test/font/arabicJoiningSmoke.mjs',
+  'test/font/arabicShapingSmoke.mjs',
+  'test/font/autoRegisterSmoke.mjs',
+  'test/font/avarReaderSmoke.mjs',
+  'test/font/bidiIsolatesSmoke.mjs',
+  'test/font/bidiN0Smoke.mjs',
+  'test/font/bidiSmoke.mjs',
+  'test/font/bidiTextRunSmoke.mjs',
+  'test/font/bitmapFontAssetSmoke.mjs',
+  'test/font/boldItalicSmoke.mjs',
+  'test/font/cbdtReaderSmoke.mjs',
+  'test/font/cff2ReaderSmoke.mjs',
+  'test/font/cffFlexSmoke.mjs',
+  'test/font/cffFixedOperandSmoke.mjs',
+  'test/font/cffJsSmoke.mjs',
+  'test/font/cffMultiFontSmoke.mjs',
+  'test/font/cffSeacSmoke.mjs',
+  'test/font/cjkWrapSmoke.mjs',
+  'test/font/cmapExtendedFormatsSmoke.mjs',
+  'test/font/colrFontAssetSmoke.mjs',
+  'test/font/colrPaintToGraphSmoke.mjs',
+  'test/font/colrColorLineSmoke.mjs', // a color line off [0, 1] renormalizes with its geometry; ill-formed gradients paint nothing
+  'test/font/colrReaderSmoke.mjs',
+  'test/font/colrTextRunSmoke.mjs',
+  'test/font/colrV1GradSmoke.mjs',
+  'test/font/colrSpecLayoutSmoke.mjs', // COLRv1 PaintTransform + Var* layouts and PaintSkew against fontTools-written fonts
+  'test/font/colrPlacedHitSmoke.mjs', // paint transforms pushed to the leaves; hit table, bbox, undrawn base outline
+  'test/font/colrClipHitSmoke.mjs', // a hit where the ClipList box cuts a PaintGlyph silhouette away does not answer
+  'test/font/textStyleLayoutForwardSmoke.mjs', // style.varCoords / fallbacks / language reach the layout
+  'test/font/gposVariationIndexSmoke.mjs', // GPOS VariationIndex deltas on pair kerning and SinglePos (HarfBuzz widths)
+  'test/font/colrClipListSmoke.mjs', // COLRv1 ClipList (format 1/2, ranges, PaintColrGlyph boxes), HarfBuzz clip pushes
+  'test/font/gposValueRecordSmoke.mjs', // GPOS xPlacement/yPlacement/yAdvance, second pair record, Device + VariationIndex, ppem tables, anchor devices (HarfBuzz)
+  'test/font/cffCharStringBudgetSmoke.mjs', // CFF charstring work budget (subroutine bomb), GlyphOutlineError
+  'test/font/woff1Smoke.mjs', // WOFF 1.0 decode through decodeIfWoff2, clear constructor error
+  'test/font/colrV1ReaderSmoke.mjs',
+  'test/font/colrV1RichSmoke.mjs',
+  'test/font/colrVarSmoke.mjs',
+  'test/font/cursiveAttachSmoke.mjs',
+  'test/font/curveRangesSmoke.mjs',
+  'test/font/defaultIgnorableSmoke.mjs',
+  'test/font/ebdtBitmapSmoke.mjs',
+  'test/font/markupTagsSmoke.mjs',
+  'test/font/markupIndentMarginSmoke.mjs',
+  'test/font/markupRichTextSmoke.mjs',
+  'test/font/markupLayoutSmoke.mjs',
+  'test/font/fallbackSmoke.mjs',
+  'test/font/featureEntryGenSmoke.mjs',
+  'test/font/fontAssetColrV1GraphSmoke.mjs',
+  'test/font/fvarReaderSmoke.mjs',
+  'test/font/glyphSegsTtfNativeQuadSmoke.mjs',
+  'test/font/gposLookupTypesSmoke.mjs',
+  'test/font/gposMarkSmoke.mjs',
+  'test/font/graphemeSmoke.mjs',
+  'test/font/gsubLookupTypesSmoke.mjs',
+  'test/font/gvarReaderSmoke.mjs',
+  'test/font/hangulJamoSmoke.mjs',
+  'test/font/hangulShapingSmoke.mjs',
+  'test/font/harakatSmoke.mjs',
+  'test/font/hvarReaderSmoke.mjs',
+  'test/font/indicAllScriptsSmoke.mjs',
+  'test/font/indicBaseConsonantSmoke.mjs',
+  'test/font/indicClassifySmoke.mjs',
+  'test/font/indicFeatureApplySmoke.mjs',
+  'test/font/indicFeatureSmoke.mjs',
+  'test/font/indicLookupTypesSmoke.mjs',
+  'test/font/jstfPrioritiesSmoke.mjs', // JSTF priorities, source ranges, cursive joins and vertical extenders.
+  'test/font/indicReorderSmoke.mjs',
+  'test/font/indicShapingSmoke.mjs',
+  'test/font/jstfKashidaSmoke.mjs',
+  'test/font/justifySmoke.mjs',
+  'test/font/l0Smoke.mjs',
+  'test/font/l1Smoke.mjs',
+  'test/font/lamAlefSmoke.mjs',
+  'test/font/linkTagSmoke.mjs',
+  'test/font/lookupFlagSmoke.mjs',
+  'test/font/markLigPosSmoke.mjs',
+  'test/font/mathAssemblyEmitSmoke.mjs',
+  'test/font/mathAssemblySmoke.mjs',
+  'test/font/mathReaderSmoke.mjs',
+  'test/font/mathShapingSmoke.mjs',
+  'test/font/mathStretchySmoke.mjs',
+  'test/font/measureTextSmoke.mjs',
+  'test/font/mvarReaderSmoke.mjs',
+  'test/font/nameReaderSmoke.mjs',
+  'test/font/nameCodecsSmoke.mjs',
+  'test/font/statSelectionSmoke.mjs',
+  'test/font/aatPreferSmoke.mjs', // a font with both AAT and OpenType tables is shaped by AAT by default (preferAat), GSUB/GPOS on request
+  'test/font/otTablesSmoke.mjs',
+  'test/font/overridesSmoke.mjs',
+  'test/font/richDecorationSmoke.mjs',
+  'test/font/sbixReaderSmoke.mjs',
+  'test/font/shapeMorphSmoke.mjs',
+  'test/font/svgInOtReaderSmoke.mjs',
+  'test/font/svgInOtTextRunSmoke.mjs',
+  'test/font/scriptLangSysSmoke.mjs',
+  'test/font/svgTextAnchorPerTspanSmoke.mjs',
+  'test/font/svgTextAnchorSmoke.mjs',
+  'test/font/svgTextPathAnchorParitySmoke.mjs',
+  'test/font/svgTextPathArcLenSmoke.mjs',
+  'test/font/svgTextPathSmoke.mjs',
+  'test/font/svgTextSmoke.mjs',
+  'test/font/svgTextStrokeFallbackSmoke.mjs',
+  'test/font/svgTspanSmoke.mjs',
+  'test/font/syntheticFallbackSmoke.mjs',
+  'test/font/textBundleFontMetricsSmoke.mjs',
+  'test/font/textBundleSmoke.mjs',
+  'test/font/textBundleVerticalSmoke.mjs',
+  'test/font/textRunColrV1Smoke.mjs',
+  'test/font/textRunFeaturesSmoke.mjs',
+  'test/font/thaiShaperSmoke.mjs',
+  'test/font/thaiShapingSmoke.mjs',
+  'test/font/ttcAppleEmojiSmoke.mjs',
+  'test/font/ttcFaceSelectSmoke.mjs',
+  'test/font/useShaperSmoke.mjs',
+  'test/font/useShapingSmoke.mjs',
+  'test/font/useFeatureSmoke.mjs',
+  'test/font/vmtxReaderSmoke.mjs',
+  'test/font/wouldSubstituteSmoke.mjs',
+  'test/font/woff2CollectionSmoke.mjs',
+  'test/font/woff2TransformedHmtxSmoke.mjs',
+  'test/font/wordBreakSmoke.mjs',
+  'test/font/fontBudgetSmoke.mjs', // small fonts that ask for unbounded work: hang and heap-exhaustion budgets.
+  'test/font/fontMalformedTableSmoke.mjs', // a malformed table is dropped, not thrown out of layout.
+  'test/font/bidiBracketsSmoke.mjs', // rule N0 over every pair of BidiBrackets.txt, and L1 through what X9 removes.
+  'test/font/textShapingRegressSmoke.mjs', // shaping and layout cases read against hb-shape.
+  'test/font/wordStartsRegistrySmoke.mjs',
+  'test/gradientStopsPackSmoke.mjs',
+  'test/droppedContentSmoke.mjs',
+  'test/streamArcSectionSmoke.mjs',
+  'test/morphKeptInvisibleFillMeshSmoke.mjs',
+  'test/keepHiddenSmoke.mjs',
+  'test/keepInvisibleShapesSmoke.mjs',
+  'test/morphOccupancyGuardSmoke.mjs',
+  'test/morphClipBindingSmoke.mjs',
+  'test/morphClipRunsSmoke.mjs',
+  'test/drawMorphOverridesSmoke.mjs',
+  'test/bundleHandleMorphSmoke.mjs',
+  'test/occupancyGridSmoke.mjs',
+  'test/occupancyImportSmoke.mjs',
+  'test/occupancyUploadBoundsSmoke.mjs',
+  'test/pathBooleanIntersectKernelsSmoke.mjs',
+  'test/pathBooleanLineIntersectSmoke.mjs',
+  'test/pathBooleanQuadQuadSmoke.mjs',
+  'test/pathBooleanQuadArcSmoke.mjs',
+  'test/pathBooleanBezierClipSmoke.mjs',
+  'test/pathBooleanArcIntersectSmoke.mjs',
+  'test/pathBooleanMonotoneSmoke.mjs',
+  'test/pathBooleanSplitSmoke.mjs',
+  'test/pathBooleanDcelSmoke.mjs',
+  'test/pathBooleanUnionSmoke.mjs',
+  'test/silhouetteCrossingSmoke.mjs',
+  'test/silhouetteRefIndexSmoke.mjs',
+  'test/silhouetteClippedExtentSmoke.mjs',
+  'test/pointInShapeSeamRaySmoke.mjs',
+  'test/pathBooleanCoincidentSmoke.mjs',
+  'test/pathBooleanPlanarGraphSmoke.mjs',
+  'test/pathBooleanFaceClassifySmoke.mjs',
+  'test/pathBooleanThinLobeSmoke.mjs',
+  'test/lbAnnulusCenterSmoke.mjs',
+  'test/shapeRecognizeEnclosesOnceSmoke.mjs',
+  'test/sceneBoxSmoke.mjs',
+  'test/polyRootsQuarticSmoke.mjs',
+  'test/pathBooleanCoincidentArcLineSmoke.mjs',
+  'test/pathBooleanScaleInvariantSmoke.mjs',
+  'test/importerScaleInvariantSmoke.mjs',
+  'test/strokeWalkShapeSmoke.mjs',
+  'test/strokeStripFoldSmoke.mjs', // a folding stroke row strips with patches that hold the whole stroke (CPU coverage, 2^-20..2^20)
+  'test/incrementalStrokeTangentScaleSmoke.mjs',
+  'test/circlePrimConformalSmoke.mjs',
+  'test/markerAspectSmoke.mjs',
+  'test/markerClipMaskSmoke.mjs',
+  'test/markerViewportClipSmoke.mjs',
+  'test/objectBoundingBoxTransformSmoke.mjs',
+  'test/objectBoundingBoxStrokeGradientSmoke.mjs',
+  'test/streamScopeGuardSmoke.mjs',
+  'test/renderEntryWarmSmoke.mjs',
+  'test/psoWarmDeadlineSmoke.mjs',
+  'test/frameEntryWarmSmoke.mjs',
+  'test/renderRouteParitySmoke.mjs',
+  'test/frameEntryContractSmoke.mjs',
+  'test/transformArcConditioningSmoke.mjs',
+  'test/lbArcPieceInvarianceSmoke.mjs',
+  'test/patternChildrenSmoke.mjs',
+  'test/patternUnitsSmoke.mjs',
+  'test/filterRegionImportSmoke.mjs',
+  'test/filterSubregionImportSmoke.mjs',
+  'test/filterScaleImportSmoke.mjs', // a filter's lengths (stdDeviation, radius, displacement, light height) and places (light, noise) follow the referencing element's transform
+  'test/svg/filterColorSpaceImportSmoke.mjs', // color-interpolation-filters read (attribute, style, rule, inherited, per primitive), spaces per node, conversion counts, routes, CSS functions sRGB
+  'test/filterRegionTransformSmoke.mjs',
+  'test/unifiedFilterSubRectCacheSmoke.mjs',
+  'test/filterSnapshotCountSmoke.mjs',
+  'test/unifiedFilterInGroupSmoke.mjs',
+  'test/nestedGroupSmoke.mjs',
+  'test/groupOverBlitSmoke.mjs',
+  'test/groupAlphaSmoke.mjs', // a draw's alpha is GROUP opacity: one accumulator faded once; alpha 1 keeps the call log; one paint-only leaf stays direct; faded instances leave the single instanced draw
+  'test/alphaRecolorDirectSmoke.mjs', // a faded one-leaf draw whose colorMatrix leaves alpha alone is direct, not a group (a board of tinted border cells: 26 -> 4 ms a frame)
+  'test/groupAtlasSmoke.mjs', // a run of plain groups (faded fill+stroke leaves, faded instance layers) shares ONE atlas target: 3 passes, slots disjoint with even shifts, composites in painter order; groupAtlas:false is a pass pair per group
+  'test/groupFilterSkipSmoke.mjs', // a filtered group whose result key is unchanged skips its children (no accumulator pass, one composite per element), on both routes; every key input still invalidates; inputs the key does not hold bypass the skip
+  'test/groupAlphaExportSmoke.mjs', // the export / native scene write a draw's alpha as opacity on ONE <g> around the bundle (as the GL path does)
+  'test/psoWarmScissorSmoke.mjs',
+  'test/filterCacheInputsSmoke.mjs',
+  'test/unifiedSpanBailGroupSmoke.mjs',
+  'test/contextResourceOwnershipSmoke.mjs', // allocation-generation bookkeeping and native-call audit
+  'test/contextRestoreFilterSmoke.mjs',
+  'test/groupLeafTargetSmoke.mjs',
+  'test/nestedMaskGateSmoke.mjs', // a mask nested in a mask declines the unified route (gate 'nested-mask'); single-level masks keep it
+  // strict play smokes: the driver-model and derivation guards
+  'test/coopUploadSmoke.mjs',
+  'test/coversDrawSmoke.mjs',
+  'test/debugStatsSerializableSmoke.mjs',
+  'test/gateBarsSmoke.mjs',
+  'test/instancedCompactCacheNodeSmoke.mjs',
+  'test/morphWarmQueryGateSmoke.mjs',
+  'test/strictDerivedRealSmoke.mjs',
+  'test/strictDerivedRegionsSmoke.mjs',
+  'test/aacPickRegionsSmoke.mjs',
+  'test/streamPinnedImageSmoke.mjs',
+  'test/emptyBundleWarmSmoke.mjs',
+  'test/textReflowKeySmoke.mjs',
+  'test/timelinePairsWarmSmoke.mjs',
+  'test/rendererOptionsListSmoke.mjs',
+  'test/aacPointsGenTableSmoke.mjs', // the generated points' entry table, searched as the vertex shader searches it, is the point list point for point
+  'test/spriteTimelineLazySmoke.mjs', // a sprite timeline builds no frame at creation (each frame is a morph bundle; one scene has 2827 of them)
+  'test/pointListMemorySmoke.mjs', // the points route keeps no CPU copy of its lists; their GPU buffers stay inside aacPointsBufferBudget
+  'test/declareReachSmoke.mjs', // renderer.declareReach(bundle, tags): the warm builds exactly the declared states; a morph reaches its poses' union
+  'test/cpatchPinDeclineRecordSmoke.mjs', // a pinned CPatch that did not draw says why: pending before its build lands, on the points route too; unsupported for a row an override takes off its patches
+  'test/morphPrimitivesOnSmoke.mjs', // primitives 'on' and a morph from a recognized circle: the source's disc does not draw at every t
+  'test/streamFrameFixedSmoke.mjs', // an update keeps a frame the author fixed (fixedBBox, preserveViewport); without one the box follows the content
+  'test/declareStreamSmoke.mjs', // renderer.declareStream(bundle): an imported bundle's first and later updates link and build nothing in play; undeclared, the warm is unchanged, key for key
+  'test/streamUpdateBeforeLoadSmoke.mjs', // a lightweight stream updated once before the loading call links and builds nothing in play (README's streaming rule)
+  'test/linkRetryWindowSmoke.mjs', // a fill key that failed to link is not linked in play, is tried once per loading call or warm window, and draws when the link then succeeds
+  'test/declaredChannelLerpWarmSmoke.mjs', // a declared channel-lerp recolor is a warm state: its pipelines are built at load (a per-class sprite tint built them in play)
+  'test/bindSetBatchCapSmoke.mjs', // the bind-set pass builds pipelines in small batches behind fences, so the loading screen can present between them
+  'test/maskBakeNoNetSmoke.mjs', // a stand-in-free renderer builds no all-types mask-bake program; a bake that misses in play waits for its exact program
+  'test/lateBundleScopedWarmSmoke.mjs', // awaitBundleReady warms the late bundle alone, and it is ready afterward
+  'test/filterGeneratorRegionSmoke.mjs', // a generator or arithmetic k4 paints the filter region, a negative displacement scale grows the rect; a <desc> child keeps the filter; an owner paint with nothing to draw reads transparent
+  'test/hitNonScalingDashSmoke.mjs', // a non-scaling stroke's hit dashes follow the row's differentials, an override's scale and a turned world matrix too
+  'test/nativeOverrideReplaySmoke.mjs', // native scene: an unchanged override table does not compound a recolor, keep a sprite's hide or lose its writes; the bake's placement and which draws may use it; scissor across a resize; drawImage's NaN matrix
+  'test/nativeActiveContentSmoke.mjs', // the clone drops a javascript: href spelled with a tab or newline, the animation that would write one, and an iframe
+  'test/hitTieMemoSmoke.mjs', // a hit query's answer does not depend on the one before it: the memo stops short of the tie band
+  'test/groupFilterRectSmoke.mjs', // a filter on a <g> paints past its children: the static cache's blit and an outer group's composite are not cut at the children's box
+  'test/pointsVectorEffectSmoke.mjs', // a row with a vector effect does not take the points route: the point shader cannot cancel the world matrix per row
+  'test/coopUploadDrainSmoke.mjs', // a loading call never ends with a vertex buffer unfilled: past its deadline, or cut short by a dispose, it finishes the queue
+  'test/loadingCallOverlapSmoke.mjs', // overlapping loading calls run one at a time; awaitBundleReady answers from what was built; a warm of one late bundle keeps the app's range and claims no size class; a thrown call leaves no phase behind
+  'test/warmedMorphReleaseSmoke.mjs', // a morph the loading call warmed is not kept alive by having been warmed
+  'test/filterIncompleteNotStampedSmoke.mjs', // a result drawn without its program is not kept: a linear blur while its converting programs link, a FillPaint gradient, a bake over a reuse draw
+  'test/timelineSharedPoseSmoke.mjs', // timelines over shared poses: drawBundle(timeline), setTime with an unchanged time, the instanced and handle entries each draw the right pose; a pose change keeps a caller's framebuffer
+  'test/handleKeptRowsSmoke.mjs', // a mount brings a kept row back as drawBundle does: an override with ink, reveal on a keepHidden row
+  'test/spriteViewDrawSpriteSmoke.mjs', // drawSprite and drawSpriteInstanced take a sprite timeline and its held frame
+  'test/filterOverrideTablesSmoke.mjs', // one bundle with two override tables: a filter result or a mask bake re-evaluates when the rows that feed it differ, and only then
+  'test/filterCacheBudgetGrowSmoke.mjs', // the filter cache's budget and ceiling hold when entries grow (zoom in), not only when one is stored
+  'test/renderDisposedTargetSmoke.mjs', // render(target) with a disposed target draws nothing, not the bundle bound before it
+  'test/filterScratchCeilingSmoke.mjs', // filter scratch has a ceiling while filters run: a long zoom does not keep every target size it crosses, and a working set in use is never freed
+  'test/filterFrameAllocSmoke.mjs', // a filtered shape crossing the canvas edge reuses its targets while it moves: the frame's margin sits on a grid and a rect the frame cuts goes back on its quantum
+  'test/strokeWidthOverrideRectSmoke.mjs', // a stroke-width override widens the box a group's composite is bounded by
+  'test/cullRetireDocumentUnitsSmoke.mjs', // an override that moves an occluder retires the occlusion cull in a document of any units
+  'test/alphaPlanMorphPoseSmoke.mjs', // the plans of faded instances follow a morph's pose: t 0 then t 1 draws as t 1 alone does
+  'test/alphaSlotHomogeneousSmoke.mjs', // the slot offset of a faded instance goes through the matrix's w: a matrix and its multiple land in one place
+  'test/alphaSlotBudgetSmoke.mjs', // faded instances in slots ask the memory budget for the atlas, and fall to the layered accumulators when refused
+  'test/filterCacheResizeSmoke.mjs', // a resize takes the filter results' bytes off the count: the cache still serves a static scene after 40 resizes
+  'test/groupFrameTargetSmoke.mjs', // a filter frame does not re-size the accumulator of the group around it: a graph-filtered leaf, a plain group, a blend leaf; a faded draw
+  'test/sharedGroupSiblingBakeSmoke.mjs', // members of a shared static-cache group never blit a raster that shows something else: a sibling's bake is adopted when equal, and a raster in use is not baked over
+  'test/setTextRetrySmoke.mjs', // setText and setStyle after a failed rebuild can be retried; a repeat of a call still running waits for it
+  'test/maskStandInNotStampedSmoke.mjs', // a rotated mask bake drawn by the axis-aligned program while its own links is not kept once the program is ready
+  'test/bundleDisposeCachesSmoke.mjs', // what a renderer caches for a bundle goes with its dispose: point lists on each renderer, instanced compact buffers
+  'test/handleExportSmoke.mjs', // exportFrameSVG of a frame drawn through a mount is the export of the same frame through drawBundle
+  'test/filterPastCanvasRectSmoke.mjs', // a filter's targets stop at what can reach the canvas: a pointwise filter on a shape far past it asks for canvas-sized targets at any zoom
+  'test/submitThrowSmoke.mjs', // a submitted draw that throws does not repaint its frame's list in the next frame
+  'test/pointListTwoRenderersSmoke.mjs', // a point list shared by two renderers cannot wedge the other's eviction or be counted twice
+  'test/timelineRefLifetimeSmoke.mjs', // a timeline's references on shared pair morphs survive a caller's array and a failed creation; a pair morph takes a label
+  'test/warmQueueLifecycleSmoke.mjs', // the warm queue's lifecycle: cancel and dispose leave nothing waiting or stranded; a finished scene releases its bundles; a lost context, a fractional link limit and a null scale wedge nothing
+  'test/warmQueueGameContextSmoke.mjs', // a game on the warm queue: a late scene, a start over a game, the deadline closing the window, focus with a game, one game's needs, listed keys, idle, a waiting item, the scan limit, the viewport, release on cancel
+  'test/warmManifestClassesSmoke.mjs', // manifest minor 2 on the real renderer: every class a key was bound at, older manifests read at any size; bundles on a manifest scene; a capture; release on cancel; world maps recorded at any scale
+  'test/morphPassWarmRestoredSmoke.mjs', // a restored context's renderer warms the morph helper passes again
+  'test/morphMetaRingStandInSmoke.mjs', // a morph created while the lerp helper links keeps moving its meta plane once the helper is ready
+  'test/morphAliasResourceIdsSmoke.mjs', // a row of a rebuilt mask run reads the same resources as the row it mirrors
+  'test/streamMeshStalenessSmoke.mjs', // a lightweight update's meshes follow arc parameters, and a full update releases them
+  'test/morphDstOnlyStrokeBandSmoke.mjs', // a destination-only stroke keeps its band pad
+  'test/morphArcHalfTurnSmoke.mjs', // a half turn's large-arc flag and a scaled arc's band break
+  'test/morphArcSpecNumbersSmoke.mjs', // an arc's rotation and radii interpolate as numbers (SVG 2, 9.3.2), under a transform too
+  'test/morphArcRotationOptionSmoke.mjs', // arcRotation: 'shortest' for running-angle art, on a morph and on every timeline; compat reaches timelines too
+  'test/morphArcSpecFlagsSmoke.mjs', // an arc flag that differs is 1 between the poses; compat: 'chrome' steps it at 0.5
+  'test/morphArcFlagEndPoseSmoke.mjs', // an arc whose poses disagree on sweep lands on each pose at t = 0 and t = 1
+  'test/nativeMorphStashSmoke.mjs', // the native morph's auto-apply stashes are on the bundle it hands out, and leave a pose when the morph does
+  'test/warmSizeRegionBoxSmoke.mjs', // a bundle's warm size regions do not depend on where its art sits
+  'test/morphCullScaleSmoke.mjs', // the morph cull's boundary certificate gives one answer at any scale
+  'test/coverFanHullKeySmoke.mjs', // the cover-fan hull cache: non-finite axis values are separate keys, and a copy far out for its size leaves no rounded hull for a near one
+  'test/coverFanHullShareSmoke.mjs', // a glyph's cover-fan hull is computed once, and each copy's fan still contains it
+  'test/standInReadyRoundsSmoke.mjs', // the stand-in policy: awaitBundleReady runs at most one warm round per missing key (it reran the whole loading call on every text re-flow and trial)
+  'test/recolorFoldWarmSmoke.mjs', // a bundle declared both a color matrix and a channel lerp has one recolor program; each draw's enabled flags still follow its own state; no program built in play
+  'test/groupTargetPickWarmSmoke.mjs', // a bundle whose AAC engine pick has a bar at some drawn scale warms both outcomes (tiles that pop in from scale 0)
+  'test/noAaGateWarmSmoke.mjs', // the no-AA gates' bar (a covering stroke's device width) is reached by a world matrix: both outcomes are warmed
+  'test/patternTileGateWarmSmoke.mjs', // the pattern minification gate's bar (a tile's device size) is reached by a world matrix: both outcomes are warmed
+  'test/lbPickGateWarmSmoke.mjs', // every row tally the Loop-Blinn pick's bars admit in (0, inf) is warmed, and the image's probes leave the pick cache alone
+  'test/strokeStripGateNeutralSmoke.mjs', // the stroke strip policy moves no program: the sweep crosses its bar and nothing builds
+  'test/instancedScaleNeutralSmoke.mjs', // the instanced fast path's pick is neutral to the instances' matrices: both engines are warmed only for a bar in the viewport range
+  'test/aacPointsScaleNeutralSmoke.mjs', // a scale that takes the points route with an unbuilt program declines to the cover key and links nothing in play
+  'test/poseDirectWarmSmoke.mjs', // a morph's source pose is warmed under the stand-in-free policy (warmMorphSources: false opts out): drawn directly, nothing builds in play
+  'test/compositeInstancedWarmSmoke.mjs', // the group composite's instanced helper is built by the loading call of a scene that can reach it, and of no other
+  'test/standInsPriorOwnerSmoke.mjs', // previous-variant reuse only reuses this renderer's variant: a bundle's record of a disposed renderer's program is not bound
+  'test/fillSelectThrowSmoke.mjs', // a draw on a lost context defers instead of throwing; a selection that throws leaves no fill pass active; a failed link is not linked again every frame
+  'test/idleInferenceMotionSmoke.mjs', // the static-frame count the idle warm reads climbs on a still screen and on no moving one, whichever entry draws the motion
+  'test/warmKeepsBindingSmoke.mjs', // setBundle stays bound through a frame's warm tick and a loading call: a bare render() draws what the caller bound
+  'test/rendererDisposeWarmScratchSmoke.mjs', // a renderer's dispose frees its warm scratch and filter helper programs: a shared context does not collect them
+  'test/warmQueueReleaseSmoke.mjs', // warmQueueRelease (the hub's warmer): each program is deleted once built; a released key is done for later scenes
+  'test/warmTargetSizeSmoke.mjs', // a pipeline warm allocates group/filter targets at real size only for the as-drawn play state; play builds nothing
+  'test/warmSizeDedupSmoke.mjs', // the loading call skips a derived size whose owners ask for nothing new, and stops at its deadline (one scene: 262 sizes to the 180 s cap)
+  'test/timelineShareSmoke.mjs', // timelines over the same poses share one morph per pair; each draws its own pose (drawBundle morphT) // createRenderer's known-option list is exactly the options the renderer reads (no false "unknown option" warning, no dead option)  // every bracket-pair morph of a timeline is built by the loading call and in its warm image     // a text bundle's warm image covers every string of its font (font outline types; both AAC gate outcomes)   // a bundle with nothing to draw binds no fill program: empty image, nothing unbuilt, nothing blocked in play
+  'test/filterParamTweenSmoke.mjs',
+  'test/filterGraphTweenReachSmoke.mjs',
+  'test/blurKernelSmoke.mjs',
+  'test/porterDuffSmoke.mjs',
+  'test/svgCommentDashSmoke.mjs',
+  'test/zeroValuedAttributeSmoke.mjs',
+  'test/inheritedChannelOpacitySmoke.mjs',
+  'test/gradientPaintOpacitySmoke.mjs',
+  'test/useInheritanceSmoke.mjs',
+  'test/textInheritanceSmoke.mjs',
+  'test/markerInheritanceSmoke.mjs',
+  'test/defContentInheritanceSmoke.mjs',
+  'test/clipRuleSmoke.mjs',
+  'test/childGradientOpacitySmoke.mjs',
+  'test/childImageOpacitySmoke.mjs',
+  'test/primHitTestSmoke.mjs',
+  'test/shaderFeatureSelectSmoke.mjs',
+  'test/shaderMinifySmoke.mjs',
+  'test/shapeAnimationSmoke.mjs',
+  'test/shapeMorphMetaSmoke.mjs',
+  'test/morphGradientStopLayoutSmoke.mjs', // a gradient pair packed one texel / two texels per stop still tweens its stops (prepareMorphGradients relayout)
+  'test/svg/anchorHrefSmoke.mjs',
+  'test/svg/anchorHrefHitSmoke.mjs',
+  'test/svg/blendModeSmoke.mjs',
+  'test/svg/colorParseSmoke.mjs',
+  'test/svg/colorChromeSmoke.mjs', // compositing color: ~650 strings vs Chrome's own answers, invalid colors fall back, currentcolor in functions, straight-alpha clear, premultipliedAlpha:false warning
+  'test/svg/cssAtRulesSmoke.mjs',
+  'test/svg/cssImportantSmoke.mjs',
+  'test/svg/cssRuleIndexSmoke.mjs',
+  'test/svg/cssSelectorsSmoke.mjs',
+  'test/svg/externalStylesheetSmoke.mjs',
+  'test/svg/imageMaskInheritanceSmoke.mjs',
+  'test/svg/lengthIntegrationSmoke.mjs',
+  'test/svg/lengthParseSmoke.mjs',
+  'test/svg/manyStopsSmoke.mjs',
+  'test/svg/maskInheritanceSmoke.mjs',
+  'test/svg/convolveOrderPassThroughSmoke.mjs',
+  'test/svg/maskTypeSmoke.mjs',
+  'test/svg/modifiersSmoke.mjs',
+  'test/svg/modifiersClosedPathSmoke.mjs',
+  'test/svg/nestedClipSmoke.mjs',
+  'test/svg/nestedSvgImageSmoke.mjs',
+  'test/svg/svgImageDocumentSmoke.mjs',
+  'test/svg/feImageExternalSmoke.mjs',
+  'test/svg/nestedSvgSmoke.mjs',
+  'test/svg/repeaterArcSmoke.mjs',
+  'test/svg/riveModifiersSmoke.mjs',
+  'test/svg/sceneApiSmoke.mjs',
+  'test/svg/shapeIdsSmoke.mjs',
+  'test/svg/svgzHrefSmoke.mjs',
+  'test/svg/switchSystemLanguageSmoke.mjs',
+  'test/svg/textAreaSmoke.mjs',
+  'test/svg/svgTextImportSmoke.mjs',
+  'test/svg/svgWhiteSpaceSmoke.mjs', // CSS white-space on SVG text (collapse vs preserve, inheritance, xml:space), tab stops and tab-size
 
-let failures = 0;
-for (const rel of SMOKES) {
-  const abs = path.join(ROOT, rel);
-  process.stdout.write(`\n▶ ${rel}\n`);
-  const r = spawnSync(process.execPath, [abs], { cwd: ROOT, stdio: 'inherit' });
-  if (r.status !== 0) failures++;
-}
-console.log(failures ? `\nSMOKES FAIL (${failures}/${SMOKES.length})` : `\nSMOKES PASS (${SMOKES.length})`);
-process.exit(failures ? 1 : 0);
+  'test/svg/specDefaultSmoke.mjs', // compat: spec by default, chrome opt-in: zero subregion, filter list with a missing url(), zero-length square cap direction, xml:space=default newline
+  'test/svg/textMaskInheritanceSmoke.mjs',
+  'test/svg/vectorEffectSmoke.mjs',
+  'test/svg/viewElementSmoke.mjs',
+  'test/svg/namespaceElementsSmoke.mjs',
+  'test/svgAutoSmoke.mjs',
+  'test/svgTextDecorationSmoke.mjs',
+  'test/svgTextSourceExpansionSmoke.mjs',
+  'test/svgTextSynthVerticalSmoke.mjs',
+  'test/textLayoutWidthSmoke.mjs',
+  'test/arcMorphAuthoredRadiiSmoke.mjs',
+  'test/arcMorphGateSmoke.mjs',
+  'test/cpatchMorphMixedRowsSmoke.mjs',
+  'test/syntheticPaintRowsSmoke.mjs',
+  'test/fillNormalizeBandsSmoke.mjs',
+  'test/fillNormalizeArcsSmoke.mjs',
+  'test/cpatchMixedAreaOrientationSmoke.mjs',
+  'test/cpatchPerturbationSmoke.mjs',
+  'test/cpatchWorkBudgetSmoke.mjs',
+  'test/cpatchRoundingSmoke.mjs',
+  'test/warmSceneSmoke.mjs',
+  'test/morphFillParitySmoke.mjs',
+  'test/sceneUnionSmoke.mjs',
+  'test/fillVariantNoWaitSmoke.mjs', // no fill draw in play reads an unfinished link or takes a never-built universal; the warm-superset algebra
+  'test/nonBlockingGlSmoke.mjs', // nonblock: the zero-blocking invariant -- no query on an unfinished program, no draw with one, no query behind a pipeline build, from creation to play (recording GL with a driver model + src/renderer/glGuard.js)
+  'test/strictPlaySmoke.mjs', // strictPlay: every play frame complete and new, zero builds/deferrals/sheds; safety nets stand in for unpredicted states
+  'test/warmQueueSmoke.mjs', // renderer.warm (focus/resume/cancel/priority, manifest v3 warm without bundles, stale-manifest fallback) and warmPolicy 'idle'/'off' on the driver model
+  'test/primitiveStartPointSmoke.mjs',
+  'test/morphFullTurnReanchorSmoke.mjs',
+  'test/morphArcDirectionSmoke.mjs',
+  'test/morphRecordCompatibilitySmoke.mjs',
+  'test/aacPointsPolicyToggleSmoke.mjs',
+  'test/monotoneKeyInPlaySmoke.mjs', // certified-monotone art keeps its key through an external clip, a sprite range, a zero-scale row and a stream's first update: nothing is linked in play
+  'test/aacCubicPreparationSmoke.mjs',
+  'test/hitQueryContractSmoke.mjs',
+  'test/hitSpecModelSmoke.mjs',
+  'test/morphColorInterpSmoke.mjs',
+  'test/morphFilterCarrySmoke.mjs',
+  'test/morphLeafPropsSmoke.mjs',
+  'test/morphGroupOpacitySmoke.mjs', // a fill+stroke leaf with opacity is one group; a morph across opacity 1 keeps the group around the same shapes and lerps its opacity
+  'test/groupIdsEveryBundleSmoke.mjs', // the group tree is on every bundle with an id'd container: GL and native tables resolve group ids without hit-only rows; morph merges it
+  'test/hitOnlyAnimSmoke.mjs', // hit-only shapes follow overrides by id / index and group overrides; native table agrees; morph and stream warn
+  'test/overrideTableContractSmoke.mjs',
+  'test/disposeLifecycleSmoke.mjs',
+  'test/lifecycleContractSmoke.mjs', // context loss/restore contract, unusable contexts, option and argument validation, disposed owners, updateBundleGeometry results
+  'test/apiArgumentContractSmoke.mjs',
+  'test/animationAuditSmoke.mjs',
+];
+process.exitCode = await runNodeChecks(SMOKES, { filters: process.argv.slice(2) });

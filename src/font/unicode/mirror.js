@@ -1,13 +1,17 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Bidi mirroring (UAX #9 rule L4): a character at an odd (RTL) embedding level
 // whose Bidi_Mirrored property is Yes is drawn with its mirrored glyph, e.g.
 // '(' U+0028 <-> ')' U+0029. The mirror map comes from BidiMirroring.txt.
-import { bidiMaps } from "./tables/bidiMaps.js";
+import { bidiMaps } from './tables/bidiMaps.js';
 
 const { mirrorKeys, mirrorVals } = bidiMaps;
 
 /** Mirrored code point for `cp`, or `cp` itself if it has no mirror. */
 export function mirror(cp) {
-  let lo = 0, hi = mirrorKeys.length - 1;
+  let lo = 0,
+    hi = mirrorKeys.length - 1;
   while (lo <= hi) {
     const m = (lo + hi) >> 1;
     const k = mirrorKeys[m];
@@ -20,7 +24,8 @@ export function mirror(cp) {
 
 /** True iff `cp` has a mirrored form. */
 export function hasMirror(cp) {
-  let lo = 0, hi = mirrorKeys.length - 1;
+  let lo = 0,
+    hi = mirrorKeys.length - 1;
   while (lo <= hi) {
     const m = (lo + hi) >> 1;
     const k = mirrorKeys[m];

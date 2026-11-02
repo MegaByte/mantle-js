@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Render a multi-shape corpus asset LB vs Slug on the REAL GPU, diff, and save a
 // magnified crop of the densest internal-boundary region — to SEE whether LB's
 // residual is abutting-shape AA seams (background showing through a shared edge)
@@ -6,7 +9,7 @@ import { readFileSync, writeFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 if (!process.env.SVG) throw new Error('SVG must name the asset to inspect');
@@ -60,25 +63,62 @@ for(let x=ox;x<ox+WIN;x++){ const o=((${N}-1-sy)*${N}+x)*4;
 window.__out={ best, ox, oy, sy, scan, seamOn, seamOff, numShapes: bundle.numShapes, seamNoDepth, hasOcc: !!bundle.hasOccupancy, lbUrl, slugUrl, diffUrl };
 window.__ready=true;
 </script></body></html>`;
-const server=http.createServer((req,res)=>{ try{
-  if(req.url==='/'){res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(HTML);return;}
-  const p=decodeURIComponent(req.url.split('?')[0]);
-  res.writeHead(200,{'content-type':p.endsWith('.glsl')?'text/plain':'text/javascript'});res.end(readFileSync(path.join(ROOT,p)));
-}catch{if(!res.headersSent)res.writeHead(404);res.end();}});
-await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const port=server.address().port;
-const browser=await puppeteer.launch({headless:false,args:['--no-sandbox','--use-angle=metal','--enable-gpu']});
-const page=await browser.newPage();
-page.on('pageerror',e=>console.error('[page-err]',e.message));
-page.on('console',m=>{if(m.type()==='error')console.error('[console]',m.text());});
-await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'load',timeout:20000});
-await page.waitForFunction(()=>window.__ready===true,{timeout:15000});
-const o=await page.evaluate(()=>window.__out);
-console.log('SEAM vs Slug: cull-on='+o.seamOn+' cull-off='+o.seamOff+' numShapes='+o.numShapes+' hasOcc='+o.hasOcc+' SEAM-no-depth='+o.seamNoDepth);
+const server = http.createServer((req, res) => {
+  try {
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML);
+      return;
+    }
+    const p = decodeURIComponent(req.url.split('?')[0]);
+    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const port = server.address().port;
+// HEADLESS EVEN ON THE GPU. Headless Chrome reaches the real GPU: ANGLE (Apple, ANGLE Metal
+// Renderer) reports and TIMES the same headless or headful.
+// A window is not free to the person running this: macOS CLAMPS --window-position (measured:
+// screenX/Y 83,65 whatever you pass), so a headful run cannot be put out of the way and lands
+// on whichever desktop is in front.
+const browser = await launchBrowser({
+  headless: 'new',
+  args: ['--no-sandbox', '--use-angle=metal', '--enable-gpu'],
+});
+const page = await browser.newPage();
+page.on('pageerror', (e) => console.error('[page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('[console]', m.text());
+});
+await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 20000 });
+await page.waitForFunction(() => window.__ready === true, { timeout: 15000 });
+const o = await page.evaluate(() => window.__out);
+console.log(
+  'SEAM vs Slug: cull-on=' +
+    o.seamOn +
+    ' cull-off=' +
+    o.seamOff +
+    ' numShapes=' +
+    o.numShapes +
+    ' hasOcc=' +
+    o.hasOcc +
+    ' SEAM-no-depth=' +
+    o.seamNoDepth,
+);
 console.log('densest diff cell @', o.best, ' window origin', o.ox, o.oy);
 console.log('scanline y=%d (x: LB rgb | Slug rgb):', o.sy);
-for(const [x,l,s] of o.scan) console.log('  x=%d  LB=[%s]  Slug=[%s]', x, l.join(','), s.join(','));
-for(const [k,f] of [['lbUrl','conf_lb.png'],['slugUrl','conf_slug.png'],['diffUrl','conf_diff.png']])
-  if(o[k]) writeFileSync('probes/_hudCaptureOut/'+f, Buffer.from(o[k].split(',')[1],'base64'));
+for (const [x, l, s] of o.scan)
+  console.log('  x=%d  LB=[%s]  Slug=[%s]', x, l.join(','), s.join(','));
+for (const [k, f] of [
+  ['lbUrl', 'conf_lb.png'],
+  ['slugUrl', 'conf_slug.png'],
+  ['diffUrl', 'conf_diff.png'],
+])
+  if (o[k]) writeFileSync('probes/_hudCaptureOut/' + f, Buffer.from(o[k].split(',')[1], 'base64'));
 console.log('wrote conf_lb.png conf_slug.png conf_diff.png');
-await browser.close(); server.close();
+await browser.close();
+server.close();

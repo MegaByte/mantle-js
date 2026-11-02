@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // bidiRegistry.js — opt-in UAX #9 bidirectional algorithm.
 //
 // textRun / font/text consult this registry instead of statically
@@ -21,26 +24,44 @@ import { BaseDirection } from './bidiConst.js';
 
 const _LTR_FALLBACK = Object.freeze({
   // (baseDir, codepoints) → resolved base direction. LTR always.
-  resolveBaseDirection() { return BaseDirection.Ltr; },
+  resolveBaseDirection() {
+    return BaseDirection.Ltr;
+  },
   // (codepoints, baseDir) → per-codepoint embedding levels. All 0.
   // Uint8Array so callers can `.subarray()` a per-line slice.
-  resolveLevels(codepoints) { return new Uint8Array(codepoints.length); },
+  resolveLevels(codepoints) {
+    return new Uint8Array(codepoints.length);
+  },
   // (levels) → logical→visual index order. Identity.
   reorderLine(levels) {
-    const n = levels.length, order = new Array(n);
+    const n = levels.length,
+      order = new Array(n);
     for (let i = 0; i < n; i++) order[i] = i;
     return order;
   },
   // (codepoint) → BidiClass. L (0) for everything under the fallback.
-  getBidiClass() { return 0; },
+  getBidiClass() {
+    return 0;
+  },
   // (cls) → is the class a strong RTL type. Never, under LTR.
-  isRtlStrong() { return false; },
+  isRtlStrong() {
+    return false;
+  },
 });
 
 let _impl = null;
 
 /** Wire the real UAX #9 implementation. Called by font/typography/bidi. */
-export function registerBidi(impl) { _impl = impl; }
+export function registerBidi(impl) {
+  _impl = impl;
+}
+
+/** Whether the real UAX #9 implementation is registered. */
+export function hasBidi() {
+  return _impl !== null;
+}
 
 /** The active bidi implementation (real if registered, else LTR fallback). */
-export function getBidi() { return _impl || _LTR_FALLBACK; }
+export function getBidi() {
+  return _impl || _LTR_FALLBACK;
+}

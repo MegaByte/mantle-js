@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // nativeStationaryClipSmoke.mjs — setNodeClip on the native (no-WebGL)
 // backend: a STATIONARY viewport-space clip that MOVING content is drawn
 // through. This is the case Mantle's intra-bundle <mask> can't express (an
@@ -18,19 +21,22 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { openReady } from './_pageReady.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 // 20×20 red square at the top (em 40..60 x, 0..20 y) of a 100×100 em box.
-const CONTENT = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">'
-  + '<rect x="40" y="0" width="20" height="20" fill="#ff0000"/></svg>';
+const CONTENT =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">' +
+  '<rect x="40" y="0" width="20" height="20" fill="#ff0000"/></svg>';
 // Clip mask shape: the TOP half of the viewport (px 0..50 in y). Paint is
 // irrelevant for mode 'in' (clipPath uses geometry); for 'out' the impl
 // forces it black.
-const CLIP = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">'
-  + '<rect x="0" y="0" width="100" height="50" fill="#fff"/></svg>';
+const CLIP =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">' +
+  '<rect x="0" y="0" width="100" height="50" fill="#fff"/></svg>';
 
 const HTML = `<!DOCTYPE html><html><body>
 <div id="host"></div>
@@ -63,41 +69,64 @@ window.__ready = true;
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(HTML);
+    return;
+  }
   let p = decodeURIComponent(req.url.split('?')[0]);
-  try { res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' }); res.end(readFileSync(path.join(ROOT, p))); }
-  catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 const isRed = (px) => px[0] > 150 && px[1] < 90 && px[2] < 90;
 const isBg = (px) => px[0] < 60 && px[1] < 60 && px[2] < 60;
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
 try {
-  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await openReady(page, `http://127.0.0.1:${port}/`, { ready: 'flag' });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 // mode 'in': visible in the top half, clipped out below.
 await page.evaluate(() => window.__setClip('in'));
-const inTop = await page.evaluate(() => window.__renderAt(10));   // square at y10..30 → inside
-const inBot = await page.evaluate(() => window.__renderAt(60));   // square at y60..80 → below clip
+const inTop = await page.evaluate(() => window.__renderAt(10)); // square at y10..30 → inside
+const inBot = await page.evaluate(() => window.__renderAt(60)); // square at y60..80 → below clip
 if (isRed(inTop)) ok("mode 'in': square RED while in the top half (y~20): " + inTop);
 else fail("mode 'in' top: expected red, got " + inTop);
-if (isBg(inBot)) ok("mode 'in': square CLIPPED OUT once it descends past y=50 (clip is stationary): " + inBot);
+if (isBg(inBot))
+  ok("mode 'in': square CLIPPED OUT once it descends past y=50 (clip is stationary): " + inBot);
 else fail("mode 'in' bottom: square still visible — clip moved WITH the bundle: " + inBot);
 
 // mode 'out': complement — hidden at top, visible once below.
 await page.evaluate(() => window.__setClip('out'));
-const outTop = await page.evaluate(() => window.__renderAt(10));  // top → destination-out → hidden
-const outBot = await page.evaluate(() => window.__renderAt(60));  // below → visible
+const outTop = await page.evaluate(() => window.__renderAt(10)); // top → destination-out → hidden
+const outBot = await page.evaluate(() => window.__renderAt(60)); // below → visible
 if (isBg(outTop)) ok("mode 'out': square HIDDEN in the top half (destination-out): " + outTop);
 else fail("mode 'out' top: expected bg, got " + outTop);
 if (isRed(outBot)) ok("mode 'out': square VISIBLE once below the stationary mask: " + outBot);

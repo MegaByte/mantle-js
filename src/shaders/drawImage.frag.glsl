@@ -1,4 +1,6 @@
 #version 300 es
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
 // drawImage fragment — sample the source texture, apply tint + alpha.
 //
 // The source texture is uploaded PREMULTIPLIED (renderer.createImage),

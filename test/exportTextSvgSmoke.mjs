@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // exportTextSvgSmoke.mjs — proof that renderer.exportFrameSVG() handles
 // TEXT bundles two ways:
 //   - default (recoverText off): glyph-outline <path>s, synthesized from
@@ -12,11 +15,13 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { openReady } from './_pageReady.mjs';
+import { fontFixture, requireAsset } from './_assets.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
-const fontB64 = readFileSync(new URL('./font/fixtures/roboto-regular.ttf', import.meta.url)).toString('base64');
+const fontB64 = readFileSync(requireAsset(fontFixture('roboto-regular.ttf'))).toString('base64');
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="256" height="128"></canvas>
@@ -64,31 +69,57 @@ window.__ready = true;
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(HTML);
+    return;
+  }
   let p = decodeURIComponent(req.url.split('?')[0]);
   const ct = p.endsWith('.glsl') ? 'text/plain' : 'text/javascript';
-  try { res.writeHead(200, { 'content-type': ct + '; charset=utf-8' }); res.end(readFileSync(path.join(ROOT, p))); }
-  catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    res.writeHead(200, { 'content-type': ct + '; charset=utf-8' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { if (m.type() === 'error') console.error('  [console]', m.text()); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('  [console]', m.text());
+});
 try {
-  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await openReady(page, `http://127.0.0.1:${port}/`, { ready: 'flag' });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
-if (await page.evaluate(() => window.__hasSource)) ok('createTextBundle({retainText}) attaches bundle.textSource');
+if (await page.evaluate(() => window.__hasSource))
+  ok('createTextBundle({retainText}) attaches bundle.textSource');
 else fail('retainText did not attach textSource');
-if (await page.evaluate(() => window.__plainNoSource)) ok('default createTextBundle leaves textSource unset');
+if (await page.evaluate(() => window.__plainNoSource))
+  ok('default createTextBundle leaves textSource unset');
 else fail('plain text bundle unexpectedly has textSource');
 
 // (1) Default export → synthesized glyph outlines, no <text>.
@@ -98,16 +129,22 @@ const glyphs = await page.evaluate(async () => {
 });
 if (glyphs.rep.drawn === 1 && glyphs.rep.skipped === 0 && glyphs.p.paths >= 1 && !glyphs.p.hasText)
   ok('default text export → ' + glyphs.p.paths + ' glyph <path>s (synthesized), no <text>');
-else fail('glyph text export wrong: ' + JSON.stringify({ d: glyphs.rep.drawn, s: glyphs.rep.skipped, p: glyphs.p }).slice(0, 200));
+else
+  fail(
+    'glyph text export wrong: ' +
+      JSON.stringify({ d: glyphs.rep.drawn, s: glyphs.rep.skipped, p: glyphs.p }).slice(0, 200),
+  );
 
 // (2) recoverText → a real <text> with the original string, fill, baseline.
 const txt = await page.evaluate(async () => {
   const rep = await window.__keepText();
   return { rep, p: window.__parse(rep.svg) };
 });
-if (txt.p.hasText && txt.p.textContent === 'Hi') ok('recoverText emits <text> with the original string "Hi"');
+if (txt.p.hasText && txt.p.textContent === 'Hi')
+  ok('recoverText emits <text> with the original string "Hi"');
 else fail('recovered <text> missing/incorrect string: ' + JSON.stringify(txt.p).slice(0, 200));
-if (txt.p.textFill === 'rgba(26,51,179,1)') ok('recovered <text> carries the original fill (rgba(26,51,179,1))');
+if (txt.p.textFill === 'rgba(26,51,179,1)')
+  ok('recovered <text> carries the original fill (rgba(26,51,179,1))');
 else fail('recovered <text> fill wrong: ' + txt.p.textFill);
 if (txt.p.textSize === '1' && txt.p.textY != null && Number.isFinite(parseFloat(txt.p.textY)))
   ok('recovered <text> uses em font-size + a finite baseline y=' + txt.p.textY);
@@ -124,5 +161,8 @@ else fail('glyph fallback wrong: ' + JSON.stringify({ rep: fb.rep, p: fb.p }).sl
 
 await browser.close();
 server.close();
-if (failures) { console.error('\\n' + failures + ' failure(s)'); process.exit(1); }
+if (failures) {
+  console.error('\\n' + failures + ' failure(s)');
+  process.exit(1);
+}
 console.log('\\nexportTextSvgSmoke: all assertions passed');

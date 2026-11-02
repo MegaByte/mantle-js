@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // perfBench.mjs — measure bundle-build performance.
 //
 // Three axes:
@@ -14,6 +17,7 @@ import { performance } from 'perf_hooks';
 import { MantleFontAsset, decodeIfWoff2 } from '../../src/font/fontAsset.js';
 import { buildTextRun } from '../../src/font/textRun.js';
 import { registerWoff2Reader } from '../../src/font/formats/woff2.js';
+import { fontFixture, have, missingHint, noteSkip } from '../_assets.mjs';
 registerWoff2Reader();
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -25,15 +29,24 @@ const SAMPLES = [
 ];
 
 const FONTS = [
-  { name: 'Arial (TTF)',  path: '/System/Library/Fonts/Supplemental/Arial.ttf' },
-  { name: 'STIX (CFF)',   path: '/System/Library/Fonts/Supplemental/STIXGeneral.otf' },
-  { name: 'Roboto (woff2)', path: join(HERE, 'fixtures', 'roboto-regular.woff2') },
+  { name: 'Arial (TTF)', path: '/System/Library/Fonts/Supplemental/Arial.ttf' },
+  { name: 'STIX (CFF)', path: '/System/Library/Fonts/Supplemental/STIXGeneral.otf' },
+  { name: 'Roboto (woff2)', path: fontFixture('roboto-regular.woff2') },
 ];
 
-console.log(`${'font'.padEnd(18)}  ${'sample'.padEnd(8)}  ${'len'.padStart(5)}  ${'cold(ms)'.padStart(9)}  ${'warm(ms)'.padStart(9)}  ${'µs/glyph cold'.padStart(15)}  ${'µs/glyph warm'.padStart(15)}`);
+console.log(
+  `${'font'.padEnd(18)}  ${'sample'.padEnd(8)}  ${'len'.padStart(5)}  ${'cold(ms)'.padStart(9)}  ${'warm(ms)'.padStart(9)}  ${'µs/glyph cold'.padStart(15)}  ${'µs/glyph warm'.padStart(15)}`,
+);
 console.log('-'.repeat(95));
 
 for (const fnt of FONTS) {
+  // Roboto is fetched, not vendored; the two system faces still give a timing baseline, so the
+  // bench keeps running and reports SKIP instead of dying on an ENOENT.
+  if (!have(fnt.path)) {
+    console.log(`${fnt.name.padEnd(18)}  SKIP`);
+    noteSkip(missingHint(fnt.path));
+    continue;
+  }
   let bytes = new Uint8Array(readFileSync(fnt.path));
   bytes = await decodeIfWoff2(bytes);
   const font = new MantleFontAsset(bytes);
@@ -46,7 +59,7 @@ for (const fnt of FONTS) {
     const wmup = await buildTextRun(sample.text, font);
     const nGlyphs = wmup.numShapes;
 
-    // Drop the glyph cache to time a "cold" build of THIS string
+    // Drop the glyph cache to time a "cold" build of this string
     // (everything starts from the codepoint → cmap → glyf path).
     font._cache.clear();
     const t0 = performance.now();
@@ -60,7 +73,9 @@ for (const fnt of FONTS) {
 
     const usGlyphCold = (tCold * 1000) / Math.max(nGlyphs, 1);
     const usGlyphWarm = (tWarm * 1000) / Math.max(nGlyphs, 1);
-    console.log(`${fnt.name.padEnd(18)}  ${sample.label}  ${sample.text.length.toString().padStart(5)}  ${tCold.toFixed(2).padStart(9)}  ${tWarm.toFixed(2).padStart(9)}  ${usGlyphCold.toFixed(1).padStart(15)}  ${usGlyphWarm.toFixed(1).padStart(15)}`);
+    console.log(
+      `${fnt.name.padEnd(18)}  ${sample.label}  ${sample.text.length.toString().padStart(5)}  ${tCold.toFixed(2).padStart(9)}  ${tWarm.toFixed(2).padStart(9)}  ${usGlyphCold.toFixed(1).padStart(15)}  ${usGlyphWarm.toFixed(1).padStart(15)}`,
+    );
   }
   console.log();
 }

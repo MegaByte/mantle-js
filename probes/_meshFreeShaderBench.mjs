@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // _meshFreeShaderBench.mjs — mesh-free signed-area coverage FRAGMENT SHADER on real
 // GPU, with NATIVE per-type curve handling (NO degree elevation — a rational quad is
 // an exact conic and must stay rational). Validate vs our Slug + CPU, then BENCH both
@@ -12,64 +15,219 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 import { signedAreaCoverageSegs } from '../src/renderer/signedAreaCoverage.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
-const N = 256;   // modest res — the bench is deliberately light
+const N = 256; // modest res — the bench is deliberately light
 
 // ---- native evaluators (JS, for CPU split + y-extrema) ------------------------
 const evalSeg = (s, t) => {
   const u = 1 - t;
-  if (s.type === 'cubic') return [u * u * u * s.P[0][0] + 3 * u * u * t * s.P[1][0] + 3 * u * t * t * s.P[2][0] + t * t * t * s.P[3][0], u * u * u * s.P[0][1] + 3 * u * u * t * s.P[1][1] + 3 * u * t * t * s.P[2][1] + t * t * t * s.P[3][1]];
-  if (s.type === 'rquad') { const w = s.w, b0 = u * u, b1 = 2 * u * t * w, b2 = t * t, d = b0 + b1 + b2; return [(b0 * s.P[0][0] + b1 * s.P[1][0] + b2 * s.P[2][0]) / d, (b0 * s.P[0][1] + b1 * s.P[1][1] + b2 * s.P[2][1]) / d]; }
-  if (s.type === 'quad') return [u * u * s.P[0][0] + 2 * u * t * s.P[1][0] + t * t * s.P[2][0], u * u * s.P[0][1] + 2 * u * t * s.P[1][1] + t * t * s.P[2][1]];
-  return [s.P[0][0] + t * (s.P[1][0] - s.P[0][0]), s.P[0][1] + t * (s.P[1][1] - s.P[0][1])];   // line
+  if (s.type === 'cubic')
+    return [
+      u * u * u * s.P[0][0] +
+        3 * u * u * t * s.P[1][0] +
+        3 * u * t * t * s.P[2][0] +
+        t * t * t * s.P[3][0],
+      u * u * u * s.P[0][1] +
+        3 * u * u * t * s.P[1][1] +
+        3 * u * t * t * s.P[2][1] +
+        t * t * t * s.P[3][1],
+    ];
+  if (s.type === 'rquad') {
+    const w = s.w,
+      b0 = u * u,
+      b1 = 2 * u * t * w,
+      b2 = t * t,
+      d = b0 + b1 + b2;
+    return [
+      (b0 * s.P[0][0] + b1 * s.P[1][0] + b2 * s.P[2][0]) / d,
+      (b0 * s.P[0][1] + b1 * s.P[1][1] + b2 * s.P[2][1]) / d,
+    ];
+  }
+  if (s.type === 'quad')
+    return [
+      u * u * s.P[0][0] + 2 * u * t * s.P[1][0] + t * t * s.P[2][0],
+      u * u * s.P[0][1] + 2 * u * t * s.P[1][1] + t * t * s.P[2][1],
+    ];
+  return [s.P[0][0] + t * (s.P[1][0] - s.P[0][0]), s.P[0][1] + t * (s.P[1][1] - s.P[0][1])]; // line
 };
 // split a seg at parameter t into two same-type segs (de Casteljau; rational uses homogeneous)
 function splitSeg(s, t) {
   const L = (a, b) => [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
-  if (s.type === 'cubic') { const ab = L(s.P[0], s.P[1]), bc = L(s.P[1], s.P[2]), cd = L(s.P[2], s.P[3]), abc = L(ab, bc), bcd = L(bc, cd), m = L(abc, bcd); return [{ type: 'cubic', P: [s.P[0], ab, abc, m] }, { type: 'cubic', P: [m, bcd, cd, s.P[3]] }]; }
-  if (s.type === 'rquad') { // homogeneous split: weights [1, w, 1]
-    const w = s.w; const h0 = [s.P[0][0], s.P[0][1], 1], h1 = [s.P[1][0] * w, s.P[1][1] * w, w], h2 = [s.P[2][0], s.P[2][1], 1];
-    const HL = (a, b) => [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]), a[2] + t * (b[2] - a[2])];
-    const a = HL(h0, h1), b = HL(h1, h2), m = HL(a, b);
-    const dehom = (h) => [h[0] / h[2], h[1] / h[2]];
-    const wa = a[2] / Math.sqrt(m[2] * h0[2]) || a[2];   // recover the middle weight per piece
-    // left piece control weight = a[2]/sqrt(m[2]*1); right = b[2]/sqrt(1*m[2])
-    const wl = a[2] / Math.sqrt(h0[2] * m[2]), wr = b[2] / Math.sqrt(m[2] * h2[2]);
-    return [{ type: 'rquad', w: wl, P: [dehom(h0), dehom(a), dehom(m)] }, { type: 'rquad', w: wr, P: [dehom(m), dehom(b), dehom(h2)] }];
+  if (s.type === 'cubic') {
+    const ab = L(s.P[0], s.P[1]),
+      bc = L(s.P[1], s.P[2]),
+      cd = L(s.P[2], s.P[3]),
+      abc = L(ab, bc),
+      bcd = L(bc, cd),
+      m = L(abc, bcd);
+    return [
+      { type: 'cubic', P: [s.P[0], ab, abc, m] },
+      { type: 'cubic', P: [m, bcd, cd, s.P[3]] },
+    ];
   }
-  if (s.type === 'quad') { const ab = L(s.P[0], s.P[1]), bc = L(s.P[1], s.P[2]), m = L(ab, bc); return [{ type: 'quad', P: [s.P[0], ab, m] }, { type: 'quad', P: [m, bc, s.P[2]] }]; }
-  const m = L(s.P[0], s.P[1]); return [{ type: 'line', P: [s.P[0], m] }, { type: 'line', P: [m, s.P[1]] }];
+  if (s.type === 'rquad') {
+    // homogeneous split: weights [1, w, 1]
+    const w = s.w;
+    const h0 = [s.P[0][0], s.P[0][1], 1],
+      h1 = [s.P[1][0] * w, s.P[1][1] * w, w],
+      h2 = [s.P[2][0], s.P[2][1], 1];
+    const HL = (a, b) => [
+      a[0] + t * (b[0] - a[0]),
+      a[1] + t * (b[1] - a[1]),
+      a[2] + t * (b[2] - a[2]),
+    ];
+    const a = HL(h0, h1),
+      b = HL(h1, h2),
+      m = HL(a, b);
+    const dehom = (h) => [h[0] / h[2], h[1] / h[2]];
+    const wa = a[2] / Math.sqrt(m[2] * h0[2]) || a[2]; // recover the middle weight per piece
+    // left piece control weight = a[2]/sqrt(m[2]*1); right = b[2]/sqrt(1*m[2])
+    const wl = a[2] / Math.sqrt(h0[2] * m[2]),
+      wr = b[2] / Math.sqrt(m[2] * h2[2]);
+    return [
+      { type: 'rquad', w: wl, P: [dehom(h0), dehom(a), dehom(m)] },
+      { type: 'rquad', w: wr, P: [dehom(m), dehom(b), dehom(h2)] },
+    ];
+  }
+  if (s.type === 'quad') {
+    const ab = L(s.P[0], s.P[1]),
+      bc = L(s.P[1], s.P[2]),
+      m = L(ab, bc);
+    return [
+      { type: 'quad', P: [s.P[0], ab, m] },
+      { type: 'quad', P: [m, bc, s.P[2]] },
+    ];
+  }
+  const m = L(s.P[0], s.P[1]);
+  return [
+    { type: 'line', P: [s.P[0], m] },
+    { type: 'line', P: [m, s.P[1]] },
+  ];
 }
 // split into y-monotonic pieces (sample y' sign changes; robust, type-agnostic)
 function yMono(s) {
-  const D = 40; let prev = evalSeg(s, 0)[1], sign = 0; const ts = [];
-  for (let i = 1; i <= D; i++) { const y = evalSeg(s, i / D)[1]; const d = y - prev; if (d !== 0) { const sg = d > 0 ? 1 : -1; if (sign !== 0 && sg !== sign) ts.push((i - 0.5) / D); sign = sg; } prev = y; }
-  let out = [], cur = s, base = 0;
-  for (const t of ts) { const lt = (t - base) / (1 - base); const [l, r] = splitSeg(cur, lt); out.push(l); cur = r; base = t; }
-  out.push(cur); return out;
+  const D = 40;
+  let prev = evalSeg(s, 0)[1],
+    sign = 0;
+  const ts = [];
+  for (let i = 1; i <= D; i++) {
+    const y = evalSeg(s, i / D)[1];
+    const d = y - prev;
+    if (d !== 0) {
+      const sg = d > 0 ? 1 : -1;
+      if (sign !== 0 && sg !== sign) ts.push((i - 0.5) / D);
+      sign = sg;
+    }
+    prev = y;
+  }
+  let out = [],
+    cur = s,
+    base = 0;
+  for (const t of ts) {
+    const lt = (t - base) / (1 - base);
+    const [l, r] = splitSeg(cur, lt);
+    out.push(l);
+    cur = r;
+    base = t;
+  }
+  out.push(cur);
+  return out;
 }
 
 // ---- test shapes: a holed "O" in each curve type ------------------------------
-const cx = 0.5, cy = 0.5, K = 0.5522847498, Wt = 0.70710678;
-const on = (c, r, ccw) => ccw ? [[c[0] + r, c[1]], [c[0], c[1] + r], [c[0] - r, c[1]], [c[0], c[1] - r]] : [[c[0] + r, c[1]], [c[0], c[1] - r], [c[0] - r, c[1]], [c[0], c[1] + r]];
-function ringCubic(c, r, ccw) { const O = on(c, r, ccw); const tan = ccw ? [[0, r], [-r, 0], [0, -r], [r, 0]] : [[0, -r], [-r, 0], [0, r], [r, 0]]; return O.map((a, i) => { const b = O[(i + 1) % 4]; return { type: 'cubic', P: [a, [a[0] + tan[i][0] * K, a[1] + tan[i][1] * K], [b[0] - tan[(i + 1) % 4][0] * K, b[1] - tan[(i + 1) % 4][1] * K], b] }; }); }
-function ringQuad(c, r, ccw) { const O = on(c, r, ccw); const ct = ccw ? [[c[0] + r, c[1] + r], [c[0] - r, c[1] + r], [c[0] - r, c[1] - r], [c[0] + r, c[1] - r]] : [[c[0] + r, c[1] - r], [c[0] - r, c[1] - r], [c[0] - r, c[1] + r], [c[0] + r, c[1] + r]]; return O.map((a, i) => ({ type: 'quad', P: [a, ct[i], O[(i + 1) % 4]] })); }
-function ringRquad(c, r, ccw) { return ringQuad(c, r, ccw).map((s) => ({ type: 'rquad', w: Wt, P: s.P })); }   // same hull, exact circle via w
+const cx = 0.5,
+  cy = 0.5,
+  K = 0.5522847498,
+  Wt = 0.70710678;
+const on = (c, r, ccw) =>
+  ccw
+    ? [
+        [c[0] + r, c[1]],
+        [c[0], c[1] + r],
+        [c[0] - r, c[1]],
+        [c[0], c[1] - r],
+      ]
+    : [
+        [c[0] + r, c[1]],
+        [c[0], c[1] - r],
+        [c[0] - r, c[1]],
+        [c[0], c[1] + r],
+      ];
+function ringCubic(c, r, ccw) {
+  const O = on(c, r, ccw);
+  const tan = ccw
+    ? [
+        [0, r],
+        [-r, 0],
+        [0, -r],
+        [r, 0],
+      ]
+    : [
+        [0, -r],
+        [-r, 0],
+        [0, r],
+        [r, 0],
+      ];
+  return O.map((a, i) => {
+    const b = O[(i + 1) % 4];
+    return {
+      type: 'cubic',
+      P: [
+        a,
+        [a[0] + tan[i][0] * K, a[1] + tan[i][1] * K],
+        [b[0] - tan[(i + 1) % 4][0] * K, b[1] - tan[(i + 1) % 4][1] * K],
+        b,
+      ],
+    };
+  });
+}
+function ringQuad(c, r, ccw) {
+  const O = on(c, r, ccw);
+  const ct = ccw
+    ? [
+        [c[0] + r, c[1] + r],
+        [c[0] - r, c[1] + r],
+        [c[0] - r, c[1] - r],
+        [c[0] + r, c[1] - r],
+      ]
+    : [
+        [c[0] + r, c[1] - r],
+        [c[0] - r, c[1] - r],
+        [c[0] - r, c[1] + r],
+        [c[0] + r, c[1] + r],
+      ];
+  return O.map((a, i) => ({ type: 'quad', P: [a, ct[i], O[(i + 1) % 4]] }));
+}
+function ringRquad(c, r, ccw) {
+  return ringQuad(c, r, ccw).map((s) => ({ type: 'rquad', w: Wt, P: s.P }));
+} // same hull, exact circle via w
 const shapes = {
-  cubic: [...ringCubic([cx, cy], 0.40, true), ...ringCubic([cx, cy], 0.22, false)],
-  quad: [...ringQuad([cx, cy], 0.40, true), ...ringQuad([cx, cy], 0.22, false)],
-  rquad: [...ringRquad([cx, cy], 0.40, true), ...ringRquad([cx, cy], 0.22, false)],
+  cubic: [...ringCubic([cx, cy], 0.4, true), ...ringCubic([cx, cy], 0.22, false)],
+  quad: [...ringQuad([cx, cy], 0.4, true), ...ringQuad([cx, cy], 0.22, false)],
+  rquad: [...ringRquad([cx, cy], 0.4, true), ...ringRquad([cx, cy], 0.22, false)],
 };
 
 // fit each shape's curve-bbox to the canvas (match the renderer) + build the SVG.
 function prep(segs) {
-  let a = 1e9, b = 1e9, c = -1e9, d = -1e9;
-  for (const s of segs) for (let k = 0; k <= 64; k++) { const p = evalSeg(s, k / 64); a = Math.min(a, p[0]); b = Math.min(b, p[1]); c = Math.max(c, p[0]); d = Math.max(d, p[1]); }
-  const sc = Math.min(N / (c - a), N / (d - b)), tx = (N - (c - a) * sc) / 2 - a * sc, ty = (N - (d - b) * sc) / 2 - b * sc;
+  let a = 1e9,
+    b = 1e9,
+    c = -1e9,
+    d = -1e9;
+  for (const s of segs)
+    for (let k = 0; k <= 64; k++) {
+      const p = evalSeg(s, k / 64);
+      a = Math.min(a, p[0]);
+      b = Math.min(b, p[1]);
+      c = Math.max(c, p[0]);
+      d = Math.max(d, p[1]);
+    }
+  const sc = Math.min(N / (c - a), N / (d - b)),
+    tx = (N - (c - a) * sc) / 2 - a * sc,
+    ty = (N - (d - b) * sc) / 2 - b * sc;
   const F = (p) => [p[0] * sc + tx, p[1] * sc + ty];
   const fitted = segs.map((s) => ({ ...s, P: s.P.map(F) }));
   const mono = fitted.flatMap(yMono);
@@ -79,7 +237,15 @@ function prep(segs) {
 // simplest: emit device coords in a 0..N viewBox at width N (identity).
 function svgOf(segs, type) {
   const V = (p) => `${p[0].toFixed(3)} ${p[1].toFixed(3)}`;
-  const sub = (rg) => { let d = `M ${V(rg[0].P[0])} `; for (const s of rg) { if (s.type === 'cubic') d += `C ${V(s.P[1])} ${V(s.P[2])} ${V(s.P[3])} `; else if (s.type === 'line') d += `L ${V(s.P[1])} `; else d += `Q ${V(s.P[1])} ${V(s.P[2])} `; } return d + 'Z'; };
+  const sub = (rg) => {
+    let d = `M ${V(rg[0].P[0])} `;
+    for (const s of rg) {
+      if (s.type === 'cubic') d += `C ${V(s.P[1])} ${V(s.P[2])} ${V(s.P[3])} `;
+      else if (s.type === 'line') d += `L ${V(s.P[1])} `;
+      else d += `Q ${V(s.P[1])} ${V(s.P[2])} `;
+    }
+    return d + 'Z';
+  };
   // rquad rendered as SVG arc is awkward; emit quad hull (Slug will treat exact via its own arc detection is N/A) — for rquad compare we rely on CPU/Slug both from the same SVG 'Q' (a plain quad!) → so rquad exactness only matters in OUR shader; Slug/CPU here use the polynomial quad. Flag handled in the report.
   const half = segs.length / 2;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${N} ${N}" width="${N}" height="${N}"><path fill="#000" d="${sub(segs.slice(0, half))} ${sub(segs.slice(half))}"/></svg>`;
@@ -90,8 +256,23 @@ for (const [k, segs] of Object.entries(shapes)) {
   const { fitted, mono } = prep(segs);
   // flat packing for the shader: per mono seg → [type, w, P0x,P0y,P1x,P1y,P2x,P2y,P3x,P3y]
   const TY = { line: 0, quad: 1, rquad: 2, cubic: 3 };
-  const rec = mono.map((s) => { const P = s.P; const p = (i) => P[i] || [0, 0]; return [TY[s.type], s.w || 1, ...p(0), ...p(1), ...p(2), ...p(3)]; });
-  const cpu = signedAreaCoverageSegs(fitted.map((s) => s.type === 'line' ? { a: s.P[0], b: s.P[1] } : s.type === 'cubic' ? { type: 'cubic', P0: s.P[0], P1: s.P[1], P2: s.P[2], P3: s.P[3] } : { type: 'quad', P0: s.P[0], P1: s.P[1], P2: s.P[2] }), N, N, false);
+  const rec = mono.map((s) => {
+    const P = s.P;
+    const p = (i) => P[i] || [0, 0];
+    return [TY[s.type], s.w || 1, ...p(0), ...p(1), ...p(2), ...p(3)];
+  });
+  const cpu = signedAreaCoverageSegs(
+    fitted.map((s) =>
+      s.type === 'line'
+        ? { a: s.P[0], b: s.P[1] }
+        : s.type === 'cubic'
+          ? { type: 'cubic', P0: s.P[0], P1: s.P[1], P2: s.P[2], P3: s.P[3] }
+          : { type: 'quad', P0: s.P[0], P1: s.P[1], P2: s.P[2] },
+    ),
+    N,
+    N,
+    false,
+  );
   built[k] = { rec: rec.flat(), nrec: rec.length, svg: svgOf(fitted, k), cpu: Array.from(cpu) };
 }
 
@@ -176,24 +357,80 @@ const dbg=g.getExtension('WEBGL_debug_renderer_info'); out.gpu=dbg?g.getParamete
 window.__out=out; window.__ready=true;
 </script></body></html>`;
 
-const server = http.createServer((req, res) => { try { if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; } const p = decodeURIComponent(req.url.split('?')[0]); res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' }); res.end(readFileSync(path.join(ROOT, p))); } catch { if (!res.headersSent) res.writeHead(404); res.end(); } });
+const server = http.createServer((req, res) => {
+  try {
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML);
+      return;
+    }
+    const p = decodeURIComponent(req.url.split('?')[0]);
+    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
+});
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
-const browser = await puppeteer.launch({ headless: false, args: ['--no-sandbox', '--use-angle=metal'] });
+// HEADLESS EVEN ON THE GPU. Headless Chrome reaches the real GPU: ANGLE (Apple, ANGLE Metal
+// Renderer) reports and TIMES the same headless or headful.
+// A window is not free to the person running this: macOS CLAMPS --window-position (measured:
+// screenX/Y 83,65 whatever you pass), so a headful run cannot be put out of the way and lands
+// on whichever desktop is in front.
+const browser = await launchBrowser({
+  headless: 'new',
+  args: ['--no-sandbox', '--use-angle=metal'],
+});
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.error('  [page-err]', e.message));
-page.on('console', (m) => { if (m.type() === 'error') console.error('  [console]', m.text()); });
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('  [console]', m.text());
+});
 let out;
-try { await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 30000 }); await page.waitForFunction(() => window.__ready === true, { timeout: 40000 }); out = await page.evaluate(() => window.__out); }
-catch (e) { console.error('setup failed:', e.message); await browser.close(); server.close(); process.exit(1); }
-await browser.close(); server.close();
+try {
+  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 30000 });
+  await page.waitForFunction(() => window.__ready === true, { timeout: 40000 });
+  out = await page.evaluate(() => window.__out);
+} catch (e) {
+  console.error('setup failed:', e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
+await browser.close();
+server.close();
 
-console.log('GPU:', out.gpu, `@ ${N}×${N}`, out.hasTimer ? '(GPU timer query)' : '(wall-clock fallback)');
+console.log(
+  'GPU:',
+  out.gpu,
+  `@ ${N}×${N}`,
+  out.hasTimer ? '(GPU timer query)' : '(wall-clock fallback)',
+);
 for (const k of Object.keys(shapes)) {
-  const b = out[k], cpu = built[k].cpu;
-  let vsC = 0, vsS = 0, inkM = 0, inkS = 0;
-  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const rb = ((N - 1 - y) * N + x) * 4; const mf = 1 - b.mfPx[rb] / 255, sl = 1 - b.slPx[rb] / 255, c = cpu[y * N + x]; vsC = Math.max(vsC, Math.abs(mf - c)); vsS = Math.max(vsS, Math.abs(mf - sl)); inkM += mf; inkS += sl; }
+  const b = out[k],
+    cpu = built[k].cpu;
+  let vsC = 0,
+    vsS = 0,
+    inkM = 0,
+    inkS = 0;
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      const rb = ((N - 1 - y) * N + x) * 4;
+      const mf = 1 - b.mfPx[rb] / 255,
+        sl = 1 - b.slPx[rb] / 255,
+        c = cpu[y * N + x];
+      vsC = Math.max(vsC, Math.abs(mf - c));
+      vsS = Math.max(vsS, Math.abs(mf - sl));
+      inkM += mf;
+      inkS += sl;
+    }
   console.log(`\n[${k}] ${b.nrec} y-mono segs`);
-  console.log(`  validation: mesh-free vs CPU maxDiff=${vsC.toFixed(3)} | vs Slug maxDiff=${vsS.toFixed(3)} | ink mf=${inkM.toFixed(0)} slug=${inkS.toFixed(0)}`);
-  console.log(`  bench: mesh-free ${b.mfMs.toFixed(3)} ms | Slug ${b.slMs.toFixed(3)} ms | ratio ${(b.mfMs / b.slMs).toFixed(2)}×`);
+  console.log(
+    `  validation: mesh-free vs CPU maxDiff=${vsC.toFixed(3)} | vs Slug maxDiff=${vsS.toFixed(3)} | ink mf=${inkM.toFixed(0)} slug=${inkS.toFixed(0)}`,
+  );
+  console.log(
+    `  bench: mesh-free ${b.mfMs.toFixed(3)} ms | Slug ${b.slMs.toFixed(3)} ms | ratio ${(b.mfMs / b.slMs).toFixed(2)}×`,
+  );
 }

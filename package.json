@@ -1,7 +1,7 @@
 {
   "name": "@kontek/mantle",
-  "version": "1.1.0",
-  "description": "Mantle is a vector graphics renderer. WebGL2 implementation: imports .svg into a compact bundle and draws with analytic anti-aliasing (Slug ray-cast, Loop-Blinn, AAC, and hierarchical winding fills). Fonts, morphs, filters, and a native-SVG fallback included.",
+  "version": "1.2.0",
+  "description": "Mantle is a vector graphics renderer. WebGL2 implementation: imports .svg into a compact bundle and draws with analytic area, Loop-Blinn, CPatch, and hierarchical winding fills. Fonts, morphs, filters, and a native-SVG fallback included.",
   "keywords": [
     "vector",
     "graphics",
@@ -25,10 +25,16 @@
     "test": "node scripts/runSmokes.mjs",
     "test:render": "node scripts/runRenderSmokes.mjs",
     "check:types": "node scripts/checkRendererTypes.mjs",
-    "prepublishOnly": "npm run build:shaders && npm run gen:types && npm run test && npm run test:render",
+    "check:public-types": "node scripts/checkPublicTypes.mjs",
+    "prepack": "node scripts/prepack.mjs",
+    "prepublishOnly": "npm run build:shaders && npm run gen:types && npm run check:public-types && npm run test && npm run test:render",
     "fetch:fixtures": "node scripts/fetchTestFixtures.mjs",
     "pretest": "node scripts/fetchTestFixtures.mjs",
-    "gen:smoke-assets": "node scripts/genSmokeAssets.mjs"
+    "gen:smoke-assets": "node scripts/genSmokeAssets.mjs",
+    "test:lanes": "node scripts/runLanes.mjs",
+    "test:accuracy": "node scripts/runAccuracyDiagnostics.mjs",
+    "diagnose:accuracy": "node scripts/runAccuracyDiagnostics.mjs",
+    "diagnose:accuracy:fused": "node scripts/runAccuracyDiagnostics.mjs --fused"
   },
   "exports": {
     ".": {
@@ -63,9 +69,29 @@
       "types": "./types/renderer/index.d.ts",
       "default": "./src/renderer/index.js"
     },
+    "./renderer/features/all": {
+      "types": "./types/renderer/features/all.d.ts",
+      "default": "./src/renderer/features/all.js"
+    },
+    "./renderer/features/frameExport": {
+      "types": "./types/renderer/features/frameExport.d.ts",
+      "default": "./src/renderer/features/frameExport.js"
+    },
+    "./renderer/features/cpatch": {
+      "types": "./types/renderer/features/cpatch.d.ts",
+      "default": "./src/renderer/features/cpatch.js"
+    },
     "./fallback": {
       "types": "./types/fallback/index.d.ts",
       "default": "./src/fallback/index.js"
+    },
+    "./native/text": {
+      "types": "./types/fallback/nativeText.d.ts",
+      "default": "./src/fallback/nativeText.js"
+    },
+    "./native": {
+      "types": "./types/fallback/native.d.ts",
+      "default": "./src/fallback/native.js"
     },
     "./core/metaBin": {
       "types": "./types/core/metaBin.d.ts",
@@ -167,6 +193,10 @@
       "types": "./types/font/color/index.d.ts",
       "default": "./src/font/color/index.js"
     },
+    "./font/color/svgInOtImport": {
+      "types": "./types/font/color/svgInOtImport.d.ts",
+      "default": "./src/font/color/svgInOtImport.js"
+    },
     "./font/variations": {
       "types": "./types/font/variations/index.d.ts",
       "default": "./src/font/variations/index.js"
@@ -215,23 +245,36 @@
       "types": "./types/shaders/index.d.ts",
       "default": "./src/shaders/index.js"
     },
-    "./shaders/*": "./src/shaders/*"
+    "./shaders/bundled": {
+      "types": "./types/shaders/bundled.d.ts",
+      "default": "./src/shaders/bundled.js"
+    },
+    "./shaders/*": "./src/shaders/*",
+    "./renderer/*.worker.js": "./src/renderer/*.worker.js",
+    "./package.json": "./package.json"
   },
   "sideEffects": [
     "./src/index.js",
     "./src/font/index.js",
     "./src/filterGraph/primitives/*.js",
-    "./src/filterGraph/colr/paints.js"
+    "./src/filterGraph/colr/paints.js",
+    "./src/renderer/features/*.js",
+    "./src/fallback/nativeText.js"
   ],
   "files": [
     "src/**/*.js",
-    "src/shaders/*.glsl",
     "src/shaders/generated/",
     "types/",
+    "docs/NATIVE_FALLBACK.md",
     "README.md",
+    "CHANGELOG.md",
+    "PROVENANCE.md",
     "LICENSE",
     "NOTICE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "@xmldom/xmldom": "^0.8.13",
     "puppeteer": "^24.0.0",
@@ -243,6 +286,9 @@
   "license": "Apache-2.0",
   "author": "Aaron Kaluszka <megabyte@kontek.net> (https://kaluszka.com/)",
   "homepage": "https://github.com/MegaByte/mantle-js",
+  "bugs": {
+    "url": "https://github.com/MegaByte/mantle-js/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/MegaByte/mantle-js.git"

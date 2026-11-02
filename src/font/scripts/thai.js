@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // font/scripts/thai.js — opt-in registration for Thai + Lao shaping.
 //
 //   import { registerThaiShaping } from '@kontek/mantle/font/scripts/thai';
@@ -7,16 +10,16 @@
 // (U+0E00..U+0E7F) and Lao (U+0E80..U+0EFF). Both scripts are encoded
 // in visual order (TUS §16.1) — no glyph reordering is performed.
 
-import {
-  isThaiLaoCodepoint, isThaiLaoMark, decomposeSaraAm,
-} from './thaiShaper.js';
+import { isThaiLaoCodepoint, isThaiLaoMark, decomposeSaraAm } from './thaiShaper.js';
 import { registerThaiShaping as _register } from '../shaperRegistry.js';
+import { registerOtScriptTags } from '../otScriptTags.js';
 
 let _registered = false;
 
 export function registerThaiShaping() {
   if (_registered) return;
   _registered = true;
+  registerOtScriptTags();
   _register({ isThaiLaoCodepoint, isThaiLaoMark, decomposeSaraAm });
 }
 

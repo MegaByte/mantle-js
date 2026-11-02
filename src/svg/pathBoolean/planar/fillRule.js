@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // fillRule.js — point-in-shape test per the fill rule. Used by the
 // silhouette extractor to classify each DCEL face as inside or
 // outside the union of the original shapes.
@@ -11,14 +14,10 @@
 //   counts +1, upward counts -1, or vice versa). Inside if total ≠ 0.
 //
 //   Even-odd rule: count crossings as ±1. Inside if odd count.
-//
-// We need the SIGNED direction of crossing for nonzero, which depends
-// on whether the segment's y is increasing or decreasing across the
-// crossing point. After y-monotone subdivision, each segment is
-// strictly one or the other.
 
 import { mkLine, SEG_LINE, SEG_QUAD, SEG_CUBIC, SEG_ARC } from '../../segment.js';
 import { intersectSegments } from '../intersect/index.js';
+import { subdivideYMonotone } from '../subdivide.js';
 
 const EPS = 1e-9;
 
@@ -34,23 +33,20 @@ const EPS = 1e-9;
 export function pointInShape(p, segs, fillRule) {
   // Cast a horizontal ray from p extending to far +x. Use a
   // long line segment so it intersects everything.
-  const x0 = p[0], y0 = p[1];
+  const x0 = p[0],
+    y0 = p[1];
   // Far-x bound: extend past the shape's max x by a margin. The
   // intersection kernels are dimensionless.
   //
   // The ray must clear the shape ENTIRELY, or it stops inside and misses
   // crossings — which silently flips an inside/outside verdict.
-  //
-  // Two scale-blind mistakes to avoid here, both of the family that has bitten
-  // repeatedly in this codebase: measuring a curve by its ENDPOINTS (a Bezier
-  // reaches to its control hull, not its endpoints — measured 23.7 units past
-  // the endpoint extent on real content), and then padding by an ABSOLUTE
-  // constant (100 was fine for that content and would not be for the same art
-  // authored at 10x coordinates).
-  //
+
   // So: take the extent over control points too, and pad by the shape's own
   // size. A Bezier is contained in its control hull, so this provably clears it.
-  let maxX = x0, minX = x0, minY = y0, maxY = y0;
+  let maxX = x0,
+    minX = x0,
+    minY = y0,
+    maxY = y0;
   for (const s of segs) {
     for (const p of [s.p1, s.p2, s.p3, s.p4]) {
       if (!p) continue;
@@ -73,110 +69,98 @@ export function pointInShape(p, segs, fillRule) {
   const rayP2 = [farX, y0];
   const ray = mkLine(rayP1, rayP2);
 
-  let total = 0;       // signed for nonzero, |count| for evenodd
-  for (const seg of segs) {
-    const hits = intersectSegments(ray, seg);
-    for (const h of hits) {
-      // Filter: ray param tA must be > 0 (we only count crossings to
-      // the right of p). The kernel returns tA in [0, 1].
-      if (h.tA < EPS) continue;
-      // Skip exactly-on-ray endpoints to avoid double-counting at
-      // segment vertices. The y-monotone preprocessing ensures
-      // segments don't touch the ray tangentially in their interior.
-      if (h.endpointB) {
-        // Crossing at a segment endpoint — handle by considering only
-        // the segment whose y-range strictly straddles y0 from above-
-        // or-below toward the other side. Skip if endpoint is "below"
-        // the ray (the next segment in the path will pick it up at
-        // its start).
-        const segY0 = segStart(seg)[1];
-        const segY1 = segEnd(seg)[1];
-        // If both endpoints are on the ray, this is a horizontal
-        // sub-segment along the ray itself — skip.
-        if (Math.abs(segY0 - y0) < EPS && Math.abs(segY1 - y0) < EPS) continue;
-        // If the endpoint matching the crossing is the segment's
-        // upper endpoint (and lower endpoint is below the ray), count
-        // as a "from below" crossing. If lower endpoint (upper above
-        // ray), skip.
-        if (h.tB < EPS) {
-          // Crossing at segment start. Skip if seg goes downward
-          // (start higher than end) — the previous segment in the
-          // path already counted this endpoint.
-          if (segY0 < segY1) continue;
-        } else if (h.tB > 1 - EPS) {
-          // Crossing at segment end.
-          if (segY1 < segY0) continue;
+  // Piece by y-monotone piece, which is what the vertex rule below and the direction of a crossing both rest on. Whole
+  // curves break both. A curve's tangent can be horizontal at the very vertex the ray goes through (a smooth step, or the
+  // midpoint of a vertical edge level with a corner of a rounded shape), which gives that crossing no direction and
+  // nonzero loses it: a filled triangle with one curved side would read as empty. And a curve that leaves the ray, turns,
+  // and crosses it again would be counted at the vertex and again at the crossing.
+  let total = 0; // signed for nonzero, |count| for evenodd
+  for (const whole of segs)
+    for (const seg of subdivideYMonotone(whole)) {
+      const hits = intersectSegments(ray, seg);
+      const segY0 = segStart(seg)[1],
+        segY1 = segEnd(seg)[1];
+      for (const h of hits) {
+        if (h.tA < EPS) continue;
+        // Skip exactly-on-ray endpoints to avoid double-counting at
+        // segment vertices. The y-monotone preprocessing ensures
+        // segments don't touch the ray tangentially in their interior.
+        if (h.endpointB) {
+          // Crossing at a segment endpoint — handle by considering only
+          // the segment whose y-range strictly straddles y0 from above-
+          // or-below toward the other side. Skip if endpoint is "below"
+          // the ray (the next segment in the path will pick it up at
+          // its start).
+          // If the segment LIES ALONG the ray, it is a horizontal sub-segment of the ray itself — skip.
+          // "On the ray" within the tolerance the kernels give this pair (the ray and the segment): 1e-9
+          // of their extent, or the precision of the coordinates -- not an absolute 1e-9, which depends on
+          // the size of the drawing handed in.
+          //
+          // Its endpoints are not the segment. Asking only whether both ENDS are on the ray is the chord
+          // standing in for the curve: a cubic that leaves the ray and comes back has both ends on it, and
+          // so does a closed contour's SEAM, where the start and the end are the same point. Skipping both
+          // outright would leave the crossing at that vertex uncounted and read the parity backwards --
+          // a <circle> (one full-turn arc, seam at theta = pi) would report every point on the ray through its
+          // center, out to infinity on the seam side, as INSIDE it. A Bezier lies inside its control hull, so it
+          // is on the ray exactly when all of its control points are; an arc with both ends on the ray still
+          // bulges off it, and a full turn has both ends at the same point.
+          const tolY = Math.max(
+            1e-9 * (farX - minX + maxY - minY),
+            32e-15 * Math.max(Math.abs(y0), Math.abs(segY0), Math.abs(segY1)),
+          );
+          let alongRay = Math.abs(segY0 - y0) <= tolY && Math.abs(segY1 - y0) <= tolY;
+          if (alongRay && seg.type !== SEG_LINE) {
+            if (seg.type === SEG_ARC) alongRay = false;
+            else
+              for (const q of [seg.p2, seg.p3, seg.p4]) {
+                if (q && Math.abs(q[1] - y0) > tolY) {
+                  alongRay = false;
+                  break;
+                }
+              }
+          }
+          if (alongRay) continue;
+          // If the endpoint matching the crossing is the segment's
+          // upper endpoint (and lower endpoint is below the ray), count
+          // as a "from below" crossing. If lower endpoint (upper above
+          // ray), skip.
+          if (h.tB < EPS) {
+            // Crossing at segment start. Skip if seg goes downward
+            // (start higher than end) — the previous segment in the
+            // path already counted this endpoint.
+            if (segY0 < segY1) continue;
+          } else if (h.tB > 1 - EPS) {
+            // Crossing at segment end.
+            if (segY1 < segY0) continue;
+          }
         }
-      }
-      // Determine crossing direction: does y(t) increase or decrease
-      // as we cross the ray? At the crossing parameter tB, the
-      // segment's y-component dy/dt sign tells us.
-      const dySign = ySignAtParam(seg, h.tB);
-      if (fillRule === 'nonzero') {
-        total += dySign;       // +1 if upward, -1 if downward (or
-                                // sign-swap depending on convention)
-      } else {
-        total += 1;
+
+        if (fillRule === 'nonzero') {
+          total += Math.sign(segY1 - segY0); // a monotone piece runs one way
+        } else {
+          total += 1;
+        }
+        // A monotone piece meets a level ray once. A kernel can report that one meeting twice: a triple root, where a curve leaves
+        // the ray flat, comes back as two hits at one parameter, and counting both flips the parity.
+        break;
       }
     }
-  }
 
   if (fillRule === 'nonzero') return total !== 0;
   return (total & 1) === 1;
 }
 
-/** Sign of dy/dt for a segment at parameter t. Returns +1, -1, or 0. */
-function ySignAtParam(s, t) {
-  let dyDt;
-  switch (s.type) {
-    case SEG_LINE:
-      dyDt = s.p2[1] - s.p1[1];
-      break;
-    case SEG_QUAD: {
-      // y(t) = ay + by·t + cy·t². dy/dt = by + 2·cy·t.
-      const by = 2 * (s.p2[1] - s.p1[1]);
-      const cy = s.p1[1] - 2 * s.p2[1] + s.p3[1];
-      dyDt = by + 2 * cy * t;
-      break;
-    }
-    case SEG_CUBIC: {
-      const by = 3 * (s.p2[1] - s.p1[1]);
-      const cy = 3 * (s.p1[1] - 2 * s.p2[1] + s.p3[1]);
-      const dy = -s.p1[1] + 3 * s.p2[1] - 3 * s.p3[1] + s.p4[1];
-      dyDt = by + 2 * cy * t + 3 * dy * t * t;
-      break;
-    }
-    case SEG_ARC: {
-      // y(θ) = cy + sp·rx·cos(θ) + cp·ry·sin(θ).
-      // dy/dθ = -sp·rx·sin(θ) + cp·ry·cos(θ).
-      // tB ∈ [0, 1] is normalized along the sweep.
-      const cp = Math.cos(s.phi), sp = Math.sin(s.phi);
-      const theta = s.theta_start + t * (s.theta_end - s.theta_start);
-      const cs = Math.cos(theta), ss = Math.sin(theta);
-      dyDt = -sp * s.rx * ss + cp * s.ry * cs;
-      // Multiply by sweep sign if theta_end < theta_start (reverse-sweep).
-      if (s.theta_end < s.theta_start) dyDt = -dyDt;
-      break;
-    }
-    default:
-      dyDt = 0;
-  }
-  if (dyDt > EPS) return 1;
-  if (dyDt < -EPS) return -1;
-  return 0;
-}
-
 function segStart(s) {
-  if (s.type === SEG_LINE)  return s.p1;
-  if (s.type === SEG_QUAD)  return s.p1;
+  if (s.type === SEG_LINE) return s.p1;
+  if (s.type === SEG_QUAD) return s.p1;
   if (s.type === SEG_CUBIC) return s.p1;
-  if (s.type === SEG_ARC)   return s.p1;
+  if (s.type === SEG_ARC) return s.p1;
   return [0, 0];
 }
 function segEnd(s) {
-  if (s.type === SEG_LINE)  return s.p2;
-  if (s.type === SEG_QUAD)  return s.p3;
+  if (s.type === SEG_LINE) return s.p2;
+  if (s.type === SEG_QUAD) return s.p3;
   if (s.type === SEG_CUBIC) return s.p4;
-  if (s.type === SEG_ARC)   return s.p4;
+  if (s.type === SEG_ARC) return s.p4;
   return [0, 0];
 }

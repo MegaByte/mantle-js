@@ -1,0 +1,925 @@
+{
+  "productionShaders": true,
+  "sdfRecognition": false,
+  "forceUnified": false,
+  "defaults": {
+    "rounds": 1,
+    "batch": 1,
+    "repetitions": 1,
+    "comparisonBase": "lbLine"
+  },
+  "cases": [
+    {
+      "name": "zero-radius-9.53674e-07-0-0",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 9.53674316406e-06 9.53674316406e-06 L 3.81469726562e-05 1.14440917969e-05 L 3.62396240234e-05 3.81469726562e-05 A 0 0 0 0 1 9.53674316406e-06 9.53674316406e-06 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 9.53674316406e-06 9.53674316406e-06 L 3.81469726562e-05 1.14440917969e-05 L 3.62396240234e-05 3.81469726562e-05 L 9.53674316406e-06 9.53674316406e-06 Z\"/></g></svg>",
+      "bbox": [0, 0, 4.76837158203125e-5, 4.76837158203125e-5],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-9.53674e-07-0-1",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 9.53674316406e-06 9.53674316406e-06 L 3.81469726562e-05 1.14440917969e-05 L 3.62396240234e-05 3.81469726562e-05 A 4.76837158203e-06 0 20 0 0 9.53674316406e-06 9.53674316406e-06 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 9.53674316406e-06 9.53674316406e-06 L 3.81469726562e-05 1.14440917969e-05 L 3.62396240234e-05 3.81469726562e-05 L 9.53674316406e-06 9.53674316406e-06 Z\"/></g></svg>",
+      "bbox": [0, 0, 4.76837158203125e-5, 4.76837158203125e-5],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-9.53674e-07-0-2",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 9.53674316406e-06 9.53674316406e-06 L 3.81469726562e-05 1.14440917969e-05 L 3.62396240234e-05 3.81469726562e-05 A 0 4.76837158203e-06 0 0 1 9.53674316406e-06 9.53674316406e-06 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 9.53674316406e-06 9.53674316406e-06 L 3.81469726562e-05 1.14440917969e-05 L 3.62396240234e-05 3.81469726562e-05 L 9.53674316406e-06 9.53674316406e-06 Z\"/></g></svg>",
+      "bbox": [0, 0, 4.76837158203125e-5, 4.76837158203125e-5],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-9.53674e-07-30-0",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 1.8605822509e-05 4.30070776294e-06 L 4.2429333741e-05 2.02576348789e-05 L 2.74260809414e-05 4.2429333741e-05 A 0 0 30 0 1 1.8605822509e-05 4.30070776294e-06 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 1.8605822509e-05 4.30070776294e-06 L 4.2429333741e-05 2.02576348789e-05 L 2.74260809414e-05 4.2429333741e-05 L 1.8605822509e-05 4.30070776294e-06 Z\"/></g></svg>",
+      "bbox": [0, 0, 4.76837158203125e-5, 4.76837158203125e-5],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-9.53674e-07-30-1",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 1.8605822509e-05 4.30070776294e-06 L 4.2429333741e-05 2.02576348789e-05 L 2.74260809414e-05 4.2429333741e-05 A 4.76837158203e-06 0 50 0 0 1.8605822509e-05 4.30070776294e-06 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 1.8605822509e-05 4.30070776294e-06 L 4.2429333741e-05 2.02576348789e-05 L 2.74260809414e-05 4.2429333741e-05 L 1.8605822509e-05 4.30070776294e-06 Z\"/></g></svg>",
+      "bbox": [0, 0, 4.76837158203125e-5, 4.76837158203125e-5],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-9.53674e-07-30-2",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 1.8605822509e-05 4.30070776294e-06 L 4.2429333741e-05 2.02576348789e-05 L 2.74260809414e-05 4.2429333741e-05 A 0 4.76837158203e-06 30 0 1 1.8605822509e-05 4.30070776294e-06 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 1.8605822509e-05 4.30070776294e-06 L 4.2429333741e-05 2.02576348789e-05 L 2.74260809414e-05 4.2429333741e-05 L 1.8605822509e-05 4.30070776294e-06 Z\"/></g></svg>",
+      "bbox": [0, 0, 4.76837158203125e-5, 4.76837158203125e-5],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-1-0-0",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 10 10 L 40 12 L 38 40 A 0 0 0 0 1 10 10 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 10 10 L 40 12 L 38 40 L 10 10 Z\"/></g></svg>",
+      "bbox": [0, 0, 50, 50],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-1-0-1",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 10 10 L 40 12 L 38 40 A 5 0 20 0 0 10 10 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 10 10 L 40 12 L 38 40 L 10 10 Z\"/></g></svg>",
+      "bbox": [0, 0, 50, 50],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-1-0-2",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 10 10 L 40 12 L 38 40 A 0 5 0 0 1 10 10 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 10 10 L 40 12 L 38 40 L 10 10 Z\"/></g></svg>",
+      "bbox": [0, 0, 50, 50],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-1-30-0",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 19.5096189432 4.50961894323 L 44.4903810568 21.2416697508 L 28.7583302492 44.4903810568 A 0 0 30 0 1 19.5096189432 4.50961894323 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 19.5096189432 4.50961894323 L 44.4903810568 21.2416697508 L 28.7583302492 44.4903810568 L 19.5096189432 4.50961894323 Z\"/></g></svg>",
+      "bbox": [0, 0, 50, 50],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-1-30-1",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 19.5096189432 4.50961894323 L 44.4903810568 21.2416697508 L 28.7583302492 44.4903810568 A 5 0 50 0 0 19.5096189432 4.50961894323 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 19.5096189432 4.50961894323 L 44.4903810568 21.2416697508 L 28.7583302492 44.4903810568 L 19.5096189432 4.50961894323 Z\"/></g></svg>",
+      "bbox": [0, 0, 50, 50],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-1-30-2",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 19.5096189432 4.50961894323 L 44.4903810568 21.2416697508 L 28.7583302492 44.4903810568 A 0 5 30 0 1 19.5096189432 4.50961894323 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 19.5096189432 4.50961894323 L 44.4903810568 21.2416697508 L 28.7583302492 44.4903810568 L 19.5096189432 4.50961894323 Z\"/></g></svg>",
+      "bbox": [0, 0, 50, 50],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-1.04858e+06-0-0",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 10485760 10485760 L 41943040 12582912 L 39845888 41943040 A 0 0 0 0 1 10485760 10485760 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 10485760 10485760 L 41943040 12582912 L 39845888 41943040 L 10485760 10485760 Z\"/></g></svg>",
+      "bbox": [0, 0, 52428800, 52428800],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-1.04858e+06-0-1",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 10485760 10485760 L 41943040 12582912 L 39845888 41943040 A 5242880 0 20 0 0 10485760 10485760 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 10485760 10485760 L 41943040 12582912 L 39845888 41943040 L 10485760 10485760 Z\"/></g></svg>",
+      "bbox": [0, 0, 52428800, 52428800],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-1.04858e+06-0-2",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 10485760 10485760 L 41943040 12582912 L 39845888 41943040 A 0 5242880 0 0 1 10485760 10485760 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 10485760 10485760 L 41943040 12582912 L 39845888 41943040 L 10485760 10485760 Z\"/></g></svg>",
+      "bbox": [0, 0, 52428800, 52428800],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-1.04858e+06-30-0",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 20457318.193 4728678.19302 L 46651545.807 22273505.1006 L 30155294.8994 46651545.807 A 0 0 30 0 1 20457318.193 4728678.19302 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 20457318.193 4728678.19302 L 46651545.807 22273505.1006 L 30155294.8994 46651545.807 L 20457318.193 4728678.19302 Z\"/></g></svg>",
+      "bbox": [0, 0, 52428800, 52428800],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-1.04858e+06-30-1",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 20457318.193 4728678.19302 L 46651545.807 22273505.1006 L 30155294.8994 46651545.807 A 5242880 0 50 0 0 20457318.193 4728678.19302 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 20457318.193 4728678.19302 L 46651545.807 22273505.1006 L 30155294.8994 46651545.807 L 20457318.193 4728678.19302 Z\"/></g></svg>",
+      "bbox": [0, 0, 52428800, 52428800],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-1.04858e+06-30-2",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 20457318.193 4728678.19302 L 46651545.807 22273505.1006 L 30155294.8994 46651545.807 A 0 5242880 30 0 1 20457318.193 4728678.19302 Z\"/></g></svg>",
+      "normalized": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 20457318.193 4728678.19302 L 46651545.807 22273505.1006 L 30155294.8994 46651545.807 L 20457318.193 4728678.19302 Z\"/></g></svg>",
+      "bbox": [0, 0, 52428800, 52428800],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "normalized": true
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb"
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb"
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "normalized": true
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch"
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch"
+        }
+      ]
+    },
+    {
+      "name": "zero-radius-morph-1.04858e+06-0.2",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 20457318.193 4728678.19302 L 46651545.807 22273505.1006 L 30155294.8994 46651545.807 A 0 0 30 0 1 20457318.193 4728678.19302 Z\"/></g></svg>",
+      "bbox": [0, 0, 52428800, 52428800],
+      "poseSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 20457318.193 4728678.19302 L 46651545.807 22273505.1006 L 30155294.8994 46651545.807 L 20457318.193 4728678.19302 Z\"/></g></svg>",
+      "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path transform=\"translate(2097152 -1048576)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 20457318.193 4728678.19302 L 46651545.807 22273505.1006 L 30155294.8994 46651545.807 A 5242880 0 50 0 0 20457318.193 4728678.19302 Z\"/></g></svg>",
+      "morphT": 0.2,
+      "morphCycle": [0, 0.2, 0.5, 0.8, 1],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "morph": true,
+          "pose": true,
+          "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path transform=\"translate(2097152 -1048576)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 20457318.193 4728678.19302 L 46651545.807 22273505.1006 L 30155294.8994 46651545.807 L 20457318.193 4728678.19302 Z\"/></g></svg>"
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb",
+          "morph": true
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb",
+          "morph": true
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "morph": true,
+          "pose": true,
+          "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path transform=\"translate(2097152 -1048576)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 20457318.193 4728678.19302 L 46651545.807 22273505.1006 L 30155294.8994 46651545.807 L 20457318.193 4728678.19302 Z\"/></g></svg>"
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch",
+          "morph": true
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch",
+          "morph": true
+        }
+      ],
+      "checkMorphRestoration": true
+    },
+    {
+      "name": "zero-radius-morph-1.04858e+06-0.8",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 20457318.193 4728678.19302 L 46651545.807 22273505.1006 L 30155294.8994 46651545.807 A 0 0 30 0 1 20457318.193 4728678.19302 Z\"/></g></svg>",
+      "bbox": [0, 0, 52428800, 52428800],
+      "poseSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 20457318.193 4728678.19302 L 46651545.807 22273505.1006 L 30155294.8994 46651545.807 L 20457318.193 4728678.19302 Z\"/></g></svg>",
+      "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path transform=\"translate(2097152 -1048576)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 20457318.193 4728678.19302 L 46651545.807 22273505.1006 L 30155294.8994 46651545.807 A 5242880 0 50 0 0 20457318.193 4728678.19302 Z\"/></g></svg>",
+      "morphT": 0.8,
+      "morphCycle": [0, 0.2, 0.5, 0.8, 1],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "morph": true,
+          "pose": true,
+          "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path transform=\"translate(2097152 -1048576)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 20457318.193 4728678.19302 L 46651545.807 22273505.1006 L 30155294.8994 46651545.807 L 20457318.193 4728678.19302 Z\"/></g></svg>"
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb",
+          "morph": true
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb",
+          "morph": true
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "morph": true,
+          "pose": true,
+          "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 52428800 52428800\"><g opacity=\".63\"><path transform=\"translate(2097152 -1048576)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 20457318.193 4728678.19302 L 46651545.807 22273505.1006 L 30155294.8994 46651545.807 L 20457318.193 4728678.19302 Z\"/></g></svg>"
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch",
+          "morph": true
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch",
+          "morph": true
+        }
+      ],
+      "checkMorphRestoration": true
+    },
+    {
+      "name": "zero-radius-morph-1-0.2",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 19.5096189432 4.50961894323 L 44.4903810568 21.2416697508 L 28.7583302492 44.4903810568 A 0 0 30 0 1 19.5096189432 4.50961894323 Z\"/></g></svg>",
+      "bbox": [0, 0, 50, 50],
+      "poseSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 19.5096189432 4.50961894323 L 44.4903810568 21.2416697508 L 28.7583302492 44.4903810568 L 19.5096189432 4.50961894323 Z\"/></g></svg>",
+      "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path transform=\"translate(2 -1)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 19.5096189432 4.50961894323 L 44.4903810568 21.2416697508 L 28.7583302492 44.4903810568 A 5 0 50 0 0 19.5096189432 4.50961894323 Z\"/></g></svg>",
+      "morphT": 0.2,
+      "morphCycle": [0, 0.2, 0.5, 0.8, 1],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "morph": true,
+          "pose": true,
+          "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path transform=\"translate(2 -1)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 19.5096189432 4.50961894323 L 44.4903810568 21.2416697508 L 28.7583302492 44.4903810568 L 19.5096189432 4.50961894323 Z\"/></g></svg>"
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb",
+          "morph": true
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb",
+          "morph": true
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "morph": true,
+          "pose": true,
+          "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path transform=\"translate(2 -1)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 19.5096189432 4.50961894323 L 44.4903810568 21.2416697508 L 28.7583302492 44.4903810568 L 19.5096189432 4.50961894323 Z\"/></g></svg>"
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch",
+          "morph": true
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch",
+          "morph": true
+        }
+      ],
+      "checkMorphRestoration": true
+    },
+    {
+      "name": "zero-radius-morph-1-0.8",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 19.5096189432 4.50961894323 L 44.4903810568 21.2416697508 L 28.7583302492 44.4903810568 A 0 0 30 0 1 19.5096189432 4.50961894323 Z\"/></g></svg>",
+      "bbox": [0, 0, 50, 50],
+      "poseSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 19.5096189432 4.50961894323 L 44.4903810568 21.2416697508 L 28.7583302492 44.4903810568 L 19.5096189432 4.50961894323 Z\"/></g></svg>",
+      "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path transform=\"translate(2 -1)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 19.5096189432 4.50961894323 L 44.4903810568 21.2416697508 L 28.7583302492 44.4903810568 A 5 0 50 0 0 19.5096189432 4.50961894323 Z\"/></g></svg>",
+      "morphT": 0.8,
+      "morphCycle": [0, 0.2, 0.5, 0.8, 1],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "morph": true,
+          "pose": true,
+          "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path transform=\"translate(2 -1)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 19.5096189432 4.50961894323 L 44.4903810568 21.2416697508 L 28.7583302492 44.4903810568 L 19.5096189432 4.50961894323 Z\"/></g></svg>"
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb",
+          "morph": true
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb",
+          "morph": true
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "morph": true,
+          "pose": true,
+          "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\"><g opacity=\".63\"><path transform=\"translate(2 -1)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 19.5096189432 4.50961894323 L 44.4903810568 21.2416697508 L 28.7583302492 44.4903810568 L 19.5096189432 4.50961894323 Z\"/></g></svg>"
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch",
+          "morph": true
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch",
+          "morph": true
+        }
+      ],
+      "checkMorphRestoration": true
+    },
+    {
+      "name": "zero-radius-morph-9.53674e-07-0.2",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 1.8605822509e-05 4.30070776294e-06 L 4.2429333741e-05 2.02576348789e-05 L 2.74260809414e-05 4.2429333741e-05 A 0 0 30 0 1 1.8605822509e-05 4.30070776294e-06 Z\"/></g></svg>",
+      "bbox": [0, 0, 4.76837158203125e-5, 4.76837158203125e-5],
+      "poseSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 1.8605822509e-05 4.30070776294e-06 L 4.2429333741e-05 2.02576348789e-05 L 2.74260809414e-05 4.2429333741e-05 L 1.8605822509e-05 4.30070776294e-06 Z\"/></g></svg>",
+      "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path transform=\"translate(1.9073486328125e-06 -9.5367431640625e-07)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 1.8605822509e-05 4.30070776294e-06 L 4.2429333741e-05 2.02576348789e-05 L 2.74260809414e-05 4.2429333741e-05 A 4.76837158203125e-06 0 50 0 0 1.8605822509e-05 4.30070776294e-06 Z\"/></g></svg>",
+      "morphT": 0.2,
+      "morphCycle": [0, 0.2, 0.5, 0.8, 1],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "morph": true,
+          "pose": true,
+          "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path transform=\"translate(1.9073486328125e-06 -9.5367431640625e-07)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 1.8605822509e-05 4.30070776294e-06 L 4.2429333741e-05 2.02576348789e-05 L 2.74260809414e-05 4.2429333741e-05 L 1.8605822509e-05 4.30070776294e-06 Z\"/></g></svg>"
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb",
+          "morph": true
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb",
+          "morph": true
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "morph": true,
+          "pose": true,
+          "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path transform=\"translate(1.9073486328125e-06 -9.5367431640625e-07)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 1.8605822509e-05 4.30070776294e-06 L 4.2429333741e-05 2.02576348789e-05 L 2.74260809414e-05 4.2429333741e-05 L 1.8605822509e-05 4.30070776294e-06 Z\"/></g></svg>"
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch",
+          "morph": true
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch",
+          "morph": true
+        }
+      ],
+      "checkMorphRestoration": true
+    },
+    {
+      "name": "zero-radius-morph-9.53674e-07-0.8",
+      "size": 64,
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 1.8605822509e-05 4.30070776294e-06 L 4.2429333741e-05 2.02576348789e-05 L 2.74260809414e-05 4.2429333741e-05 A 0 0 30 0 1 1.8605822509e-05 4.30070776294e-06 Z\"/></g></svg>",
+      "bbox": [0, 0, 4.76837158203125e-5, 4.76837158203125e-5],
+      "poseSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 1.8605822509e-05 4.30070776294e-06 L 4.2429333741e-05 2.02576348789e-05 L 2.74260809414e-05 4.2429333741e-05 L 1.8605822509e-05 4.30070776294e-06 Z\"/></g></svg>",
+      "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path transform=\"translate(1.9073486328125e-06 -9.5367431640625e-07)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 1.8605822509e-05 4.30070776294e-06 L 4.2429333741e-05 2.02576348789e-05 L 2.74260809414e-05 4.2429333741e-05 A 4.76837158203125e-06 0 50 0 0 1.8605822509e-05 4.30070776294e-06 Z\"/></g></svg>",
+      "morphT": 0.8,
+      "morphCycle": [0, 0.2, 0.5, 0.8, 1],
+      "arms": [
+        {
+          "name": "lbLine",
+          "engine": "lb",
+          "morph": true,
+          "pose": true,
+          "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path transform=\"translate(1.9073486328125e-06 -9.5367431640625e-07)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 1.8605822509e-05 4.30070776294e-06 L 4.2429333741e-05 2.02576348789e-05 L 2.74260809414e-05 4.2429333741e-05 L 1.8605822509e-05 4.30070776294e-06 Z\"/></g></svg>"
+        },
+        {
+          "name": "lbArc",
+          "engine": "lb",
+          "morph": true
+        },
+        {
+          "name": "lbArcAA",
+          "engine": "lb",
+          "morph": true
+        },
+        {
+          "name": "cpLine",
+          "engine": "cpatch",
+          "morph": true,
+          "pose": true,
+          "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4.76837158203e-05 4.76837158203e-05\"><g opacity=\".63\"><path transform=\"translate(1.9073486328125e-06 -9.5367431640625e-07)\" fill=\"#c050a0\" fill-opacity=\".51\" d=\"M 1.8605822509e-05 4.30070776294e-06 L 4.2429333741e-05 2.02576348789e-05 L 2.74260809414e-05 4.2429333741e-05 L 1.8605822509e-05 4.30070776294e-06 Z\"/></g></svg>"
+        },
+        {
+          "name": "cpArc",
+          "engine": "cpatch",
+          "morph": true
+        },
+        {
+          "name": "cpArcAA",
+          "engine": "cpatch",
+          "morph": true
+        }
+      ],
+      "checkMorphRestoration": true
+    }
+  ]
+}

@@ -1,11 +1,14 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Build canonical-decomposition + canonical-composition data for NFC (UAX #15).
 // Hangul is handled algorithmically at runtime (no table). Composition uses the
 // authoritative Full_Composition_Exclusion property from DerivedNormalizationProps.
-import { parseUnicodeData, ucd } from "./ucd.mjs";
+import { parseUnicodeData, ucd } from './ucd.mjs';
 
 export function buildNfcData() {
   const { ccc, decomp } = parseUnicodeData();
-  const fce = parseFullCompositionExclusion(ucd("DerivedNormalizationProps.txt"));
+  const fce = parseFullCompositionExclusion(ucd('DerivedNormalizationProps.txt'));
 
   // Canonical decompositions only (drop <compat> mappings). Max length 2.
   const keys = [];
@@ -44,19 +47,25 @@ export function buildNfcData() {
     if (fce.has(cp)) compExcl.push(cp);
   }
 
-  return { decompKeys, decompFirst, decompSecondDict, decompSecondIdx, compExcl: Uint32Array.from(compExcl) };
+  return {
+    decompKeys,
+    decompFirst,
+    decompSecondDict,
+    decompSecondIdx,
+    compExcl: Uint32Array.from(compExcl),
+  };
 }
 
 function parseFullCompositionExclusion(text) {
   const set = new Set();
-  for (let line of text.split("\n")) {
-    const h = line.indexOf("#");
+  for (let line of text.split('\n')) {
+    const h = line.indexOf('#');
     if (h >= 0) line = line.slice(0, h);
     line = line.trim();
     if (!line) continue;
-    const f = line.split(";").map((s) => s.trim());
-    if (f[1] !== "Full_Composition_Exclusion") continue;
-    const m = f[0].split("..");
+    const f = line.split(';').map((s) => s.trim());
+    if (f[1] !== 'Full_Composition_Exclusion') continue;
+    const m = f[0].split('..');
     const lo = parseInt(m[0], 16);
     const hi = m.length > 1 ? parseInt(m[1], 16) : lo;
     for (let c = lo; c <= hi; c++) set.add(c);

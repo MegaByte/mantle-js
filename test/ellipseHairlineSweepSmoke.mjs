@@ -1,20 +1,24 @@
-// Broad sweep guarding against a vertical centre hairline through
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// Broad sweep guarding against a vertical center hairline through
 // ellipseContour circles, across configurations:
 //
 //   - world-matrix scale / translate (joint position in pixel space)
 //   - non-square canvas / non-square globalBBox (aspect-ratio scaling)
-//   - off-centre circles (cx, cy != canvas centre)
+//   - off-center circles (cx, cy != canvas center)
 //   - non-uniform ellipse (rx != ry)
 //   - wide size sweep
 //
-// Detection: scan the centre column (column nearest x=cx in pixel
-// space) for rows visibly darker than the 2-px side neighbours.
+// Detection: scan the center column (column nearest x=cx in pixel
+// space) for rows visibly darker than the 2-px side neighbors.
 
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { pageTimeoutFor } from './_laneBudget.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -24,58 +28,104 @@ mkdirSync(OUT, { recursive: true });
 // Test cases — each independently rendered and inspected.
 const CASES = [
   // Dense size sweep at canvas origin, identity world matrix.
-  ...[...Array(50).keys()].map(i => ({
+  ...[...Array(50).keys()].map((i) => ({
     name: `base-${50 + i * 5}`,
-    w: 50 + i * 5, h: 50 + i * 5,
-    cx: 50, cy: 50, rx: 50, ry: 50,
+    w: 50 + i * 5,
+    h: 50 + i * 5,
+    cx: 50,
+    cy: 50,
+    rx: 50,
+    ry: 50,
     worldM: [1, 0, 0, 0, 1, 0, 0, 0, 1],
-    bboxW: 100, bboxH: 100,
+    bboxW: 100,
+    bboxH: 100,
   })),
   // World matrix scale (joint x in pixel space shifts by sx).
-  ...[1.0, 1.2, 1.5, 1.7, 1.9, 2.0, 2.3, 2.7, 3.0].map(sx => ({
+  ...[1.0, 1.2, 1.5, 1.7, 1.9, 2.0, 2.3, 2.7, 3.0].map((sx) => ({
     name: `worldscale-sx${sx.toFixed(1)}`,
-    w: 200, h: 200,
-    cx: 50, cy: 50, rx: 50 / sx, ry: 50 / sx,
+    w: 200,
+    h: 200,
+    cx: 50,
+    cy: 50,
+    rx: 50 / sx,
+    ry: 50 / sx,
     worldM: [sx, 0, 0, 0, sx, 0, 0, 0, 1],
-    bboxW: 100, bboxH: 100,
+    bboxW: 100,
+    bboxH: 100,
   })),
   // World matrix translate.
-  ...[-30, -15, -7, 0, 7, 15, 30].map(tx => ({
+  ...[-30, -15, -7, 0, 7, 15, 30].map((tx) => ({
     name: `worldtrans-tx${tx}`,
-    w: 200, h: 200,
-    cx: 50, cy: 50, rx: 50, ry: 50,
+    w: 200,
+    h: 200,
+    cx: 50,
+    cy: 50,
+    rx: 50,
+    ry: 50,
     worldM: [1, 0, 0, 0, 1, 0, tx, 0, 1],
-    bboxW: 100, bboxH: 100,
+    bboxW: 100,
+    bboxH: 100,
   })),
   // Non-square canvas (200x100, 100x200, 300x150, 150x300).
   ...[
-    [200, 100], [100, 200], [300, 150], [150, 300], [400, 100], [100, 400],
+    [200, 100],
+    [100, 200],
+    [300, 150],
+    [150, 300],
+    [400, 100],
+    [100, 400],
   ].map(([w, h]) => ({
     name: `canvas-${w}x${h}`,
-    w, h,
-    cx: 50, cy: 50, rx: 50, ry: 50,
+    w,
+    h,
+    cx: 50,
+    cy: 50,
+    rx: 50,
+    ry: 50,
     worldM: [1, 0, 0, 0, 1, 0, 0, 0, 1],
-    bboxW: 100, bboxH: 100,
+    bboxW: 100,
+    bboxH: 100,
   })),
-  // Off-centre circle (canvas centre at 100,100, circle centre offset).
+  // Off-center circle (canvas center at 100,100, circle center offset).
   ...[
-    [25, 50], [75, 50], [50, 25], [50, 75], [33, 67], [66, 33], [75, 75], [25, 25],
+    [25, 50],
+    [75, 50],
+    [50, 25],
+    [50, 75],
+    [33, 67],
+    [66, 33],
+    [75, 75],
+    [25, 25],
   ].map(([cx, cy]) => ({
     name: `offcenter-cx${cx}-cy${cy}`,
-    w: 200, h: 200,
-    cx, cy, rx: 20, ry: 20,
+    w: 200,
+    h: 200,
+    cx,
+    cy,
+    rx: 20,
+    ry: 20,
     worldM: [1, 0, 0, 0, 1, 0, 0, 0, 1],
-    bboxW: 100, bboxH: 100,
+    bboxW: 100,
+    bboxH: 100,
   })),
   // Non-uniform ellipse (rx != ry).
   ...[
-    [50, 30], [30, 50], [70, 20], [20, 70], [50, 25],
+    [50, 30],
+    [30, 50],
+    [70, 20],
+    [20, 70],
+    [50, 25],
   ].map(([rx, ry]) => ({
     name: `ellipse-rx${rx}-ry${ry}`,
-    w: 200, h: 200,
-    cx: 50, cy: 50, rx, ry,
+    w: 200,
+    h: 200,
+    cx: 50,
+    cy: 50,
+    rx,
+    ry,
     worldM: [1, 0, 0, 0, 1, 0, 0, 0, 1],
-    bboxW: 100, bboxH: 100,
+    bboxW: 100,
+    bboxH: 100,
   })),
 ];
 
@@ -115,8 +165,8 @@ for (const cs of CASES) {
   // the pixel column where x=cx maps to. For this smoke the shapes
   // produce their own viewBox (sceneToBundle auto-computes globalBBox
   // from shape geometry — for a single ellipseContour it's the
-  // ellipse's tight bbox). After arScale the centre of the geometry
-  // bbox maps to canvas centre. Simpler: scan the WHOLE canvas for
+  // ellipse's tight bbox). After arScale the center of the geometry
+  // bbox maps to canvas center. Simpler: scan the WHOLE canvas for
   // any vertical streak of dark pixels with bright pixels on both
   // sides.
   const w = cs.w, h = cs.h;
@@ -124,10 +174,10 @@ for (const cs of CASES) {
   const buf = new Uint8Array(w * h * 4);
   gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
   // Per-column count of "interior" rows (R > 200).
-  // A hairline column is one where the per-row R is < neighbours' R
+  // A hairline column is one where the per-row R is < neighbors' R
   // by >20 on most rows.
   const hairlineCols = [];
-  // Skip columns within 1px of canvas edge (no neighbours).
+  // Skip columns within 1px of canvas edge (no neighbors).
   for (let x = 2; x < w - 2; x++) {
     let badRows = 0;
     let interiorRows = 0;
@@ -135,7 +185,7 @@ for (const cs of CASES) {
       const cR  = buf[(y * w + x)     * 4];
       const lR  = buf[(y * w + x - 2) * 4];
       const rR  = buf[(y * w + x + 2) * 4];
-      // Both neighbours must be "deep interior" for this row to count.
+      // Both neighbors must be "deep interior" for this row to count.
       if (lR > 200 && rR > 200) {
         interiorRows++;
         if (cR < Math.min(lR, rR) - 20) badRows++;
@@ -165,30 +215,43 @@ const server = http.createServer((req, res) => {
     return;
   }
   let p = decodeURIComponent(u.pathname);
-  const mime = p.endsWith('.js') || p.endsWith('.mjs') ? 'text/javascript'
-             : p.endsWith('.glsl') ? 'text/plain' : 'application/octet-stream';
+  const mime =
+    p.endsWith('.js') || p.endsWith('.mjs')
+      ? 'text/javascript'
+      : p.endsWith('.glsl')
+        ? 'text/plain'
+        : 'application/octet-stream';
   try {
     res.writeHead(200, { 'content-type': mime + '; charset=utf-8' });
     res.end(readFileSync(path.join(ROOT, p)));
   } catch {
-    try { res.writeHead(404); res.end(); } catch {}
+    try {
+      res.writeHead(404);
+      res.end();
+    } catch {}
   }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${server.address().port}/`;
 
-const browser = await puppeteer.launch({
+const browser = await launchBrowser({
   headless: 'new',
-  args: ['--enable-unsafe-swiftshader', '--no-sandbox'],
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
 });
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', msg => {
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (msg) => {
   if (msg.type() === 'error') console.error('  [console-err]', msg.text());
 });
 await page.setViewport({ width: 500, height: 500 });
 await page.goto(url, { waitUntil: 'load', timeout: 10000 });
-await page.waitForFunction(() => window.__done === true, { timeout: 180000 });
+await page.waitForFunction(() => window.__done === true, {
+  timeout: pageTimeoutFor(180000),
+  polling: 100,
+});
 const results = await page.evaluate(() => window.__result);
 await browser.close();
 server.close();
@@ -201,12 +264,16 @@ for (const name of Object.keys(results)) {
   const r = results[name];
   // Always write PNGs so the user can visually verify.
   if (r.pngDataUrl) {
-    writeFileSync(path.join(OUT, name + '.png'),
-      Buffer.from(r.pngDataUrl.slice('data:image/png;base64,'.length), 'base64'));
+    writeFileSync(
+      path.join(OUT, name + '.png'),
+      Buffer.from(r.pngDataUrl.slice('data:image/png;base64,'.length), 'base64'),
+    );
   }
   if (r.hairlineCols.length > 0) {
     anyHairline = true;
-    console.error(`FAIL ${name} (canvas=${r.canvasW}x${r.canvasH}): hairline at columns ${JSON.stringify(r.hairlineCols)}`);
+    console.error(
+      `FAIL ${name} (canvas=${r.canvasW}x${r.canvasH}): hairline at columns ${JSON.stringify(r.hairlineCols)}`,
+    );
   } else {
     cleanCases++;
   }

@@ -1,4 +1,6 @@
 #version 300 es
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
 // feBlend — combine two filter-graph inputs via a CSS blend mode.
 // SVG Filter Effects 1 (Compositing & Blending Level 1 integration)
 // supports all 16 CSS blend modes.
@@ -15,6 +17,7 @@ uniform sampler2D uIn2;   // dst
 uniform vec4 uIn1Map;     // vUV → uIn1 uv (see @@FILTER_RECT@@)
 uniform vec4 uIn2Map;     // vUV → uIn2 uv — a DIFFERENT rect
 uniform int uMode;
+uniform ivec2 uCsIn;      // per-input color-space conversion (csConvert)
 in vec2 vUV;
 out vec4 fragColor;
 
@@ -23,8 +26,8 @@ out vec4 fragColor;
 @@BLEND_HELPERS@@
 
 void main() {
-  vec4 srcPre = sampleIn(uIn1, mapIn(vUV, uIn1Map));
-  vec4 dstPre = sampleIn(uIn2, mapIn(vUV, uIn2Map));
+  vec4 srcPre = csConvert(sampleIn(uIn1, mapIn(vUV, uIn1Map)), uCsIn.x);
+  vec4 dstPre = csConvert(sampleIn(uIn2, mapIn(vUV, uIn2Map)), uCsIn.y);
   vec3 src = unpre(srcPre);
   vec3 dst = unpre(dstPre);
   float as = srcPre.a, ad = dstPre.a;

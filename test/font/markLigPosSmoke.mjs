@@ -1,10 +1,14 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // markLigPosSmoke.mjs — verifies GPOS type 5 (MarkLigPos) wiring.
 //
 // MarkLigPos fires when a mark follows a glyph that was produced by
 // type-4 ligature substitution. The textRun's ligComponents tracking
 // passes the consumed-component count through to the mark-attach
-// loop, which calls GetMarkLigAttachment with componentIdx =
-// lastComponent (the HarfBuzz "default to final" heuristic).
+// loop, which calls getMarkLigAttachment with the component the mark was
+// written after, or, for a trailing mark, lastComponent (the HarfBuzz
+// "default to final" heuristic).
 //
 // This smoke verifies:
 //   T1 reader exposes getMarkLigAttachment + can return non-null on
@@ -23,8 +27,11 @@ import { registerArabicShaping } from '../../src/font/scripts/arabic.js';
 registerArabicShaping();
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 const SFArabicPath = '/System/Library/Fonts/SFArabic.ttf';
 if (!existsSync(SFArabicPath)) {
@@ -52,13 +59,17 @@ font.getMetrics(0x0628);
   if (!slots || slots.length === 0) {
     fail('T2 layoutSlots returned empty');
   } else {
-    const ligSlots = slots.filter(s => s.ligComponents > 1);
+    const ligSlots = slots.filter((s) => s.ligComponents > 1);
     if (ligSlots.length === 0) {
       // Diagnose: what gids did shaping produce, and any with >1 components?
-      const ligOnes = slots.map(s => `gid=${s.glyphId} lc=${s.ligComponents}`).join(', ');
-      fail(`T2 expected at least one slot with ligComponents>1 in 'بلاد' (lam-alef). Got: ${ligOnes}`);
+      const ligOnes = slots.map((s) => `gid=${s.glyphId} lc=${s.ligComponents}`).join(', ');
+      fail(
+        `T2 expected at least one slot with ligComponents>1 in 'بلاد' (lam-alef). Got: ${ligOnes}`,
+      );
     } else {
-      ok(`T2 ligComponents propagated: ${ligSlots.length} ligature slot(s), counts=[${ligSlots.map(s=>s.ligComponents).join(',')}]`);
+      ok(
+        `T2 ligComponents propagated: ${ligSlots.length} ligature slot(s), counts=[${ligSlots.map((s) => s.ligComponents).join(',')}]`,
+      );
     }
   }
 }
@@ -67,9 +78,11 @@ font.getMetrics(0x0628);
 {
   const style = defaultStyle();
   const slots = _layoutSlotsForTest([{ text: 'ABC', style }], font, {});
-  const nonOnes = slots.filter(s => s.ligComponents !== 1);
+  const nonOnes = slots.filter((s) => s.ligComponents !== 1);
   if (nonOnes.length > 0) {
-    fail(`T3 ASCII 'ABC' should have all ligComponents=1, found anomalies: ${JSON.stringify(nonOnes.map(s=>s.ligComponents))}`);
+    fail(
+      `T3 ASCII 'ABC' should have all ligComponents=1, found anomalies: ${JSON.stringify(nonOnes.map((s) => s.ligComponents))}`,
+    );
   } else ok('T3 non-ligature slots default ligComponents=1');
 }
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // svgTextPathSmoke.mjs — <textPath href="#id" startOffset="...">
 // rides text along an arbitrary path. Validates:
 //   • Glyphs end up near the path (not at the text's nominal x/y).
@@ -13,12 +16,17 @@ import importSvg from '../../src/svg/importer.js';
 
 if (typeof globalThis.DOMParser === 'undefined') globalThis.DOMParser = DOMParser;
 
-const arial = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')));
+const arial = new MantleFontAsset(
+  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')),
+);
 arial.getMetrics(0x41);
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 const META_HEADER_BYTES = 32;
 const asMetaF32 = (b) =>
@@ -53,8 +61,12 @@ const ymaxI = (b, mf, i) => mf[i * b.metaFloatsPerShape + 3];
     const x0 = (xminI(b, mf, 0) + xmaxI(b, mf, 0)) / 2;
     const x1 = (xminI(b, mf, 1) + xmaxI(b, mf, 1)) / 2;
     const x2 = (xminI(b, mf, 2) + xmaxI(b, mf, 2)) / 2;
-    if (!(x0 < x1 && x1 < x2)) fail(`T1 glyphs not in order: ${x0.toFixed(1)} ${x1.toFixed(1)} ${x2.toFixed(1)}`);
-    if (failures === 0) ok(`T1 textPath on line: 3 glyphs along y≈100, x=${x0.toFixed(1)}/${x1.toFixed(1)}/${x2.toFixed(1)}`);
+    if (!(x0 < x1 && x1 < x2))
+      fail(`T1 glyphs not in order: ${x0.toFixed(1)} ${x1.toFixed(1)} ${x2.toFixed(1)}`);
+    if (failures === 0)
+      ok(
+        `T1 textPath on line: 3 glyphs along y≈100, x=${x0.toFixed(1)}/${x1.toFixed(1)}/${x2.toFixed(1)}`,
+      );
   }
 }
 
@@ -81,7 +93,8 @@ const ymaxI = (b, mf, i) => mf[i * b.metaFloatsPerShape + 3];
     // check the center is near the vertical line.
     const cx = (xminI(b, mf, 0) + xmaxI(b, mf, 0)) / 2;
     if (Math.abs(cx - 100) > 30) fail(`T2 glyph cx=${cx.toFixed(1)} (expected ~100)`);
-    else ok(`T2 textPath on vertical line: cx=${cx.toFixed(1)} (w=${w.toFixed(1)} h=${h.toFixed(1)})`);
+    else
+      ok(`T2 textPath on vertical line: cx=${cx.toFixed(1)} (w=${w.toFixed(1)} h=${h.toFixed(1)})`);
   }
 }
 
@@ -94,9 +107,16 @@ const ymaxI = (b, mf, i) => mf[i * b.metaFloatsPerShape + 3];
     <textPath href="#line" startOffset="${off}">A</textPath>
   </text>
 </svg>`;
-  const b0 = await importSvg(svgFor(0),   { fonts: { Arial: arial }, svgTextLayout: buildSvgTextGlyphs });
-  const b1 = await importSvg(svgFor(200), { fonts: { Arial: arial }, svgTextLayout: buildSvgTextGlyphs });
-  const m0 = asMetaF32(b0), m1 = asMetaF32(b1);
+  const b0 = await importSvg(svgFor(0), {
+    fonts: { Arial: arial },
+    svgTextLayout: buildSvgTextGlyphs,
+  });
+  const b1 = await importSvg(svgFor(200), {
+    fonts: { Arial: arial },
+    svgTextLayout: buildSvgTextGlyphs,
+  });
+  const m0 = asMetaF32(b0),
+    m1 = asMetaF32(b1);
   const x0 = (xminI(b0, m0, 0) + xmaxI(b0, m0, 0)) / 2;
   const x1 = (xminI(b1, m1, 0) + xmaxI(b1, m1, 0)) / 2;
   // Difference should be ~200 (startOffset).
@@ -158,6 +178,55 @@ const ymaxI = (b, mf, i) => mf[i * b.metaFloatsPerShape + 3];
   // edge, not its center. Allow a small (few px) tolerance.
   if (Math.abs(xL - 400) > 5) fail(`T5 50% offset xmin=${xL.toFixed(2)} (expected ~400)`);
   else ok(`T5 startOffset='50%': A starts at x=${xL.toFixed(2)}`);
+}
+
+// A horizontal path preserves styled glyph geometry and synthesized weight.
+for (const own of [false, true]) {
+  const style = own
+    ? 'font-weight="900" font-style="italic" letter-spacing="3px" direction="rtl"'
+    : '';
+  const expected = {
+    fontWeight: own ? '900' : '700',
+    fontStyle: own ? 'italic' : 'normal',
+    letterSpacing: own ? '3px' : '2px',
+    direction: own ? 'rtl' : 'ltr',
+  };
+  const svg = (path) => `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="200">
+    <defs><path id="line" d="M0 0H750"/></defs>
+    <g font-family="Arial" font-size="40" font-weight="700" font-style="normal" letter-spacing="2px" direction="ltr">
+      <text>${path ? `<textPath href="#line" ${style}>Af</textPath>` : `<tspan ${style}>Af</tspan>`}</text>
+    </g></svg>`;
+  const seen = [];
+  const layout = (...args) => {
+    seen.push(args[7]);
+    return buildSvgTextGlyphs(...args);
+  };
+  const opts = { fonts: { Arial: arial }, svgTextLayout: layout };
+  const flat = await importSvg(svg(false), opts),
+    onPath = await importSvg(svg(true), opts);
+  if (
+    seen.length !== 2 ||
+    seen.some((v) => Object.entries(expected).some(([k, x]) => v?.[k] !== x))
+  )
+    fail(`textPath ${own ? 'own' : 'inherited'} styles missing from layout callback`);
+  const a = asMetaF32(flat),
+    b = asMetaF32(onPath);
+  if (flat.numShapes !== onPath.numShapes || flat.numShapes === 0)
+    fail('styled textPath glyph count');
+  else {
+    // direction="rtl" right-aligns a flat run at its x (SVG 1.1 10.9.1: start is the right edge) but not along a path,
+    // so only the left-to-right case compares geometry.
+    let delta = 0;
+    if (!own)
+      for (let i = 0; i < flat.numShapes; i++)
+        for (const j of [0, 1, 2, 3, 7, 8, 9, 10, 11, 12])
+          delta = Math.max(
+            delta,
+            Math.abs(a[i * flat.metaFloatsPerShape + j] - b[i * onPath.metaFloatsPerShape + j]),
+          );
+    if (delta > 1e-4) fail(`styled textPath differs from flat glyph geometry/paint by ${delta}`);
+    else ok(`textPath ${own ? 'own' : 'inherited'} styles preserve glyph geometry and weight`);
+  }
 }
 
 console.log();

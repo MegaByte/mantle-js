@@ -1,10 +1,13 @@
-// lbTranslucentSolidSmoke — forced LB serves translucent solids through its
-// combined route and composites alpha exactly, including overlapping shapes.
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// lbTranslucentSolidSmoke — forced LB serves translucent solids and composites
+// alpha exactly, including overlapping shapes (no pixel composited twice).
 import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 import { emitFixture } from './_fixtures.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -15,7 +18,7 @@ const N = 200;
 // control points, k = 0.5523r). Do NOT use corner-style control points here: those
 // classify as kind-4 (Bezout) cubics, which have their own open under-fill bug
 // (probes/_lbCubicCircleBug.mjs) and would make this test fail for an unrelated reason.
-// The centre band is covered by both: red-over-blue at 50% each.
+// The center band is covered by both: red-over-blue at 50% each.
 const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${N} ${N}" width="${N}" height="${N}">
   <path fill="#3366cc" fill-opacity="0.5" d="M 30 100 C 30.000 72.385 52.385 50.000 80 50 C 107.615 50.000 130.000 72.385 130 100 C 130.000 127.615 107.615 150.000 80 150 C 52.385 150.000 30.000 127.615 30 100 Z"/>
   <path fill="#cc3333" fill-opacity="0.5" d="M 70 100 C 70.000 72.385 92.385 50.000 120 50 C 147.615 50.000 170.000 72.385 170 100 C 170.000 127.615 147.615 150.000 120 150 C 92.385 150.000 70.000 127.615 70 100 Z"/>
@@ -32,7 +35,9 @@ import { importSvg, createBundle, createRenderer, loadShaders } from '/src/index
 const gl = document.getElementById('c').getContext('webgl2', { antialias: false, premultipliedAlpha: true, preserveDrawingBuffer: true });
 const shaders = await loadShaders(new URL('/src/shaders/', location.href).href);
 const N = ${N};
-const renderer = createRenderer(gl, shaders);
+// The double-paint question is the unified draw's, answered by a painter-order depth
+// claim (see unifiedFillDraw) — and that is what the pixel assertions below check.
+const renderer = createRenderer(gl, shaders, { staticUnified: true });
 // Exercise prepareBundle's synchronous builder before its queued worker can
 // publish. It must choose the same convex-translucent chain plan as the worker.
 const qBundle = createBundle(gl, await importSvg(${JSON.stringify(QUAD_SVG)}));
@@ -48,7 +53,9 @@ const at = (px, x, yTop) => { const o = ((N-1-yTop)*N + x)*4; return [px[o], px[
 
 renderer.setLoopBlinnFill('off'); draw(); const slug = readAll();
 const c0 = renderer.debugStats.loopBlinnRouteCount;
-renderer.setLoopBlinnFill('on'); draw(); const lb = readAll();
+// awaitLbReady, not just prepareBundle: while the LB-hosting variant links a bundle
+// falls to the best non-LB engine, so a one-frame draw would route nothing.
+renderer.setLoopBlinnFill('on'); await renderer.awaitLbReady(bundle); draw(); const lb = readAll();
 const lbRouted = renderer.debugStats.loopBlinnRouteCount - c0;
 
 let maxDiff = 0, sum = 0;
@@ -65,9 +72,9 @@ for(let cy=0;cy<4;cy++){ const row=[];
 const ink=(px)=>{let n=0; for(let i=0;i<px.length;i+=4) if(px[i]<250||px[i+1]<250||px[i+2]<250) n++; return n;};
 
 // DOUBLE-COMPOSITE DETECTOR. A mean over the whole image cannot see a one-pixel line, so it
-// missed the years-old bug this pins: LB extruded an AA ring from EVERY cubic hull edge,
-// including the chord shared with the interior triangle. That ring lies inside the fill and
-// its klm reads "inside", so it painted coverage 1 a second time — invisible under an opaque
+// misses what this pins: an AA ring extruded from EVERY cubic hull edge, including the chord
+// shared with the interior triangle, lies inside the fill and its klm reads "inside", so it
+// paints coverage 1 a second time — invisible under an opaque
 // fill, a solid line under a translucent one. Any LB pixel materially DARKER than Slug on a
 // white ground is a pixel composited twice. There must be none.
 let doubled = 0, worst = 0;
@@ -75,9 +82,8 @@ for (let i = 0; i < N*N; i++) {
   const o = i*4;
   const d = ((slug[o]+slug[o+1]+slug[o+2]) - (lb[o]+lb[o+1]+lb[o+2])) / 3;
   // > 16, not > 8: a genuine double-composite is huge (a 0.5 fill compositing to 0.75 reads ~35
-  // and this fixture measured up to 56). Edge pixels differ by single digits simply because LB
-  // computes an exact area and Slug blends — more so since exactEdgeAa became opt-in — and
-  // scoring those would make this a test of AA agreement rather than of double-compositing.
+  // and this fixture reads up to 56). Edge pixels differ by single digits simply because the two
+  // kernels round differently at an edge, and scoring those would make this a test of AA agreement rather than of double-compositing.
   if (d > 16) { doubled++; if (d > worst) worst = d; }
 }
 window.__out = {
@@ -85,7 +91,6 @@ window.__out = {
   cells, inkSlug: ink(slug), inkLb: ink(lb),
   lbRouted,
   syncPrepared, syncConvexHasChain,
-  combined: !!bundle._lbCombined,
   maxDiff, meanDiff: sum/slug.length,
   // (120,100) lies in the overlap of both discs; (55,100) only in the blue one.
   overlapLb: at(lb,120,100), overlapSlug: at(slug,120,100),
@@ -96,39 +101,57 @@ window.__ready = true;
 
 const server = http.createServer((q, res) => {
   try {
-    if (q.url === '/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(HTML); return; }
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
     const pp = decodeURIComponent(q.url.split('?')[0]);
     res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
     res.end(readFileSync(path.join(ROOT, pp)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
-const br = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
 const pg = await br.newPage();
 pg.on('pageerror', (e) => console.error(' [err]', e.message));
 await pg.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 90000 });
-await pg.waitForFunction(() => window.__ready === true, { timeout: 90000 });
+await pg.waitForFunction(() => window.__ready === true, { timeout: 90000, polling: 100 });
 const o = await pg.evaluate(() => window.__out);
-await br.close(); server.close();
+await br.close();
+server.close();
 
 let fail = 0;
-const ok = (c, m) => c ? console.log('  ok ' + m) : (fail++, console.error('  FAIL ' + m));
+const ok = (c, m) => (c ? console.log('  ok ' + m) : (fail++, console.error('  FAIL ' + m)));
 const near = (a, b, t) => a.every((v, i) => Math.abs(v - b[i]) <= t);
 
 console.log('  diff map (mean |Δ| per 50x50 cell, top row = top of image):');
-for (const row of o.cells) console.log('    ' + row.map(v=>String(v).padStart(6)).join(''));
-console.log(`  ink: slug=${o.inkSlug} lb=${o.inkLb} (ratio ${(o.inkLb/o.inkSlug).toFixed(3)})`);
+for (const row of o.cells) console.log('    ' + row.map((v) => String(v).padStart(6)).join(''));
+console.log(`  ink: slug=${o.inkSlug} lb=${o.inkLb} (ratio ${(o.inkLb / o.inkSlug).toFixed(3)})`);
 ok(o.lbRouted > 0, `translucent solids take the forced LB route (routes=${o.lbRouted})`);
-ok(o.syncPrepared && !o.syncConvexHasChain,
-   'synchronous and worker builders both omit convex translucent PART chains');
-ok(o.combined, 'they ride the ONE-DRAW combined route');
+ok(
+  o.syncPrepared && !o.syncConvexHasChain,
+  'synchronous and worker builders both omit convex translucent PART chains',
+);
 // LB/Slug differ by a few LSBs on cubic AA edges; interior pixels must agree tightly.
 ok(o.meanDiff <= 3.0, `matches all-Slug (meanDiff=${o.meanDiff.toFixed(4)}, maxDiff=${o.maxDiff})`);
 // The one that matters for translucency, and the one a mean cannot see.
-ok(o.doubled === 0, `NO pixel is composited twice (${o.doubled} px darker than Slug, worst Δlum ${o.worstDark})`);
-ok(near(o.overlapLb, o.overlapSlug, 3), `α composites exactly where the two discs OVERLAP (lb=${o.overlapLb} slug=${o.overlapSlug})`);
-ok(near(o.soloLb, o.soloSlug, 3), `α correct in the singly-covered region (lb=${o.soloLb} slug=${o.soloSlug})`);
+ok(
+  o.doubled === 0,
+  `NO pixel is composited twice (${o.doubled} px darker than Slug, worst Δlum ${o.worstDark})`,
+);
+ok(
+  near(o.overlapLb, o.overlapSlug, 3),
+  `α composites exactly where the two discs OVERLAP (lb=${o.overlapLb} slug=${o.overlapSlug})`,
+);
+ok(
+  near(o.soloLb, o.soloSlug, 3),
+  `α correct in the singly-covered region (lb=${o.soloLb} slug=${o.soloSlug})`,
+);
 
 console.log(fail ? `\nLB-TRANSLUCENT-SOLID FAIL (${fail})` : '\nLB-TRANSLUCENT-SOLID PASS');
 process.exit(fail ? 1 : 0);

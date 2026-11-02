@@ -1,17 +1,34 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // _lbBreakEven — build-INCLUSIVE LB audit. The LB gate (px²/seg >= 150) is a proxy for "worth
 // building." The real quantity: total = build + draw*redraws. LB pays iff (a) it has a per-draw
 // advantage (draw_LB < draw_bestOther) AND (b) redraws > breakeven = build / (draw_other-draw_LB).
-// If draw_LB >= draw_other, LB NEVER pays (breakeven = inf) — that must be a hard veto (detail_fish).
+// If draw_LB >= draw_other, LB never pays (breakeven = inf) — that must be a hard veto.
 // Measures FIRST build (fresh bundle, cache cold) + draws, at true on-screen size.
 import { readFileSync } from 'fs';
-import http from 'http'; import path from 'path'; import { fileURLToPath } from 'url'; import puppeteer from 'puppeteer';
+import { benchNames, BENCH_UNSET } from '../test/_assets.mjs';
+import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { launchBrowser } from '../test/_launch.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const N=1024;
-const CONTENT=[];
-for (const f of ['icon_rotate','quad_torso','cubic_onion','detail_fish']) { try{ CONTENT.push({name:f, svg:readFileSync(path.join(ROOT,'examples/_bench',f+'.svg'),'utf8')});}catch{} }
-try{ CONTENT.push({name:'tiger', svg:readFileSync(path.join(ROOT,'examples/tiger.svg'),'utf8')});}catch{}
-const SIZES=[32, 128, 512];
-const HTML=`<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas>
+const N = 1024;
+const CONTENT = [];
+if (!benchNames().length) console.log(BENCH_UNSET);
+for (const f of benchNames()) {
+  try {
+    CONTENT.push({
+      name: f,
+      svg: readFileSync(path.join(ROOT, 'examples/_bench', f + '.svg'), 'utf8'),
+    });
+  } catch {}
+}
+try {
+  CONTENT.push({ name: 'tiger', svg: readFileSync(path.join(ROOT, 'examples/tiger.svg'), 'utf8') });
+} catch {}
+const SIZES = [32, 128, 512];
+const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas>
 <script type="module">
 import { importSvg, createBundle, createRenderer, loadShaders } from '/src/index.js';
 const gl=document.getElementById('c').getContext('webgl2',{antialias:false,premultipliedAlpha:true,preserveDrawingBuffer:true});
@@ -47,18 +64,45 @@ window.__run=async(content, sizes)=>{
 };
 window.__ready=true;
 </script></body></html>`;
-const server=http.createServer((q,res)=>{try{if(q.url==='/'){res.writeHead(200,{'content-type':'text/html'});res.end(HTML);return;}
-const pp=decodeURIComponent(q.url.split('?')[0]);res.writeHead(200,{'content-type':pp.endsWith('.glsl')?'text/plain':'text/javascript'});res.end(readFileSync(path.join(ROOT,pp)));}catch{if(!res.headersSent)res.writeHead(404);res.end();}});
-await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const br=await puppeteer.launch({headless:'new',args:['--no-sandbox']});
-const pg=await br.newPage(); pg.on('pageerror',e=>console.error(' [err]',e.message));
-await pg.goto(`http://127.0.0.1:${server.address().port}/`,{waitUntil:'load',timeout:90000});
-await pg.waitForFunction(()=>window.__ready===true,{timeout:180000,polling:50});
-const o=await pg.evaluate((c,s)=>window.__run(c,s), CONTENT, SIZES); await br.close(); server.close();
+const server = http.createServer((q, res) => {
+  try {
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
+    const pp = decodeURIComponent(q.url.split('?')[0]);
+    res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, pp)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
+const pg = await br.newPage();
+pg.on('pageerror', (e) => console.error(' [err]', e.message));
+await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
+await pg.waitForFunction(() => window.__ready === true, { timeout: 180000, polling: 50 });
+const o = await pg.evaluate((c, s) => window.__run(c, s), CONTENT, SIZES);
+await br.close();
+server.close();
 console.log('\\n  LB break-even: redraws for build to amortize vs the best non-LB engine.\\n');
 console.log('  content       size |  build   dLB   dBest(eng) | LB draw adv | break-even');
-let last='';
-for(const r of o){ if(r.name!==last){ console.log('  -- '+r.name+' --'); last=r.name; }
-  const verd = r.adv<=0 ? 'NEVER (LB draw slower)' : (r.be<10 ? `${r.be.toFixed(0)} redraws (static wins)` : `${r.be.toFixed(0)} redraws (needs heavy reuse)`);
-  console.log(`  ${r.name.padEnd(12)} ${String(r.px).padStart(3)} | ${r.buildMs.toFixed(1).padStart(6)} ${r.dLb.toFixed(3)} ${r.dOther.toFixed(3)}(${r.otherName}) | ${(r.adv>0?'+':'')+r.adv.toFixed(3)}      | ${verd}`);
+let last = '';
+for (const r of o) {
+  if (r.name !== last) {
+    console.log('  -- ' + r.name + ' --');
+    last = r.name;
+  }
+  const verd =
+    r.adv <= 0
+      ? 'NEVER (LB draw slower)'
+      : r.be < 10
+        ? `${r.be.toFixed(0)} redraws (static wins)`
+        : `${r.be.toFixed(0)} redraws (needs heavy reuse)`;
+  console.log(
+    `  ${r.name.padEnd(12)} ${String(r.px).padStart(3)} | ${r.buildMs.toFixed(1).padStart(6)} ${r.dLb.toFixed(3)} ${r.dOther.toFixed(3)}(${r.otherName}) | ${(r.adv > 0 ? '+' : '') + r.adv.toFixed(3)}      | ${verd}`,
+  );
 }

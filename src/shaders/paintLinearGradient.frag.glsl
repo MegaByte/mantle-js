@@ -1,4 +1,6 @@
 #version 300 es
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
 // PaintLinearGradient — COLRv1 linear gradient. Per spec the gradient
 // axis is defined by three points (p0, p1, p2): p0 = start, p1 = end,
 // and p2 = rotation control along an axis perpendicular to (p1 - p0).
@@ -13,7 +15,7 @@
 // Stops LUT format and helpers live in `_gradientHelpers.glsl`, which
 // the shader loader prepends at the @@GRADIENT_HELPERS@@ marker.
 // uniform sampler2D uGradientStops is declared in the preamble — it's
-// the SAME shared bundle texture the SVG fill walker (ray-cast) reads from.
+// the same shared bundle texture the SVG fill walker (ray-cast) reads from.
 // uStopsOffset/uStopCount pick this gradient's slice.
 //
 // Output is premultiplied RGBA (CSS Filter Effects §11 invariant).
@@ -23,18 +25,19 @@ in vec2 vUV;
 uniform sampler2D uGradientStops;
 uniform int uStopsOffset;
 uniform int uStopCount;
-uniform vec2 uBboxOrigin;
-uniform vec2 uBboxSize;
+uniform vec3 uPaintMapX;   // vUV -> the gradient's own coordinates: q = (dot(uPaintMapX, (vUV, 1)),
+uniform vec3 uPaintMapY;   //   dot(uPaintMapY, (vUV, 1))) -- colrPaintShared.bindPaintMap
 uniform vec2 uP0;
 uniform vec2 uP1;
 uniform vec2 uP2;
 uniform int  uExtend;
 out vec4 fragColor;
 
+#define GRAD_STOPS_COLR
 @@GRADIENT_HELPERS@@
 
 void main() {
-  vec2 q = uBboxOrigin + vUV * uBboxSize;
+  vec2 q = vec2(dot(uPaintMapX, vec3(vUV, 1.0)), dot(uPaintMapY, vec3(vUV, 1.0)));
   vec2 axis = uP1 - uP0;
   vec2 perpRef = uP2 - uP0;
   vec2 perp = vec2(perpRef.y, -perpRef.x);   // 90° CW
@@ -43,6 +46,6 @@ void main() {
   float axisProj = dot(axis, axisDir);
   if (axisProj < 0.0) { axisDir = -axisDir; axisProj = -axisProj; }
   float t = (axisProj > 1e-6) ? dot(q - uP0, axisDir) / axisProj : 0.0;
-  vec4 c = sampleStops(t, uStopsOffset, uStopCount, uExtend);
+  vec4 c = sampleStops(t, uStopsOffset, uStopCount, uExtend, vec2(dFdx(t), dFdy(t)));   // unwrapped; uniform flow
   fragColor = vec4(c.rgb * c.a, c.a);
 }

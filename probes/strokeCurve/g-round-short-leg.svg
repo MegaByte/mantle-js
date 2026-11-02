@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Round join, short leg. The leg into the join is 8 units against a 14 half-width, so the join vertex disc reaches 6 units PAST that leg's own butt cap; SVG 2 ends that side in a butt end. -->
+  <rect width="200" height="200" fill="#ffffff"/>
+  <path d="M 92 100 Q 96 100 100 100 Q 122 132 112 170" fill="none" stroke="#000000" stroke-width="28" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="4"/>
+</svg>

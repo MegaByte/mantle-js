@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Verifies GSUB init/medi/fina/isol form-feature dispatch.
 //
 // Loads SFArabic.ttf and checks the form variants are reachable and
@@ -14,8 +17,11 @@ const font = new MantleFontAsset(fontBytes);
 font.getMetrics(0x41); // warm up the parser
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 const gsub = font.gsub;
 
@@ -37,13 +43,19 @@ const gsub = font.gsub;
     const fina = gsub.substituteArabicForm(baseGid, ArabicForm.Fina);
     // Init/Medi/Fina should differ from the base (isolated) gid.
     if (init === baseGid && medi === baseGid && fina === baseGid) {
-      fail(`T2 beh forms all identical to base (gid=${baseGid}): init=${init} medi=${medi} fina=${fina}`);
+      fail(
+        `T2 beh forms all identical to base (gid=${baseGid}): init=${init} medi=${medi} fina=${fina}`,
+      );
     } else {
       // The four forms should be mutually distinct for beh
       // (which is heavily shape-shifted across positions).
       const distinct = new Set([isol, init, medi, fina]).size;
-      if (distinct < 3) fail(`T2 beh forms only ${distinct} distinct (need ≥3): ${isol} ${init} ${medi} ${fina}`);
-      else ok(`T2 beh forms: isol=${isol} init=${init} medi=${medi} fina=${fina} (${distinct} distinct)`);
+      if (distinct < 3)
+        fail(`T2 beh forms only ${distinct} distinct (need ≥3): ${isol} ${init} ${medi} ${fina}`);
+      else
+        ok(
+          `T2 beh forms: isol=${isol} init=${init} medi=${medi} fina=${fina} (${distinct} distinct)`,
+        );
     }
   }
 }

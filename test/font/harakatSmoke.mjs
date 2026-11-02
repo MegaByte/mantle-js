@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // harakatSmoke.mjs — verifies that Arabic vowel marks (harakat) are
 // positioned on top of their base letters via GPOS mark attachment,
 // not at the pen origin.
@@ -7,13 +10,16 @@ import { MantleFontAsset } from '../../src/font/fontAsset.js';
 import { buildSvgTextGlyphs } from '../../src/font/textRun.js';
 
 const font = new MantleFontAsset(
-  new Uint8Array(readFileSync('/System/Library/Fonts/SFArabic.ttf'))
+  new Uint8Array(readFileSync('/System/Library/Fonts/SFArabic.ttf')),
 );
 font.getMetrics(0x41);
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // ----- T1: 'بَ' (beh + fatha) — fatha must overlap beh visually ----
 //
@@ -30,20 +36,23 @@ const ok   = (msg) => console.log('ok ' + msg);
     fail(`T1 expected 2 glyphs (beh + fatha), got ${glyphs.length}`);
   } else {
     // Find which is the base and which is the mark by codepoint.
-    let baseGlyph = null, markGlyph = null;
+    let baseGlyph = null,
+      markGlyph = null;
     for (const g of glyphs) {
       if (g.codepoint === 0x0628) baseGlyph = g;
-      else if (g.codepoint === 0x064E) markGlyph = g;
+      else if (g.codepoint === 0x064e) markGlyph = g;
     }
     if (!baseGlyph || !markGlyph) fail(`T1 missing base or mark in output`);
     else {
-      const baseW = baseGlyph.advance;       // user-space (px)
+      const baseW = baseGlyph.advance; // user-space (px)
       const dx = markGlyph.penX - baseGlyph.penX;
       // Mark should be ATTACHED to base, not after it.
       // Acceptable range: anywhere within base's advance box ±a bit.
       const maxDx = baseW * 1.5;
       if (Math.abs(dx) > maxDx) {
-        fail(`T1 fatha not attached: dx=${dx.toFixed(2)} px (baseW=${baseW.toFixed(2)}); mark sat next-to instead of on-top-of`);
+        fail(
+          `T1 fatha not attached: dx=${dx.toFixed(2)} px (baseW=${baseW.toFixed(2)}); mark sat next-to instead of on-top-of`,
+        );
       } else if (markGlyph.advance !== 0) {
         fail(`T1 fatha advance=${markGlyph.advance}, expected 0`);
       } else {

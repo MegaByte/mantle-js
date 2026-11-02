@@ -1,5 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // shapeMorphSmoke.mjs — createShapeMorph plan + setT
-// behaviour, exercised against hand-built sections-shape bundles so
+// behavior, exercised against hand-built sections-shape bundles so
 // we don't need a real GL context or a font file.
 //
 // The morph's createBundle path expects real GL; we monkey-patch
@@ -13,29 +16,50 @@
 import { createShapeMorph } from '../../src/animation/shapeMorph.js';
 
 let failures = 0;
-function ok(msg)   { console.log('ok', msg); }
-function fail(msg) { failures++; console.error('FAIL', msg); }
-function approx(a, b, eps = 1e-5) { return Math.abs(a - b) < eps; }
+function ok(msg) {
+  console.log('ok', msg);
+}
+function fail(msg) {
+  failures++;
+  console.error('FAIL', msg);
+}
+function approx(a, b, eps = 1e-5) {
+  return Math.abs(a - b) < eps;
+}
 
 // Minimal WebGL2 stub for createBundle + createOverrideTable.
 function makeGlStub() {
   const state = { uploads: [], lastBindTarget: 0 };
-  function makeTexHandle(tag) { return { id: 'tex_' + tag, _bytes: 0 }; }
+  function makeTexHandle(tag) {
+    return { id: 'tex_' + tag, _bytes: 0 };
+  }
   return {
-    NEAREST: 9728, CLAMP_TO_EDGE: 33071, LINEAR: 9729,
-    TEXTURE_2D: 3553, TEXTURE_MIN_FILTER: 10241, TEXTURE_MAG_FILTER: 10240,
-    TEXTURE_WRAP_S: 10242, TEXTURE_WRAP_T: 10243,
-    RGBA32F: 34836, RGBA: 6408, FLOAT: 5126, RGBA8: 32856,
+    NEAREST: 9728,
+    CLAMP_TO_EDGE: 33071,
+    LINEAR: 9729,
+    TEXTURE_2D: 3553,
+    TEXTURE_MIN_FILTER: 10241,
+    TEXTURE_MAG_FILTER: 10240,
+    TEXTURE_WRAP_S: 10242,
+    TEXTURE_WRAP_T: 10243,
+    RGBA32F: 34836,
+    RGBA: 6408,
+    FLOAT: 5126,
+    RGBA8: 32856,
     UNSIGNED_BYTE: 5121,
     createTexture: () => makeTexHandle('any'),
-    bindTexture(target, tex) { state.lastBindTarget = target; },
+    bindTexture(target, tex) {
+      state.lastBindTarget = target;
+    },
     texParameteri() {},
     texImage2D() {},
     texSubImage2D(target, lvl, x, y, w, h, fmt, type, data) {
       state.uploads.push({ w, h, fmt, type, byteLen: data && data.byteLength | 0 });
     },
     deleteTexture() {},
-    get uploads() { return state.uploads; },
+    get uploads() {
+      return state.uploads;
+    },
   };
 }
 
@@ -62,7 +86,7 @@ function makeFakeBundle(shapesSpec) {
   for (let i = 0; i < n; i++) {
     const off = i * stride;
     // Texel 0 (bbox) — leave as (0,0,0,0) so hitTest etc. behave deterministically.
-    meta[off + 7] = 1;            // texel 1 (.a) = fill α = 1
+    meta[off + 7] = 1; // texel 1 (.a) = fill α = 1
     // Texel 4: glyphLoc.x, glyphLoc.y (4-float = 1 texel). cursorF is
     // in float units, so texel index = cursorF / 4, x = mod TEX_W,
     // y = div TEX_W.
@@ -71,7 +95,7 @@ function makeFakeBundle(shapesSpec) {
     meta[off + 17] = (t / TEX_W) | 0;
     cursorF += shapesSpec[i].curveFloatLen;
   }
-  // Curve data: write a recognisable pattern per shape — each curve
+  // Curve data: write a recognizable pattern per shape — each curve
   // float = (shapeIdx + 1) * 100 + j. Lets us verify lerp arithmetic.
   // No row padding: curveTexels.length is exactly the sum of all
   // shapes' curveFloatLen so the last shape's range doesn't absorb
@@ -88,16 +112,19 @@ function makeFakeBundle(shapesSpec) {
     metaFloatsPerShape: stride,
     metaFloats: meta,
     curves: curves.buffer,
-    curveTexels: curves,  // morph reads this preferentially
+    bands: new Float32Array(cursorF + 16).buffer, // Empty lists: these fixtures test plan and numeric interpolation.
+    curveTexels: curves, // morph reads this preferentially
     flags: 0,
     globalBBox: [0, 0, 100, 100],
-    shapeIds: shapesSpec.map(s => s.id),
+    shapeIds: shapesSpec.map((s) => s.id),
     // createBundle reads sections; we hand it back a sections-like
     // shape sufficient for the createOverrideTable path inside the
     // morph. The morph also wraps it as a `curveTex` carrier for the
     // setT upload — that's a fake handle from the gl stub.
     curveTex: { id: 'curveTex_fake' },
-    dispose() { /* no-op for the stub */ },
+    dispose() {
+      /* no-op for the stub */
+    },
   };
 }
 
@@ -125,7 +152,7 @@ function roundUpToRow(floats) {
   else fail('T1 stray src/dst-only entries');
   morph.setT(0.5);
   // Verify the upload happened.
-  if (gl.uploads.some(u => u.fmt === gl.RGBA && u.type === gl.FLOAT))
+  if (gl.uploads.some((u) => u.fmt === gl.RGBA && u.type === gl.FLOAT))
     ok('T1 setT(0.5) triggers a RGBA32F upload');
   else fail('T1 no curve upload observed');
   morph.dispose();
@@ -144,21 +171,21 @@ function roundUpToRow(floats) {
   // length check sensitive to actual per-shape size rather than to
   // trailing buffer padding.
   const src = makeFakeBundle([
-    { id: 'a',      curveFloatLen: 8 },
-    { id: 'after',  curveFloatLen: 4 },
-    { id: 'tail',   curveFloatLen: 4 },
+    { id: 'a', curveFloatLen: 8 },
+    { id: 'after', curveFloatLen: 4 },
+    { id: 'tail', curveFloatLen: 4 },
   ]);
   const dst = makeFakeBundle([
-    { id: 'a',      curveFloatLen: 12 },
-    { id: 'after',  curveFloatLen: 4 },
-    { id: 'tail',   curveFloatLen: 4 },
+    { id: 'a', curveFloatLen: 12 },
+    { id: 'after', curveFloatLen: 4 },
+    { id: 'tail', curveFloatLen: 4 },
   ]);
   const morph = createShapeMorph(gl, src, dst);
   // 'after' (srcIdx=1) and 'tail' (srcIdx=2) both match by name AND
   // by curve byte count → matched.length should be 2; the trailing
   // 'tail' is the last shape so its end-of-range absorbs row padding
   // but src+dst pad to the same row count.
-  const matchedSrcIdxs = morph.plan.matched.map(m => m.srcIdx).sort();
+  const matchedSrcIdxs = morph.plan.matched.map((m) => m.srcIdx).sort();
   if (morph.plan.matched.length === 2 && matchedSrcIdxs[0] === 1 && matchedSrcIdxs[1] === 2)
     ok('T2 "after" + "tail" matched (same lengths); "a" does not');
   else fail(`T2 matched = ${JSON.stringify(morph.plan.matched)}`);
@@ -176,7 +203,7 @@ function roundUpToRow(floats) {
   const gl = makeGlStub();
   const src = makeFakeBundle([
     { id: 'head', curveFloatLen: 4 },
-    { id: 'hat',  curveFloatLen: 4 },
+    { id: 'hat', curveFloatLen: 4 },
   ]);
   const dst = makeFakeBundle([
     { id: 'head', curveFloatLen: 4 },
@@ -244,23 +271,32 @@ function roundUpToRow(floats) {
     const n = shapesSpec.length;
     const body = new Float32Array(n * STRIDE);
     for (let i = 0; i < n; i++) {
-      body[i * STRIDE + META_TEXEL_4]     = shapesSpec[i].gx;
+      body[i * STRIDE + META_TEXEL_4] = shapesSpec[i].gx;
       body[i * STRIDE + META_TEXEL_4 + 1] = shapesSpec[i].gy;
-      body[i * STRIDE + 7] = 1.0;  // fill α
+      body[i * STRIDE + 7] = 1.0; // fill α
     }
     const meta = new ArrayBuffer(32 + body.byteLength);
     const dv = new DataView(meta);
     dv.setUint32(0, n, true);
     new Uint8Array(meta, 32).set(new Uint8Array(body.buffer));
     return {
-      flags: 0, metaFloatsPerShape: STRIDE,
-      meta, curves: new Float32Array(curveFloatLen).buffer,
+      flags: 0,
+      metaFloatsPerShape: STRIDE,
+      meta,
+      curves: new Float32Array(curveFloatLen).buffer,
       bands: new Float32Array(16).buffer,
-      curveGeom: null, gradients: null, gradientStops: null,
-      gradientStopsCount: 0, dashes: null, strokeMesh: null,
-      clipMesh: null, maskMesh: null, filterTab: null,
-      imageAtlas: null, imageAtlasDim: null,
-      shapeIds: shapesSpec.map(s => s.id),
+      curveGeom: null,
+      gradients: null,
+      gradientStops: null,
+      gradientStopsCount: 0,
+      dashes: null,
+      strokeMesh: null,
+      clipMesh: null,
+      maskMesh: null,
+      filterTab: null,
+      imageAtlas: null,
+      imageAtlasDim: null,
+      shapeIds: shapesSpec.map((s) => s.id),
     };
   }
   const gl = makeGlStub();
@@ -269,16 +305,33 @@ function roundUpToRow(floats) {
   // (Same length → matched.) src curve buffer is 32 floats total;
   // dst curve buffer is 32 floats total too. Both pad to one row
   // internally, but `curveRangesByShape` reports unpadded.
-  const src = createBundle(gl, makeSections(
-    [{ id: 'a', gx: 0, gy: 0 }, { id: 'b', gx: 3, gy: 0 }], 32));
-  const dst = createBundle(gl, makeSections(
-    [{ id: 'a', gx: 0, gy: 0 }, { id: 'b', gx: 3, gy: 0 }], 32));
+  const src = createBundle(
+    gl,
+    makeSections(
+      [
+        { id: 'a', gx: 0, gy: 0 },
+        { id: 'b', gx: 3, gy: 0 },
+      ],
+      32,
+    ),
+  );
+  const dst = createBundle(
+    gl,
+    makeSections(
+      [
+        { id: 'a', gx: 0, gy: 0 },
+        { id: 'b', gx: 3, gy: 0 },
+      ],
+      32,
+    ),
+  );
   const morph = createShapeMorph(gl, src, dst);
   if (morph.plan.matched.length === 2)
     ok('T6 createBundle-built last shape matches exactly (no padding absorption)');
   else fail(`T6 matched = ${JSON.stringify(morph.plan.matched)}`);
   morph.dispose();
-  src.dispose(); dst.dispose();
+  src.dispose();
+  dst.dispose();
 }
 
 // === T7: gradient-stops lerp ========================================
@@ -291,20 +344,32 @@ function roundUpToRow(floats) {
   // Stops layout: (premul.r, premul.g, premul.b, offset).
   // Src: red→blue gradient. Dst: green→yellow.
   const srcStops = new Uint8Array([
-    255,   0,   0,   0,    //   red @ offset 0
-      0,   0, 255, 255,    //  blue @ offset 1
+    255,
+    0,
+    0,
+    0, //   red @ offset 0
+    0,
+    0,
+    255,
+    255, //  blue @ offset 1
   ]);
   const dstStops = new Uint8Array([
-      0, 255,   0,   0,    // green @ offset 0
-    255, 255,   0, 255,    // yellow @ offset 1
+    0,
+    255,
+    0,
+    0, // green @ offset 0
+    255,
+    255,
+    0,
+    255, // yellow @ offset 1
   ]);
   // Gradient param table: 1 gradient × 16 floats. Texel 2 (offset
   // 8..11) carries (ax, ay, stopsOffset, stopsCount). We only need
   // stopsOffset (10) and stopsCount (11) for the plan builder.
   function makeGradFloats() {
     const g = new Float32Array(16);
-    g[10] = 0;   // stopsOffset = 0 (texel index)
-    g[11] = 2;   // stopsCount  = 2
+    g[10] = 0; // stopsOffset = 0 (texel index)
+    g[11] = -2; // stopsCount  = 2
     return g;
   }
   const srcGrad = makeGradFloats();
@@ -315,8 +380,10 @@ function roundUpToRow(floats) {
       metaFloatsPerShape: 48,
       metaFloats: (() => {
         const m = new Float32Array(48);
-        m[7] = 1;       // fill alpha
-        m[16] = 0; m[17] = 0;  // glyphLoc
+        m[7] = 1; // fill alpha
+        m[28] = 1; // fill gradient claim
+        m[16] = 0;
+        m[17] = 0; // glyphLoc
         return m;
       })(),
       curves: new Float32Array(8).buffer,
@@ -329,7 +396,7 @@ function roundUpToRow(floats) {
       // Morph reads these for the gradient-stops plan:
       gradientStopsBytes: stops,
       gradientStopsCount: stops.length / 4,
-      gradientFloats:     gradFloats,
+      gradientFloats: gradFloats,
       // Token GL handles the morph references at render time:
       gradientStopsTex: { id: 'srcStopsTex_' + tag },
       curveTex: { id: 'curveTex_' + tag },
@@ -340,15 +407,16 @@ function roundUpToRow(floats) {
   const dst = makeBundleWithGrad(dstStops, dstGrad, 'dst');
   const morph = createShapeMorph(gl, src, dst);
   // The plan should pair gradient 0 with itself (same stops count).
-  const sections = morph.bundle._mergedCurveF32
-    ? null : null;  // not needed; inspect via private fields below
+  const sections = morph.bundle._mergedCurveF32 ? null : null; // not needed; inspect via private fields below
   // Reach into the morph's compose result through the bundle —
   // gradientStopsCount + gradientStopsBytes were forwarded.
   const b = morph.bundle;
   if (b.gradientStopsCount === 2 && b.gradientStopsBytes && b.gradientStopsBytes.length === 8)
     ok('T7 morph bundle carries forwarded stops (count + bytes)');
   else
-    fail(`T7 morph gradStopsCount=${b.gradientStopsCount} bytes=${b.gradientStopsBytes && b.gradientStopsBytes.length}`);
+    fail(
+      `T7 morph gradStopsCount=${b.gradientStopsCount} bytes=${b.gradientStopsBytes && b.gradientStopsBytes.length}`,
+    );
   // Clear earlier uploads (createBundle did texImage2D, not texSubImage),
   // then drive setT(0.5) and verify a stops upload happens with the
   // midpoint bytes.
@@ -357,11 +425,12 @@ function roundUpToRow(floats) {
   // Expected mid stops: round((src + dst) / 2).
   //   stop 0: (128, 128, 0, 0)
   //   stop 1: (128, 128, 128, 255)
-  const stopsUpload = gl.uploads.find(u => u.fmt === 6408 /* RGBA */ && u.type === 5121 /* UNSIGNED_BYTE */);
+  const stopsUpload = gl.uploads.find(
+    (u) => u.fmt === 6408 /* RGBA */ && u.type === 5121 /* UNSIGNED_BYTE */,
+  );
   if (stopsUpload && stopsUpload.byteLen === 8 && stopsUpload.w === 2 && stopsUpload.h === 1)
     ok('T7 setT(0.5) uploads the lerped stops bytes (2×1 RGBA8)');
-  else
-    fail(`T7 stops upload not seen; uploads = ${JSON.stringify(gl.uploads)}`);
+  else fail(`T7 stops upload not seen; uploads = ${JSON.stringify(gl.uploads)}`);
   // setT(1) should land at dst.
   gl.uploads.length = 0;
   morph.setT(1);
@@ -370,7 +439,7 @@ function roundUpToRow(floats) {
 
 // === T7b: morph + external driver compose via update() =============
 // Drivers like SVG SMIL push absolute fill/stroke overrides on the
-// SAME override table the morph uses for visibility. Verify that
+// same override table the morph uses for visibility. Verify that
 // morph.setT() (which writes visibility) doesn't wipe the driver's
 // pushed fill.
 {
@@ -380,12 +449,15 @@ function roundUpToRow(floats) {
   // Simpler here: just one matched shape.
   function bundle(tag) {
     return {
-      numShapes: 1, metaFloatsPerShape: 48,
+      numShapes: 1,
+      metaFloatsPerShape: 48,
       metaFloats: new Float32Array(48),
       curves: new Float32Array(4).buffer,
       curveTexels: new Float32Array(4),
       bands: new Float32Array(16).buffer,
-      curveGeom: null, flags: 0, globalBBox: [0, 0, 100, 100],
+      curveGeom: null,
+      flags: 0,
+      globalBBox: [0, 0, 100, 100],
       shapeIds: ['x'],
       gradientStopsTex: { id: 'stops_' + tag },
       curveTex: { id: 'curve_' + tag },
@@ -402,30 +474,45 @@ function roundUpToRow(floats) {
   const o = morph.overrides.get('x');
   if (o.fill && approx(o.fill[0], 0.25) && approx(o.fill[2], 0.75))
     ok('T7b morph.setT preserves external driver-pushed fill via update()');
-  else
-    fail(`T7b fill wiped: ${JSON.stringify(o.fill)}`);
+  else fail(`T7b fill wiped: ${JSON.stringify(o.fill)}`);
   morph.dispose();
 }
 
 // === T8: mismatched stop counts → no lerp plan ======================
 {
   const gl = makeGlStub();
-  const srcStops = new Uint8Array([255, 0, 0, 0,  0, 0, 255, 255]); // 2 stops
+  const srcStops = new Uint8Array([255, 0, 0, 0, 0, 0, 255, 255]); // 2 stops
   const dstStops = new Uint8Array([
-      0, 255, 0,   0,    //  3 stops
-    128, 128, 0, 128,
-      0,   0, 0, 255,
+    0,
+    255,
+    0,
+    0, //  3 stops
+    128,
+    128,
+    0,
+    128,
+    0,
+    0,
+    0,
+    255,
   ]);
-  const srcGrad = new Float32Array(16); srcGrad[10] = 0; srcGrad[11] = 2;
-  const dstGrad = new Float32Array(16); dstGrad[10] = 0; dstGrad[11] = 3;
+  const srcGrad = new Float32Array(16);
+  srcGrad[10] = 0;
+  srcGrad[11] = 2;
+  const dstGrad = new Float32Array(16);
+  dstGrad[10] = 0;
+  dstGrad[11] = 3;
   function build(stops, gradF, tag) {
     return {
-      numShapes: 1, metaFloatsPerShape: 48,
+      numShapes: 1,
+      metaFloatsPerShape: 48,
       metaFloats: new Float32Array(48),
       curves: new Float32Array(8).buffer,
       curveTexels: new Float32Array(8),
       bands: new Float32Array(16).buffer,
-      curveGeom: null, flags: 0, globalBBox: [0, 0, 100, 100],
+      curveGeom: null,
+      flags: 0,
+      globalBBox: [0, 0, 100, 100],
       shapeIds: ['x'],
       gradientStopsBytes: stops,
       gradientStopsCount: stops.length / 4,
@@ -440,15 +527,13 @@ function roundUpToRow(floats) {
   const morph = createShapeMorph(gl, src, dst);
   gl.uploads.length = 0;
   morph.setT(0.5);
-  const stopsUpload = gl.uploads.find(u => u.fmt === 6408 && u.type === 5121);
-  if (!stopsUpload)
-    ok('T8 mismatched stop counts: no per-frame stops upload (graceful fallback)');
-  else
-    fail(`T8 unexpected stops upload: ${JSON.stringify(stopsUpload)}`);
+  const stopsUpload = gl.uploads.find((u) => u.fmt === 6408 && u.type === 5121);
+  if (!stopsUpload) ok('T8 mismatched stop counts: no per-frame stops upload (graceful fallback)');
+  else fail(`T8 unexpected stops upload: ${JSON.stringify(stopsUpload)}`);
   morph.dispose();
 }
 
 console.log('---');
 if (failures) console.error(`SHAPE-MORPH FAIL (${failures})`);
-else          console.log('SHAPE-MORPH PASS');
+else console.log('SHAPE-MORPH PASS');
 process.exit(failures ? 1 : 0);

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // _clipXformShape2 — same as _clipXformShape but every doc carries an invisible
 // full-viewBox ANCHOR rect so globalBBox (and therefore the renderer's
 // bbox-normalizing autofit) is identical across cases. mantle vs the browser's
@@ -6,29 +9,35 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ANCHOR = '<rect x="0" y="0" width="100" height="100" fill="#ff0000" fill-opacity="0.004"/>';
 const CLIPS = {
   none: null,
-  all:  'M -50 -50 L 150 -50 L 150 150 L -50 150 Z',
-  top:  'M 0 0 L 100 0 L 100 50 L 0 50 Z',
-  bot:  'M 0 50 L 100 50 L 100 100 L 0 100 Z',
+  all: 'M -50 -50 L 150 -50 L 150 150 L -50 150 Z',
+  top: 'M 0 0 L 100 0 L 100 50 L 0 50 Z',
+  bot: 'M 0 50 L 100 50 L 100 100 L 0 100 Z',
 };
 const LEAVES = {
   // same USER-space geometry, expressed with and without a leaf transform
-  fill_noxf:   '<path fill="#00ff00" d="M 20 20 L 80 20 L 80 80 L 20 80 Z"/>',
-  fill_xf:     '<path fill="#00ff00" d="M 0 0 L 60 0 L 60 60 L 0 60 Z" transform="matrix(1, 0, 0, -1, 20, 80)"/>',
+  fill_noxf: '<path fill="#00ff00" d="M 20 20 L 80 20 L 80 80 L 20 80 Z"/>',
+  fill_xf:
+    '<path fill="#00ff00" d="M 0 0 L 60 0 L 60 60 L 0 60 Z" transform="matrix(1, 0, 0, -1, 20, 80)"/>',
   stroke_noxf: '<path fill="none" stroke="#00ff00" stroke-width="20" d="M 30 20 L 30 80"/>',
-  stroke_xf:   '<path fill="none" stroke="#00ff00" stroke-width="20" d="M 0 0 L 0 60" transform="matrix(1, 0, 0, -1, 30, 80)"/>',
+  stroke_xf:
+    '<path fill="none" stroke="#00ff00" stroke-width="20" d="M 0 0 L 0 60" transform="matrix(1, 0, 0, -1, 30, 80)"/>',
 };
 const docs = {};
-for (const [cn, cd] of Object.entries(CLIPS)) for (const [ln, lv] of Object.entries(LEAVES)) {
-  const body = cd
-    ? `<defs><clipPath id="k"><path clip-rule="nonzero" d="${cd}"/></clipPath></defs>${ANCHOR}<g clip-path="url(#k)">${lv}</g>`
-    : ANCHOR + lv;
-  docs[cn + '|' + ln] = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">' + body + '</svg>';
-}
+for (const [cn, cd] of Object.entries(CLIPS))
+  for (const [ln, lv] of Object.entries(LEAVES)) {
+    const body = cd
+      ? `<defs><clipPath id="k"><path clip-rule="nonzero" d="${cd}"/></clipPath></defs>${ANCHOR}<g clip-path="url(#k)">${lv}</g>`
+      : ANCHOR + lv;
+    docs[cn + '|' + ln] =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">' +
+      body +
+      '</svg>';
+  }
 const HTML = `<!DOCTYPE html><html><body style="margin:0">
 <canvas id="c" width="100" height="100"></canvas>
 <script type="module">
@@ -63,26 +72,47 @@ window.__native=async k=>{const s=await get(k);return new Promise(res=>{
   img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(s);});};
 window.__ready=true;
 </script></body></html>`;
-const server=http.createServer((req,res)=>{
-  if(req.url==='/'){res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(HTML);return;}
-  if(req.url.startsWith('/__v/')){res.writeHead(200,{'content-type':'image/svg+xml'});res.end(docs[decodeURIComponent(req.url.slice(5))]||'');return;}
-  const p=decodeURIComponent(req.url.split('?')[0]);
-  try{res.writeHead(200,{'content-type':(p.endsWith('.glsl')?'text/plain':'text/javascript')+'; charset=utf-8'});res.end(readFileSync(path.join(ROOT,p)));}
-  catch{if(!res.headersSent)res.writeHead(404);res.end();}
+const server = http.createServer((req, res) => {
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(HTML);
+    return;
+  }
+  if (req.url.startsWith('/__v/')) {
+    res.writeHead(200, { 'content-type': 'image/svg+xml' });
+    res.end(docs[decodeURIComponent(req.url.slice(5))] || '');
+    return;
+  }
+  const p = decodeURIComponent(req.url.split('?')[0]);
+  try {
+    res.writeHead(200, {
+      'content-type': (p.endsWith('.glsl') ? 'text/plain' : 'text/javascript') + '; charset=utf-8',
+    });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const port=server.address().port;
-const browser=await puppeteer.launch({headless:'new',args:['--enable-unsafe-swiftshader','--no-sandbox']});
-const page=await browser.newPage();
-page.on('pageerror',e=>console.error('  [page-err]',e.message));
-await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'load',timeout:60000});
-await page.waitForFunction(()=>window.__ready===true,{timeout:120000});
-console.log('case'.padEnd(18)+'mantle'.padStart(18)+'native'.padStart(18)+'  verdict');
-for(const k of Object.keys(docs)){
-  const m=await page.evaluate(kk=>window.__mantle(kk),k);
-  const n=await page.evaluate(kk=>window.__native(kk),k);
-  const f=r=>r?`${r.n} (${r.y0}..${r.y1})`:'null';
-  const bad=n&&Math.abs(m.n-n.n)>Math.max(50,n.n*0.15);
-  console.log(k.padEnd(18)+f(m).padStart(18)+f(n).padStart(18)+(bad?'   <== MISMATCH':''));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const port = server.address().port;
+const browser = await launchBrowser({
+  headless: 'new',
+  args: ['--enable-unsafe-swiftshader', '--no-sandbox'],
+});
+const page = await browser.newPage();
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 60000 });
+await page.waitForFunction(() => window.__ready === true, { timeout: 120000 });
+console.log('case'.padEnd(18) + 'mantle'.padStart(18) + 'native'.padStart(18) + '  verdict');
+for (const k of Object.keys(docs)) {
+  const m = await page.evaluate((kk) => window.__mantle(kk), k);
+  const n = await page.evaluate((kk) => window.__native(kk), k);
+  const f = (r) => (r ? `${r.n} (${r.y0}..${r.y1})` : 'null');
+  const bad = n && Math.abs(m.n - n.n) > Math.max(50, n.n * 0.15);
+  console.log(
+    k.padEnd(18) + f(m).padStart(18) + f(n).padStart(18) + (bad ? '   <== MISMATCH' : ''),
+  );
 }
-await browser.close();server.close();
+await browser.close();
+server.close();

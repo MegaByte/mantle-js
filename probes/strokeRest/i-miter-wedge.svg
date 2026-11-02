@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Join wedge under a plain miter: the branch only lowers the distance, so less moves than under miter-clip, but the radial disc outside the wedge still goes. -->
+  <rect width="200" height="200" fill="#ffffff"/>
+  <path d="M 78 50 Q 84.2322 50.3016 94.0498 143.38420000000002 Q 88.1712 141.2912 81.9988 126.96520000000001 Q 67.73 103.9916 78 50 Z" fill="none" stroke="#000000" stroke-width="31.200000000000003" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4"/>
+</svg>

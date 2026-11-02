@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // nativeIdlessMatchedMorphSmoke.mjs — matched native morph rows must apply by
 // numeric shape index when SVG leaves have no authored id. The native morph
 // writes pathD/visibility with overrides.update(shapeIndex, ...); drawBundle
@@ -6,15 +9,18 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { openReady } from './_pageReady.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
-const SRC = '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
-  + '<rect x="10" y="40" width="20" height="20" fill="#ff0000"/></svg>';
-const DST = '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
-  + '<rect x="70" y="40" width="20" height="20" fill="#ff0000"/></svg>';
+const SRC =
+  '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">' +
+  '<rect x="10" y="40" width="20" height="20" fill="#ff0000"/></svg>';
+const DST =
+  '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">' +
+  '<rect x="70" y="40" width="20" height="20" fill="#ff0000"/></svg>';
 
 const HTML = `<!DOCTYPE html><html><body style="margin:0">
 <canvas id="c" width="100" height="100"></canvas>
@@ -49,27 +55,50 @@ window.__ready = true;
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(HTML);
+    return;
+  }
   let p = decodeURIComponent(req.url.split('?')[0]);
-  try { const b = readFileSync(path.join(ROOT, p)); res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' }); res.end(b); }
-  catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    const b = readFileSync(path.join(ROOT, p));
+    res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' });
+    res.end(b);
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 const isRed = (p) => p[0] > 150 && p[1] < 90 && p[2] < 90 && p[3] > 120;
 const isWhite = (p) => p[0] > 220 && p[1] > 220 && p[2] > 220 && p[3] > 120;
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
 try {
-  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await openReady(page, `http://127.0.0.1:${port}/`, { ready: 'flag' });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 const ids = await page.evaluate(() => window.__shapeIds);
 if (ids.length === 1 && !ids[0]) ok('fixture has one id-less shape row');

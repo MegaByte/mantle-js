@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // cjkWrapSmoke.mjs — CJK soft-wrap behavior.
 //
 // Verifies break-before-CJK so Asian text wraps inside a max-width
@@ -9,13 +12,17 @@ import { buildTextRun, buildStyled } from '../../src/font/textRun.js';
 import { parseMarkup, defaultStyle } from '../../src/font/markupParser.js';
 
 const font = new MantleFontAsset(
-  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/AppleGothic.ttf'))
+  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/AppleGothic.ttf')),
 );
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
-const build = async (text, opts) => await buildStyled([{ text, style: defaultStyle() }], font, opts);
+const build = async (text, opts) =>
+  await buildStyled([{ text, style: defaultStyle() }], font, opts);
 
 // ---- T1: 8 Hangul syllables wrap into multiple lines ----
 {
@@ -23,11 +30,16 @@ const build = async (text, opts) => await buildStyled([{ text, style: defaultSty
   const text = '가나다라마바사아';
   const single = await build(text, {});
   const wrapped = await build(text, { maxWidthEm: 3 });
-  if (wrapped.numShapes !== single.numShapes) fail(`T1 numShapes wrapped=${wrapped.numShapes} vs single=${single.numShapes}`);
+  if (wrapped.numShapes !== single.numShapes)
+    fail(`T1 numShapes wrapped=${wrapped.numShapes} vs single=${single.numShapes}`);
   const wrapH = wrapped.globalBBox[3];
   const singleH = single.globalBBox[3];
-  if (wrapH < singleH * 2) fail(`T1 wrap didn't add lines: wrapH=${wrapH.toFixed(3)} singleH=${singleH.toFixed(3)}`);
-  else ok(`T1 Hangul wraps: single h=${singleH.toFixed(3)} wrapped h=${wrapH.toFixed(3)} (${Math.round(wrapH/singleH)}× lines)`);
+  if (wrapH < singleH * 2)
+    fail(`T1 wrap didn't add lines: wrapH=${wrapH.toFixed(3)} singleH=${singleH.toFixed(3)}`);
+  else
+    ok(
+      `T1 Hangul wraps: single h=${singleH.toFixed(3)} wrapped h=${wrapH.toFixed(3)} (${Math.round(wrapH / singleH)}× lines)`,
+    );
 }
 
 // ---- T2: wrapped width fits inside frame ----
@@ -76,7 +88,8 @@ const build = async (text, opts) => await buildStyled([{ text, style: defaultSty
   const wrapH = wrapped.globalBBox[3];
   const singleH = single.globalBBox[3];
   if (wrapH < singleH * 1.5) fail(`T5 mixed wrap didn't fire: wrapH=${wrapH.toFixed(3)}`);
-  else if (wrapped.numShapes !== single.numShapes) fail(`T5 mixed lost glyphs: ${wrapped.numShapes} vs ${single.numShapes}`);
+  else if (wrapped.numShapes !== single.numShapes)
+    fail(`T5 mixed lost glyphs: ${wrapped.numShapes} vs ${single.numShapes}`);
   else ok(`T5 mixed Latin+CJK wraps cleanly: ${wrapped.numShapes} shapes, h=${wrapH.toFixed(3)}`);
 }
 
@@ -92,7 +105,10 @@ const build = async (text, opts) => await buildStyled([{ text, style: defaultSty
   const spans = parseMarkup('<nobr>' + text + '</nobr>', defaultStyle());
   const noWrap = await buildStyled(spans, font, layout);
   const noWrapH = noWrap.globalBBox[3];
-  if (noWrapH > wrapH * 0.6) fail(`T6 <nobr> didn't suppress CJK wrap: noWrapH=${noWrapH.toFixed(3)} wrapH=${wrapH.toFixed(3)}`);
+  if (noWrapH > wrapH * 0.6)
+    fail(
+      `T6 <nobr> didn't suppress CJK wrap: noWrapH=${noWrapH.toFixed(3)} wrapH=${wrapH.toFixed(3)}`,
+    );
   else ok(`T6 <nobr> suppresses CJK break (h ${wrapH.toFixed(3)} → ${noWrapH.toFixed(3)})`);
 }
 
@@ -102,7 +118,8 @@ const build = async (text, opts) => await buildStyled([{ text, style: defaultSty
   const text = 'ひらがな';
   const single = await build(text, {});
   const wrapped = await build(text, { maxWidthEm: 2 });
-  if (wrapped.numShapes !== single.numShapes) fail(`T7 hiragana lost glyphs ${wrapped.numShapes} vs ${single.numShapes}`);
+  if (wrapped.numShapes !== single.numShapes)
+    fail(`T7 hiragana lost glyphs ${wrapped.numShapes} vs ${single.numShapes}`);
   else {
     const wrapH = wrapped.globalBBox[3];
     const singleH = single.globalBBox[3];

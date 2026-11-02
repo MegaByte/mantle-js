@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // richDecorationSmoke.mjs — verify <u> and <s> markup attributes
 // produce the right TextStyle fields, and that emitDecoration's
 // recipe produces the expected shape counts for each style.
@@ -8,8 +11,11 @@ import { buildStyled, _layoutSlotsForTest } from '../../src/font/textRun.js';
 import { MantleFontAsset } from '../../src/font/fontAsset.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL', msg); failures++; };
-const ok   = (msg) => console.log('ok', msg);
+const fail = (msg) => {
+  console.error('FAIL', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok', msg);
 
 // ---- T1: bare <u> / <s> tags toggle the underline/strike flag ----
 {
@@ -21,7 +27,8 @@ const ok   = (msg) => console.log('ok', msg);
     if (!spans[3].style.strikethrough) fail('T1 span[3] should be strikethrough');
     if (spans[0].style.underline) fail('T1 span[0] should NOT be underlined');
     if (spans[0].style.strikethrough) fail('T1 span[0] should NOT be strike');
-    if (spans[1].style.underlineStyle !== 'solid') fail(`T1 default style 'solid', got ${spans[1].style.underlineStyle}`);
+    if (spans[1].style.underlineStyle !== 'solid')
+      fail(`T1 default style 'solid', got ${spans[1].style.underlineStyle}`);
     else ok('T1 bare <u>/<s> set underline/strikethrough flags with defaults');
   }
 }
@@ -53,7 +60,8 @@ const ok   = (msg) => console.log('ok', msg);
   if (!s?.underline) fail('T4 no underline');
   else if (s.underlineStyle !== 'wavy') fail(`T4 style wrong: ${s.underlineStyle}`);
   else if (Math.abs(s.underlineColor[0] - 1) > 1e-9) fail(`T4 color wrong: ${s.underlineColor}`);
-  else if (Math.abs(s.underlineThicknessEm - 0.08) > 1e-9) fail(`T4 thickness wrong: ${s.underlineThicknessEm}`);
+  else if (Math.abs(s.underlineThicknessEm - 0.08) > 1e-9)
+    fail(`T4 thickness wrong: ${s.underlineThicknessEm}`);
   else ok('T4 shorthand "red wavy 0.08em" parses all three fields');
 }
 
@@ -63,7 +71,8 @@ const ok   = (msg) => console.log('ok', msg);
   const s = spans[0]?.style;
   if (!s?.strikethrough) fail('T5 no strike');
   else if (s.strikeStyle !== 'dotted') fail(`T5 style wrong: ${s.strikeStyle}`);
-  else if (!(s.strikeColor && Math.abs(s.strikeColor[2] - 1) > 0)) ok('T5 <s="blue dotted"> sets strikeColor + strikeStyle');
+  else if (!(s.strikeColor && Math.abs(s.strikeColor[2] - 1) > 0))
+    ok('T5 <s="blue dotted"> sets strikeColor + strikeStyle');
   else ok('T5 <s="blue dotted"> sets strikeColor + strikeStyle');
 }
 
@@ -75,8 +84,10 @@ const ok   = (msg) => console.log('ok', msg);
   // span[1] is the 'y' between the </u> and </u>: should still be RED, solid (outer).
   if (spans.length !== 2) fail(`T6 expected 2 spans, got ${spans.length}`);
   else {
-    if (spans[0].style.underlineStyle !== 'wavy') fail(`T6 inner wavy: ${spans[0].style.underlineStyle}`);
-    if (spans[1].style.underlineStyle !== 'solid') fail(`T6 after inner pop, outer style=solid; got ${spans[1].style.underlineStyle}`);
+    if (spans[0].style.underlineStyle !== 'wavy')
+      fail(`T6 inner wavy: ${spans[0].style.underlineStyle}`);
+    if (spans[1].style.underlineStyle !== 'solid')
+      fail(`T6 after inner pop, outer style=solid; got ${spans[1].style.underlineStyle}`);
     // Both should keep the RED color from the outer <u=red>.
     if (!spans[0].style.underlineColor || Math.abs(spans[0].style.underlineColor[0] - 1) > 1e-9)
       fail('T6 inner should inherit red');
@@ -102,7 +113,9 @@ if (!existsSync(arialPath)) {
     const style = { ...baseStyle, underline: true };
     const slots = await buildStyled([{ text: 'ABC', style }], font, {});
     // Count "underline_*" shapes in shapeIds.
-    const ulCount = slots.shapeIds ? slots.shapeIds.filter(s => s && s.startsWith('underline_')).length : 0;
+    const ulCount = slots.shapeIds
+      ? slots.shapeIds.filter((s) => s && s.startsWith('underline_')).length
+      : 0;
     if (ulCount !== 1) fail(`T7 solid underline: expected 1 underline shape, got ${ulCount}`);
     else ok(`T7 solid underline → 1 shape (correctly coalesced across 3 glyphs)`);
   }
@@ -111,7 +124,9 @@ if (!existsSync(arialPath)) {
   {
     const style = { ...baseStyle, underline: true, underlineStyle: 'dashed' };
     const slots = await buildStyled([{ text: 'ABCABCABCABCABCABC', style }], font, {});
-    const ulCount = slots.shapeIds ? slots.shapeIds.filter(s => s && s.startsWith('underline_')).length : 0;
+    const ulCount = slots.shapeIds
+      ? slots.shapeIds.filter((s) => s && s.startsWith('underline_')).length
+      : 0;
     if (ulCount < 2) fail(`T8 dashed: expected ≥2 dash shapes, got ${ulCount}`);
     else ok(`T8 dashed underline → ${ulCount} dash shapes (over 18 chars)`);
   }
@@ -120,7 +135,9 @@ if (!existsSync(arialPath)) {
   {
     const style = { ...baseStyle, underline: true, underlineStyle: 'double' };
     const slots = await buildStyled([{ text: 'ABC', style }], font, {});
-    const ulCount = slots.shapeIds ? slots.shapeIds.filter(s => s && s.startsWith('underline_')).length : 0;
+    const ulCount = slots.shapeIds
+      ? slots.shapeIds.filter((s) => s && s.startsWith('underline_')).length
+      : 0;
     if (ulCount !== 2) fail(`T9 double: expected 2 shapes, got ${ulCount}`);
     else ok('T9 double underline → 2 shapes (two parallel rects)');
   }
@@ -129,7 +146,9 @@ if (!existsSync(arialPath)) {
   {
     const style = { ...baseStyle, underline: true, underlineStyle: 'wavy' };
     const slots = await buildStyled([{ text: 'ABC', style }], font, {});
-    const ulCount = slots.shapeIds ? slots.shapeIds.filter(s => s && s.startsWith('underline_')).length : 0;
+    const ulCount = slots.shapeIds
+      ? slots.shapeIds.filter((s) => s && s.startsWith('underline_')).length
+      : 0;
     if (ulCount !== 1) fail(`T10 wavy: expected 1 shape, got ${ulCount}`);
     else ok('T10 wavy underline → 1 closed-curve shape');
   }

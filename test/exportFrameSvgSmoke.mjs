@@ -1,5 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // exportFrameSvgSmoke.mjs — proof that the WebGL (non-native) renderer can
-// serialize the CURRENT FRAME to an SVG string by replaying its recorded
+// serialize the current FRAME to an SVG string by replaying its recorded
 // draw list through the native (DOM) backend — renderer.exportFrameSVG().
 //
 // Runs in a real browser (puppeteer) with a REAL WebGL2 context (the
@@ -7,7 +10,7 @@
 // XMLSerializer (so the native replay + serialization are genuine).
 //
 // Asserts:
-//   1. renderer.exportFrameSVG exists; capture is on by default.
+//   1. Frame export is available when capture is enabled.
 //   2. A drawn frame serializes to a parseable <svg> with content.
 //   3. Per-shape overrides land in the markup: a hidden shape is hidden,
 //      a recolored shape carries its new fill.
@@ -20,24 +23,40 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { openReady } from './_pageReady.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 // Three id'd shapes so overrides can address them by id.
-const ART = readFileSync(new URL('../examples/smoke/exportFrameSvg__ART.svg', import.meta.url), 'utf8');
+const ART = readFileSync(
+  new URL('../examples/smoke/exportFrameSvg__ART.svg', import.meta.url),
+  'utf8',
+);
 
 // Two matched-topology poses (same id 'p', same path topology, different x)
 // for a whole-bundle shape morph. The matched path lerps geometrically.
-const POSE_A = readFileSync(new URL('../examples/smoke/exportFrameSvg__POSE_A.svg', import.meta.url), 'utf8');
-const POSE_B = readFileSync(new URL('../examples/smoke/exportFrameSvg__POSE_B.svg', import.meta.url), 'utf8');
+const POSE_A = readFileSync(
+  new URL('../examples/smoke/exportFrameSvg__POSE_A.svg', import.meta.url),
+  'utf8',
+);
+const POSE_B = readFileSync(
+  new URL('../examples/smoke/exportFrameSvg__POSE_B.svg', import.meta.url),
+  'utf8',
+);
 
 // A two-sprite sheet for drawSprite subset export.
-const SHEET = readFileSync(new URL('../examples/smoke/exportFrameSvg__SHEET.svg', import.meta.url), 'utf8');
+const SHEET = readFileSync(
+  new URL('../examples/smoke/exportFrameSvg__SHEET.svg', import.meta.url),
+  'utf8',
+);
 
 // A clipped shape whose clip can be moved via setClipper('win', …).
-const CLIPART = readFileSync(new URL('../examples/smoke/exportFrameSvg__CLIPART.svg', import.meta.url), 'utf8');
+const CLIPART = readFileSync(
+  new URL('../examples/smoke/exportFrameSvg__CLIPART.svg', import.meta.url),
+  'utf8',
+);
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="100" height="100"></canvas>
@@ -157,37 +176,116 @@ window.__parse = (svg) => {
     hasGreenFill: /rgba\\(\\s*26\\s*,\\s*204\\s*,\\s*77\\b/.test(svg),
   };
 };
+
+window.__exportPlacement = async () => {
+  await renderer.ready;
+  const body = '<rect x="8" y="10" width="20" height="16" fill="red"/><path d="M4 44H60" fill="none" stroke="white" stroke-width="8" vector-effect="non-scaling-stroke" stroke-dasharray="8 4"/>';
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 64 64">' + body + '</svg>';
+  const bundle = createBundle(gl, await importSvg(svg, {retainSource:true,preserveViewport:true}));
+  const previousEngine = renderer.getFillEngine();
+  renderer.setFillEngine({route:'none',kernel:'aac',primitives:'off'});
+  const rows = [];
+  const raster = async text => {
+    const im = new Image(); im.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(text); await im.decode();
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 800;
+    const ctx = canvas.getContext('2d'); ctx.drawImage(im,0,0,800,800); return ctx.getImageData(0,0,800,800).data;
+  };
+  try {
+    renderer.setViewport(100,100);
+    for (const mode of ['default','world','rect','instances']) {
+      const opts = mode === 'world' ? {worldMatrix:[2,0,0,0,2,0,0,0,1]} : mode === 'rect' ? {dstRect:[-25,-25,150,150],clipToRect:false} : {};
+      const draw = () => {
+        renderer.beginFrame([0,0,0,0]);
+        if (mode === 'instances') renderer.drawBundleInstanced(bundle,[{worldMatrix:[1,0,0,0,1,0,-.4,.2,1]},{worldMatrix:[.5,0,0,0,.5,0,.5,-.5,1]}]);
+        else renderer.drawBundle(bundle,opts);
+        renderer.endFrame();
+      };
+      draw(); gl.finish();
+      const pixels = new Uint8Array(100*100*4); gl.readPixels(0,0,100,100,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+      const exported = await renderer.exportFrameSVG({detail:true});
+      const ref = await raster(exported.svg); let max=0,checked=0,ink=0;
+      for (let y=3;y<97;y+=2) for(let x=3;x<97;x+=2) {
+        const center=((y*8+4)*800+x*8+4)*4; let stable=true;
+        for(const dy of [-12,0,12]) for(const dx of [-12,0,12]) for(let k=0;k<4;k++) if(ref[center+(dy*800+dx)*4+k]!==ref[center+k])stable=false;
+        if(!stable)continue; checked++; if(ref[center+3]>0)ink++;
+        const at=((99-y)*100+x)*4,a=ref[center+3];
+        for(let k=0;k<4;k++)max=Math.max(max,Math.abs(pixels[at+k]-(k===3?a:ref[center+k]*a/255)));
+      }
+      rows.push({mode,max,checked,ink,drawn:exported.drawn,skipped:exported.skipped});
+    }
+  } finally {bundle.dispose();renderer.setFillEngine(previousEngine);}
+  return rows;
+};
+
 window.__ready = true;
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(HTML);
+    return;
+  }
   let p = decodeURIComponent(req.url.split('?')[0]);
   const ct = p.endsWith('.glsl') ? 'text/plain' : 'text/javascript';
-  try { res.writeHead(200, { 'content-type': ct + '; charset=utf-8' }); res.end(readFileSync(path.join(ROOT, p))); }
-  catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    res.writeHead(200, { 'content-type': ct + '; charset=utf-8' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { if (m.type() === 'error') console.error('  [console]', m.text()); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('  [console]', m.text());
+});
 try {
-  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await openReady(page, `http://127.0.0.1:${port}/`, { ready: 'flag' });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 // (1) API surface.
 if (await page.evaluate(() => window.__hasFn)) ok('renderer.exportFrameSVG exists');
 else fail('exportFrameSVG not present');
-if (await page.evaluate(() => window.__capDefaultOff)) ok('frame capture OFF by default (export instrumentation is opt-in)');
+if (await page.evaluate(() => window.__capDefaultOff))
+  ok('frame capture OFF by default (export instrumentation is opt-in)');
 else fail('frameCaptureEnabled should default to false');
+
+const placements = await page.evaluate(() => window.__exportPlacement());
+for (const row of placements) {
+  if (
+    row.max <= 1 &&
+    row.checked > 100 &&
+    row.ink > 0 &&
+    row.skipped === 0 &&
+    row.drawn === (row.mode === 'instances' ? 2 : 1)
+  )
+    ok('viewport export placement ' + JSON.stringify(row));
+  else fail('viewport export placement ' + JSON.stringify(row));
+}
 
 // (2) Plain frame serializes to a parseable, non-empty <svg>.
 const plain = await page.evaluate(async () => {
@@ -198,14 +296,16 @@ if (typeof plain.rep.svg === 'string' && plain.p.tag === 'svg' && plain.p.childC
   ok('plain frame → parseable <svg> with ' + plain.p.childCount + ' elements');
 else fail('plain export malformed: ' + JSON.stringify(plain.rep).slice(0, 200));
 if (plain.rep.drawn === 1 && plain.rep.skipped === 0) ok('plain frame: drawn=1 skipped=0');
-else fail('plain draw/skip counts: ' + JSON.stringify({ d: plain.rep.drawn, s: plain.rep.skipped }));
+else
+  fail('plain draw/skip counts: ' + JSON.stringify({ d: plain.rep.drawn, s: plain.rep.skipped }));
 
 // (3) Overrides land in the markup: one hidden, one recolored.
 const ovr = await page.evaluate(async () => {
   const svg = await window.__exportOverridden();
   return { svg, p: window.__parse(svg) };
 });
-if (ovr.p.hidden >= 1) ok('overridden frame hides the addressed shape (' + ovr.p.hidden + ' hidden)');
+if (ovr.p.hidden >= 1)
+  ok('overridden frame hides the addressed shape (' + ovr.p.hidden + ' hidden)');
 else fail('hidden-shape override did not land in markup');
 if (ovr.p.hasGreenFill) ok('overridden frame carries the recolored fill');
 else fail('recolor override fill not found in markup');
@@ -219,7 +319,8 @@ const m = await page.evaluate(async () => {
 if (m.a.drawn >= 1 && m.a.skipped === 0 && m.b.drawn >= 1 && m.b.skipped === 0)
   ok('morph frames export with no skipped draws');
 else fail('morph export draw/skip: ' + JSON.stringify({ a: m.a, b: m.b }).slice(0, 200));
-if (m.a.svg !== m.b.svg) ok('morph geometry differs between t=0 and t=0.5 (CPU rebuild at export time)');
+if (m.a.svg !== m.b.svg)
+  ok('morph geometry differs between t=0 and t=0.5 (CPU rebuild at export time)');
 else fail('morph export identical across t — geometry not reconstructed');
 
 // (5) drawSprite subset export: only the sprite's shapes survive.
@@ -229,31 +330,44 @@ const sp = await page.evaluate(async () => {
   return { fullHidden: full.hidden, rep, p: window.__parse(rep.svg) };
 });
 if (sp.fullHidden === 0 && sp.p.hidden >= 1 && sp.rep.drawn === 1 && sp.rep.skipped === 0)
-  ok('drawSprite exports the sprite subset (other sprite hidden: full=' + sp.fullHidden
-     + ' sprite=' + sp.p.hidden + ')');
-else fail('sprite-subset export wrong: ' + JSON.stringify({ full: sp.fullHidden, rep: sp.rep, hidden: sp.p.hidden }).slice(0, 200));
+  ok(
+    'drawSprite exports the sprite subset (other sprite hidden: full=' +
+      sp.fullHidden +
+      ' sprite=' +
+      sp.p.hidden +
+      ')',
+  );
+else
+  fail(
+    'sprite-subset export wrong: ' +
+      JSON.stringify({ full: sp.fullHidden, rep: sp.rep, hidden: sp.p.hidden }).slice(0, 200),
+  );
 
 // (6) Animated clipper export: the <clipPath> child carries the transform.
 const clip = await page.evaluate(async () => {
   const svg = await window.__exportClipper();
   const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
   // The transform lands on the clip element (clipPath or its child).
-  const moved = [...doc.documentElement.querySelectorAll('*')].some(e => {
+  const moved = [...doc.documentElement.querySelectorAll('*')].some((e) => {
     const t = e.getAttribute('transform') || '';
     return /translate\(\s*30\b/.test(t);
   });
   return { moved, hasClip: /clipPath/i.test(svg) };
 });
-if (clip.hasClip && clip.moved) ok('setClipper transform reproduced on the live <clipPath> (translate 30)');
+if (clip.hasClip && clip.moved)
+  ok('setClipper transform reproduced on the live <clipPath> (translate 30)');
 else fail('animated clipper not reproduced in export: ' + JSON.stringify(clip));
 
 // (7) Precondition: no-retainSource bundle is skipped + noted, not blank.
 const ns = await page.evaluate(async () => await window.__exportNoSrc());
-if (ns.skipped >= 1 && ns.drawn === 0 && ns.notes.some(n => /svgSource|retainSource/i.test(n)))
+if (ns.skipped >= 1 && ns.drawn === 0 && ns.notes.some((n) => /svgSource|retainSource/i.test(n)))
   ok('bundle without retainSource is skipped + reported (not silently blank)');
 else fail('no-retainSource handling wrong: ' + JSON.stringify(ns).slice(0, 200));
 
 await browser.close();
 server.close();
-if (failures) { console.error('\\n' + failures + ' failure(s)'); process.exit(1); }
+if (failures) {
+  console.error('\\n' + failures + ' failure(s)');
+  process.exit(1);
+}
 console.log('\\nexportFrameSvgSmoke: all assertions passed');

@@ -1,11 +1,14 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // lbBuilderOwnershipSmoke — creating a SECOND renderer must not stop the first one building LB.
 //
-// The off-thread LB builder is registered through a module-level singleton (setLbBuilder), so the
-// LAST renderer created owned it. Its first line is `if (R._lbSlugOnly) return;` — so the moment
-// anything created a Slug-only renderer (which is every non-LB engine: AAC, GWN, hard, and any app
-// that keeps a second renderer around), NO bundle created afterwards ever got LB meshes built, and
-// LB silently declined for the rest of the session. In the demo: pick LB, it works; pick AAC; pick
-// LB again — declined, permanently.
+// The off-thread LB builder is registered per renderer (setLbBuilder). Behind a module-level
+// singleton the LAST renderer created would own it, and its first line is `if (R._lbSlugOnly)
+// return;` — so the moment anything created a Slug-only renderer (which is every non-LB engine:
+// AAC, GWN, hard, and any app that keeps a second renderer around), NO bundle created afterwards
+// would get LB meshes built, and LB would silently decline for the rest of the session: pick LB, it
+// works; pick AAC; pick LB again — declined, permanently.
 //
 // The bundle is shared, so this is not about which renderer draws: it is that nobody BUILT the
 // meshes. Build if ANY registered builder wants them.
@@ -13,7 +16,7 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 import { emitFixture } from './_fixtures.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -69,8 +72,8 @@ const after = await lbMeshes();
 
 // 4. DISPOSE the second renderer. Its hook must come back OUT of the registry — a disposed
 //    renderer's closure captures a dead GL context, and leaving it registered would hand the next
-//    bundle's build to a renderer that no longer exists. (The registry that fixes the bug above is
-//    what makes this hazard possible: a single slot used to be overwritten by the next renderer.)
+//    bundle's build to a renderer that does not exist. (A registry is what makes this hazard
+//    possible; a single slot would instead be overwritten by the next renderer.)
 rAac.dispose();
 const afterDispose = await lbMeshes();
 
@@ -86,6 +89,9 @@ const afterPeerGone = await lbMeshes();
 rLb.dispose();
 const rOff = createRenderer(gl, shaders); rOff.setLoopBlinnFill('off');
 const bOff = createBundle(gl, await importSvg(SVG));
+// KEPT A FIXED WINDOW ON PURPOSE: this asserts that NOTHING happens -- a Slug-only renderer must not rebuild LB through the
+// idle preparer. There is no completion signal for work that must not occur, so the claim is "not within 100 ms of the idle
+// preparer's first chance"; waiting for a flag would wait forever on the passing path.
 await new Promise(q => setTimeout(q, 100));
 const slugOnly = { decided: bOff._lbMeshes !== undefined, memory: rOff.getLoopBlinnMemoryUse() };
 bOff.dispose(); rOff.dispose();
@@ -94,7 +100,7 @@ bOff.dispose(); rOff.dispose();
 // but changing that same renderer to forced LB must build it on demand.
 const rAuto = createRenderer(gl, shaders);
 const bAuto = createBundle(gl, await importSvg(LINE_SVG));
-await new Promise(q => setTimeout(q, 100));
+// (awaitLbReady below is the readiness signal for this bundle's build decision; no delay needed first.)
 const autoWaitStart = performance.now();
 const autoReady = await rAuto.awaitLbReady(bAuto);
 const autoSkipped = {
@@ -120,14 +126,21 @@ window.__ready = true;
 
 const server = http.createServer((q, res) => {
   try {
-    if (q.url === '/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(HTML); return; }
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
     const pp = decodeURIComponent(q.url.split('?')[0]);
     res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
     res.end(readFileSync(path.join(ROOT, pp)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const br = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
 const pg = await br.newPage();
 pg.on('pageerror', (e) => console.error(' [err]', e.message));
 await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
@@ -135,31 +148,58 @@ await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load',
 // (the page finishes but rAF never fires), timing out a passing test.
 await pg.waitForFunction(() => window.__ready === true, { timeout: 90000, polling: 250 });
 const o = await pg.evaluate(() => window.__out);
-await br.close(); server.close();
+await br.close();
+server.close();
 
 let fail = 0;
-const ok = (c, m) => c ? console.log('  ok ' + m) : (fail++, console.error('  FAIL ' + m));
+const ok = (c, m) => (c ? console.log('  ok ' + m) : (fail++, console.error('  FAIL ' + m)));
 
-console.log(`  before a 2nd renderer exists: ${o.before.real}/${o.before.meshes} meshes built, LB routed ${o.before.routed}`);
-console.log(`  after  a Slug-only renderer : ${o.after.real}/${o.after.meshes} meshes built, LB routed ${o.after.routed}`);
-console.log(`  after  disposing it         : ${o.afterDispose.real}/${o.afterDispose.meshes} meshes built, LB routed ${o.afterDispose.routed}`);
-console.log(`  after  a disposed peer      : ${o.afterPeerGone.real}/${o.afterPeerGone.meshes} meshes built, LB routed ${o.afterPeerGone.routed}`);
+console.log(
+  `  before a 2nd renderer exists: ${o.before.real}/${o.before.meshes} meshes built, LB routed ${o.before.routed}`,
+);
+console.log(
+  `  after  a Slug-only renderer : ${o.after.real}/${o.after.meshes} meshes built, LB routed ${o.after.routed}`,
+);
+console.log(
+  `  after  disposing it         : ${o.afterDispose.real}/${o.afterDispose.meshes} meshes built, LB routed ${o.afterDispose.routed}`,
+);
+console.log(
+  `  after  a disposed peer      : ${o.afterPeerGone.real}/${o.afterPeerGone.meshes} meshes built, LB routed ${o.afterPeerGone.routed}`,
+);
 
-ok(o.before.real > 0 && o.before.routed > 0, 'LB builds and routes before any other renderer exists');
-ok(o.after.real > 0, `LB still BUILDS meshes after a Slug-only renderer is created (${o.after.real} real)`);
+ok(
+  o.before.real > 0 && o.before.routed > 0,
+  'LB builds and routes before any other renderer exists',
+);
+ok(
+  o.after.real > 0,
+  `LB still BUILDS meshes after a Slug-only renderer is created (${o.after.real} real)`,
+);
 ok(o.after.routed > 0, 'LB still ROUTES after a Slug-only renderer is created');
-ok(o.afterDispose.real > 0 && o.afterDispose.routed > 0,
-   `LB survives that renderer being DISPOSED (${o.afterDispose.real} meshes, routed ${o.afterDispose.routed})`);
-ok(o.afterPeerGone.real > 0 && o.afterPeerGone.routed > 0,
-   `LB survives a create-then-dispose peer (${o.afterPeerGone.real} meshes, routed ${o.afterPeerGone.routed})`);
-ok(!o.slugOnly.decided && o.slugOnly.memory === 0,
-   'Slug-only renderers do not enqueue an LB idle build');
-ok(!o.autoSkipped.decided && o.autoSkipped.memory === 0,
-   'auto mode skips LB construction for straight-only bundles');
-ok(!o.autoSkipped.ready && o.autoSkipped.waitMs < 250,
-   `awaitLbReady resolves false immediately for an auto-skipped bundle (${o.autoSkipped.waitMs.toFixed(1)} ms)`);
-ok(o.forced.ready && o.forced.routed > 0 && o.forced.memory > 0,
-   'switching an auto-skipped bundle to forced LB builds and routes it on demand');
+ok(
+  o.afterDispose.real > 0 && o.afterDispose.routed > 0,
+  `LB survives that renderer being DISPOSED (${o.afterDispose.real} meshes, routed ${o.afterDispose.routed})`,
+);
+ok(
+  o.afterPeerGone.real > 0 && o.afterPeerGone.routed > 0,
+  `LB survives a create-then-dispose peer (${o.afterPeerGone.real} meshes, routed ${o.afterPeerGone.routed})`,
+);
+ok(
+  !o.slugOnly.decided && o.slugOnly.memory === 0,
+  'Slug-only renderers do not enqueue an LB idle build',
+);
+ok(
+  !o.autoSkipped.decided && o.autoSkipped.memory === 0,
+  'auto mode skips LB construction for straight-only bundles',
+);
+ok(
+  !o.autoSkipped.ready && o.autoSkipped.waitMs < 250,
+  `awaitLbReady resolves false immediately for an auto-skipped bundle (${o.autoSkipped.waitMs.toFixed(1)} ms)`,
+);
+ok(
+  o.forced.ready && o.forced.routed > 0 && o.forced.memory > 0,
+  'switching an auto-skipped bundle to forced LB builds and routes it on demand',
+);
 
 console.log(fail ? `\nLB-BUILDER-OWNERSHIP FAIL (${fail})` : '\nLB-BUILDER-OWNERSHIP PASS');
 process.exit(fail ? 1 : 0);

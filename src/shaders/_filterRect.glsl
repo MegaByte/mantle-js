@@ -1,17 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Rect addressing for filter-graph passes.
 //
 // Every filter RT covers a RECT of the canvas — an origin and a size in canvas
 // pixels, always 1:1 with them. A filter pass may crop or translate its output,
 // never rescale it. Nothing in an SVG filter graph resamples.
-//
-// `vUV` is 0..1 across the OUTPUT, and that much is sound: the cover quad fills
-// the viewport, and the viewport is the output. What is NOT sound is reusing it
-// to sample an INPUT, because an input has its own rect. That conflation — "0..1
-// across the viewport" read as "0..1 across the texture" — is what let a pool
-// that rounded RTs up to a 32px bucket silently rescale every pass in the graph,
-// compounding, each step a bilinear filter. Filtered shapes came out soft and
-// upscaled and nothing in the pipeline was doing anything obviously wrong.
-//
+
 // So an input's uv is an explicit affine remap of vUV, supplied per input:
 //
 //   uInMap.xy = outRect.size / inRect.size
@@ -31,4 +26,20 @@ vec2 mapIn(vec2 uv, vec4 m) {
 vec4 sampleIn(sampler2D tex, vec2 uv) {
   vec2 s = step(vec2(0.0), uv) * step(uv, vec2(1.0));
   return texture(tex, uv) * (s.x * s.y);
+}
+
+// COLOR SPACE (color-interpolation-filters, Filter Effects 1 §15.8). A filter RT holds premultiplied RGBA in the space its primitive
+// produced it in (sRGB or linearRGB); a primitive that operates in the other space converts what it reads. mode 0 = none,
+// 1 = sRGB -> linear, 2 = linear -> sRGB. Alpha is untouched: unpremultiply, convert, premultiply.
+vec3 csSrgbToLinear(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+vec3 csLinearToSrgb(vec3 c) {
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+}
+vec4 csConvert(vec4 p, int mode) {
+  if (mode == 0 || p.a <= 0.0) return p;
+  vec3 c = clamp(p.rgb / p.a, 0.0, 1.0);
+  c = mode == 1 ? csSrgbToLinear(c) : csLinearToSrgb(c);
+  return vec4(c * p.a, p.a);
 }

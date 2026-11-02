@@ -1,0 +1,15 @@
+{
+  "scope": "Archive/source/image integrity; includes the measured slowdown and two completed-SVG composition negatives. No release-ready claim.",
+  "members": 9902,
+  "reports": 23,
+  "cases": 94,
+  "sourceChecks": 17974,
+  "renderedPixels": 21102592,
+  "timingCells": 32,
+  "inconclusive": 31,
+  "slower": 1,
+  "morphPoses": 3,
+  "nativeChangedPixels": 39,
+  "compositionNegatives": 2,
+  "nonAacStages": 40
+}

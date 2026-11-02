@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // instancedBundleRenderDiffSmoke — proves the drawBundleInstanced GPU
 // fast path (one drawArraysInstanced per cover-quad chunk, per-instance
 // worldMatrix+alpha streamed from a vertex buffer read by the
@@ -16,15 +19,21 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 let failures = 0;
-const ok = m => console.log('ok', m);
-const fail = m => { failures++; console.error('FAIL', m); };
+const ok = (m) => console.log('ok', m);
+const fail = (m) => {
+  failures++;
+  console.error('FAIL', m);
+};
 
-const SVG = readFileSync(new URL('../examples/smoke/instancedBundleRenderDiff__SVG.svg', import.meta.url), 'utf8');
+const SVG = readFileSync(
+  new URL('../examples/smoke/instancedBundleRenderDiff__SVG.svg', import.meta.url),
+  'utf8',
+);
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="256" height="256"></canvas>
@@ -98,39 +107,75 @@ window.__done = true;
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost');
   if (u.pathname === '/' || u.pathname === '/index.html') {
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return;
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(HTML);
+    return;
   }
   const p = decodeURIComponent(u.pathname);
-  const mime = p.endsWith('.js') || p.endsWith('.mjs') ? 'text/javascript'
-             : p.endsWith('.glsl') ? 'text/plain' : 'application/octet-stream';
-  try { res.writeHead(200, { 'content-type': mime + '; charset=utf-8' }); res.end(readFileSync(path.join(ROOT, p))); }
-  catch { try { res.writeHead(404); res.end(); } catch {} }
+  const mime =
+    p.endsWith('.js') || p.endsWith('.mjs')
+      ? 'text/javascript'
+      : p.endsWith('.glsl')
+        ? 'text/plain'
+        : 'application/octet-stream';
+  try {
+    res.writeHead(200, { 'content-type': mime + '; charset=utf-8' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    try {
+      res.writeHead(404);
+      res.end();
+    } catch {}
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${server.address().port}/`;
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { if (m.type() === 'error') console.error('  [console]', m.text()); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('  [console]', m.text());
+});
 await page.goto(url, { waitUntil: 'load', timeout: 15000 });
-await page.waitForFunction(() => window.__done === true, { timeout: 30000 }).catch(() => {});
+await page
+  .waitForFunction(() => window.__done === true, { timeout: 30000, polling: 100 })
+  .catch(() => {});
 const r = await page.evaluate(() => window.__result);
-await browser.close(); server.close();
+await browser.close();
+server.close();
 
-if (!r || !r.compiled) { fail('instanced render did not complete: ' + (r && r.error || 'page error')); }
-else for (const c of r.cases) {
-  // Bar: ≤1 LSB at a handful of subpixels. The instanced path issues ONE
-  // drawArraysInstanced (instance-major) where the loop issues N separate
-  // draws; at an instance-seam AA edge that can round 1 LSB differently —
-  // a sub-quantization rasterization artifact, not a logic difference (the
-  // override case is exactly byte-identical). A real bug (wrong transform /
-  // missing instance / bad order) shows maxDiff in the dozens-to-hundreds
-  // over thousands of pixels, which this gate still catches.
-  if (c.nFast !== 4 || c.nLoop !== 4) fail(`${c.name}: drew ${c.nFast}/${c.nLoop} instances (expected 4/4)`);
-  else if (c.ink === 0) fail(`${c.name}: nothing rendered`);
-  else if (c.maxDiff === 0) ok(`${c.name}: instanced == per-instance loop byte-identical (ink=${c.ink})`);
-  else if (c.maxDiff <= 1 && c.nDiff <= 16) ok(`${c.name}: instanced matches loop within 1 LSB (nDiff=${c.nDiff}/${c.ink}, ink=${c.ink})`);
-  else fail(`${c.name}: instanced differs (maxDiff=${c.maxDiff}, nDiff=${c.nDiff})`);
+if (!r || !r.compiled) {
+  fail('instanced render did not complete: ' + ((r && r.error) || 'page error'));
+} else
+  for (const c of r.cases) {
+    // Bar: ≤1 LSB at a handful of subpixels. The instanced path issues ONE
+    // drawArraysInstanced (instance-major) where the loop issues N separate
+    // draws; at an instance-seam AA edge that can round 1 LSB differently —
+    // a sub-quantization rasterization artifact, not a logic difference (the
+    // override case is exactly byte-identical). A real bug (wrong transform /
+    // missing instance / bad order) shows maxDiff in the dozens-to-hundreds
+    // over thousands of pixels, which this gate still catches.
+    if (c.nFast !== 4 || c.nLoop !== 4)
+      fail(`${c.name}: drew ${c.nFast}/${c.nLoop} instances (expected 4/4)`);
+    else if (c.ink === 0) fail(`${c.name}: nothing rendered`);
+    else if (c.maxDiff === 0)
+      ok(`${c.name}: instanced == per-instance loop byte-identical (ink=${c.ink})`);
+    else if (c.maxDiff <= 1 && c.nDiff <= 16)
+      ok(
+        `${c.name}: instanced matches loop within 1 LSB (nDiff=${c.nDiff}/${c.ink}, ink=${c.ink})`,
+      );
+    else fail(`${c.name}: instanced differs (maxDiff=${c.maxDiff}, nDiff=${c.nDiff})`);
+  }
+if (failures) {
+  console.error(`\n${failures} failure(s)`);
+  process.exit(1);
 }
-if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
-console.log('\ninstancedBundleRenderDiffSmoke: drawBundleInstanced fast path is byte-identical to the loop');
+console.log(
+  '\ninstancedBundleRenderDiffSmoke: drawBundleInstanced fast path is byte-identical to the loop',
+);

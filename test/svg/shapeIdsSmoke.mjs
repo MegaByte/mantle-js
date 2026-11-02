@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // shapeIdsSmoke.mjs — verifies SVG `id` attributes flow into
 // bundle.shapeIds (via el.getAttribute('id') on staged shape records)
 // and are addressable from createOverrideTable.
@@ -11,7 +14,7 @@
 //       warn ('bundle.shapeIds is empty — set("…") will never
 //       resolve') on first unknown-id miss, then stays silent.
 //   T4: stroked shapes get a `${id}_stroke` row in addition to the
-//       fill row (so the C# `_stroke` naming convention is preserved).
+//       fill row (the `_stroke` naming convention the C# runtime shares).
 //   T5: <a href> + id stack lifecycle survives nesting (id pushed,
 //       popped on exit; sibling shapes don't inherit parent's id).
 
@@ -21,16 +24,25 @@ import { importSvg } from '../../src/svg/importer.js';
 import { createOverrideTable } from '../../src/animation/overrides.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL', msg); failures++; };
-const ok   = (msg) => console.log('ok', msg);
+const fail = (msg) => {
+  console.error('FAIL', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok', msg);
 
 // Minimal WebGL2 shim (matches overridesSmoke.mjs's pattern).
 function makeGlStub() {
   return {
-    NEAREST: 9728, CLAMP_TO_EDGE: 33071,
-    TEXTURE_2D: 3553, TEXTURE_MIN_FILTER: 10241, TEXTURE_MAG_FILTER: 10240,
-    TEXTURE_WRAP_S: 10242, TEXTURE_WRAP_T: 10243,
-    RGBA32F: 34836, RGBA: 6408, FLOAT: 5126,
+    NEAREST: 9728,
+    CLAMP_TO_EDGE: 33071,
+    TEXTURE_2D: 3553,
+    TEXTURE_MIN_FILTER: 10241,
+    TEXTURE_MAG_FILTER: 10240,
+    TEXTURE_WRAP_S: 10242,
+    TEXTURE_WRAP_T: 10243,
+    RGBA32F: 34836,
+    RGBA: 6408,
+    FLOAT: 5126,
     createTexture: () => ({}),
     bindTexture: () => {},
     texParameteri: () => {},
@@ -55,8 +67,7 @@ function makeGlStub() {
     fail(`T1 shapeIds length ${bundle.shapeIds.length} != numShapes ${bundle.numShapes}`);
   else if (!bundle.shapeIds.includes('bg') || !bundle.shapeIds.includes('fill'))
     fail(`T1 missing expected ids in [${bundle.shapeIds.join(', ')}]`);
-  else
-    ok(`T1 SVG ids propagate: shapeIds = [${bundle.shapeIds.join(', ')}]`);
+  else ok(`T1 SVG ids propagate: shapeIds = [${bundle.shapeIds.join(', ')}]`);
 }
 
 // ----- T2: overrideTable.set(string) hits known ids ---------------
@@ -71,10 +82,10 @@ function makeGlStub() {
   // (numShapes + shapeIds is all it reads).
   const handle = { numShapes: bundle.numShapes, shapeIds: bundle.shapeIds };
   const ov = createOverrideTable(makeGlStub(), handle);
-  const okBg   = ov.set('bg',   { tint: [1, 0, 0, 1] });
+  const okBg = ov.set('bg', { tint: [1, 0, 0, 1] });
   const okFill = ov.set('fill', { tint: [0, 1, 0, 1] });
   const okMiss = ov.set('xxxxx', { tint: [0, 0, 1, 1] });
-  if (!okBg)   fail('T2 set("bg") returned false despite id existing');
+  if (!okBg) fail('T2 set("bg") returned false despite id existing');
   else if (!okFill) fail('T2 set("fill") returned false despite id existing');
   else if (okMiss) fail('T2 set("xxxxx") returned true despite unknown id');
   else ok('T2 set(known) true / set(unknown) false');
@@ -90,20 +101,17 @@ function makeGlStub() {
   console.warn = (m) => warnings.push(m);
   try {
     const ov = createOverrideTable(makeGlStub(), handle);
-    ov.set('foo', { tint: [1, 0, 0, 1] });    // miss #1 → expect warn
-    ov.set('bar', { tint: [0, 1, 0, 1] });    // miss #2 → silent
-    ov.set('baz', { tint: [0, 0, 1, 1] });    // miss #3 → silent
+    ov.set('foo', { tint: [1, 0, 0, 1] }); // miss #1 → expect warn
+    ov.set('bar', { tint: [0, 1, 0, 1] }); // miss #2 → silent
+    ov.set('baz', { tint: [0, 0, 1, 1] }); // miss #3 → silent
   } finally {
     console.warn = origWarn;
   }
-  if (warnings.length === 0)
-    fail('T3 expected one console.warn on empty-shapeIds miss; got none');
-  else if (warnings.length > 1)
-    fail(`T3 expected exactly ONE warn, got ${warnings.length}`);
+  if (warnings.length === 0) fail('T3 expected one console.warn on empty-shapeIds miss; got none');
+  else if (warnings.length > 1) fail(`T3 expected exactly ONE warn, got ${warnings.length}`);
   else if (!/shapeIds is empty/.test(warnings[0]))
     fail(`T3 warn text doesn't mention empty shapeIds: ${warnings[0]}`);
-  else
-    ok(`T3 unknown-id on empty bundle warns once: "${warnings[0].slice(0, 60)}…"`);
+  else ok(`T3 unknown-id on empty bundle warns once: "${warnings[0].slice(0, 60)}…"`);
 }
 
 // ----- T4: stroked shape gets fill + _stroke rows -----------------
@@ -114,9 +122,9 @@ function makeGlStub() {
             fill="rgb(255,0,0)" stroke="rgb(0,0,0)" stroke-width="4"/>
     </svg>`;
   const bundle = await importSvg(svg, {});
-  const hasFill   = bundle.shapeIds.includes('frame');
+  const hasFill = bundle.shapeIds.includes('frame');
   const hasStroke = bundle.shapeIds.includes('frame_stroke');
-  if (!hasFill)   fail(`T4 expected 'frame' id, got [${bundle.shapeIds.join(', ')}]`);
+  if (!hasFill) fail(`T4 expected 'frame' id, got [${bundle.shapeIds.join(', ')}]`);
   else if (!hasStroke) fail(`T4 expected 'frame_stroke' id, got [${bundle.shapeIds.join(', ')}]`);
   else ok(`T4 stroked shape emits fill+_stroke rows: [${bundle.shapeIds.join(', ')}]`);
 }
@@ -133,12 +141,16 @@ function makeGlStub() {
   const bundle = await importSvg(svg, {});
   // 'group1' is a non-rendering container, so it shouldn't appear in
   // shapeIds. 'inner' and 'sibling' should both appear.
-  const hasInner   = bundle.shapeIds.includes('inner');
+  const hasInner = bundle.shapeIds.includes('inner');
   const hasSibling = bundle.shapeIds.includes('sibling');
-  const hasGroup   = bundle.shapeIds.includes('group1');
-  if (!hasInner)        fail(`T5 expected 'inner' in [${bundle.shapeIds.join(', ')}]`);
-  else if (!hasSibling) fail(`T5 expected 'sibling' (id stack popped after group): [${bundle.shapeIds.join(', ')}]`);
-  else if (hasGroup)    fail(`T5 unexpected 'group1' (group container should NOT produce an id'd meta row): [${bundle.shapeIds.join(', ')}]`);
+  const hasGroup = bundle.shapeIds.includes('group1');
+  if (!hasInner) fail(`T5 expected 'inner' in [${bundle.shapeIds.join(', ')}]`);
+  else if (!hasSibling)
+    fail(`T5 expected 'sibling' (id stack popped after group): [${bundle.shapeIds.join(', ')}]`);
+  else if (hasGroup)
+    fail(
+      `T5 unexpected 'group1' (group container should NOT produce an id'd meta row): [${bundle.shapeIds.join(', ')}]`,
+    );
   else ok(`T5 id stack scopes correctly across siblings: [${bundle.shapeIds.join(', ')}]`);
 }
 

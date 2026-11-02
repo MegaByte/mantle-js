@@ -19,6 +19,19 @@ vec4 sampleIn(sampler2D tex, vec2 uv) {
   return texture(tex, uv) * (s.x * s.y);
 }
 
+vec3 csSrgbToLinear(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+vec3 csLinearToSrgb(vec3 c) {
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+}
+vec4 csConvert(vec4 p, int mode) {
+  if (mode == 0 || p.a <= 0.0) return p;
+  vec3 c = clamp(p.rgb / p.a, 0.0, 1.0);
+  c = mode == 1 ? csSrgbToLinear(c) : csLinearToSrgb(c);
+  return vec4(c * p.a, p.a);
+}
+
 void main() {
   vec2 uv = mapIn(vUV, uInMap);
   if (uRadius < 0.5) { fragColor = sampleIn(uTex, uv); return; }
@@ -26,15 +39,17 @@ void main() {
   int r = int(min(ceil(uRadius), 64.0));
 
   vec4 acc = sampleIn(uTex, uv);
-  for (int i = 1; i <= 64; ++i) {
-    if (i > r) break;
-    vec2 d = uDir * uTexel * float(i);
-    vec4 p = sampleIn(uTex, uv + d);
-    vec4 n = sampleIn(uTex, uv - d);
-    if (uOperator == 1) {
-      acc = max(acc, max(p, n));
-    } else {
-      acc = min(acc, min(p, n));
+  if (uOperator == 1) {
+    for (int i = 1; i <= 64; ++i) {
+      if (i > r) break;
+      vec2 d = uDir * uTexel * float(i);
+      acc = max(acc, max(sampleIn(uTex, uv + d), sampleIn(uTex, uv - d)));
+    }
+  } else {
+    for (int i = 1; i <= 64; ++i) {
+      if (i > r) break;
+      vec2 d = uDir * uTexel * float(i);
+      acc = min(acc, min(sampleIn(uTex, uv + d), sampleIn(uTex, uv - d)));
     }
   }
   fragColor = acc;

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Capability detection: platform-first, table-fallback. Runs the platform
 // Unicode API (String.normalize / Intl.Segmenter) against sentinels baked from
 // the pinned UCD version; any throw or divergence means the platform is
@@ -6,11 +9,11 @@
 // Importing this module pulls in the table engines as the fallback; consumers
 // targeting a known-modern platform can call String.normalize/Intl.Segmenter
 // directly and never import this.
-import { toNFC } from "./nfc.js";
-import { eachGrapheme } from "./graphemes.js";
-import { nfcSentinels, graphemeSentinels } from "./tables/sentinels.js";
+import { toNFC } from './nfc.js';
+import { eachGrapheme } from './graphemes.js';
+import { nfcSentinels, graphemeSentinels } from './tables/sentinels.js';
 
-let policy = "auto"; // 'auto' | 'platform' | 'tables'
+let policy = 'auto'; // 'auto' | 'platform' | 'tables'
 let _nfc = null;
 let _gr = null;
 
@@ -27,16 +30,16 @@ function cpArray(str) {
 }
 
 function probeNFC() {
-  if (policy !== "auto") return policy;
+  if (policy !== 'auto') return policy;
   try {
-    if (typeof "".normalize !== "function") return "tables";
+    if (typeof ''.normalize !== 'function') return 'tables';
     for (const s of nfcSentinels) {
-      const got = cpArray(String.fromCodePoint(...s.in).normalize("NFC"));
-      if (got.length !== s.out.length || got.some((v, i) => v !== s.out[i])) return "tables";
+      const got = cpArray(String.fromCodePoint(...s.in).normalize('NFC'));
+      if (got.length !== s.out.length || got.some((v, i) => v !== s.out[i])) return 'tables';
     }
-    return "platform";
+    return 'platform';
   } catch {
-    return "tables";
+    return 'tables';
   }
 }
 
@@ -48,19 +51,20 @@ function sizesFromBounds(bounds) {
 }
 
 function probeGrapheme() {
-  if (policy !== "auto") return policy;
+  if (policy !== 'auto') return policy;
   try {
-    if (typeof Intl === "undefined" || typeof Intl.Segmenter !== "function") return "tables";
-    const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    if (typeof Intl === 'undefined' || typeof Intl.Segmenter !== 'function') return 'tables';
+    const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
     for (const s of graphemeSentinels) {
       const want = sizesFromBounds(s.bounds);
       const got = [];
-      for (const { segment } of seg.segment(String.fromCodePoint(...s.in))) got.push(cpArray(segment).length);
-      if (got.length !== want.length || got.some((v, i) => v !== want[i])) return "tables";
+      for (const { segment } of seg.segment(String.fromCodePoint(...s.in)))
+        got.push(cpArray(segment).length);
+      if (got.length !== want.length || got.some((v, i) => v !== want[i])) return 'tables';
     }
-    return "platform";
+    return 'platform';
   } catch {
-    return "tables";
+    return 'tables';
   }
 }
 
@@ -73,13 +77,13 @@ export function graphemeMode() {
 
 /** NFC-normalize a string via the platform when current, else the table engine. */
 export function normalizeNFC(str) {
-  return nfcMode() === "platform" ? str.normalize("NFC") : toNFC(str);
+  return nfcMode() === 'platform' ? str.normalize('NFC') : toNFC(str);
 }
 
 /** Return grapheme clusters as strings, platform or table-driven. */
 export function segmentGraphemes(str) {
-  if (graphemeMode() === "platform") {
-    const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  if (graphemeMode() === 'platform') {
+    const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
     const out = [];
     for (const { segment } of seg.segment(str)) out.push(segment);
     return out;

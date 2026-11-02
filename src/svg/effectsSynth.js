@@ -1,6 +1,6 @@
-// svg/effectsSynth.js — synthesizers for Flash/Lottie "layer effects"
-// that have no direct SVG primitive but compose cleanly from our
-// existing filter graph.
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 //
 // Each entry returns a graph object compatible with filterGraph.js:
 //   { nodes: [...], rootOut: int }
@@ -12,7 +12,7 @@
 // a single root output. Composability with other primitives is the
 // caller's responsibility: feMerge / feComposite as needed.
 
-import { SRC_GRAPHIC } from '../filterGraph/filterGraph.js';
+import { SRC_GRAPHIC } from '../filterGraph/sourceTags.js';
 
 // Build a feComponentTransfer LUT row that reads `table` (an array
 // of floats on [0, 1]) and interpolates linearly between adjacent
@@ -30,7 +30,7 @@ function bakeTableRow(table) {
     const t = Math.max(0, Math.min(1, x)) * n;
     const idx = Math.floor(t);
     const f = t - idx;
-    const v = (idx >= n) ? table[n] : table[idx] * (1 - f) + table[idx + 1] * f;
+    const v = idx >= n ? table[n] : table[idx] * (1 - f) + table[idx + 1] * f;
     out[i] = Math.max(0, Math.min(255, Math.round(v * 255)));
   }
   return out;
@@ -65,26 +65,44 @@ function packLutBytes(rowR, rowG, rowB, rowA) {
 //
 // Inputs: c0, c1 are [r,g,b,a] in [0,1]. Source alpha is preserved.
 export function tintGraph(c0, c1) {
-  const lumR = 0.299, lumG = 0.587, lumB = 0.114;
+  const lumR = 0.299,
+    lumG = 0.587,
+    lumB = 0.114;
   // Step 1: 4×5 colorMatrix — splat L = lumR*r + lumG*g + lumB*b into
   // RGB while passing source alpha through unchanged.
   const splat = [
-    lumR, lumG, lumB, 0, 0,
-    lumR, lumG, lumB, 0, 0,
-    lumR, lumG, lumB, 0, 0,
-    0,    0,    0,    1, 0,
+    lumR,
+    lumG,
+    lumB,
+    0,
+    0,
+    lumR,
+    lumG,
+    lumB,
+    0,
+    0,
+    lumR,
+    lumG,
+    lumB,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
   ];
   // Step 2: gradient lookup. row R: at L=0 -> c0.r, L=1 -> c1.r.
   // Simple 2-point linear table.
   const rowR = bakeTableRow([c0[0], c1[0]]);
   const rowG = bakeTableRow([c0[1], c1[1]]);
   const rowB = bakeTableRow([c0[2], c1[2]]);
-  const rowA = bakeTableRow([0, 1]);   // identity (alpha row reads from src.a after splat)
+  const rowA = bakeTableRow([0, 1]); // identity (alpha row reads from src.a after splat)
   const lut = packLutBytes(rowR, rowG, rowB, rowA);
   return {
     nodes: [
-      { type: 'feColorMatrix',        inputs: [SRC_GRAPHIC], params: { matrix: splat } },
-      { type: 'feComponentTransfer',  inputs: [0],           params: { lutBytes: lut } },
+      { type: 'feColorMatrix', inputs: [SRC_GRAPHIC], params: { matrix: splat } },
+      { type: 'feComponentTransfer', inputs: [0], params: { lutBytes: lut } },
     ],
     rootOut: 1,
   };
@@ -97,12 +115,30 @@ export function tintGraph(c0, c1) {
 // source luminance. `dark`, `mid`, `light` are RGBA colors; the
 // table is a 3-stop ramp through them.
 export function tritoneGraph(dark, mid, light) {
-  const lumR = 0.299, lumG = 0.587, lumB = 0.114;
+  const lumR = 0.299,
+    lumG = 0.587,
+    lumB = 0.114;
   const splat = [
-    lumR, lumG, lumB, 0, 0,
-    lumR, lumG, lumB, 0, 0,
-    lumR, lumG, lumB, 0, 0,
-    0,    0,    0,    1, 0,
+    lumR,
+    lumG,
+    lumB,
+    0,
+    0,
+    lumR,
+    lumG,
+    lumB,
+    0,
+    0,
+    lumR,
+    lumG,
+    lumB,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
   ];
   // 3-stop table per channel: at L=0 dark, L=0.5 mid, L=1 light.
   const rowR = bakeTableRow([dark[0], mid[0], light[0]]);
@@ -112,8 +148,8 @@ export function tritoneGraph(dark, mid, light) {
   const lut = packLutBytes(rowR, rowG, rowB, rowA);
   return {
     nodes: [
-      { type: 'feColorMatrix',        inputs: [SRC_GRAPHIC], params: { matrix: splat } },
-      { type: 'feComponentTransfer',  inputs: [0],           params: { lutBytes: lut } },
+      { type: 'feColorMatrix', inputs: [SRC_GRAPHIC], params: { matrix: splat } },
+      { type: 'feComponentTransfer', inputs: [0], params: { lutBytes: lut } },
     ],
     rootOut: 1,
   };
@@ -121,10 +157,7 @@ export function tritoneGraph(dark, mid, light) {
 
 // Internal: shared luminance-splat 4×5 matrix.
 export const LUMA_SPLAT_MATRIX = Object.freeze([
-  0.299, 0.587, 0.114, 0, 0,
-  0.299, 0.587, 0.114, 0, 0,
-  0.299, 0.587, 0.114, 0, 0,
-  0,     0,     0,     1, 0,
+  0.299, 0.587, 0.114, 0, 0, 0.299, 0.587, 0.114, 0, 0, 0.299, 0.587, 0.114, 0, 0, 0, 0, 0, 1, 0,
 ]);
 
 // ────────────────────────────────────────────────────────────────
@@ -137,15 +170,6 @@ export const LUMA_SPLAT_MATRIX = Object.freeze([
 // blur scales with the shape's transform (0 = local / scales with
 // transform; 1 = world / fixed in pixels).
 //
-// We expose it as a single graph: feGaussianBlur → feOffset.
-// transformSpace is the *caller*'s concern — they pass the
-// already-scaled sigma in. We don't compose with the source (drop-
-// shadow style), because Rive's Feather *replaces* the shape's
-// rasterized output with the blurred-and-offset version; the layer
-// composes on top of whatever's beneath via the shape's own blend
-// mode, not via merge. That matches feGaussianBlur+feOffset's stack
-// of two passes producing one final RT.
-//
 // If the caller wants the SVG drop-shadow shape ("shape over its own
 // blurred shadow") they should compose `featherGraph(...)` with a
 // feMerge against SourceGraphic — same pattern as feDropShadow.
@@ -155,9 +179,10 @@ export function featherGraph(strengthX, strengthY = strengthX, offsetX = 0, offs
   // is a passthrough (handled by the feGaussianBlur dispatch).
   const sigmaX = Math.max(0, strengthX);
   const sigmaY = Math.max(0, strengthY);
-  const nodes = [
-    { type: 'feGaussianBlur', inputs: [SRC_GRAPHIC], params: { sigmaX, sigmaY } },
-  ];
+  // Heterogeneous by design — feOffset's params are {dx,dy}, not {sigmaX,sigmaY}
+  // — so the element type must not be inferred from the first entry.
+  /** @type {{type: string, inputs: number[], params: object}[]} */
+  const nodes = [{ type: 'feGaussianBlur', inputs: [SRC_GRAPHIC], params: { sigmaX, sigmaY } }];
   let root = 0;
   if (offsetX !== 0 || offsetY !== 0) {
     nodes.push({ type: 'feOffset', inputs: [0], params: { dx: offsetX, dy: offsetY } });
@@ -177,15 +202,15 @@ export function featherDropShadowGraph(strengthX, strengthY, offsetX, offsetY, c
   const sigmaY = Math.max(0, strengthY);
   const nodes = [
     // 0: blurred alpha (source-alpha, blurred)
-    { type: 'feGaussianBlur', inputs: [-2],  params: { sigmaX, sigmaY } },
+    { type: 'feGaussianBlur', inputs: [-2], params: { sigmaX, sigmaY } },
     // 1: offset the blurred alpha
-    { type: 'feOffset',       inputs: [0],   params: { dx: offsetX, dy: offsetY } },
+    { type: 'feOffset', inputs: [0], params: { dx: offsetX, dy: offsetY } },
     // 2: a flood of the shadow color
-    { type: 'feFlood',        inputs: [],    params: { rgba: color } },
+    { type: 'feFlood', inputs: [], params: { rgba: color } },
     // 3: composite flood "in" blurred-offset alpha → colored shadow
-    { type: 'feComposite',    inputs: [2, 1], params: { op: 1 } },  // op=1 = "in"
+    { type: 'feComposite', inputs: [2, 1], params: { op: 1 } }, // op=1 = "in"
     // 4: merge (shadow under source)
-    { type: 'feMerge',        inputs: [3, -1], params: {} },
+    { type: 'feMerge', inputs: [3, -1], params: {} },
   ];
   return { nodes, rootOut: 4 };
 }

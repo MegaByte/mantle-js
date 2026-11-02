@@ -1,14 +1,20 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Verifies CFF2 (variable-flavor Adobe outlines) end-to-end against a
 // synthesized fixture (_cff2FontFixture.mjs).
 
 import { MantleFontAsset } from '../../src/font/fontAsset.js';
 import { registerCffReader } from '../../src/font/formats/cff.js';
-import { buildCff2TestSfnt } from './_cff2FontFixture.mjs';
+import { buildCff2TestSfnt, buildPrivateVsindexFixtures } from './_cff2FontFixture.mjs';
 registerCffReader();
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // ----- T1: static CFF2 (no blend) — fixture parses + glyph reads ----
 {
@@ -37,7 +43,10 @@ const ok   = (msg) => console.log('ok ' + msg);
   const segs = font.getGlyphSegsByGid(gid);
   if (!segs) fail('T2 segs null');
   else {
-    let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+    let xmin = Infinity,
+      xmax = -Infinity,
+      ymin = Infinity,
+      ymax = -Infinity;
     for (const s of segs) {
       for (const p of [s.p1, s.p2, s.p3, s.p4]) {
         if (!p) continue;
@@ -69,14 +78,14 @@ const ok   = (msg) => console.log('ok ' + msg);
   else {
     let drift = 0;
     for (let i = 0; i < segsV.length; i++) {
-      const a = segsV[i], b = segsS[i];
+      const a = segsV[i],
+        b = segsS[i];
       for (const k of ['p1', 'p2', 'p3', 'p4']) {
         if (!a[k] || !b[k]) continue;
         if (Math.abs(a[k][0] - b[k][0]) > 1 || Math.abs(a[k][1] - b[k][1]) > 1) drift++;
       }
     }
-    if (drift > 0)
-      fail(`T3 default-blend drift: ${drift} point mismatches`);
+    if (drift > 0) fail(`T3 default-blend drift: ${drift} point mismatches`);
     else ok(`T3 variable CFF2 at default coords matches static outline`);
   }
 }
@@ -103,11 +112,13 @@ const ok   = (msg) => console.log('ok ' + msg);
   if (!segsDef || !segsMax) fail('T4 segs null');
   else {
     function bbox(segs) {
-      let xmin = Infinity, xmax = -Infinity;
-      for (const s of segs) for (const p of [s.p1, s.p2, s.p3, s.p4]) {
-        if (p && p[0] < xmin) xmin = p[0];
-        if (p && p[0] > xmax) xmax = p[0];
-      }
+      let xmin = Infinity,
+        xmax = -Infinity;
+      for (const s of segs)
+        for (const p of [s.p1, s.p2, s.p3, s.p4]) {
+          if (p && p[0] < xmin) xmin = p[0];
+          if (p && p[0] > xmax) xmax = p[0];
+        }
       return [xmin, xmax];
     }
     const [, xmaxDef] = bbox(segsDef);
@@ -118,6 +129,23 @@ const ok   = (msg) => console.log('ok ' + msg);
     if (xmaxDef !== 300 || xmaxMax < 499 || xmaxMax > 501)
       fail(`T4 blend xmax: default ${xmaxDef} (expect 300), peak ${xmaxMax} (expect ≈500)`);
     else ok(`T4 blend at peak: top vertex x morphs default 250 → peak ${xmaxMax}`);
+  }
+}
+
+// Private DICT vsindex supplies the default; a CharString may override it.
+{
+  const { autoRegisterForFont } = await import('../../src/font/auto.js');
+  const { pathBbox } = await import('../../src/svg/bbox.js');
+  for (const [index, bytes] of buildPrivateVsindexFixtures().entries()) {
+    await autoRegisterForFont(bytes);
+    const font = new MantleFontAsset(bytes);
+    for (const coord of [-1, 0, 1]) {
+      const shifted = index === 0 ? coord === -1 : coord === 1;
+      const expected = shifted ? [14, 28, 114, 88] : [10, 20, 110, 80];
+      const actual = pathBbox(font.getGlyphSegsByGidVar(1, [coord]));
+      if (actual.some((v, i) => !Number.isFinite(v) || Math.abs(v - expected[i]) > 1e-9))
+        fail(`private variation ${index} at ${coord}: ${actual}`);
+    }
   }
 }
 

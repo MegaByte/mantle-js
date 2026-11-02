@@ -1,4 +1,7 @@
-// lbHandleInstancedParitySmoke.mjs — static Loop-Blinn fill now reaches EVERY
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// lbHandleInstancedParitySmoke.mjs — static Loop-Blinn fill reaches every
 // draw entry point, not just the bare drawBundle. Guards that:
 //   1. handle.draw() routes an uncached static bundle through the analytic fill
 //      and matches the Slug render.
@@ -7,14 +10,15 @@
 //   3. a CACHED handle does NOT route LB (its baked-RT blit already beats
 //      re-running LB per frame — the `!cached` gate in _analyticRoute), yet
 //      still renders correctly.
-// Together these close "Gap 2": before, streamOnly entry points (handle.draw /
-// instanced) could take ONLY the _lbStream route, so real handle-drawn scenes
-// never saw static LB even with the fill enabled.
+// Together these keep handle.draw and drawBundleInstanced on static LB: as
+// streamOnly entry points taking only the _lbStream route, handle-drawn scenes
+// would never see static LB even with the fill enabled.
 import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { openReady } from './_pageReady.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -22,7 +26,10 @@ const ROOT = path.resolve(__dirname, '..');
 // A curved solid-fill blob (cubics → the analytic mesh; solid → the one-draw
 // combined route). No mask/clip/filter so the instanced loop routes it (a
 // composed bundle would stay on Slug to keep its bake-once reuse).
-const SVG = readFileSync(new URL('../examples/smoke/lbHandleInstancedParity__SVG.svg', import.meta.url), 'utf8');
+const SVG = readFileSync(
+  new URL('../examples/smoke/lbHandleInstancedParity__SVG.svg', import.meta.url),
+  'utf8',
+);
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="100" height="100"></canvas>
@@ -30,7 +37,7 @@ const HTML = `<!DOCTYPE html><html><body>
 import { importSvg, createBundle, createRenderer, loadShaders, CacheStrategy } from '/src/index.js';
 const gl = document.getElementById('c').getContext('webgl2', { antialias: false, premultipliedAlpha: true, preserveDrawingBuffer: true });
 const shaders = await loadShaders(new URL('/src/shaders/', location.href).href);
-const renderer = createRenderer(gl, shaders);
+const renderer = createRenderer(gl, shaders, { staticUnified: true });
 renderer.setViewport(100, 100);
 const bundle = createBundle(gl, await importSvg(${JSON.stringify(SVG)})); renderer.prepareBundle(bundle);
 await renderer.awaitLbReady(bundle);   // LB builds off-thread; wait before asserting the route
@@ -96,42 +103,68 @@ window.__ready = true;
 
 const server = http.createServer((req, res) => {
   try {
-    if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML);
+      return;
+    }
     const p = decodeURIComponent(req.url.split('?')[0]);
-    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' }); res.end(readFileSync(path.join(ROOT, p)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { if (m.type() === 'error') console.error('  [console]', m.text()); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('  [console]', m.text());
+});
 try {
-  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await openReady(page, `http://127.0.0.1:${port}/`, { ready: 'flag' });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 const o = await page.evaluate(() => window.__out);
 console.log('  ', JSON.stringify(o));
 
 // 1. handle.draw
-if (!o.handleSlugRouted) ok('handle.draw: Slug used with LB off'); else fail('handle.draw routed LB with fill off');
+if (!o.handleSlugRouted) ok('handle.draw: Slug used with LB off');
+else fail('handle.draw routed LB with fill off');
 if (o.handleLbRouted) ok('handle.draw routes an uncached static bundle through the analytic fill');
-else fail('handle.draw did NOT route static LB (Gap 2 regression)');
-if (o.handleInk > 500) ok('handle.draw renders (' + o.handleInk + ' ink px)'); else fail('handle.draw barely rendered: ' + o.handleInk);
+else fail('handle.draw did NOT route static LB');
+if (o.handleInk > 500) ok('handle.draw renders (' + o.handleInk + ' ink px)');
+else fail('handle.draw barely rendered: ' + o.handleInk);
 if (o.handleDiff <= 6) ok('handle.draw LB matches Slug (mean channel diff ' + o.handleDiff + ')');
 else fail('handle.draw LB != Slug (mean channel diff ' + o.handleDiff + ')');
 
 // 2. drawBundleInstanced
-if (!o.instSlugRouted) ok('instanced: Slug used with LB off'); else fail('instanced routed LB with fill off');
+if (!o.instSlugRouted) ok('instanced: Slug used with LB off');
+else fail('instanced routed LB with fill off');
 if (o.instLbRouted) ok('drawBundleInstanced routes a static bundle through the analytic fill');
-else fail('drawBundleInstanced did NOT route static LB (Gap 2 regression)');
+else fail('drawBundleInstanced did NOT route static LB');
 if (o.instDiff <= 6) ok('instanced LB matches Slug (mean channel diff ' + o.instDiff + ')');
 else fail('instanced LB != Slug (mean channel diff ' + o.instDiff + ')');
 
@@ -141,9 +174,15 @@ else fail('instanced LB != Slug (mean channel diff ' + o.instDiff + ')');
 // bundles with no Slug cover-quads (lightweight builds).
 if (o.cachedRouted) ok('cached handle routes LB on live/bake frames (blit owns valid frames)');
 else ok('cached handle served entirely by the cache blit this run');
-if (o.cachedInk > 500) ok('cached handle still renders (' + o.cachedInk + ' ink px)'); else fail('cached handle barely rendered: ' + o.cachedInk);
+if (o.cachedInk > 500) ok('cached handle still renders (' + o.cachedInk + ' ink px)');
+else fail('cached handle barely rendered: ' + o.cachedInk);
 
 await browser.close();
 server.close();
-if (failures) { console.error('\\n' + failures + ' failure(s)'); process.exit(1); }
-console.log('\\nlbHandleInstancedParitySmoke: static LB reaches handle.draw + instanced; cache path preserved');
+if (failures) {
+  console.error('\\n' + failures + ' failure(s)');
+  process.exit(1);
+}
+console.log(
+  '\\nlbHandleInstancedParitySmoke: static LB reaches handle.draw + instanced; cache path preserved',
+);

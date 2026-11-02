@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // cursiveAttachSmoke.mjs — verifies GPOS type 3 (CursivePos)
 // integration. NotoNastaliq is the canonical macOS test font:
 // hundreds of contextual forms carry curs anchors with rtl=true
@@ -10,8 +13,11 @@ import { buildStyled, _layoutSlotsForTest } from '../../src/font/textRun.js';
 import { defaultStyle } from '../../src/font/markupParser.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 const NastaliqPath = '/System/Library/Fonts/NotoNastaliq.ttc';
 if (!existsSync(NastaliqPath)) {
@@ -36,11 +42,14 @@ font.getMetrics(0x0628);
   let probed = null;
   for (let g = 0; g < 2000; g++) {
     const a = gpos.getCursiveAnchors(g);
-    if (a) { probed = a; break; }
+    if (a) {
+      probed = a;
+      break;
+    }
   }
   if (!probed) fail('T2 no curs anchors found in first 2000 gids');
   else {
-    const hasShape = ('entry' in probed) && ('exit' in probed) && ('rtl' in probed);
+    const hasShape = 'entry' in probed && 'exit' in probed && 'rtl' in probed;
     if (!hasShape) fail(`T2 anchor return missing fields: ${JSON.stringify(probed)}`);
     else if (probed.rtl !== true) fail(`T2 expected rtl=true on Nastaliq, got ${probed.rtl}`);
     else ok(`T2 anchor shape correct, rtl=true`);
@@ -55,9 +64,9 @@ font.getMetrics(0x0628);
 {
   const style = defaultStyle();
   const bundle = await buildStyled(
-    [{ text: 'یہ', style }],   // Urdu 'this' — two letters that join
+    [{ text: 'یہ', style }], // Urdu 'this' — two letters that join
     font,
-    { wrap: false }
+    { wrap: false },
   );
   if (!bundle) fail('T3 buildStyled returned null');
   else {
@@ -77,19 +86,32 @@ font.getMetrics(0x0628);
   // one with entry).
   // Find a pair where exit.y != entry.y so the join produces a
   // non-trivial Y shift.
-  let exitGid = -1, exitY = 0, entryGid = -1, entryY = 0;
+  let exitGid = -1,
+    exitY = 0,
+    entryGid = -1,
+    entryY = 0;
   for (let g = 0; g < 2000; g++) {
     const a = font.gpos.getCursiveAnchors(g);
-    if (a && a.exit && a.exit.y !== 0) { exitGid = g; exitY = a.exit.y; break; }
+    if (a && a.exit && a.exit.y !== 0) {
+      exitGid = g;
+      exitY = a.exit.y;
+      break;
+    }
   }
   for (let g = 0; g < 2000; g++) {
     const a = font.gpos.getCursiveAnchors(g);
-    if (a && a.entry && a.entry.y !== 0 && g !== exitGid) { entryGid = g; entryY = a.entry.y; break; }
+    if (a && a.entry && a.entry.y !== 0 && g !== exitGid) {
+      entryGid = g;
+      entryY = a.entry.y;
+      break;
+    }
   }
   if (exitGid < 0 || entryGid < 0) {
     console.log('T5 SKIP: no exit+entry pair with non-zero y found');
   } else {
-    ok(`T5 cursive join arithmetic verified: exitGid=${exitGid} exit.y=${exitY}fu, entryGid=${entryGid} entry.y=${entryY}fu, dy=${exitY - entryY}fu`);
+    ok(
+      `T5 cursive join arithmetic verified: exitGid=${exitGid} exit.y=${exitY}fu, entryGid=${entryGid} entry.y=${entryY}fu, dy=${exitY - entryY}fu`,
+    );
   }
 }
 

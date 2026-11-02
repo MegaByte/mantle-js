@@ -1,20 +1,36 @@
-// _gateCrossover — the selection-gate validation. Render the SAME content at a range of ON-SCREEN
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// _gateCrossover — the selection-gate validation. Render the same content at a range of ON-SCREEN
 // pixel sizes (pinned via globalBBox, not fit-to-viewport) and find where each engine wins. This
-// covers BOTH regimes the earlier benches missed: small-on-screen (few fragments, fixed cost
+// covers both regimes: small-on-screen (few fragments, fixed cost
 // dominates) and large (fragment-bound). All 4 engines; LB draw-only (prepared once).
 import { readFileSync } from 'fs';
-import http from 'http'; import path from 'path'; import { fileURLToPath } from 'url'; import puppeteer from 'puppeteer';
+import { benchNames, BENCH_UNSET } from '../test/_assets.mjs';
+import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { launchBrowser } from '../test/_launch.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const N=1024;
+const N = 1024;
 const CONTENT = [];
-for (const f of ['icon_rotate', 'quad_torso', 'cubic_onion', 'detail_fish']) {
-  try { CONTENT.push({ name: f, svg: readFileSync(path.join(ROOT,'examples/_bench',f+'.svg'),'utf8') }); } catch {}
+if (!benchNames().length) console.log(BENCH_UNSET);
+for (const f of benchNames()) {
+  try {
+    CONTENT.push({
+      name: f,
+      svg: readFileSync(path.join(ROOT, 'examples/_bench', f + '.svg'), 'utf8'),
+    });
+  } catch {}
 }
-try { CONTENT.push({ name:'tiger', svg: readFileSync(path.join(ROOT,'examples/tiger.svg'),'utf8') }); } catch {}
-const SIZES = [16, 32, 64, 128, 256, 512];   // on-screen px of the content's bbox height
+try {
+  CONTENT.push({ name: 'tiger', svg: readFileSync(path.join(ROOT, 'examples/tiger.svg'), 'utf8') });
+} catch {}
+const SIZES = [16, 32, 64, 128, 256, 512]; // on-screen px of the content's bbox height
 
-const HTML=`<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas>
+const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas>
 <script type="module">
+globalThis.__MANTLE_DEBUG__ = true;   // createRenderer's fillDefines is a test hook, read only under it
 import { importSvg, createBundle, createRenderer, loadShaders } from '/src/index.js';
 const gl=document.getElementById('c').getContext('webgl2',{antialias:false,premultipliedAlpha:true,preserveDrawingBuffer:true});
 const shaders=await loadShaders(new URL('/src/shaders/',location.href).href);
@@ -49,16 +65,52 @@ window.__run=async(content, sizes)=>{
 };
 window.__ready=true;
 </script></body></html>`;
-const server=http.createServer((q,res)=>{try{if(q.url==='/'){res.writeHead(200,{'content-type':'text/html'});res.end(HTML);return;}
-const pp=decodeURIComponent(q.url.split('?')[0]);res.writeHead(200,{'content-type':pp.endsWith('.glsl')?'text/plain':'text/javascript'});res.end(readFileSync(path.join(ROOT,pp)));}catch{if(!res.headersSent)res.writeHead(404);res.end();}});
-await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const br=await puppeteer.launch({headless:'new',args:['--no-sandbox']});
-const pg=await br.newPage(); pg.on('pageerror',e=>console.error(' [err]',e.message));
-await pg.goto(`http://127.0.0.1:${server.address().port}/`,{waitUntil:'load',timeout:90000});
-await pg.waitForFunction(()=>window.__ready===true,{timeout:180000,polling:50});
-const o=await pg.evaluate((c,s)=>window.__run(c,s), CONTENT, SIZES); await br.close(); server.close();
-const win=(r)=>{const e={Slug:r.slug,AAC:r.aac,GWN:r.gwn,LB:r.lb}; let b='AAC',v=1e9; for(const k in e) if(e[k]<v){v=e[k];b=k;} return b;};
-console.log('\\n  DRAW ms at ON-SCREEN size (content bbox height = px). LB draw-only. WIN=fastest.\\n');
-let last='';
-for(const r of o){ if(r.name!==last){ console.log(`  -- ${r.name} --`); console.log('   size |  Slug    AAC    GWN     LB   | WIN'); last=r.name; }
-  console.log(`   ${String(r.px).padStart(3)}px | ${r.slug.toFixed(3)}  ${r.aac.toFixed(3)}  ${r.gwn.toFixed(3)}  ${r.lb.toFixed(3)} | ${win(r)}`); }
+const server = http.createServer((q, res) => {
+  try {
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
+    const pp = decodeURIComponent(q.url.split('?')[0]);
+    res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, pp)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
+const pg = await br.newPage();
+pg.on('pageerror', (e) => console.error(' [err]', e.message));
+await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
+await pg.waitForFunction(() => window.__ready === true, { timeout: 180000, polling: 50 });
+const o = await pg.evaluate((c, s) => window.__run(c, s), CONTENT, SIZES);
+await br.close();
+server.close();
+const win = (r) => {
+  const e = { Slug: r.slug, AAC: r.aac, GWN: r.gwn, LB: r.lb };
+  let b = 'AAC',
+    v = 1e9;
+  for (const k in e)
+    if (e[k] < v) {
+      v = e[k];
+      b = k;
+    }
+  return b;
+};
+console.log(
+  '\\n  DRAW ms at ON-SCREEN size (content bbox height = px). LB draw-only. WIN=fastest.\\n',
+);
+let last = '';
+for (const r of o) {
+  if (r.name !== last) {
+    console.log(`  -- ${r.name} --`);
+    console.log('   size |  Slug    AAC    GWN     LB   | WIN');
+    last = r.name;
+  }
+  console.log(
+    `   ${String(r.px).padStart(3)}px | ${r.slug.toFixed(3)}  ${r.aac.toFixed(3)}  ${r.gwn.toFixed(3)}  ${r.lb.toFixed(3)} | ${win(r)}`,
+  );
+}

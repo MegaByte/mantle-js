@@ -1,9 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // font/formats/cff — opt-in registration for CFF / CFF2 outline fonts.
 //
 //   import { registerCffReader } from '@kontek/mantle/font/formats/cff';
 //   registerCffReader();
 //
-// TrueType (glyf) outlines are always-on core. PostScript-flavoured
+// TrueType (glyf) outlines are always-on core. PostScript-flavored
 // fonts (.otf with a `CFF ` table, and CFF2 in variable OpenType) need
 // this reader. Without it, glyphReader renders CFF glyphs blank (with a
 // one-time console warning) — the same opt-in shape as the color /

@@ -1,25 +1,44 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // svgInOtReaderSmoke.mjs — SVG-in-OT ('SVG ' table) reader.
 // Synthesizes the table inline; no binary-font vendoring.
 
-import { SvgInOtReader, liftGlyphSubElement, isGzipped } from '../../src/font/color/svgInOtReader.js';
+import {
+  SvgInOtReader,
+  liftGlyphSubElement,
+  isGzipped,
+} from '../../src/font/color/svgInOtReader.js';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 if (typeof globalThis.DOMParser === 'undefined') globalThis.DOMParser = DOMParser;
 if (typeof globalThis.XMLSerializer === 'undefined') globalThis.XMLSerializer = XMLSerializer;
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 class Be {
-  constructor() { this.bytes = []; }
-  u8(n)  { this.bytes.push(n & 0xff); }
-  u16(n) { this.bytes.push((n >> 8) & 0xff, n & 0xff); }
-  u32(n) {
-    this.bytes.push((n >>> 24) & 0xff, (n >>> 16) & 0xff,
-                    (n >>>  8) & 0xff,  n         & 0xff);
+  constructor() {
+    this.bytes = [];
   }
-  raw(arr) { for (const b of arr) this.bytes.push(b & 0xff); }
-  get length() { return this.bytes.length; }
+  u8(n) {
+    this.bytes.push(n & 0xff);
+  }
+  u16(n) {
+    this.bytes.push((n >> 8) & 0xff, n & 0xff);
+  }
+  u32(n) {
+    this.bytes.push((n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff);
+  }
+  raw(arr) {
+    for (const b of arr) this.bytes.push(b & 0xff);
+  }
+  get length() {
+    return this.bytes.length;
+  }
 }
 
 // Build an SVG table v0 with:
@@ -29,26 +48,30 @@ class Be {
 function buildSvg() {
   // SVG bytes (just any payload — reader passes through verbatim).
   const docA = new TextEncoder().encode('<svg/>A');
-  const docB = new TextEncoder().encode('<svg><g id="glyph5"/><g id="glyph6"/><g id="glyph7"/></svg>');
+  const docB = new TextEncoder().encode(
+    '<svg><g id="glyph5"/><g id="glyph6"/><g id="glyph7"/></svg>',
+  );
 
   const b = new Be();
   // Header
-  b.u16(0);            // version
+  b.u16(0); // version
   // Reserve offsets — patch later.
   const listOffPos = b.length;
-  b.u32(0);            // svgDocumentListOffset
-  b.u32(0);            // reserved
+  b.u32(0); // svgDocumentListOffset
+  b.u32(0); // reserved
   // Document list starts here.
   const listStart = b.length;
-  b.u16(2);            // numEntries
+  b.u16(2); // numEntries
   // Record A
   const recAStart = b.length;
-  b.u16(1); b.u16(1);  // start, end gid
-  b.u32(0);            // docOff (patched)
+  b.u16(1);
+  b.u16(1); // start, end gid
+  b.u32(0); // docOff (patched)
   b.u32(docA.byteLength);
   // Record B
   const recBStart = b.length;
-  b.u16(5); b.u16(7);
+  b.u16(5);
+  b.u16(7);
   b.u32(0);
   b.u32(docB.byteLength);
   // Doc A bytes
@@ -147,47 +170,81 @@ function tablesWith(svgBytes) {
 {
   const b = new Be();
   b.u16(0);
-  const listOffPos = b.length; b.u32(0); b.u32(0);
+  const listOffPos = b.length;
+  b.u32(0);
+  b.u32(0);
   const listStart = b.length;
   b.u16(1);
   const recAStart = b.length;
-  b.u16(1); b.u16(1);
+  b.u16(1);
+  b.u16(1);
   b.u32(0);
-  b.u32(8);  // 8 bytes
+  b.u32(8); // 8 bytes
   // Gzipped doc
-  const gzPayload = new Uint8Array([0x1F, 0x8B, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00]);
+  const gzPayload = new Uint8Array([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00]);
   const docOff = b.length - listStart;
   b.raw(Array.from(gzPayload));
   const bytes = new Uint8Array(b.bytes);
   const view = new DataView(bytes.buffer);
   view.setUint32(listOffPos, listStart, false);
   view.setUint32(recAStart + 4, docOff, false);
-  const r = new SvgInOtReader({ bytes, view: new DataView(bytes.buffer), svg: [0, bytes.byteLength] });
+  const r = new SvgInOtReader({
+    bytes,
+    view: new DataView(bytes.buffer),
+    svg: [0, bytes.byteLength],
+  });
   const g = r.getGlyph(1);
   if (!g) fail('T7 gid 1 null');
   else if (!g.isGzipped) fail('T7 isGzipped false on gzipped payload');
   else ok(`T7 gzip-magic detected (1F 8B): isGzipped=true`);
 }
 
-// T8: liftGlyphSubElement — sibling glyphs hidden, target untouched.
+// T8: isolate the requested subtree while retaining referenced definitions.
 {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
-    <defs><linearGradient id="g1"/></defs>
-    <g id="glyph5"><path id="p5" d="M0 0 L1 0"/></g>
-    <g id="glyph6"><path id="p6" d="M0 0 L1 0"/></g>
-    <g id="glyph7"><path id="p7" d="M0 0 L1 0"/></g>
+  const { default: importSvg } = await import('../../src/svg/importer.js');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" color="red">
+    <style>svg > g.outer > g#glyph6 > use {fill:currentColor}</style>
+    <defs><rect id="glyph5" x="20" y="-200" width="120" height="200"/></defs>
+    <rect x="3000" width="1000" height="1000"/>
+    <g class="outer" transform="translate(1000 3000)" opacity=".25" color="blue">
+      <g id="glyph6"><use href="#glyph5"/></g>
+    </g>
   </svg>`;
-  const lifted = liftGlyphSubElement(svg, 'glyph6');
-  // glyph5 and glyph7 must be display="none"; glyph6 must not be.
-  if (!/<g id="glyph5"[^>]*display="none"/.test(lifted))
-    fail(`T8 glyph5 not hidden:\n${lifted}`);
-  else if (!/<g id="glyph7"[^>]*display="none"/.test(lifted))
-    fail(`T8 glyph7 not hidden:\n${lifted}`);
-  else if (/<g id="glyph6"[^>]*display="none"/.test(lifted))
-    fail(`T8 glyph6 wrongly hidden:\n${lifted}`);
-  else if (!lifted.includes('linearGradient'))
-    fail(`T8 defs lost:\n${lifted}`);
-  else ok('T8 liftGlyphSubElement hides siblings, keeps defs');
+  const lifted = liftGlyphSubElement(svg, 'glyph6', 'translate(2 3)');
+  const bundle = await importSvg(lifted, {});
+  if (bundle.numShapes !== 1) fail('T8 unrelated paint retained or referenced glyph omitted');
+  else if (
+    Array.from(bundle.globalBBox).some((v, i) => Math.abs(v - [22, -197, 120, 200][i]) > 1e-6)
+  )
+    fail('T8 former ancestor transform retained or outer transform lost');
+  else if (
+    Array.from(new Float32Array(bundle.meta, 32).slice(4, 8)).some((v, i) => v !== [1, 0, 0, 1][i])
+  )
+    fail('T8 source CSS lost or former ancestor color/opacity retained');
+  else ok('T8 source CSS and definitions survive target isolation');
+}
+
+// Root selectors are resolved before font viewport attributes are normalized.
+{
+  const { default: importSvg } = await import('../../src/svg/importer.js');
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" id="glyph1" width="100px" height="100px"><style>svg[width="100px"] > rect {fill:red}</style><rect width="10" height="10"/></svg>';
+  const bundle = await importSvg(liftGlyphSubElement(svg, 'glyph1', null, 1000), {});
+  if (new Float32Array(bundle.meta, 32)[4] !== 1)
+    fail('root CSS changed after viewport normalization');
+  if (liftGlyphSubElement(null, 'glyph1') !== null || liftGlyphSubElement('', 'glyph1') !== '')
+    fail('empty glyph documents should retain input identity');
+}
+
+// Custom properties inherit through the use instance, not the former parent.
+{
+  const { default: importSvg } = await import('../../src/svg/importer.js');
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" style="--paint:red"><style>.outer{--paint:blue} #glyph1 rect{fill:var(--paint)}</style><g class="outer"><g id="glyph1"><rect width="10" height="10"/></g></g></svg>';
+  const bundle = await importSvg(liftGlyphSubElement(svg, 'glyph1'), {}),
+    meta = new Float32Array(bundle.meta, 32);
+  if (![1, 0, 0, 1].every((v, k) => meta[4 + k] === v))
+    fail('source CSS variables must inherit from the instance');
 }
 
 // T9: liftGlyphSubElement with single-glyph doc — passthrough.
@@ -196,16 +253,14 @@ function tablesWith(svgBytes) {
     <g id="glyph1"><path d="M0 0 L1 0"/></g>
   </svg>`;
   const lifted = liftGlyphSubElement(svg, 'glyph1');
-  if (/display="none"/.test(lifted))
-    fail(`T9 single-glyph doc shouldn't get hidden:\n${lifted}`);
+  if (/display="none"/.test(lifted)) fail(`T9 single-glyph doc shouldn't get hidden:\n${lifted}`);
   else ok('T9 single-glyph doc passes through unmangled');
 }
 
 // T10: liftGlyphSubElement with null id — passthrough verbatim.
 {
   const svg = '<svg xmlns="http://www.w3.org/2000/svg"><g id="glyph1"/></svg>';
-  if (liftGlyphSubElement(svg, null) !== svg)
-    fail('T10 null id should return svgText unchanged');
+  if (liftGlyphSubElement(svg, null) !== svg) fail('T10 null id should return svgText unchanged');
   else if (liftGlyphSubElement(svg, '') !== svg)
     fail('T10 empty id should return svgText unchanged');
   else ok('T10 null/empty id returns passthrough');
@@ -213,9 +268,9 @@ function tablesWith(svgBytes) {
 
 // T11: isGzipped — 1F 8B header detected.
 {
-  if (!isGzipped(new Uint8Array([0x1F, 0x8B, 0x00]))) fail('T11 gzip header missed');
-  else if (isGzipped(new Uint8Array([0x3C, 0x73]))) fail('T11 ascii false-positive');
-  else if (isGzipped(new Uint8Array([0x1F]))) fail('T11 1-byte should be false');
+  if (!isGzipped(new Uint8Array([0x1f, 0x8b, 0x00]))) fail('T11 gzip header missed');
+  else if (isGzipped(new Uint8Array([0x3c, 0x73]))) fail('T11 ascii false-positive');
+  else if (isGzipped(new Uint8Array([0x1f]))) fail('T11 1-byte should be false');
   else if (isGzipped(null)) fail('T11 null should be false');
   else ok('T11 isGzipped predicate');
 }

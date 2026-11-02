@@ -1,6 +1,6 @@
 {
-  // Type-CHECK the JS (no emit). Scoped to the renderer modules — the seam the
-  // monolith→module split made fragile. checkJs gives `no-undef`-grade catching
+  // Type-CHECK the JS (no emit). Scoped to the renderer modules, whose many
+  // cross-module references are easy to break. checkJs gives `no-undef`-grade catching
   // (bare cross-module refs, R.x that's never assigned) without converting any
   // file to .ts. strict/noImplicitAny are OFF so the signal is the STRUCTURAL
   // bugs (undefined names, missing properties), not null-safety noise.
@@ -19,5 +19,5 @@
     "skipLibCheck": true,
     "lib": ["ES2022", "DOM"]
   },
-  "include": ["src/renderer/**/*.js"]
+  "include": ["src/renderer/**/*.js", "test/types/optionalNodeHost.d.ts"]
 }

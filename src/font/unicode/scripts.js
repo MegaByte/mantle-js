@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Script itemization (UAX #24): split text into runs of a single resolved
 // script. Common/Inherited code points adopt the surrounding script (inherit
 // from the preceding real script, or the following one at the start of text).
@@ -6,7 +9,7 @@
 // PARITY: do NOT replace the codegen'd trie with the platform Unicode API
 // (`\p{Script=...}`). It reads the engine's bundled ICU version, which can
 // diverge from the pinned UCD `tables/script.js` and break render parity.
-import { script as scriptTrie, Script } from "./tables/script.js";
+import { script as scriptTrie, Script } from './tables/script.js';
 
 export const SCRIPT = Script;
 export function scriptOf(cp) {

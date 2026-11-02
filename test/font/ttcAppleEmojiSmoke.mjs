@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // ttcAppleEmojiSmoke.mjs — end-to-end TTC + sbix against Apple
 // Color Emoji.ttc (192MB system font on macOS). Skipped silently
 // when the font isn't installed.
@@ -14,8 +17,11 @@ if (!existsSync(TTC_PATH)) {
 }
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 const buf = new Uint8Array(readFileSync(TTC_PATH));
 
@@ -24,8 +30,12 @@ const buf = new Uint8Array(readFileSync(TTC_PATH));
   const t = parseTtfTables(buf);
   if (t.numGlyphs <= 0) fail(`T1 numGlyphs=${t.numGlyphs}`);
   else if (!t.sbix) fail('T1 no sbix table on face 0');
-  else if (t._cmapFormat !== 12) fail(`T1 expected cmap format 12 (Unicode 32-bit), got ${t._cmapFormat}`);
-  else ok(`T1 TTC face 0: ${t.numGlyphs} glyphs, unitsPerEm=${t.unitsPerEm}, cmap format ${t._cmapFormat}`);
+  else if (t._cmapFormat !== 12)
+    fail(`T1 expected cmap format 12 (Unicode 32-bit), got ${t._cmapFormat}`);
+  else
+    ok(
+      `T1 TTC face 0: ${t.numGlyphs} glyphs, unitsPerEm=${t.unitsPerEm}, cmap format ${t._cmapFormat}`,
+    );
 }
 
 // T2: Sbix reader sees multiple strikes.
@@ -41,7 +51,7 @@ const buf = new Uint8Array(readFileSync(TTC_PATH));
 {
   const t = parseTtfTables(buf);
   const r = new SbixReader(t);
-  const gid = t.codepointToGlyphIndex(0x1F600);
+  const gid = t.codepointToGlyphIndex(0x1f600);
   if (gid === 0) fail('T3 no gid for U+1F600');
   else {
     const strikeIdx = r.pickStrikeForPpem(64);
@@ -50,13 +60,17 @@ const buf = new Uint8Array(readFileSync(TTC_PATH));
       const g = r.getBitmapGlyph(gid, strikeIdx);
       if (!g) fail(`T3 no bitmap for gid ${gid} strike ${strikeIdx}`);
       else if (!g.isPng) fail(`T3 non-PNG graphicType 0x${g.graphicType.toString(16)}`);
-      else if (g.pngBytes.length < 100) fail(`T3 PNG suspiciously short: ${g.pngBytes.length} bytes`);
+      else if (g.pngBytes.length < 100)
+        fail(`T3 PNG suspiciously short: ${g.pngBytes.length} bytes`);
       else {
         // Check PNG signature.
         const sig = Array.from(g.pngBytes.slice(0, 4));
-        if (sig[0] !== 0x89 || sig[1] !== 0x50 || sig[2] !== 0x4E || sig[3] !== 0x47)
-          fail(`T3 PNG signature wrong: ${sig.map(b=>b.toString(16)).join(' ')}`);
-        else ok(`T3 U+1F600 (😀) → gid ${gid}, strike ppem ${g.strikePpem}, ${g.pngBytes.length}-byte PNG (signature OK)`);
+        if (sig[0] !== 0x89 || sig[1] !== 0x50 || sig[2] !== 0x4e || sig[3] !== 0x47)
+          fail(`T3 PNG signature wrong: ${sig.map((b) => b.toString(16)).join(' ')}`);
+        else
+          ok(
+            `T3 U+1F600 (😀) → gid ${gid}, strike ppem ${g.strikePpem}, ${g.pngBytes.length}-byte PNG (signature OK)`,
+          );
       }
     }
   }

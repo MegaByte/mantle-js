@@ -1,4 +1,6 @@
 #version 300 es
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
 precision highp float;
 uniform sampler2D uShapeTex;  // shape's output (premultiplied RGBA)
 uniform sampler2D uDstTex;    // main framebuffer copy (premultiplied RGBA)
@@ -26,6 +28,11 @@ void main() {
   // invariant. uOpacity defaults to 1 when not set by the caller.
   float opacity = max(uOpacity, 0.0);
   srcPre = srcPre * opacity;
+  // CSS plus-lighter adds premultiplied color and alpha, clamped per channel.
+  if (uBlendMode == 19) {
+    fragColor = min(srcPre + dstPre, vec4(1.0));
+    return;
+  }
   // Flash AS3 BlendMode.ALPHA (20) and BlendMode.ERASE (21): the source
   // contributes its alpha channel only and modulates the destination's
   // alpha. RGB of the source is ignored. These are coverage operators,

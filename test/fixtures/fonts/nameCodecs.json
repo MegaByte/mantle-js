@@ -1,0 +1,185 @@
+{
+  "font": "AAEAAAAKAIAAAwAgT1MvMkFYQf0AAAEoAAAAYGNtYXAADAC0AAABkAAAADRnbHlmPgA9/gAAAcwAAAAsaGVhZC8NACYAAACsAAAANmhoZWEFFgH2AAAA5AAAACRobXR4AlgAAAAAAYgAAAAGbG9jYQAWAAsAAAHEAAAABm1heHAABAAFAAABCAAAACBuYW1lykSxuwAAAfgAAAJQcG9zdABIAAAAAARIAAAAJgABAAAAAQAApIwvm18PPPUAAwPoAAAAAOcBXqkAAAAA5wFeqQAAAAAB9AH0AAAAAwACAAAAAAAAAAEAAAMg/zgAAAJYAAAAZAH0AAEAAAAAAAAAAAAAAAAAAAABAAEAAAACAAMAAQAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAwJYAZAABQAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAPz8/PwAAAGEAYQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAACWAAAAAAAAAAAAAIAAAADAAAAFAADAAEAAAAUAAQAIAAAAAQABAABAAAAYf//AAAAYf///6AAAQAAAAAAAAALABYAAAABAAAAAAH0AfQAAgAAMREhAfQB9AAAAQAAAAAB9AH0AAIAADERIQH0AfQAAAAAGAEmAAAAAwAAAHYABgAAAAEAAAAAAAEABQAGAAEAAAAAAAIABwALAAEAAAAAAGQAhAASAAEAAAAPAGUAhAASAAEAAAARAGYAhAASAAEAAAASAGcAhAASAAEAAAAYAGkAhAASAAEAAAAlAGgAhAASAAEAAQALAG8AKQCWAAEAAgATAHAAFgC/AAEAAwAXAHEAFADVAAEABAAMAHMAAwDpAAEABgAAAGoAhAASAAEABwAAAGsAhAASAAEAGQAhAHIAFgDsAAEAHQAAAGwAhAASAAEAIwAAAG0AhAASAAEAJQAAAG4AhAASAAMAAQQJAAEACgECAAMAAQQJAAIADgEMAAMAAQQJAHQADAEaAAMAAgQRAHcABAEmAAMACgQJAHUADAEaAEEA6U4tQ29kZWNSZWd1bGFygIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp+goaKjpKWmp6ipqqusra6vsLGys7S1tre4ubq7vL2+v8DBwsPExcbHyMnKy8zNzs/Q0dLT1NXW19jZ2tvc3d7f4OHi4+Tl5ufo6err7O3u7/Dx8vP09fb3+Pn6+/z9/v8gYWJjk/qWe4zqg3SDSIOTg2eBaYNlg1iDZ4FqYWJjILGysyCAoP3+/yB+IPzBY8XppKSk5aZyq6wgYWJjIICg/f7/x9Gx2yCx27LDIGFiYyCAgYKD/v9hjqG88szl1tDOxNfWzOUgYWJjIICg/f7/AEMAbwBkAGUAYwBSAGUAZwB1AGwAYQByAEEA6U4t2D3eAABak/qWewACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAABEAAA=",
+  "records": [
+    {
+      "nameId": 100,
+      "platform": 1,
+      "encoding": 0,
+      "language": 0,
+      "codec": "mac_roman",
+      "py": "ÄÅÇÉÑÖÜáàâäãåçéèêëíìîïñóòôöõúùûü†°¢£§•¶ß®©™´¨≠ÆØ∞±≤≥¥µ∂∑∏π∫ªºΩæø¿¡¬√ƒ≈∆«»… ÀÃÕŒœ–—“”‘’÷◊ÿŸ⁄€‹›ﬁﬂ‡·‚„‰ÂÊÁËÈÍÎÏÌÓÔÒÚÛÙıˆ˜¯˘˙˚¸˝˛ˇ abc",
+      "hb": "�������������������������������������������������������������������������������������������������������������������������������� abc"
+    },
+    {
+      "nameId": 101,
+      "platform": 1,
+      "encoding": 0,
+      "language": 15,
+      "codec": "mac_iceland",
+      "py": "ÄÅÇÉÑÖÜáàâäãåçéèêëíìîïñóòôöõúùûüÝ°¢£§•¶ß®©™´¨≠ÆØ∞±≤≥¥µ∂∑∏π∫ªºΩæø¿¡¬√ƒ≈∆«»… ÀÃÕŒœ–—“”‘’÷◊ÿŸ⁄€ÐðÞþý·‚„‰ÂÊÁËÈÍÎÏÌÓÔÒÚÛÙıˆ˜¯˘˙˚¸˝˛ˇ abc",
+      "hb": "�������������������������������������������������������������������������������������������������������������������������������� abc"
+    },
+    {
+      "nameId": 102,
+      "platform": 1,
+      "encoding": 0,
+      "language": 17,
+      "codec": "mac_turkish",
+      "py": "ÄÅÇÉÑÖÜáàâäãåçéèêëíìîïñóòôöõúùûü†°¢£§•¶ß®©™´¨≠ÆØ∞±≤≥¥µ∂∑∏π∫ªºΩæø¿¡¬√ƒ≈∆«»… ÀÃÕŒœ–—“”‘’÷◊ÿŸĞğİıŞş‡·‚„‰ÂÊÁËÈÍÎÏÌÓÔÒÚÛÙˆ˜¯˘˙˚¸˝˛ˇ abc",
+      "hb": "�������������������������������������������������������������������������������������������������������������������������������� abc"
+    },
+    {
+      "nameId": 103,
+      "platform": 1,
+      "encoding": 0,
+      "language": 18,
+      "codec": "mac_croatian",
+      "py": "ÄÅÇÉÑÖÜáàâäãåçéèêëíìîïñóòôöõúùûü†°¢£§•¶ß®Š™´¨≠ŽØ∞±≤≥∆µ∂∑∏š∫ªºΩžø¿¡¬√ƒ≈Ć«Č… ÀÃÕŒœĐ—“”‘’÷◊©⁄€‹›Æ»–·‚„‰ÂćÁčÈÍÎÏÌÓÔđÒÚÛÙıˆ˜¯πË˚¸Êæˇ abc",
+      "hb": "�������������������������������������������������������������������������������������������������������������������������������� abc"
+    },
+    {
+      "nameId": 104,
+      "platform": 1,
+      "encoding": 0,
+      "language": 37,
+      "codec": "mac_romanian",
+      "py": "ÄÅÇÉÑÖÜáàâäãåçéèêëíìîïñóòôöõúùûü†°¢£§•¶ß®©™´¨≠ĂȘ∞±≤≥¥µ∂∑∏π∫ªºΩăș¿¡¬√ƒ≈∆«»… ÀÃÕŒœ–—“”‘’÷◊ÿŸ⁄€‹›Țț‡·‚„‰ÂÊÁËÈÍÎÏÌÓÔÒÚÛÙıˆ˜¯˘˙˚¸˝˛ˇ abc",
+      "hb": "�������������������������������������������������������������������������������������������������������������������������������� abc"
+    },
+    {
+      "nameId": 105,
+      "platform": 1,
+      "encoding": 0,
+      "language": 24,
+      "codec": "mac_latin2",
+      "py": "ÄĀāÉĄÖÜáąČäčĆćéŹźĎíďĒēĖóėôöõúĚěü†°Ę£§•¶ß®©™ę¨≠ģĮįĪ≤≥īĶ∂∑łĻļĽľĹĺŅņŃ¬√ńŇ∆«»… ňŐÕőŌ–—“”‘’÷◊ōŔŕŘ‹›řŖŗŠ‚„šŚśÁŤťÍŽžŪÓÔūŮÚůŰűŲųÝýķŻŁżĢˇ abc",
+      "hb": "�������������������������������������������������������������������������������������������������������������������������������� abc"
+    },
+    {
+      "nameId": 106,
+      "platform": 1,
+      "encoding": 6,
+      "language": 0,
+      "codec": "mac_greek",
+      "py": "Ä¹²É³ÖÜ΅àâä΄¨çéèêë£™îï•½‰ôö¦€ùûü†ΓΔΘΛΞΠß®©ΣΪ§≠°·Α±≤≥¥ΒΕΖΗΙΚΜΦΫΨΩάΝ¬ΟΡ≈Τ«»… ΥΧΆΈœ–―“”‘’÷ΉΊΌΎέήίόΏύαβψδεφγηιξκλμνοπώρστθωςχυζϊϋΐΰ­ abc",
+      "hb": null
+    },
+    {
+      "nameId": 107,
+      "platform": 1,
+      "encoding": 7,
+      "language": 0,
+      "codec": "mac_cyrillic",
+      "py": "АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ†°Ґ£§•¶І®©™Ђђ≠Ѓѓ∞±≤≥іµґЈЄєЇїЉљЊњјЅ¬√ƒ≈∆«»… ЋћЌќѕ–—“”‘’÷„ЎўЏџ№Ёёяабвгдежзийклмнопрстуфхцчшщъыьэю€ abc",
+      "hb": null
+    },
+    {
+      "nameId": 108,
+      "platform": 1,
+      "encoding": 29,
+      "language": 0,
+      "codec": "mac_latin2",
+      "py": "ÄĀāÉĄÖÜáąČäčĆćéŹźĎíďĒēĖóėôöõúĚěü†°Ę£§•¶ß®©™ę¨≠ģĮįĪ≤≥īĶ∂∑łĻļĽľĹĺŅņŃ¬√ńŇ∆«»… ňŐÕőŌ–—“”‘’÷◊ōŔŕŘ‹›řŖŗŠ‚„šŚśÁŤťÍŽžŪÓÔūŮÚůŰűŲųÝýķŻŁżĢˇ abc",
+      "hb": null
+    },
+    {
+      "nameId": 109,
+      "platform": 1,
+      "encoding": 35,
+      "language": 0,
+      "codec": "mac_turkish",
+      "py": "ÄÅÇÉÑÖÜáàâäãåçéèêëíìîïñóòôöõúùûü†°¢£§•¶ß®©™´¨≠ÆØ∞±≤≥¥µ∂∑∏π∫ªºΩæø¿¡¬√ƒ≈∆«»… ÀÃÕŒœ–—“”‘’÷◊ÿŸĞğİıŞş‡·‚„‰ÂÊÁËÈÍÎÏÌÓÔÒÚÛÙˆ˜¯˘˙˚¸˝˛ˇ abc",
+      "hb": null
+    },
+    {
+      "nameId": 110,
+      "platform": 1,
+      "encoding": 37,
+      "language": 0,
+      "codec": "mac_iceland",
+      "py": "ÄÅÇÉÑÖÜáàâäãåçéèêëíìîïñóòôöõúùûüÝ°¢£§•¶ß®©™´¨≠ÆØ∞±≤≥¥µ∂∑∏π∫ªºΩæø¿¡¬√ƒ≈∆«»… ÀÃÕŒœ–—“”‘’÷◊ÿŸ⁄€ÐðÞþý·‚„‰ÂÊÁËÈÍÎÏÌÓÔÒÚÛÙıˆ˜¯˘˙˚¸˝˛ˇ abc",
+      "hb": null
+    },
+    {
+      "nameId": 111,
+      "platform": 1,
+      "encoding": 1,
+      "language": 11,
+      "codec": "x_mac_japanese_ttx",
+      "py": "日本語フォント（テスト）abc ｱｲｳ \\ ©™… ~ |",
+      "hb": null
+    },
+    {
+      "nameId": 112,
+      "platform": 1,
+      "encoding": 2,
+      "language": 19,
+      "codec": "x_mac_trad_chinese_ttx",
+      "py": "繁體中文字型 abc \\ ©™…",
+      "hb": null
+    },
+    {
+      "nameId": 113,
+      "platform": 1,
+      "encoding": 3,
+      "language": 23,
+      "codec": "x_mac_korean_ttx",
+      "py": "한글 글꼴 abc  ₩—©™…",
+      "hb": null
+    },
+    {
+      "nameId": 114,
+      "platform": 1,
+      "encoding": 25,
+      "language": 33,
+      "codec": "x_mac_simp_chinese_ttx",
+      "py": "简体中文字体 abc ü ©™…",
+      "hb": null
+    },
+    {
+      "nameId": 115,
+      "platform": 1,
+      "encoding": 4,
+      "language": 12,
+      "codec": null,
+      "py": null,
+      "hb": null
+    },
+    {
+      "nameId": 116,
+      "platform": 3,
+      "encoding": 1,
+      "language": 1033,
+      "codec": "utf_16_be",
+      "py": "Aé中😀Z",
+      "hb": "Aé中😀Z"
+    },
+    {
+      "nameId": 117,
+      "platform": 3,
+      "encoding": 10,
+      "language": 1033,
+      "codec": "utf_16_be",
+      "py": "Aé中😀Z",
+      "hb": "Aé中😀Z"
+    },
+    {
+      "nameId": 118,
+      "platform": 0,
+      "encoding": 3,
+      "language": 0,
+      "codec": "utf_16_be",
+      "py": "Aé中",
+      "hb": null
+    },
+    {
+      "nameId": 119,
+      "platform": 3,
+      "encoding": 2,
+      "language": 1041,
+      "codec": "shift_jis",
+      "py": "日本",
+      "hb": null
+    }
+  ]
+}

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // clearNodeClip must clear the clip record for the current nativeText mode:
 // a nativeText scene stores its clip under __nativeRecordText, so clearNodeClip
 // must not delete only the normal __nativeRecord id and leave the clip active.
@@ -5,15 +8,18 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { openReady } from './_pageReady.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
-const CONTENT = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">'
-  + '<rect x="0" y="0" width="100" height="100" fill="#ff0000"/></svg>';
-const CLIP = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">'
-  + '<rect x="0" y="0" width="100" height="50" fill="#fff"/></svg>';
+const CONTENT =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">' +
+  '<rect x="0" y="0" width="100" height="100" fill="#ff0000"/></svg>';
+const CLIP =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">' +
+  '<rect x="0" y="0" width="100" height="50" fill="#fff"/></svg>';
 
 const HTML = `<!DOCTYPE html><html><body style="margin:0">
 <div id="host"></div><canvas id="cv" width="100" height="100"></canvas>
@@ -63,27 +69,38 @@ const server = http.createServer((req, res) => {
     res.end();
   }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 const isRed = (p) => p[0] > 150 && p[1] < 90 && p[2] < 90 && p[3] > 120;
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
 try {
-  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
+  await openReady(page, `http://127.0.0.1:${port}/`, { ready: 'flag' });
 } catch (e) {
   fail('setup: ' + e.message);
-  await browser.close(); server.close(); process.exit(1);
+  await browser.close();
+  server.close();
+  process.exit(1);
 }
 
 const r = await page.evaluate(() => window.__run());
-if (isRed(r.top) && isRed(r.bottom)) ok('nativeText clearNodeClip removed the clip from both top and bottom samples');
+if (isRed(r.top) && isRed(r.bottom))
+  ok('nativeText clearNodeClip removed the clip from both top and bottom samples');
 else fail('nativeText clearNodeClip left a stale clip: top=' + r.top + ' bottom=' + r.bottom);
 
 await browser.close();

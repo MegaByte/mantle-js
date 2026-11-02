@@ -1,0 +1,104 @@
+--- a/src/renderer/cpatchBuild.js
++++ b/src/renderer/cpatchBuild.js
+@@ -514,0 +515 @@
++                  hasRquad: m.hasRquad,
+--- a/src/renderer/cpatchPack.js
++++ b/src/renderer/cpatchPack.js
+@@ -1817,0 +1818 @@
++  let hasRquad = false;
+@@ -1821,0 +1823 @@
++    hasRquad ||= !!(m.kinds && m.kinds[5] > 0);
+@@ -1824 +1826 @@
+-           cpatch: true, kindMask: 1 << CPATCH_STREAM_TAG, unresolved, cells, dropped, allSeam, comp };
++           cpatch: true, kindMask: 1 << CPATCH_STREAM_TAG, unresolved, cells, dropped, allSeam, comp, hasRquad };
+--- a/src/renderer/fillPass.js
++++ b/src/renderer/fillPass.js
+@@ -953,0 +954,9 @@
++      // Private candidate: compile its conic area only where a pack contains one.
++      const eg = bundle._geomGen | 0, ea = bundle._lbAdoptKey | 0;
++      const em = bundle._lbMeshes || bundle._morphMeshes;
++      if (bundle._cpEllipseGen !== eg || bundle._cpEllipseAdopt !== ea || bundle._cpEllipseMeshes !== em) {
++        bundle._cpHasEllipse = !em || em.some(m => m && m.cpatch && m.hasRquad !== false);
++        bundle._cpEllipseGen = eg; bundle._cpEllipseAdopt = ea; bundle._cpEllipseMeshes = em;
++      }
++      if (bundle._cpHasEllipse) defines.push('MANTLE_CPATCH_HAS_RQUAD');
++
+--- a/src/renderer/lbContour.js
++++ b/src/renderer/lbContour.js
+@@ -687 +687,12 @@
+-      const rqs = arcToRationalQuads(cx, cy, rx, ry, th0, th1, phi);
++      let beginAngle=th0, endAngle=th1;
++      // PRIVATE DIAGNOSTIC: exact cardinal endpoints on an axis-aligned ellipse.
++      // Stored vertices are already authoritative; derive controls consistently.
++      const cardinal=(x,y)=>{const u=(x-cx)/rx,v=(y-cy)/ry;
++        return (u===0 && Math.abs(v)===1)||(v===0 && Math.abs(u)===1) ? Math.atan2(v,u) : null;};
++      const aa=phi===0 && rx>0 && ry>0 ? cardinal(sx,sy) : null;
++      const bb=phi===0 && rx>0 && ry>0 ? cardinal(ex,ey) : null;
++      if(aa!==null && bb!==null && sx!==ex){
++        const tau=2*Math.PI,raw=bb-aa,delta=th1>th0 ? (raw<=0 ? raw+tau : raw) : (raw>=0 ? raw-tau : raw);
++        if(Math.abs(delta-(th1-th0))<1e-6){beginAngle=aa;endAngle=aa+delta;}
++      }
++      const rqs = arcToRationalQuads(cx, cy, rx, ry, beginAngle, endAngle, phi);
+--- a/src/shaders/_cpatchCoverage.glsl
++++ b/src/shaders/_cpatchCoverage.glsl
+@@ -523,0 +524,46 @@
++#if defined(MANTLE_CPATCH_EXACT_ELLIPSE) && defined(MANTLE_CPATCH_HAS_RQUAD)
++// Private accuracy candidate: the exact area of an ellipse constraint in a box.
++// Transform the pixel rectangle to the unit disk; split each edge at disk roots.
++// Inside pieces contribute their triangle, outside pieces their circular sector.
++float cpDiskEdge(vec2 a, vec2 b) {
++  vec2 d = b - a;
++  float A = dot(d,d), B = dot(a,d), D = B*B-A*(dot(a,a)-1.0);
++  vec2 ts = vec2(0.0, 0.0);
++  if (D > 0.0 && A > 0.0) ts = clamp(vec2(-B-sqrt(D),-B+sqrt(D))/A,0.0,1.0);
++  float lo=0.0, sum=0.0;
++  for (int j=0;j<3;j++) {
++    float hi = j==0 ? ts.x : (j==1 ? ts.y : 1.0);
++    if (hi > lo) {
++      vec2 u=a+lo*d, v=a+hi*d, mid=a+0.5*(lo+hi)*d;
++      float cr=u.x*v.y-u.y*v.x;
++      sum += dot(mid,mid) <= 1.0 ? cr : atan(cr,dot(u,v));
++    }
++    lo=hi;
++  }
++  return 0.5*sum;
++}
++float cpEllipseBox(vec3 Q, float f, vec2 g, float emPerPx) {
++  float qs=max(abs(Q.x),max(abs(Q.y),abs(Q.z)));
++  if (!(qs > 0.0)) return -1.0;
++  Q/=qs;f/=qs;g/=qs;
++  float detQ=Q.x*Q.z-Q.y*Q.y;
++  if (!(Q.x > 0.0 && detQ > 0.0)) return -1.0;
++  vec2 ctr=0.5*vec2(Q.z*g.x-Q.y*g.y,Q.x*g.y-Q.y*g.x)/detQ;
++  float k=f+0.5*dot(g,ctr);
++  if (!(k > 0.0)) return -1.0;
++  float a=sqrt(Q.x/k), b=Q.y/sqrt(Q.x*k), c=sqrt(detQ/(Q.x*k));
++  // A loose size gate keeps the expensive exact model off large ellipses.
++  if (k*max(Q.x,Q.z) > 4.0001*detQ*emPerPx*emPerPx) return -1.0;
++  vec2 ext=sqrt(k*vec2(Q.z,Q.x)/detQ);
++  if (abs(ctr.x)-ext.x > 0.5*emPerPx || abs(ctr.y)-ext.y > 0.5*emPerPx) return 0.0;
++  if (abs(ctr.x)+ext.x <= 0.5*emPerPx && abs(ctr.y)+ext.y <= 0.5*emPerPx)
++    return clamp(3.141592653589793*k/(sqrt(detQ)*emPerPx*emPerPx),0.0,1.0);
++  vec2 off=vec2(a*ctr.x+b*ctr.y,c*ctr.y);
++  vec2 dx=0.5*emPerPx*vec2(a,0.0), dy=0.5*emPerPx*vec2(b,c);
++  vec2 p0=-dx-dy-off,p1=dx-dy-off,p2=dx+dy-off,p3=-dx+dy-off;
++  if (dot(p0,p0)<=1.0 && dot(p1,p1)<=1.0 && dot(p2,p2)<=1.0 && dot(p3,p3)<=1.0) return 1.0;
++  float area=cpDiskEdge(p0,p1)+cpDiskEdge(p1,p2)+cpDiskEdge(p2,p3)+cpDiskEdge(p3,p0);
++  return clamp(area*k/(sqrt(detQ)*emPerPx*emPerPx),0.0,1.0);
++}
++#endif
++
+@@ -810,0 +857,13 @@
++#if defined(MANTLE_CPATCH_EXACT_ELLIPSE) && defined(MANTLE_CPATCH_HAS_RQUAD)
++  if (!isCut && kind > 4.5) {
++    vec3 Q=sg*vec3(e1.x*e2c.x-e0.x*e0.x,
++      0.5*(e1.x*e2c.y+e1.y*e2c.x)-e0.x*e0.y,
++      e1.y*e2c.y-e0.y*e0.y);
++    float ellipseArea=cpEllipseBox(Q,f,gf,emPerPx);
++    if (ellipseArea >= 0.0) {
++      softOut=ellipseArea;nearOut=true;sdOut=0.0;
++      return ellipseArea;
++    }
++  }
++#endif
++

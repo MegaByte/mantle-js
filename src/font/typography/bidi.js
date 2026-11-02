@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // font/typography/bidi — opt-in UAX #9 bidirectional text.
 //
 //   import { registerBidi } from '@kontek/mantle/font/typography/bidi';
@@ -17,7 +20,11 @@
 // drops out for LTR-only consumers.
 
 import {
-  resolveBaseDirection, resolveLevels, reorderLine, getBidiClass, isRtlStrong,
+  resolveBaseDirection,
+  resolveLevels,
+  reorderLine,
+  getBidiClass,
+  isRtlStrong,
 } from '../bidi.js';
 import { registerBidi as _registerBidiImpl } from '../bidiRegistry.js';
 
@@ -27,12 +34,20 @@ export function registerBidi() {
   if (_registered) return;
   _registered = true;
   _registerBidiImpl({
-    resolveBaseDirection, resolveLevels, reorderLine, getBidiClass, isRtlStrong,
+    resolveBaseDirection,
+    resolveLevels,
+    reorderLine,
+    getBidiClass,
+    isRtlStrong,
   });
 }
 
 // Re-export the raw helpers for consumers building their own pipeline.
 export {
-  resolveBaseDirection, resolveLevels, reorderLine, getBidiClass, isRtlStrong,
+  resolveBaseDirection,
+  resolveLevels,
+  reorderLine,
+  getBidiClass,
+  isRtlStrong,
 } from '../bidi.js';
 export { BaseDirection } from '../bidiConst.js';

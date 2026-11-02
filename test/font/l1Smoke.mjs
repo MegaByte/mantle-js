@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // l1Smoke.mjs — pragmatic Unicode core.
 //
 // Verifies:
@@ -10,33 +13,41 @@ import { MantleFontAsset } from '../../src/font/fontAsset.js';
 import { buildStyled, buildTextRun } from '../../src/font/textRun.js';
 import { parseMarkup, defaultStyle } from '../../src/font/markupParser.js';
 
-const arial  = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')));
-const gothic = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/AppleGothic.ttf')));
+const arial = new MantleFontAsset(
+  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')),
+);
+const gothic = new MantleFontAsset(
+  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/AppleGothic.ttf')),
+);
 arial.getMetrics(0x41);
 gothic.getMetrics(0x41);
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
-const build = async (text, font, opts) => await buildStyled([{ text, style: defaultStyle() }], font, opts || {});
+const build = async (text, font, opts) =>
+  await buildStyled([{ text, style: defaultStyle() }], font, opts || {});
 
 // ---- T1: NFC collapses precomposed vs decomposed to same glyph count ----
 {
-  const nfc = 'café';            // precomposed U+00E9
-  const nfd = 'café';           // e + U+0301 combining acute
+  const nfc = 'café'; // precomposed U+00E9
+  const nfd = 'café'; // e + U+0301 combining acute
   const a = await buildTextRun(nfc, arial);
   const b = await buildTextRun(nfd, arial);
-  if (a.numShapes !== b.numShapes) fail(`T1 NFC vs NFD shape count ${a.numShapes} vs ${b.numShapes}`);
-  else if (Math.abs((a.globalBBox[2]) - (b.globalBBox[2])) > 1e-3)
-    fail(`T1 NFC vs NFD width differs`);
-  else ok(`T1 NFC ↔ NFD parity: ${a.numShapes} shapes, w=${(a.globalBBox[2]).toFixed(3)}`);
+  if (a.numShapes !== b.numShapes)
+    fail(`T1 NFC vs NFD shape count ${a.numShapes} vs ${b.numShapes}`);
+  else if (Math.abs(a.globalBBox[2] - b.globalBBox[2]) > 1e-3) fail(`T1 NFC vs NFD width differs`);
+  else ok(`T1 NFC ↔ NFD parity: ${a.numShapes} shapes, w=${a.globalBBox[2].toFixed(3)}`);
 }
 
 // ---- T2: NFC affects multiple precomposed letters (façade) ----
 {
   const nfc = 'façade';
-  const nfd = 'façade';  // c + cedilla
+  const nfd = 'façade'; // c + cedilla
   const a = await buildTextRun(nfc, arial);
   const b = await buildTextRun(nfd, arial);
   if (a.numShapes !== b.numShapes) fail(`T2 façade shape count ${a.numShapes} vs ${b.numShapes}`);
@@ -45,7 +56,7 @@ const build = async (text, font, opts) => await buildStyled([{ text, style: defa
 
 // ---- T3: pre-NFC text passes through unchanged ----
 {
-  const text = 'hello';   // pure ASCII, already NFC
+  const text = 'hello'; // pure ASCII, already NFC
   const b = await buildTextRun(text, arial);
   if (b.numShapes !== 5) fail(`T3 ASCII no-op: ${b.numShapes}`);
   else ok(`T3 NFC is no-op on pure ASCII`);
@@ -68,7 +79,10 @@ const build = async (text, font, opts) => await buildStyled([{ text, style: defa
   const stride = b.metaFloatsPerShape;
   let periodIdx = -1;
   for (let i = 0; i < b.numShapes; i++) {
-    if (b.shapeIds[i].includes('u3002')) { periodIdx = i; break; }
+    if (b.shapeIds[i].includes('u3002')) {
+      periodIdx = i;
+      break;
+    }
   }
   if (periodIdx < 0) fail(`T4 period glyph not found`);
   else {
@@ -78,9 +92,12 @@ const build = async (text, font, opts) => await buildStyled([{ text, style: defa
     // xmin LESS than the period's xmin (they're horizontally adjacent
     // on the same line). If the period got wrapped to line-start,
     // its xmin would be smaller than え's.
-    const myX = b.metaFloats[periodIdx*stride + 0];
-    const prevX = b.metaFloats[(periodIdx - 1)*stride + 0];
-    if (prevX > myX) fail(`T4 LB13 violated — 。 wrapped to line-start (xmin ${myX.toFixed(3)} < え xmin ${prevX.toFixed(3)})`);
+    const myX = b.metaFloats[periodIdx * stride + 0];
+    const prevX = b.metaFloats[(periodIdx - 1) * stride + 0];
+    if (prevX > myX)
+      fail(
+        `T4 LB13 violated — 。 wrapped to line-start (xmin ${myX.toFixed(3)} < え xmin ${prevX.toFixed(3)})`,
+      );
     else ok(`T4 LB13: 。 stays with preceding え (xmin ${prevX.toFixed(3)} → ${myX.toFixed(3)})`);
   }
 }
@@ -100,13 +117,19 @@ const build = async (text, font, opts) => await buildStyled([{ text, style: defa
   const stride = b.metaFloatsPerShape;
   let openIdx = -1;
   for (let i = 0; i < b.numShapes; i++) {
-    if (b.shapeIds[i].includes('u300C')) { openIdx = i; break; }
+    if (b.shapeIds[i].includes('u300C')) {
+      openIdx = i;
+      break;
+    }
   }
   if (openIdx < 0 || openIdx >= b.numShapes - 1) fail(`T5 open-quote / follower not found`);
   else {
-    const myXmin = b.metaFloats[openIdx*stride + 0];
-    const nextXmin = b.metaFloats[(openIdx + 1)*stride + 0];
-    if (nextXmin < myXmin) fail(`T5 LB14 violated — え wrapped to line-start (xmin ${nextXmin.toFixed(3)} < 「 xmin ${myXmin.toFixed(3)})`);
+    const myXmin = b.metaFloats[openIdx * stride + 0];
+    const nextXmin = b.metaFloats[(openIdx + 1) * stride + 0];
+    if (nextXmin < myXmin)
+      fail(
+        `T5 LB14 violated — え wrapped to line-start (xmin ${nextXmin.toFixed(3)} < 「 xmin ${myXmin.toFixed(3)})`,
+      );
     else ok(`T5 LB14: え stays after 「 (xmin ${myXmin.toFixed(3)} → ${nextXmin.toFixed(3)})`);
   }
 }

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 160">
+<defs><filter id="fd" x="0" y="-0.25" width="0.55" height="1.5"><feGaussianBlur stdDeviation="1.5"/></filter></defs>
+<rect x="0" y="0" width="320" height="160" fill="#101418"/>
+<g transform="translate(40 60)" filter="url(#fd)"><rect x="0" y="0" width="80" height="24" fill="#f05a28"/></g>
+<g transform="translate(190 60) rotate(30)" filter="url(#fd)"><rect x="0" y="0" width="80" height="24" fill="#f05a28"/></g>
+</svg>

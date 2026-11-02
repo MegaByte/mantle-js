@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // font/color — opt-in registration for color glyph readers.
 //
 //   import { registerColorEmojiReaders } from '@kontek/mantle/font/color';
@@ -24,12 +27,12 @@ let _registered = false;
 export function registerColorEmojiReaders() {
   if (_registered) return;
   _registered = true;
-  registerReader('colr',             (tables) => new ColrReader(tables));
-  registerReader('colrPaintToGraph', colrPaintToGraph);   // not a constructor — pure fn
-  registerReader('sbix',             (tables) => new SbixReader(tables));
-  registerReader('cbdt',             (tables) => new CbdtReader(tables));
-  registerReader('ebdt',             (tables) => new EbdtReader(tables));
-  registerReader('svgInOt',          (tables) => new SvgInOtReader(tables));
+  registerReader('colr', (tables) => new ColrReader(tables));
+  registerReader('colrPaintToGraph', colrPaintToGraph); // not a constructor — pure fn
+  registerReader('sbix', (tables) => new SbixReader(tables));
+  registerReader('cbdt', (tables) => new CbdtReader(tables));
+  registerReader('ebdt', (tables) => new EbdtReader(tables));
+  registerReader('svgInOt', (tables) => new SvgInOtReader(tables));
 }
 
 // Re-export the underlying reader classes for consumers that want to

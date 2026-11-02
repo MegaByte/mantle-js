@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Shape-morph must interpolate an inherited mask. Top-down mask wipe: SRC mask
 // rect height = 10px, DST = 80px, content rect = 100px wide × 100px tall.
 // Driving the morph t = 0 → 0.5 → 1 should produce three distinct row-counts
@@ -11,7 +14,7 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -21,8 +24,8 @@ const mk = (h) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"
   <g mask="url(#m)"><rect x="0" y="0" width="100" height="100" fill="#ff0000"/></g>
 </svg>`;
 
-const SRC = mk(10);   // thin slit at top — only ~10% red visible
-const DST = mk(80);   // wide reveal — ~80% red visible
+const SRC = mk(10); // thin slit at top — only ~10% red visible
+const DST = mk(80); // wide reveal — ~80% red visible
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="200" height="200"></canvas>
@@ -72,23 +75,37 @@ const server = http.createServer((req, res) => {
     return;
   }
   let p = decodeURIComponent(u.pathname);
-  const mime = p.endsWith('.js') || p.endsWith('.mjs') ? 'text/javascript'
-             : p.endsWith('.glsl') ? 'text/plain' : 'application/octet-stream';
-  try { res.writeHead(200, { 'content-type': mime + '; charset=utf-8' });
-        res.end(readFileSync(path.join(ROOT, p))); }
-  catch { try { res.writeHead(404); res.end(); } catch {} }
+  const mime =
+    p.endsWith('.js') || p.endsWith('.mjs')
+      ? 'text/javascript'
+      : p.endsWith('.glsl')
+        ? 'text/plain'
+        : 'application/octet-stream';
+  try {
+    res.writeHead(200, { 'content-type': mime + '; charset=utf-8' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    try {
+      res.writeHead(404);
+      res.end();
+    } catch {}
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${server.address().port}/`;
 
-const browser = await puppeteer.launch({
-  headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'],
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
 });
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
 await page.setViewport({ width: 300, height: 300 });
 await page.goto(url, { waitUntil: 'load', timeout: 10000 });
-await page.waitForFunction(() => window.__done === true, { timeout: 10000 });
+await page.waitForFunction(() => window.__done === true, { timeout: 10000, polling: 100 });
 const r = await page.evaluate(() => window.__result);
 await browser.close();
 server.close();
@@ -101,12 +118,22 @@ console.log(`red rows at t=1   = ${r.cnt1}  (expect ~80%)`);
 
 if (r.cnt0 <= 2 || r.cntMid <= 2 || r.cnt1 <= 2)
   console.error('FAIL one or more reads produced zero / negligible red — mask is fully clipping');
-else if (r.cntMid <= r.cnt0 + 5)
-  { failures++; console.error('FAIL midpoint not visibly bigger than t=0 (mask not interpolating)'); }
-else if (r.cntMid >= r.cnt1 - 5)
-  { failures++; console.error('FAIL midpoint not visibly smaller than t=1 (mask not interpolating)'); }
-else
-  console.log('ok mask geometry interpolates monotonically across t (' + r.cnt0 + ' < ' + r.cntMid + ' < ' + r.cnt1 + ')');
+else if (r.cntMid <= r.cnt0 + 5) {
+  failures++;
+  console.error('FAIL midpoint not visibly bigger than t=0 (mask not interpolating)');
+} else if (r.cntMid >= r.cnt1 - 5) {
+  failures++;
+  console.error('FAIL midpoint not visibly smaller than t=1 (mask not interpolating)');
+} else
+  console.log(
+    'ok mask geometry interpolates monotonically across t (' +
+      r.cnt0 +
+      ' < ' +
+      r.cntMid +
+      ' < ' +
+      r.cnt1 +
+      ')',
+  );
 
 console.log();
 console.log(failures === 0 ? 'MASK-WIPE PASS' : `MASK-WIPE FAIL (${failures})`);

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // colrFontAssetSmoke.mjs — builds an in-memory sfnt with COLR v0 + CPAL
 // via _colrFontFixture, feeds it through MantleFontAsset, and verifies the
 // getColoredGlyph integration end-to-end.
@@ -8,18 +11,24 @@ import { MantleFontAsset } from '../../src/font/fontAsset.js';
 import { buildColrTestFont } from './_colrFontFixture.mjs';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // T1: font with COLR → hasColor true.
 {
   const bytes = buildColrTestFont({ codepoint: 0x41 });
   const font = new MantleFontAsset(bytes);
-  font.getMetrics(0x41);   // forces _ensure()
+  font.getMetrics(0x41); // forces _ensure()
   if (!font.hasColor) fail('T1 hasColor false');
   else if (font.colr.version !== 0) fail(`T1 version=${font.colr.version}`);
   else if (font.colr.numBaseGlyphs !== 1) fail(`T1 numBaseGlyphs=${font.colr.numBaseGlyphs}`);
-  else ok(`T1 hasColor true; v${font.colr.version}, ${font.colr.numBaseGlyphs} base, ${font.colr.numPaletteEntries} palette`);
+  else
+    ok(
+      `T1 hasColor true; v${font.colr.version}, ${font.colr.numBaseGlyphs} base, ${font.colr.numPaletteEntries} palette`,
+    );
 }
 
 // T2: getColoredGlyph(codepoint) returns 2 layers with segs.
@@ -31,7 +40,10 @@ const ok   = (msg) => console.log('ok ' + msg);
   else if (layers.length !== 2) fail(`T2 expected 2 layers, got ${layers.length}`);
   else if (!layers[0].segs || layers[0].segs.length === 0) fail(`T2 layer 0 has no segs`);
   else if (!layers[1].segs || layers[1].segs.length === 0) fail(`T2 layer 1 has no segs`);
-  else ok(`T2 0x41 → 2 layers: layer0 ${layers[0].segs.length} segs (rgba ${JSON.stringify(layers[0].rgba)}), layer1 ${layers[1].segs.length} segs (rgba ${JSON.stringify(layers[1].rgba)})`);
+  else
+    ok(
+      `T2 0x41 → 2 layers: layer0 ${layers[0].segs.length} segs (rgba ${JSON.stringify(layers[0].rgba)}), layer1 ${layers[1].segs.length} segs (rgba ${JSON.stringify(layers[1].rgba)})`,
+    );
 }
 
 // T3: getColoredGlyphByGid agrees with getColoredGlyph.
@@ -54,10 +66,20 @@ const ok   = (msg) => console.log('ok ' + msg);
   const layers = font.getColoredGlyph(0x41);
   const [r0, g0, b0, a0] = layers[0].rgba;
   const [r1, g1, b1, a1] = layers[1].rgba;
-  if (Math.abs(r0 - 1) > 1e-3 || Math.abs(g0) > 1e-3 || Math.abs(b0) > 1e-3 || Math.abs(a0 - 1) > 1e-3)
-    fail(`T4 layer 0 rgba ${[r0,g0,b0,a0]} (expected red)`);
-  else if (Math.abs(r1) > 1e-3 || Math.abs(g1 - 1) > 1e-3 || Math.abs(b1) > 1e-3 || Math.abs(a1 - 1) > 1e-3)
-    fail(`T4 layer 1 rgba ${[r1,g1,b1,a1]} (expected green)`);
+  if (
+    Math.abs(r0 - 1) > 1e-3 ||
+    Math.abs(g0) > 1e-3 ||
+    Math.abs(b0) > 1e-3 ||
+    Math.abs(a0 - 1) > 1e-3
+  )
+    fail(`T4 layer 0 rgba ${[r0, g0, b0, a0]} (expected red)`);
+  else if (
+    Math.abs(r1) > 1e-3 ||
+    Math.abs(g1 - 1) > 1e-3 ||
+    Math.abs(b1) > 1e-3 ||
+    Math.abs(a1 - 1) > 1e-3
+  )
+    fail(`T4 layer 1 rgba ${[r1, g1, b1, a1]} (expected green)`);
   else ok(`T4 palette decode through full path: red + green`);
 }
 
@@ -66,7 +88,7 @@ const ok   = (msg) => console.log('ok ' + msg);
   const bytes = buildColrTestFont({ codepoint: 0x41 });
   const font = new MantleFontAsset(bytes);
   font.getMetrics(0x41);
-  const miss = font.getColoredGlyph(0x42);  // not mapped
+  const miss = font.getColoredGlyph(0x42); // not mapped
   if (miss !== null) fail(`T5 expected null, got ${miss && miss.length} layers`);
   else ok('T5 unmapped codepoint → null');
 }
@@ -76,7 +98,8 @@ const ok   = (msg) => console.log('ok ' + msg);
 {
   const { readFileSync } = await import('fs');
   const arial = new MantleFontAsset(
-    new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')));
+    new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')),
+  );
   arial.getMetrics(0x41);
   if (arial.hasColor) fail('T6 Arial hasColor true');
   else if (arial.getColoredGlyph(0x41) !== null) fail('T6 Arial getColoredGlyph non-null');
@@ -90,12 +113,19 @@ const ok   = (msg) => console.log('ok ' + msg);
   const font = new MantleFontAsset(bytes);
   const layers = font.getColoredGlyph(0x41);
   function bbox(segs) {
-    let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+    let xmin = Infinity,
+      xmax = -Infinity,
+      ymin = Infinity,
+      ymax = -Infinity;
     for (const s of segs) {
-      const pts = s.type === 0 ? [s.p1, s.p2]
-                : s.type === 1 ? [s.p1, s.p2, s.p3]
-                : s.type === 2 ? [s.p1, s.p2, s.p3, s.p4]
-                : [s.p1, s.p4];
+      const pts =
+        s.type === 0
+          ? [s.p1, s.p2]
+          : s.type === 1
+            ? [s.p1, s.p2, s.p3]
+            : s.type === 2
+              ? [s.p1, s.p2, s.p3, s.p4]
+              : [s.p1, s.p4];
       for (const p of pts) {
         if (p[0] < xmin) xmin = p[0];
         if (p[0] > xmax) xmax = p[0];
@@ -112,9 +142,12 @@ const ok   = (msg) => console.log('ok ' + msg);
   // square 50..350 font units; layer 1 is 100..700. Confirm verbatim.
   const ok0 = Math.abs(bb0[0] - 50) < 1 && Math.abs(bb0[2] - 350) < 1;
   const ok1 = Math.abs(bb1[0] - 100) < 1 && Math.abs(bb1[2] - 700) < 1;
-  if (!ok0) fail(`T7 layer 0 bbox ${bb0.map(v=>v.toFixed(1))} (expected x in [50, 350])`);
-  else if (!ok1) fail(`T7 layer 1 bbox ${bb1.map(v=>v.toFixed(1))} (expected x in [100, 700])`);
-  else ok(`T7 per-layer bbox correct: L0 [${bb0.map(v=>v.toFixed(1)).join(', ')}], L1 [${bb1.map(v=>v.toFixed(1)).join(', ')}]`);
+  if (!ok0) fail(`T7 layer 0 bbox ${bb0.map((v) => v.toFixed(1))} (expected x in [50, 350])`);
+  else if (!ok1) fail(`T7 layer 1 bbox ${bb1.map((v) => v.toFixed(1))} (expected x in [100, 700])`);
+  else
+    ok(
+      `T7 per-layer bbox correct: L0 [${bb0.map((v) => v.toFixed(1)).join(', ')}], L1 [${bb1.map((v) => v.toFixed(1)).join(', ')}]`,
+    );
 }
 
 console.log();

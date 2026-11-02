@@ -1,11 +1,16 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Measure a SINGLE curved shape's edge coverage, LB vs Slug, over green (no
 // compositing). Coverage c = 1 - greenFraction. If LB under-covers vs Slug by a
 // CONSTANT amount → fixable bias; if it varies with slope/curvature → the
 // fundamental curve-AA gap. This is the root of the internal conflation (two
 // under-covering curved edges leave a bg seam).
 import { readFileSync } from 'fs';
-import http from 'http'; import path from 'path'; import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { launchBrowser } from '../test/_launch.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const N = 300;
@@ -16,7 +21,9 @@ const SHAPE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300">
 const DIAG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300">
   <path d="M40 40 L200 40 L120 260 L40 260 Z" fill="#603018"/></svg>`;
 const CASES = { CURVE: SHAPE, DIAG };
-const HTML=(svg)=>`<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas>
+const HTML = (
+  svg,
+) => `<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas>
 <script type="module">
 import { importSvg, createBundle, createRenderer, loadShaders } from '/src/index.js';
 const gl=document.getElementById('c').getContext('webgl2',{antialias:false,premultipliedAlpha:true,preserveDrawingBuffer:true,depth:true,stencil:true});
@@ -46,22 +53,46 @@ for(const y of rows){ // find approx edge x where slug cov ~0.5
 window.__out={ out };
 window.__ready=true;
 </script></body></html>`;
-const server=http.createServer((req,res)=>{try{
-  if(req.url.startsWith('/case')){res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(HTML(CASES[req.url.slice(5)]));return;}
-  const p=decodeURIComponent(req.url.split('?')[0]);
-  res.writeHead(200,{'content-type':p.endsWith('.glsl')?'text/plain':'text/javascript'});res.end(readFileSync(path.join(ROOT,p)));
-}catch{if(!res.headersSent)res.writeHead(404);res.end();}});
-await new Promise(r=>server.listen(0,'127.0.0.1',r)); const port=server.address().port;
-const browser=await puppeteer.launch({headless:false,args:['--no-sandbox','--use-angle=metal','--enable-gpu']});
-for(const c of Object.keys(CASES)){
-  const page=await browser.newPage();
-  page.on('console',m=>{if(m.type()==='error')console.error('['+c+']',m.text());});
-  await page.goto(`http://127.0.0.1:${port}/case${c}`,{waitUntil:'load',timeout:20000});
-  await page.waitForFunction(()=>window.__ready===true,{timeout:15000});
-  const o=await page.evaluate(()=>window.__out);
+const server = http.createServer((req, res) => {
+  try {
+    if (req.url.startsWith('/case')) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML(CASES[req.url.slice(5)]));
+      return;
+    }
+    const p = decodeURIComponent(req.url.split('?')[0]);
+    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const port = server.address().port;
+// HEADLESS EVEN ON THE GPU. Headless Chrome reaches the real GPU: ANGLE (Apple, ANGLE Metal
+// Renderer) reports and TIMES the same headless or headful.
+// A window is not free to the person running this: macOS CLAMPS --window-position (measured:
+// screenX/Y 83,65 whatever you pass), so a headful run cannot be put out of the way and lands
+// on whichever desktop is in front.
+const browser = await launchBrowser({
+  headless: 'new',
+  args: ['--no-sandbox', '--use-angle=metal', '--enable-gpu'],
+});
+for (const c of Object.keys(CASES)) {
+  const page = await browser.newPage();
+  page.on('console', (m) => {
+    if (m.type() === 'error') console.error('[' + c + ']', m.text());
+  });
+  await page.goto(`http://127.0.0.1:${port}/case${c}`, { waitUntil: 'load', timeout: 20000 });
+  await page.waitForFunction(() => window.__ready === true, { timeout: 15000 });
+  const o = await page.evaluate(() => window.__out);
   console.log(`\n=== ${c} ===`);
-  for(const r of o.out){ console.log(`  y=${r.y} edge@${r.ex} covDelta(LB-Slug)=${r.covDelta}`);
-    console.log('    '+r.band.map(([x,l,s])=>`x${x}:${l}/${s}`).join('  ')); }
+  for (const r of o.out) {
+    console.log(`  y=${r.y} edge@${r.ex} covDelta(LB-Slug)=${r.covDelta}`);
+    console.log('    ' + r.band.map(([x, l, s]) => `x${x}:${l}/${s}`).join('  '));
+  }
   await page.close();
 }
-await browser.close(); server.close();
+await browser.close();
+server.close();

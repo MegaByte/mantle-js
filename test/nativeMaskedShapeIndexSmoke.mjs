@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // nativeMaskedShapeIndexSmoke.mjs — guards the positional shape→element
 // mapping on masked/clipped art.
 //
@@ -17,16 +20,20 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { fontFixture, requireAsset } from './_assets.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MROOT = path.resolve(__dirname, '..');
-const fontB64 = readFileSync(new URL('./font/fixtures/roboto-regular.ttf', import.meta.url)).toString('base64');
+const fontB64 = readFileSync(requireAsset(fontFixture('roboto-regular.ttf'))).toString('base64');
 
 // Full-canvas mask (everything visible) whose rect is the FIRST shape
 // element in document order — the index-shift trigger. Box (blue) +
 // masked text (red).
-const SVG = readFileSync(new URL('../examples/smoke/nativeMaskedShapeIndex__SVG.svg', import.meta.url), 'utf8');
+const SVG = readFileSync(
+  new URL('../examples/smoke/nativeMaskedShapeIndex__SVG.svg', import.meta.url),
+  'utf8',
+);
 
 const HTML = `<!DOCTYPE html><html><body><div id="host"></div><canvas id="cv" width="100" height="50"></canvas>
 <script type="module">
@@ -66,43 +73,71 @@ window.__ready = true;
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.writeHead(200, {'content-type':'text/html'}); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(HTML);
+    return;
+  }
   let p = decodeURIComponent(req.url.split('?')[0]);
-  try { res.writeHead(200, {'content-type':'text/javascript'}); res.end(readFileSync(path.join(MROOT, p))); }
-  catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    res.writeHead(200, { 'content-type': 'text/javascript' });
+    res.end(readFileSync(path.join(MROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 const isBlue = (p) => p[2] > 150 && p[0] < 100 && p[3] > 100;
 // "red-dominant" — robust to anti-aliased glyph-edge samples that blend
 // red over the white background (e.g. 255,191,191).
-const isRed  = (p) => p[0] > 120 && p[0] > p[1] + 30 && p[0] > p[2] + 30;
+const isRed = (p) => p[0] > 120 && p[0] > p[1] + 30 && p[0] > p[2] + 30;
 const isWhite = (p) => p[0] > 200 && p[1] > 200 && p[2] > 200;
-const near = (a, b) => Math.abs(a[0]-b[0]) < 20 && Math.abs(a[1]-b[1]) < 20 && Math.abs(a[2]-b[2]) < 20;
+const near = (a, b) =>
+  Math.abs(a[0] - b[0]) < 20 && Math.abs(a[1] - b[1]) < 20 && Math.abs(a[2] - b[2]) < 20;
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+const browser = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { if (m.type()==='error') console.error('  [console]', m.text()); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('  [console]', m.text());
+});
 try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 30000 });
-  const got = await page.waitForFunction('window.__ready === true', { timeout: 30000 }).then(()=>1).catch(()=>0);
-  if (!got) { fail('page did not become ready'); }
-  else {
+  const got = await page
+    .waitForFunction('window.__ready === true', { timeout: 30000, polling: 100 })
+    .then(() => 1)
+    .catch(() => 0);
+  if (!got) {
+    fail('page did not become ready');
+  } else {
     const before = await page.evaluate('window.__before');
     const after = await page.evaluate('window.__after');
     const n = await page.evaluate('window.__numShapes');
-    console.log('numShapes:', n, '| before:', JSON.stringify(before), '| after:', JSON.stringify(after));
+    console.log(
+      'numShapes:',
+      n,
+      '| before:',
+      JSON.stringify(before),
+      '| after:',
+      JSON.stringify(after),
+    );
 
     // Baseline: box renders blue, masked text renders red (mask reveals both).
-    if (isBlue(before.box)) ok('baseline: box renders blue'); else fail('baseline box not blue: ' + before.box);
-    if (isRed(before.text)) ok('baseline: masked text renders red'); else fail('baseline text not red: ' + before.text);
+    if (isBlue(before.box)) ok('baseline: box renders blue');
+    else fail('baseline box not blue: ' + before.box);
+    if (isRed(before.text)) ok('baseline: masked text renders red');
+    else fail('baseline text not red: ' + before.text);
 
-    // The fix: hiding VISIBLE shape 0 hides the BOX...
+    // Hiding VISIBLE shape 0 hides the BOX...
     if (isWhite(after.box)) ok('hide shape 0 → box gone (shape 0 == box, not the mask rect)');
     else fail('box still present after hiding shape 0: ' + after.box);
     // ...and leaves the masked TEXT intact + unchanged (mask not emptied,
@@ -110,8 +145,11 @@ try {
     // empty the mask and the text would go white.
     if (isRed(after.text) && near(after.text, before.text))
       ok('text unchanged (still red) — mask intact, indices not shifted');
-    else fail('text changed after hiding shape 0 — shape 0 was the mask rect (the old bug): ' + after.text);
+    else fail('text changed after hiding shape 0 — shape 0 is the mask rect: ' + after.text);
   }
-} finally { await browser.close(); server.close(); }
+} finally {
+  await browser.close();
+  server.close();
+}
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nNATIVE-MASKED-SHAPE-INDEX PASS');
 process.exit(failures ? 1 : 0);

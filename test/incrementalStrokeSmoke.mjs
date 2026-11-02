@@ -1,11 +1,14 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // incrementalStrokeSmoke.mjs — the dynamic paint-stroke path (incrementalStroke.js).
 //
-//   1. INCREMENTAL == WHOLE: a stroke appended point-by-point with draws
+//   1. INCREMENTAL == whole: a stroke appended point-by-point with draws
 //      interleaved (exercising the partial prim-row texSubImage2D uploads, the
 //      vert-tail bufferSubData, the join patches and the texture realloc)
 //      renders BYTE-IDENTICAL to the same polyline handed to
 //      createIncrementalStroke in one call.
-//   2. PARITY vs LOADED-WHOLE: the appended stroke matches a full
+//   2. PARITY vs LOADED-whole: the appended stroke matches a full
 //      importSvg→createBundle render of the same polyline (round caps/joins)
 //      within AA tolerance — the "loaded whole" reference is the default
 //      (Slug) stroke route vectorPaint renders through today.
@@ -18,19 +21,27 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 import { emitFixture } from './_fixtures.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
-const W = 200, H = 200;
-const PTS = [[30, 40], [80, 60], [60, 120], [140, 100], [170, 160], [120, 170]];
+const W = 200,
+  H = 200;
+const PTS = [
+  [30, 40],
+  [80, 60],
+  [60, 120],
+  [140, 100],
+  [170, 160],
+  [120, 170],
+];
 const COLOR = [0.8, 0.15, 0.1, 1];
 const WIDTH = 12;
 
 const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
-  <path d="M${PTS.map(p => p.join(' ')).join('L')}" fill="none" stroke="rgba(204,38,26,1)" stroke-width="${WIDTH}" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M${PTS.map((p) => p.join(' ')).join('L')}" fill="none" stroke="rgba(204,38,26,1)" stroke-width="${WIDTH}" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>`;
 emitFixture('incrementalStroke__SVG', SVG);
 
@@ -147,26 +158,50 @@ window.__ready = true;
 
 const server = http.createServer((req, res) => {
   try {
-    if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML);
+      return;
+    }
     const p = decodeURIComponent(req.url.split('?')[0]);
-    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' }); res.end(readFileSync(path.join(ROOT, p)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { if (m.type() === 'error') console.error('  [console]', m.text()); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('  [console]', m.text());
+});
 try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 20000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 30000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await page.waitForFunction(() => window.__ready === true, { timeout: 30000, polling: 100 });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 const out = await page.evaluate(() => window.__out);
 console.log('  stats:', JSON.stringify(out));
@@ -179,8 +214,12 @@ else fail(`incremental vs whole differ in ${out.diffIncWhole} bytes`);
 if (out.inkRef > 2000) ok(`reference stroke has ink (${out.inkRef}px)`);
 else fail(`reference stroke barely rendered (${out.inkRef}px)`);
 const inkRel = Math.abs(out.inkInc - out.inkRef) / out.inkRef;
-if (inkRel < 0.04) ok(`ink coverage matches loaded-whole within 4% (${(inkRel * 100).toFixed(2)}%)`);
-else fail(`ink coverage off by ${(inkRel * 100).toFixed(2)}% (inc ${out.inkInc} vs ref ${out.inkRef})`);
+if (inkRel < 0.04)
+  ok(`ink coverage matches loaded-whole within 4% (${(inkRel * 100).toFixed(2)}%)`);
+else
+  fail(
+    `ink coverage off by ${(inkRel * 100).toFixed(2)}% (inc ${out.inkInc} vs ref ${out.inkRef})`,
+  );
 if (out.hardDiff < out.inkRef * 0.03) ok(`hard pixel disagreements ${out.hardDiff} < 3% of ink`);
 else fail(`too many hard pixel disagreements: ${out.hardDiff} (ink ${out.inkRef})`);
 if (out.meanDiff < 3) ok(`mean |diff| ${out.meanDiff} < 3`);
@@ -191,22 +230,39 @@ if (out.diffHandle === 0) ok('handle.draw == drawBundle: byte-identical');
 else fail(`handle.draw differs in ${out.diffHandle} bytes`);
 
 // 4. dot + alpha.
-if (out.dotCenter > 200 && out.dotIn > 200 && out.dotOut < 30) ok(`single point renders a round dot (center ${out.dotCenter}, r8 ${out.dotIn}, r16 ${out.dotOut})`);
+if (out.dotCenter > 200 && out.dotIn > 200 && out.dotOut < 30)
+  ok(
+    `single point renders a round dot (center ${out.dotCenter}, r8 ${out.dotIn}, r16 ${out.dotOut})`,
+  );
 else fail(`dot wrong: center ${out.dotCenter}, in ${out.dotIn}, out ${out.dotOut}`);
-if (out.dotHalf > out.dotCenter * 0.35 && out.dotHalf < out.dotCenter * 0.65) ok(`alpha 0.5 modulates composite (${out.dotHalf} vs ${out.dotCenter})`);
+if (out.dotHalf > out.dotCenter * 0.35 && out.dotHalf < out.dotCenter * 0.65)
+  ok(`alpha 0.5 modulates composite (${out.dotHalf} vs ${out.dotCenter})`);
 else fail(`alpha 0.5 composite off: ${out.dotHalf} vs full ${out.dotCenter}`);
 
 // 5. perf scaling.
 if (out.perfDrew) ok('6000-point stroke draws');
 else fail('6000-point stroke rendered nothing');
-if (out.perfRatio < 3.5) ok(`append cost flat: last-1000/second-1000 chunk ratio ${out.perfRatio} < 3.5 (${out.chunkMs.join(', ')}ms)`);
-else fail(`append cost scales with stroke length: chunk ratio ${out.perfRatio} (${out.chunkMs.join(', ')}ms)`);
+if (out.perfRatio < 3.5)
+  ok(
+    `append cost flat: last-1000/second-1000 chunk ratio ${out.perfRatio} < 3.5 (${out.chunkMs.join(', ')}ms)`,
+  );
+else
+  fail(
+    `append cost scales with stroke length: chunk ratio ${out.perfRatio} (${out.chunkMs.join(', ')}ms)`,
+  );
 
 // finalize surface.
-if (out.finalizeHasPath && out.finalizeHasSvg && out.segs === 5 && out.drawCount > 0) ok('finalize() returns pathD + svg; segment/draw counts sane');
-else fail(`finalize surface wrong: ${JSON.stringify({ p: out.finalizeHasPath, s: out.finalizeHasSvg, segs: out.segs, dc: out.drawCount })}`);
+if (out.finalizeHasPath && out.finalizeHasSvg && out.segs === 5 && out.drawCount > 0)
+  ok('finalize() returns pathD + svg; segment/draw counts sane');
+else
+  fail(
+    `finalize surface wrong: ${JSON.stringify({ p: out.finalizeHasPath, s: out.finalizeHasSvg, segs: out.segs, dc: out.drawCount })}`,
+  );
 
 await browser.close();
 server.close();
-if (failures) { console.error(`\n${failures} FAILURE(S)`); process.exit(1); }
+if (failures) {
+  console.error(`\n${failures} FAILURE(S)`);
+  process.exit(1);
+}
 console.log('\nINCREMENTAL-STROKE SMOKE PASS');

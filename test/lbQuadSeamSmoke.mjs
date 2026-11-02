@@ -1,16 +1,19 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // lbQuadSeamSmoke.mjs — a SMOOTH all-quadratic ellipse (rx≠ry → real kind-1 quad
 // crescents, NOT the circular SDF) rendered at small scale. The PRIMARY contract:
 // LB must not OVER-cover the curve (the fragment's curvature-aware coverage lands
-// the ½-level exactly on the arc, not on its over-reaching tangent line — the fix
-// for the user-visible "overcoverage on curves"). The earlier VS radial dilation
-// closed the additive-MAX seam notch but over-covered systematically; it's gone.
+// the ½-level exactly on the arc, not on its over-reaching tangent line — no
+// visible "overcoverage on curves"). A VS radial dilation would close the
+// additive-MAX seam notch but over-cover systematically, so there is none.
 // A sub-pixel seam notch (under-coverage where adjacent crescents pinch) remains
-// and is bounded here — far less objectionable than the over-coverage it replaced.
+// and is bounded here — far less objectionable than systematic over-coverage.
 import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 import { emitFixture } from './_fixtures.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -23,13 +26,18 @@ function quadEllipse(cx, cy, rx, ry) {
   const tan = (a) => [-rx * Math.sin(a), ry * Math.cos(a)];
   let d = '';
   for (let i = 0; i < N; i++) {
-    const a0 = 2 * Math.PI * i / N, a1 = 2 * Math.PI * (i + 1) / N;
-    const p0 = pt(a0), p1 = pt(a1), t0 = tan(a0), t1 = tan(a1);
-    const det = t0[0] * (-t1[1]) - t0[1] * (-t1[0]);
-    const s = ((p1[0] - p0[0]) * (-t1[1]) - (p1[1] - p0[1]) * (-t1[0])) / det;
+    const a0 = (2 * Math.PI * i) / N,
+      a1 = (2 * Math.PI * (i + 1)) / N;
+    const p0 = pt(a0),
+      p1 = pt(a1),
+      t0 = tan(a0),
+      t1 = tan(a1);
+    const det = t0[0] * -t1[1] - t0[1] * -t1[0];
+    const s = ((p1[0] - p0[0]) * -t1[1] - (p1[1] - p0[1]) * -t1[0]) / det;
     const ctrl = [p0[0] + s * t0[0], p0[1] + s * t0[1]];
-    d += (i === 0 ? `M${p0[0].toFixed(3)} ${p0[1].toFixed(3)} ` : '') +
-         `Q${ctrl[0].toFixed(3)} ${ctrl[1].toFixed(3)} ${p1[0].toFixed(3)} ${p1[1].toFixed(3)} `;
+    d +=
+      (i === 0 ? `M${p0[0].toFixed(3)} ${p0[1].toFixed(3)} ` : '') +
+      `Q${ctrl[0].toFixed(3)} ${ctrl[1].toFixed(3)} ${p1[0].toFixed(3)} ${p1[1].toFixed(3)} `;
   }
   return d + 'Z';
 }
@@ -42,11 +50,11 @@ const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="${R}" height="${R
 import { importSvg, createBundle, createRenderer, loadShaders } from '/src/index.js';
 const gl = document.getElementById('c').getContext('webgl2', { antialias: false, premultipliedAlpha: true, preserveDrawingBuffer: true });
 const shaders = await loadShaders(new URL('/src/shaders/', location.href).href);
-const renderer = createRenderer(gl, shaders); renderer.setViewport(${R}, ${R});
-// REFERENCE = AAC (exact signed-area coverage). Slug and LB now share the same exactBoxCov
-// kernel, so "LB matches Slug" no longer proves either is right.
-const refR = createRenderer(gl, shaders, { aacFill: true }); refR.setViewport(${R}, ${R}); refR.setLoopBlinnFill('off');
-const bundle = createBundle(gl, await importSvg(${JSON.stringify(SVG)})); renderer.prepareBundle(bundle);
+const renderer = createRenderer(gl, shaders, { staticUnified: true }); renderer.setViewport(${R}, ${R});
+// REFERENCE = AAC (exact signed-area coverage). Slug and LB share the same exactBoxCov
+// kernel, so "LB matches Slug" does not prove either is right.
+const refR = createRenderer(gl, shaders, { staticUnified: true, aacFill: true }); refR.setViewport(${R}, ${R}); refR.setLoopBlinnFill('off');
+const bundle = createBundle(gl, await importSvg(${JSON.stringify(SVG)})); renderer.prepareBundle(bundle); await renderer.awaitLbReady(bundle);
 const read = () => { const px = new Uint8Array(${R}*${R}*4); gl.readPixels(0,0,${R},${R},gl.RGBA,gl.UNSIGNED_BYTE,px); return px; };
 const cov = (px,x,y) => { const q = ((${R}-1-y)*${R}+x)*4; return (255-px[q])/255; };
 const draw = (m) => { renderer.setLoopBlinnFill(m); const r = renderer.debugStats.loopBlinnRouteCount;
@@ -66,46 +74,80 @@ window.__ready = true;
 
 const server = http.createServer((req, res) => {
   try {
-    if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML);
+      return;
+    }
     const p = decodeURIComponent(req.url.split('?')[0]);
-    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' }); res.end(readFileSync(path.join(ROOT, p)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { if (m.type() === 'error') console.error('  [console]', m.text()); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('  [console]', m.text());
+});
 try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await page.waitForFunction(() => window.__ready === true, { timeout: 10000, polling: 100 });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 const o = await page.evaluate(() => window.__out);
 console.log('  ', JSON.stringify(o));
-if (o.lbRouted) ok('quad ellipse routes through LB'); else fail('ellipse did NOT route to LB');
+if (o.lbRouted) ok('quad ellipse routes through LB');
+else fail('ellipse did NOT route to LB');
 // PRIMARY: no SYSTEMATIC over-coverage. The signed mean over the AA band (bias) must
-// be ≈0 — the tangent-line model biased it strongly positive (the "overcoverage on
-// curves" the user hit). Individual seam pixels may still swing ± (isolated pinches),
+// be ≈0 — a tangent-line model biases it strongly positive (visible "overcoverage on
+// curves"). Individual seam pixels may still swing ± (isolated pinches),
 // so the guard is on the bias, not per-pixel maxima.
 if (o.bias <= 0.02) ok('no systematic curve over-coverage (band bias = ' + o.bias + ')');
-else fail('LB systematically OVER-covers the quad arc (band bias ' + o.bias + ') — tangent-line coverage regressed?');
-// Against the EXACT reference this measures 0.0054 — LB's rquad arcs are accurate. (The old
-// 0.03 bound was against Slug's blended combiner; when Slug became exact that comparison read
-// 0.0568, which said nothing about LB.) Keep the bound tight so a real regression trips.
+else
+  fail(
+    'LB systematically OVER-covers the quad arc (band bias ' +
+      o.bias +
+      ') — tangent-line coverage?',
+  );
+// Against the exact reference this measures 0.0054 — LB's rquad arcs are accurate. (A bound
+// against Slug would measure Slug's combiner, not LB.) Keep the bound tight so a real defect
+// trips.
 if (o.mean <= 0.015) ok('mean boundary error ' + o.mean);
 else fail('mean boundary error too high (' + o.mean + ')');
 // Residual seam notch (under-coverage at crescent pinch) must stay sub-pixel-bounded.
 if (o.maxUnder <= 0.25) ok('seam notch bounded (max under-coverage ' + o.maxUnder + ')');
-else fail('seam notch too deep (max under-coverage ' + o.maxUnder + ') — crescents pinching badly?');
+else
+  fail('seam notch too deep (max under-coverage ' + o.maxUnder + ') — crescents pinching badly?');
 
 await browser.close();
 server.close();
-if (failures) { console.error('\n' + failures + ' failure(s)'); process.exit(1); }
+if (failures) {
+  console.error('\n' + failures + ' failure(s)');
+  process.exit(1);
+}
 console.log('\nlbQuadSeamSmoke: curvature-aware coverage — no over-coverage, seam notch bounded');

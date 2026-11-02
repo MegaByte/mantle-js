@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // _drawCallCensus — how many GL draw calls does a multi-BUNDLE scene actually cost, and what
 // forces each one? This is the headroom question for cross-bundle batching.
 //
@@ -11,17 +14,17 @@
 // call, plus count the state changes (useProgram / bindTexture / blend changes) between them,
 // since those are what a reorder-and-batch scheme would actually eliminate.
 //
-// COUNTS ONLY — do NOT add timings to this scene without also passing `preserveViewport: true`
+// COUNTS only — do NOT add timings to this scene without also passing `preserveViewport: true`
 // to importSvg. Without it importSvg fits each bundle's TIGHT CONTENT BBOX to the viewport, so
 // every single-shape bundle here renders blown up to fill the canvas while a merged/one-bundle
 // comparand draws the same shapes small. Draw COUNTS are unaffected (which is all this probe
-// reports), but any ms/frame measured this way is meaningless — it produced fake 20-40x
-// "speedups" in probes/_atlasMultiBundle.mjs until the flag was added there.
+// reports), but any ms/frame measured this way is meaningless — fake 20-40x "speedups"
+// (probes/_atlasMultiBundle.mjs sets the flag for this reason).
 import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -30,17 +33,28 @@ const ROOT = path.resolve(__dirname, '..');
 // disjoint bundles can be reordered freely (order is unobservable) while overlapping ones cannot.
 const shape = (cx, cy, r, fill) =>
   `<path fill="${fill}" d="M ${cx - r} ${cy} C ${cx - r} ${cy - r * 1.3} ${cx + r} ${cy - r * 1.3} ${cx + r} ${cy} C ${cx + r} ${cy + r * 1.3} ${cx - r} ${cy + r * 1.3} ${cx - r} ${cy} Z"/>`;
-const svgOf = (parts) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">${parts.join('')}</svg>`;
+const svgOf = (parts) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">${parts.join('')}</svg>`;
 
 // one bundle holding K shapes (the batched-within case)
-const manyShapesOneBundle = (K) => svgOf(Array.from({ length: K }, (_, i) =>
-  shape(60 + (i % 8) * 55, 60 + Math.floor(i / 8) * 55, 22, `hsl(${i * 37 % 360},60%,50%)`)));
+const manyShapesOneBundle = (K) =>
+  svgOf(
+    Array.from({ length: K }, (_, i) =>
+      shape(60 + (i % 8) * 55, 60 + Math.floor(i / 8) * 55, 22, `hsl(${(i * 37) % 360},60%,50%)`),
+    ),
+  );
 // K separate single-shape bundles, laid out DISJOINT (a grid) — reorderable in principle
-const disjointBundles = (K) => Array.from({ length: K }, (_, i) =>
-  svgOf([shape(60 + (i % 8) * 55, 60 + Math.floor(i / 8) * 55, 22, `hsl(${i * 37 % 360},60%,50%)`)]));
-// K separate single-shape bundles that all OVERLAP at the centre — NOT reorderable
-const overlappingBundles = (K) => Array.from({ length: K }, (_, i) =>
-  svgOf([shape(256 + (i % 3) * 8, 256 + (i % 5) * 8, 90, `hsl(${i * 37 % 360},60%,50%)`)]));
+const disjointBundles = (K) =>
+  Array.from({ length: K }, (_, i) =>
+    svgOf([
+      shape(60 + (i % 8) * 55, 60 + Math.floor(i / 8) * 55, 22, `hsl(${(i * 37) % 360},60%,50%)`),
+    ]),
+  );
+// K separate single-shape bundles that all OVERLAP at the center — NOT reorderable
+const overlappingBundles = (K) =>
+  Array.from({ length: K }, (_, i) =>
+    svgOf([shape(256 + (i % 3) * 8, 256 + (i % 5) * 8, 90, `hsl(${(i * 37) % 360},60%,50%)`)]),
+  );
 
 const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="512" height="512"></canvas>
 <script type="module">
@@ -62,7 +76,7 @@ gl.useProgram=(p)=>{ if(p!==lastProg){progSwitch++;lastProg=p;} _up(p); };
 gl.bindTexture=(...a)=>{texBinds++;_bt(...a);};
 
 // Sprite sheet: ONE bundle holding K id'd top-level groups, each drawn individually via
-// drawSprite (a subset draw of the shared bundle). This is the already-shipped answer to
+// drawSprite (a subset draw of the shared bundle). This is the existing API's answer to
 // "share data across disjoint content" — no atlasing work needed, the sheet IS the atlas.
 window.__runSplit = async (sheetK, drawK, lb) => {
   r.setLoopBlinnFill(lb ? 'on' : 'off');
@@ -145,63 +159,102 @@ window.__ready=true;
 
 const server = http.createServer((req, res) => {
   try {
-    if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML);
+      return;
+    }
     const p = decodeURIComponent(req.url.split('?')[0]);
     res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
     res.end(readFileSync(path.join(ROOT, p)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
-const browser = await puppeteer.launch({ headless: false, args: ['--no-sandbox', '--use-angle=metal'] });
+// HEADLESS EVEN ON THE GPU. Headless Chrome reaches the real GPU: ANGLE (Apple, ANGLE Metal
+// Renderer) reports and TIMES the same headless or headful.
+// A window is not free to the person running this: macOS CLAMPS --window-position (measured:
+// screenX/Y 83,65 whatever you pass), so a headful run cannot be put out of the way and lands
+// on whichever desktop is in front.
+const browser = await launchBrowser({
+  headless: 'new',
+  args: ['--no-sandbox', '--use-angle=metal'],
+});
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.error('[page-err]', e.message));
 await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 60000 });
 await page.waitForFunction(() => window.__ready === true, { timeout: 60000 });
 
 const scenes = [
-  ['1 bundle, 32 shapes',        { svgs: [manyShapesOneBundle(32)] }],
-  ['32 bundles, disjoint',       { svgs: disjointBundles(32) }],
-  ['32 bundles, all overlapping',{ svgs: overlappingBundles(32) }],
-  ['64 bundles, disjoint',       { svgs: disjointBundles(64) }],
-  ['1 bundle x 32 MOUNTS',       { svgs: [svgOf([shape(40,40,22,'#38c')])], mounts: 32 }],
+  ['1 bundle, 32 shapes', { svgs: [manyShapesOneBundle(32)] }],
+  ['32 bundles, disjoint', { svgs: disjointBundles(32) }],
+  ['32 bundles, all overlapping', { svgs: overlappingBundles(32) }],
+  ['64 bundles, disjoint', { svgs: disjointBundles(64) }],
+  ['1 bundle x 32 MOUNTS', { svgs: [svgOf([shape(40, 40, 22, '#38c')])], mounts: 32 }],
 ];
 const rows = [];
 for (const [name, scene] of scenes) {
   for (const lb of [true, false]) {
-    rows.push([`${name} [${lb ? 'LB' : 'Slug'}]`, await page.evaluate((s, l) => window.__run(s, l), scene, lb)]);
+    rows.push([
+      `${name} [${lb ? 'LB' : 'Slug'}]`,
+      await page.evaluate((s, l) => window.__run(s, l), scene, lb),
+    ]);
   }
 }
 for (const K of [4, 8, 16, 32, 64]) {
   for (const lb of [true, false]) {
-    rows.push([`${K} sprites, ONE sheet [${lb ? 'LB' : 'Slug'}]`,
-      await page.evaluate((k, l) => window.__runSheet(k, l, false), K, lb)]);
+    rows.push([
+      `${K} sprites, ONE sheet [${lb ? 'LB' : 'Slug'}]`,
+      await page.evaluate((k, l) => window.__runSheet(k, l, false), K, lb),
+    ]);
   }
 }
 const split = [];
-for (const [sk, dk] of [[64,8],[8,8],[64,64],[64,32],[32,32]])
-  split.push(await page.evaluate((a,b,l) => window.__runSplit(a,b,l), sk, dk, true));
-await browser.close(); server.close();
+for (const [sk, dk] of [
+  [64, 8],
+  [8, 8],
+  [64, 64],
+  [64, 32],
+  [32, 32],
+])
+  split.push(await page.evaluate((a, b, l) => window.__runSplit(a, b, l), sk, dk, true));
+await browser.close();
+server.close();
 console.log('\n  DISCRIMINATOR [LB] — is the per-draw cost driven by BUNDLE SIZE or CALL COUNT?');
 console.log('  sheet shapes | drawn | ms/frame | us/draw');
 for (const s of split)
-  console.log(`  ${String(s.sheetK).padStart(12)} | ${String(s.drawK).padStart(5)} | ${s.ms.toFixed(3).padStart(8)} | ${s.usPerDraw.toFixed(1).padStart(7)}`);
-console.log('  If us/draw tracks SHEET SHAPES (64/8 ~ 64/64, not ~ 8/8), each drawSprite scans the');
+  console.log(
+    `  ${String(s.sheetK).padStart(12)} | ${String(s.drawK).padStart(5)} | ${s.ms.toFixed(3).padStart(8)} | ${s.usPerDraw.toFixed(1).padStart(7)}`,
+  );
+console.log(
+  '  If us/draw tracks SHEET SHAPES (64/8 ~ 64/64, not ~ 8/8), each drawSprite scans the',
+);
 console.log('  whole bundle => O(bundleShapes x calls). If it tracks DRAWN, the cost is per-call.');
 
 console.log('GL draw calls + state changes for ONE steady-state frame\n');
 console.log('  scene                              | bundles | draws | progSwitch | texBinds');
 for (const [name, r] of rows) {
-  console.log(`  ${name.padEnd(34)} | ${String(r.bundles).padStart(7)} | ${String(r.draws).padStart(5)} | ${String(r.progSwitch).padStart(10)} | ${String(r.texBinds).padStart(8)}`);
+  console.log(
+    `  ${name.padEnd(34)} | ${String(r.bundles).padStart(7)} | ${String(r.draws).padStart(5)} | ${String(r.progSwitch).padStart(10)} | ${String(r.texBinds).padStart(8)}`,
+  );
 }
-console.log('\n  SPRITE SHEET — data ALREADY shared (one bundle, one texture set), so this is purely');
+console.log(
+  '\n  SPRITE SHEET — data ALREADY shared (one bundle, one texture set), so this is purely',
+);
 console.log('  the cost of not coalescing consecutive same-bundle draws:');
 for (const [name, r] of rows) {
   if (r.msSprites === undefined) continue;
-  console.log(`  ${name.padEnd(34)} | ${r.draws} draws ${r.msSprites.toFixed(3)}ms  vs  ${r.wholeDraws} draw ${r.msWhole.toFixed(3)}ms`
-    + `  => ${(r.msSprites - r.msWhole).toFixed(3)}ms on the table (${((r.msSprites-r.msWhole)/Math.max(r.draws-1,1)*1000).toFixed(1)}us/draw)`);
+  console.log(
+    `  ${name.padEnd(34)} | ${r.draws} draws ${r.msSprites.toFixed(3)}ms  vs  ${r.wholeDraws} draw ${r.msWhole.toFixed(3)}ms` +
+      `  => ${(r.msSprites - r.msWhole).toFixed(3)}ms on the table (${(((r.msSprites - r.msWhole) / Math.max(r.draws - 1, 1)) * 1000).toFixed(1)}us/draw)`,
+  );
 }
-console.log('\n  Read: "1 bundle, 32 shapes" is the already-batched baseline. If the 32-bundle rows');
+console.log(
+  '\n  Read: "1 bundle, 32 shapes" is the already-batched baseline. If the 32-bundle rows',
+);
 console.log('  cost ~32x more draws, cross-bundle batching has real headroom; if the renderer');
 console.log('  already collapses them, it does not. The disjoint row is the one a reordering');
 console.log('  batcher could legally collapse — the overlapping row is order-locked by OVER.');

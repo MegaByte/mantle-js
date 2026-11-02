@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // channelLerpSmoke.mjs — bilinear recolor.
 //
 // Per-draw Unity unlit-vector bilinear channel-lerp recolor:
@@ -27,11 +30,11 @@
 //        produces tinted-then-highlight output; matrix then collapses
 //        it to luminance. Verifies the two run in pipeline order.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -44,23 +47,27 @@ mkdirSync(OUT, { recursive: true });
 //   rect 1: pure blue   (B-channel encoded → contrast)
 //   rect 2: pure white  (R=G=B=1 → highlight per the Unity formula)
 //   rect 3: light pink  (R=1, G=0.5, B=0.5) → mid lerp
-const SVG_CHANNELS = readFileSync(new URL('../examples/smoke/channelLerp__SVG_CHANNELS.svg', import.meta.url), 'utf8');
+const SVG_CHANNELS = readFileSync(
+  new URL('../examples/smoke/channelLerp__SVG_CHANNELS.svg', import.meta.url),
+  'utf8',
+);
 
-// External art fixture. Point TRAIN_SVG at a channel-encoded sprite
-// SVG; the test skips cleanly when it's unset or the file is missing.
-const trainSvgPath = process.env.TRAIN_SVG || '';
-if (!trainSvgPath || !existsSync(trainSvgPath)) {
-  console.log(`SKIP channelLerp: sprite fixture not found (set TRAIN_SVG to a channel-encoded SVG)`);
-  process.exit(0);
-}
-const trainSvg = readFileSync(trainSvgPath, 'utf8');
+// A small channel-encoded sprite (committed, synthetic): a red body (R = primary), a blue rail (B = contrast) and a pure white dome
+// (the highlight). 100 x 100 units drawn at 200 x 200 px, so unit (x, y) is pixel (2x, 2y)
+// (the body spans the whole viewBox: the renderer fits the content bounding box, so a smaller body would be scaled up).
+const SVG_TRAIN = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="100" height="100" rx="8" fill="#FF0000"/>
+  <rect x="0" y="55" width="100" height="10" fill="#0000FF"/>
+  <circle cx="70" cy="40" r="10" fill="#FFFFFF"/>
+</svg>`;
+const trainSvg = SVG_TRAIN;
 
 const HTML = `<!DOCTYPE html><html><body style="margin:0;background:#222">
 <canvas id="c" width="100" height="100"></canvas>
 <script type="module">
 import {
   importSvg, createBundle, createRenderer, loadShaders,
-  unityChannelLerp, colorMatrixMonochrome,
+  channelLerpParams, colorMatrixMonochrome,
 } from '/src/index.js';
 
 const cnv = document.getElementById('c');
@@ -100,20 +107,26 @@ async function drawTrain(opts) {
   renderer.beginFrame([34/255, 34/255, 34/255, 1]);
   renderer.drawBundle(bundleTrain, { worldMatrix: id, ...opts });
   renderer.endFrame();
-  return cnv.toDataURL('image/png');
+  // GL rows count from the bottom: unit (x, y) of the sprite is pixel (2x, 199 - 2y).
+  return {
+    body: readPx(40, 199 - 60),     // unit (20, 30): the red body
+    rail: readPx(40, 199 - 120),    // unit (20, 60): the blue rail
+    dome: readPx(140, 199 - 80),    // unit (70, 40): the white dome
+    pngDataUrl: cnv.toDataURL('image/png'),
+  };
 }
 
 const out = {};
 
 // T1..T4 — channel-rect SVG with various recolor params.
 //
-// Use unityChannelLerp(primary=teal, contrast=orange, highlight=white):
+// Use channelLerpParams(primary=teal, contrast=orange, highlight=white):
 //   pure red rect    → teal       (R=1, B=0, G=0, A=1; k=0; tint=teal)
 //   pure blue rect   → orange     (R=0, B=1, G=0, A=1; k=0; tint=orange)
 //   pure white rect  → white      (R=1, G=1, B=1, A=1; k=clamp(1+0,0,1)=1)
 //   pink rect (1, .5, .5) → mix(teal+.5*orange, white, .5)
 out.T1to4 = await drawChannels({
-  channelLerp: unityChannelLerp(
+  channelLerp: channelLerpParams(
     [0, 0.8, 0.8, 1],    // primary = teal
     [1, 0.5, 0, 1],      // contrast = orange
     [1, 1, 1, 1],        // highlight = white
@@ -127,7 +140,7 @@ out.T5_revert = await drawChannels({});
 {
   const { matrix, offset } = colorMatrixMonochrome([1, 1, 0, 1]);
   out.T6_lerp_then_matrix = await drawChannels({
-    channelLerp: unityChannelLerp([1, 0, 0, 1], [0, 0, 1, 1]),
+    channelLerp: channelLerpParams([1, 0, 0, 1], [0, 0, 1, 1]),
     colorMatrix: matrix,
     colorMatrixOffset: offset,
   });
@@ -136,14 +149,14 @@ out.T5_revert = await drawChannels({});
 // Train demo (visual; baseline + recolored).
 out.T7_train_baseline = await drawTrain({});
 out.T8_train_singleColor_red = await drawTrain({
-  channelLerp: unityChannelLerp(
+  channelLerp: channelLerpParams(
     [0.92, 0.09, 0.41, 1],   // primary = magenta-red
     [0.92, 0.09, 0.41, 1],   // contrast = SAME (single-color class)
     [1, 1, 1, 1],            // highlight = white
   ),
 });
 out.T9_train_dualColor = await drawTrain({
-  channelLerp: unityChannelLerp(
+  channelLerp: channelLerpParams(
     [0.0, 0.6, 0.0, 1],   // primary = green
     [1, 0.9, 0, 1],       // contrast = yellow
     [1, 1, 1, 1],
@@ -165,25 +178,40 @@ const server = http.createServer((req, res) => {
     return;
   }
   let p = decodeURIComponent(u.pathname);
-  const mime = p.endsWith('.js') || p.endsWith('.mjs') ? 'text/javascript'
-             : p.endsWith('.glsl') ? 'text/plain' : 'application/octet-stream';
+  const mime =
+    p.endsWith('.js') || p.endsWith('.mjs')
+      ? 'text/javascript'
+      : p.endsWith('.glsl')
+        ? 'text/plain'
+        : 'application/octet-stream';
   try {
     res.writeHead(200, { 'content-type': mime + '; charset=utf-8' });
     res.end(readFileSync(path.join(ROOT, p)));
   } catch {
-    try { res.writeHead(404); res.end(); } catch {}
+    try {
+      res.writeHead(404);
+      res.end();
+    } catch {}
   }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${server.address().port}/`;
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { if (m.type() === 'error') console.error('  [console]', m.text()); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('  [console]', m.text());
+});
 await page.setViewport({ width: 300, height: 300 });
 await page.goto(url, { waitUntil: 'load', timeout: 10000 });
-await page.waitForFunction(() => window.__d === true, { timeout: 30000 });
+await page.waitForFunction(() => window.__d === true, { timeout: 30000, polling: 100 });
 const r = await page.evaluate(() => window.__r);
 await browser.close();
 server.close();
@@ -192,34 +220,39 @@ for (const k of Object.keys(r)) {
   const v = r[k];
   const url = typeof v === 'string' ? v : v.pngDataUrl;
   if (url) {
-    writeFileSync(path.join(OUT, k + '.png'),
-      Buffer.from(url.slice('data:image/png;base64,'.length), 'base64'));
+    writeFileSync(
+      path.join(OUT, k + '.png'),
+      Buffer.from(url.slice('data:image/png;base64,'.length), 'base64'),
+    );
   }
 }
 
 let failures = 0;
-const ok = m => console.log('ok', m);
-const fail = m => { failures++; console.error('FAIL', m); };
+const ok = (m) => console.log('ok', m);
+const fail = (m) => {
+  failures++;
+  console.error('FAIL', m);
+};
 const close = (a, b, tol = 6) =>
-  Math.abs(a[0] - b[0]) <= tol &&
-  Math.abs(a[1] - b[1]) <= tol &&
-  Math.abs(a[2] - b[2]) <= tol;
+  Math.abs(a[0] - b[0]) <= tol && Math.abs(a[1] - b[1]) <= tol && Math.abs(a[2] - b[2]) <= tol;
 
 // T1..T4 — channel rects with channelLerp(teal, orange, white).
 {
   const t = r.T1to4;
-  console.log(`T1..T4: red=${t.red.slice(0,3)} blue=${t.blue.slice(0,3)} white=${t.white.slice(0,3)} pink=${t.pink.slice(0,3)}`);
+  console.log(
+    `T1..T4: red=${t.red.slice(0, 3)} blue=${t.blue.slice(0, 3)} white=${t.white.slice(0, 3)} pink=${t.pink.slice(0, 3)}`,
+  );
   // T1: pure red (R=1, G=0, B=0, A=1) → tint = primary = teal (0, 204, 204).
   // k = G + 1 - A = 0. mix(teal, white, 0) = teal.
-  if (close(t.red, [0, 204, 204], 8))   ok('T1 pure red → primary tint (teal)');
-  else fail('T1 red got ' + t.red.slice(0,3));
+  if (close(t.red, [0, 204, 204], 8)) ok('T1 pure red → primary tint (teal)');
+  else fail('T1 red got ' + t.red.slice(0, 3));
   // T2: pure blue → tint = contrast = orange (255, 128, 0).
-  if (close(t.blue, [255, 128, 0], 8))  ok('T2 pure blue → contrast tint (orange)');
-  else fail('T2 blue got ' + t.blue.slice(0,3));
+  if (close(t.blue, [255, 128, 0], 8)) ok('T2 pure blue → contrast tint (orange)');
+  else fail('T2 blue got ' + t.blue.slice(0, 3));
   // T3: pure white (R=G=B=1, A=1). tint = primary + contrast = (255, 332, 204).
   // k = 1 + 0 = 1 (clamped to 1). mix(tint, white, 1) = white.
-  if (close(t.white, [255, 255, 255], 4))  ok('T3 pure white → highlight (white preserved)');
-  else fail('T3 white got ' + t.white.slice(0,3));
+  if (close(t.white, [255, 255, 255], 4)) ok('T3 pure white → highlight (white preserved)');
+  else fail('T3 white got ' + t.white.slice(0, 3));
   // T4: pink (R=1, G=0.5, B=0.5, A=1). tint = primary + 0.5*contrast =
   //     (0 + 0.5*1, 0.8 + 0.5*0.5, 0.8 + 0) = (0.5, 1.05, 0.8) clamped (0.5, 1, 0.8).
   // k = G + 1 - A = 0.5. mix(tint, white, 0.5) with mix(a,b,t)=a*(1-t)+b*t.
@@ -227,18 +260,18 @@ const close = (a, b, tol = 6) =>
   // check uses a loose tolerance.
   if (t.pink[0] > 150 && t.pink[0] < 220 && t.pink[1] > 230 && t.pink[2] > 180)
     ok('T4 light pink → tint mixed toward highlight (G drives lerp)');
-  else fail('T4 pink got ' + t.pink.slice(0,3));
+  else fail('T4 pink got ' + t.pink.slice(0, 3));
 }
 
 // T5 — state revert.
 {
   const t = r.T5_revert;
-  if (close(t.red, [255, 0, 0]))   ok('T5 state revert: red rect returns to authored');
-  else fail('T5 red got ' + t.red.slice(0,3));
-  if (close(t.blue, [0, 0, 255]))  ok('T5 state revert: blue rect returns to authored');
-  else fail('T5 blue got ' + t.blue.slice(0,3));
-  if (close(t.white, [255, 255, 255]))  ok('T5 state revert: white rect returns to authored');
-  else fail('T5 white got ' + t.white.slice(0,3));
+  if (close(t.red, [255, 0, 0])) ok('T5 state revert: red rect returns to authored');
+  else fail('T5 red got ' + t.red.slice(0, 3));
+  if (close(t.blue, [0, 0, 255])) ok('T5 state revert: blue rect returns to authored');
+  else fail('T5 blue got ' + t.blue.slice(0, 3));
+  if (close(t.white, [255, 255, 255])) ok('T5 state revert: white rect returns to authored');
+  else fail('T5 white got ' + t.white.slice(0, 3));
 }
 
 // T6 — channelLerp + monochrome(yellow). lerp produces RGB; then
@@ -247,15 +280,42 @@ const close = (a, b, tol = 6) =>
 // Tint yellow → (54, 54, 0).
 {
   const t = r.T6_lerp_then_matrix;
-  console.log(`T6 lerp→mono: red→${t.red.slice(0,3)} blue→${t.blue.slice(0,3)} white→${t.white.slice(0,3)}`);
-  if (close(t.red, [54, 54, 0], 8))  ok('T6 red → primary(red) → yellow-luminance');
-  else fail('T6 red got ' + t.red.slice(0,3));
+  console.log(
+    `T6 lerp→mono: red→${t.red.slice(0, 3)} blue→${t.blue.slice(0, 3)} white→${t.white.slice(0, 3)}`,
+  );
+  if (close(t.red, [54, 54, 0], 8)) ok('T6 red → primary(red) → yellow-luminance');
+  else fail('T6 red got ' + t.red.slice(0, 3));
   // Pure blue → contrast (blue). Y = 0.0722 * 255 ≈ 18. Yellow-tint → (18, 18, 0).
   if (close(t.blue, [18, 18, 0], 8)) ok('T6 blue → contrast(blue) → yellow-luminance');
-  else fail('T6 blue got ' + t.blue.slice(0,3));
+  else fail('T6 blue got ' + t.blue.slice(0, 3));
   // Pure white → highlight white. Y = 255. Yellow → (255, 255, 0).
   if (close(t.white, [255, 255, 0], 8)) ok('T6 white → highlight(white) → yellow-luminance');
-  else fail('T6 white got ' + t.white.slice(0,3));
+  else fail('T6 white got ' + t.white.slice(0, 3));
+}
+
+// T7..T9 — the sprite. The headline contract: pure white stays white, even for a single-color recolor (primary == contrast).
+{
+  const b = r.T7_train_baseline,
+    m = r.T8_train_singleColor_red,
+    d = r.T9_train_dualColor;
+  const mag = [Math.round(0.92 * 255), Math.round(0.09 * 255), Math.round(0.41 * 255)];
+  const chk = (c, want, label) => {
+    if (close(c, want)) ok(label);
+    else fail(label + ' got ' + c.slice(0, 3) + ' want ' + want);
+  };
+  chk(b.body, [255, 0, 0], 'T7 baseline: red body as authored');
+  chk(b.rail, [0, 0, 255], 'T7 baseline: blue rail as authored');
+  chk(b.dome, [255, 255, 255], 'T7 baseline: white dome as authored');
+  chk(m.body, mag, 'T8 single-color: red body takes the one color');
+  chk(m.rail, mag, 'T8 single-color: blue rail takes the same color');
+  chk(
+    m.dome,
+    [255, 255, 255],
+    'T8 single-color: the white dome STAYS white (the highlight survives)',
+  );
+  chk(d.body, [0, Math.round(0.6 * 255), 0], 'T9 dual-color: red body takes the primary');
+  chk(d.rail, [255, Math.round(0.9 * 255), 0], 'T9 dual-color: blue rail takes the contrast');
+  chk(d.dome, [255, 255, 255], 'T9 dual-color: the white dome stays white');
 }
 
 console.log(`\nPNGs saved to ${OUT}`);

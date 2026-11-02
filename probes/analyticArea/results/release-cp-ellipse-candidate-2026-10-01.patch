@@ -1,0 +1,260 @@
+--- a/src/shaders/_cpatchCoverage.glsl
++++ b/src/shaders/_cpatchCoverage.glsl
+@@ -521,6 +521,52 @@
+ }
+ #endif
+
++#if defined(MANTLE_CPATCH_EXACT_ELLIPSE) && defined(MANTLE_CPATCH_HAS_RQUAD)
++// Private accuracy candidate: the exact area of an ellipse constraint in a box.
++// Transform the pixel rectangle to the unit disk; split each edge at disk roots.
++// Inside pieces contribute their triangle, outside pieces their circular sector.
++float cpDiskEdge(vec2 a, vec2 b) {
++  vec2 d = b - a;
++  float A = dot(d,d), B = dot(a,d), D = B*B-A*(dot(a,a)-1.0);
++  vec2 ts = vec2(0.0, 0.0);
++  if (D > 0.0 && A > 0.0) ts = clamp(vec2(-B-sqrt(D),-B+sqrt(D))/A,0.0,1.0);
++  float lo=0.0, sum=0.0;
++  for (int j=0;j<3;j++) {
++    float hi = j==0 ? ts.x : (j==1 ? ts.y : 1.0);
++    if (hi > lo) {
++      vec2 u=a+lo*d, v=a+hi*d, mid=a+0.5*(lo+hi)*d;
++      float cr=u.x*v.y-u.y*v.x;
++      sum += dot(mid,mid) <= 1.0 ? cr : atan(cr,dot(u,v));
++    }
++    lo=hi;
++  }
++  return 0.5*sum;
++}
++float cpEllipseBox(vec3 Q, float f, vec2 g, float emPerPx) {
++  float qs=max(abs(Q.x),max(abs(Q.y),abs(Q.z)));
++  if (!(qs > 0.0)) return -1.0;
++  Q/=qs;f/=qs;g/=qs;
++  float detQ=Q.x*Q.z-Q.y*Q.y;
++  if (!(Q.x > 0.0 && detQ > 0.0)) return -1.0;
++  vec2 ctr=0.5*vec2(Q.z*g.x-Q.y*g.y,Q.x*g.y-Q.y*g.x)/detQ;
++  float k=f+0.5*dot(g,ctr);
++  if (!(k > 0.0)) return -1.0;
++  float a=sqrt(Q.x/k), b=Q.y/sqrt(Q.x*k), c=sqrt(detQ/(Q.x*k));
++  // A loose size gate keeps the expensive exact model off large ellipses.
++  if (k*max(Q.x,Q.z) > 4.0001*detQ*emPerPx*emPerPx) return -1.0;
++  vec2 ext=sqrt(k*vec2(Q.z,Q.x)/detQ);
++  if (abs(ctr.x)-ext.x > 0.5*emPerPx || abs(ctr.y)-ext.y > 0.5*emPerPx) return 0.0;
++  if (abs(ctr.x)+ext.x <= 0.5*emPerPx && abs(ctr.y)+ext.y <= 0.5*emPerPx)
++    return clamp(3.141592653589793*k/(sqrt(detQ)*emPerPx*emPerPx),0.0,1.0);
++  vec2 off=vec2(a*ctr.x+b*ctr.y,c*ctr.y);
++  vec2 dx=0.5*emPerPx*vec2(a,0.0), dy=0.5*emPerPx*vec2(b,c);
++  vec2 p0=-dx-dy-off,p1=dx-dy-off,p2=dx+dy-off,p3=-dx+dy-off;
++  if (dot(p0,p0)<=1.0 && dot(p1,p1)<=1.0 && dot(p2,p2)<=1.0 && dot(p3,p3)<=1.0) return 1.0;
++  float area=cpDiskEdge(p0,p1)+cpDiskEdge(p1,p2)+cpDiskEdge(p2,p3)+cpDiskEdge(p3,p0);
++  return clamp(area*k/(sqrt(detQ)*emPerPx*emPerPx),0.0,1.0);
++}
++#endif
++
+ float cpatchCurveCov(int idx, vec2 p, float emPerPx, out bool cutOut, out float softOut, out bool nearOut,
+                      out bool hullOut, out float sdOut, out vec2 nOut, out float outlOut) {
+   softOut = 1.0; nearOut = false;
+@@ -808,6 +854,19 @@
+   float f; vec2 gf;
+   CP_EVAL(p, f, gf)
+   f *= sg; gf *= sg;
++#if defined(MANTLE_CPATCH_EXACT_ELLIPSE) && defined(MANTLE_CPATCH_HAS_RQUAD)
++  if (!isCut && kind > 4.5) {
++    vec3 Q=sg*vec3(e1.x*e2c.x-e0.x*e0.x,
++      0.5*(e1.x*e2c.y+e1.y*e2c.x)-e0.x*e0.y,
++      e1.y*e2c.y-e0.y*e0.y);
++    float ellipseArea=cpEllipseBox(Q,f,gf,emPerPx);
++    if (ellipseArea >= 0.0) {
++      softOut=ellipseArea;nearOut=true;sdOut=0.0;
++      return ellipseArea;
++    }
++  }
++#endif
++
+   // A SEAM DECIDES ALONG ITS OWN SPAN AND NO FURTHER (ledger CP25). Its step is an implicit's sign, and the zero set runs
+   // on past the seam's ends -- often as the very outline the seam meets, where a curve was split into a seam piece and an
+   // outline piece -- so a fragment in this patch's skirt, beside that outline pixels further on, read the seam's extension as
+--- a/src/renderer/cpatchPack.js
++++ b/src/renderer/cpatchPack.js
+@@ -1815,13 +1815,15 @@
+   }
+   const texels = new Float32Array(nTex), verts = new Float32Array(nVert);
+   let to = 0, vo = 0, unresolved = 0, cells = 0, dropped = 0, allSeam = 0, comp = 0;
++  let hasRquad = false;
+   for (const m of parts) {
+     texels.set(m.texels, to); to += m.texels.length;
+     verts.set(m.verts, vo);   vo += m.verts.length;
+     unresolved += m.unresolved; cells += m.cells; dropped += m.dropped; allSeam += m.allSeam | 0; comp += m.comp | 0;
++    hasRquad ||= !!(m.kinds && m.kinds[5] > 0);
+   }
+   return { texels, verts, vertexCount: verts.length / LB_STRIDE,
+-           cpatch: true, kindMask: 1 << CPATCH_STREAM_TAG, unresolved, cells, dropped, allSeam, comp };
++           cpatch: true, kindMask: 1 << CPATCH_STREAM_TAG, unresolved, cells, dropped, allSeam, comp, hasRquad };
+ }
+
+ /// PLAN one segment of a morph: the cells, and the vertex stream, ONCE for the whole span.
+--- a/src/renderer/cpatchBuild.js
++++ b/src/renderer/cpatchBuild.js
+@@ -512,6 +512,7 @@
+                   // selector read, so a mesh that forgets to say it is CPatch is reported as LB —
+                   // which is the same misattribution, just in the other direction.
+                   cpatch: true, slug: false, kindMask: m.kindMask,
++                  hasRquad: m.hasRquad,
+                   // NO LOOP-BLINN CHAIN FACE, and whether a seam packed its companion: the presence questions the
+                   // variant selector asks (fillPass). A CPatch vertex never reaches an LB chain kernel, and an
+                   // unanswered question keeps the kernel -- which compiled both chain kernels into every CPatch
+--- a/src/renderer/fillPass.js
++++ b/src/renderer/fillPass.js
+@@ -951,6 +951,15 @@
+     // now the kernel's only composition -- the patch whose side the pixel's centre is on paints what the shape covers there,
+     // exact under OVER and under the claim alike -- so there is no variant to pick here any more (owner's call, 2026-09-28).
+     if (defines.includes('MANTLE_CPATCH')) {
++      // Private candidate: compile its conic area only where a pack contains one.
++      const eg = bundle._geomGen | 0, ea = bundle._lbAdoptKey | 0;
++      const em = bundle._lbMeshes || bundle._morphMeshes;
++      if (bundle._cpEllipseGen !== eg || bundle._cpEllipseAdopt !== ea || bundle._cpEllipseMeshes !== em) {
++        bundle._cpHasEllipse = !em || em.some(m => m && m.cpatch && m.hasRquad !== false);
++        bundle._cpEllipseGen = eg; bundle._cpEllipseAdopt = ea; bundle._cpEllipseMeshes = em;
++      }
++      if (bundle._cpHasEllipse) defines.push('MANTLE_CPATCH_HAS_RQUAD');
++
+       // AND THE SEAM COMPANION'S CODE ONLY WHERE A SEAM PACKED ONE (ledger CP33): see R._cpatchHasComp.
+       if (R._cpatchHasComp && R._cpatchHasComp(bundle) && !defines.includes('MANTLE_CPATCH_COMP'))
+         defines.push('MANTLE_CPATCH_COMP');
+--- a/src/renderer/cpatchMorphCert.js
++++ b/src/renderer/cpatchMorphCert.js
+@@ -189,6 +189,28 @@
+   }
+   return s;
+ };
++
++// Clear the rational point's denominator before fitting a polynomial lattice.
++// A fixed (1,w,1) weight is positive over [0,1] when w > -1; reject
++// other slices instead of applying a sign-changing multiplier. Gradients use
++// the SAME total degree as F so F/|gradient| retains its distance meaning.
++function pointH(seg, u) {
++  if (seg.t !== 'rquad') { const p = segPt(seg, u); return [p[0], p[1], 1]; }
++  const w = seg.w == null ? 1 : seg.w;
++  if (!(w > -1) || !Number.isFinite(w)) return [NaN, NaN, NaN];
++  const a = (1-u)*(1-u), b = 2*u*(1-u)*w, c = u*u, P = seg.P;
++  return [a*P[0][0]+b*P[1][0]+c*P[2][0],
++          a*P[0][1]+b*P[1][1]+c*P[2][1], a+b+c];
++}
++function evalAlong(F, seg, u, degree = F.deg) {
++  if (seg.t !== 'rquad') { const p = segPt(seg, u); return evalPoly(F, p[0], p[1]); }
++  const [x,y,w] = pointH(seg,u); let v = 0;
++  for (let i=0;i<F.c.length;i++) for (let j=0;j<F.c[i].length;j++) {
++    const k=F.c[i][j];
++    if (k) v += k*Math.pow(x,i)*Math.pow(y,j)*Math.pow(w,degree-i-j);
++  }
++  return v;
++}
+
+ /// Values at the D+1 equally spaced nodes -> Bernstein coefficients of the degree-D polynomial
+ /// through them. Small and cached; D never exceeds a dozen here.
+@@ -393,7 +415,7 @@
+   const coverLines = movingCover(curvesA, curvesB);
+   const coverGrids = (i, j, degS, degT) => coverLines.map((h) => bivSample(
+     (tv) => ({ sg: segAtM(j, tv), off: h.cA + (h.cB - h.cA) * tv }),
+-    (c, sv) => { const pt = segPt(c.sg, sv); return h.n[0] * pt[0] + h.n[1] * pt[1] + c.off; },
++    (c, sv) => { const pt = pointH(c.sg, sv); return h.n[0] * pt[0] + h.n[1] * pt[1] + c.off * pt[2]; },
+     degS, Math.max(degT, 2))).filter(Boolean);
+
+   // THE WORK UNIT IS THE BOX, NOT THE PAIR. `pairs` counts (curve, constraint) pairs, which is how
+@@ -442,10 +464,9 @@
+         for (let b = 0; b <= degT; b++) {
+           const c = ctxT[b];
+           if (!c) { row.push(NaN); rowX.push(NaN); rowY.push(NaN); continue; }
+-          const p = segPt(c.sg, s);
+-          row.push(evalPoly(c.F, p[0], p[1]));
+-          rowX.push(evalPoly(c.Fx, p[0], p[1]));
+-          rowY.push(evalPoly(c.Fy, p[0], p[1]));
++          row.push(evalAlong(c.F, c.sg, s, di));
++          rowX.push(evalAlong(c.Fx, c.sg, s, di));
++          rowY.push(evalAlong(c.Fy, c.sg, s, di));
+         }
+         vals.push(row); valX.push(rowX); valY.push(rowY);
+       }
+@@ -573,6 +594,21 @@
+ /// subdivided rather than waved through.
+ const loAbs = (g) => { const mn = gridMin(g), mx = gridMax(g); return mn > 0 ? mn : mx < 0 ? -mx : 0; };
+
++// Certify near-coincidence with the same distance slack on every child.
++// Reading one gradient component across a whole conic can lose its bound;
++// dividing global hull extrema also discards correlation. Subdivision proves
++// each child with its own hull, without widening the permitted distance.
++function nearCurveGrid(g, gx, gy, slack, depth = 0) {
++  const mag = Math.max(Math.abs(gridMin(g)), Math.abs(gridMax(g)));
++  const grad = Math.max(loAbs(gx), loAbs(gy));
++  if (grad > 0 && mag < slack * grad) return true;
++  if (depth >= 8) return false;
++  const split = depth % 2 ? splitT : splitS;
++  const vs=split(g), xs=split(gx), ys=split(gy);
++  return nearCurveGrid(vs[0],xs[0],ys[0],slack,depth+1)
++      && nearCurveGrid(vs[1],xs[1],ys[1],slack,depth+1);
++}
++
+ function bivGrid(implOf, segOf, degS, degT) {
+   const inS = valuesToBernstein(degS), inT = valuesToBernstein(degT);
+   if (!inS || !inT) return null;
+@@ -589,8 +625,7 @@
+   for (let a = 0; a <= degS; a++) {
+     const s = degS === 0 ? 0 : a / degS, row = [];
+     for (let b = 0; b <= degT; b++) {
+-      const p = segPt(sgs[b], s);
+-      row.push(evalPoly(Fs[b], p[0], p[1]));
++      row.push(evalAlong(Fs[b], sgs[b], s));
+     }
+     vals.push(row);
+   }
+@@ -771,7 +806,7 @@
+         // evaluate, so building it three times was three times the resultants and three times
+         // the blossoms for one answer.
+         const perT = (tv) => { const F = implAt(j, tv); return F ? { F, sg: segOf(tv) } : null; };
+-        const g = bivSample(perT, (c, sv) => { const pt = segPt(c.sg, sv); return evalPoly(c.F, pt[0], pt[1]); },
++        const g = bivSample(perT, (c, sv) => { return evalAlong(c.F, c.sg, sv, dj.deg); },
+           degS, degT);
+         if (!g) { bad = 'bivGrid j=' + j; break; }
+         // ORIENT FROM THE PATCH INTERIOR, not from the grid. The grid samples f_j along curve i's
+@@ -791,9 +826,9 @@
+         // own largest coefficient -- which is a different question, and the one that left five
+         // failures on spans of zero width.
+         const gx = bivSample((tv) => { const F = implAt(j, tv); return F ? { F: polyDx(F), sg: segOf(tv) } : null; },
+-          (c, sv) => { const pt = segPt(c.sg, sv); return evalPoly(c.F, pt[0], pt[1]); }, degS, degT);
++          (c, sv) => { return evalAlong(c.F, c.sg, sv, dj.deg); }, degS, degT);
+         const gy = bivSample((tv) => { const F = implAt(j, tv); return F ? { F: polyDy(F), sg: segOf(tv) } : null; },
+-          (c, sv) => { const pt = segPt(c.sg, sv); return evalPoly(c.F, pt[0], pt[1]); }, degS, degT);
++          (c, sv) => { return evalAlong(c.F, c.sg, sv, dj.deg); }, degS, degT);
+         if (!gx || !gy) { bad = 'gradient grid j=' + j; break; }
+         // CURVE i'S EXTENSION RUNS ALONG CURVE j -- two pieces of one cubic, split at an
+         // inflection or separated by a cut. They bound the patch along the SAME algebraic curve,
+@@ -808,7 +843,9 @@
+         // A THOUSANDTH of the tolerance. Measured, the coincident pairs sit at 1e-7 of a unit
+         // box against a tolerance of 1.9e-3 -- four orders below the line either way, so the
+         // constant is not carrying the decision, the separation is.
+-        if (gLo > 0 && gm < 1e-3 * tolN * gLo) { sameCurve = true; break; }
++        const gHi = Math.max(Math.abs(gridMin(gx)),Math.abs(gridMax(gx)),Math.abs(gridMin(gy)),Math.abs(gridMax(gy)));
++        if ((gLo > 0 && gm < 1e-3 * tolN * gLo)
++            || (gm < 0.01 * tolN * gHi && nearCurveGrid(g,gx,gy,1e-3*tolN))) { sameCurve = true; break; }
+         // THE GRADIENTS DO NOT GO INTO THE STACK. They are read once, just above, to turn the
+         // same-curve test into a distance; the box test itself is strict and never looks at them.
+         // Carried along they were split, allocated and re-bounded at every one of up to 2^16
+@@ -832,8 +869,8 @@
+       for (const end of [0, 1]) {
+         const near = bivSample(
+           (tv) => ({ sg: segOf0(tv), e: segPt(segAtM(i, tv), end) }),
+-          (c, sv) => { const pt = segPt(c.sg, sv);
+-            return tolN * tolN - ((pt[0] - c.e[0]) ** 2 + (pt[1] - c.e[1]) ** 2); },
++          (c, sv) => { const pt = pointH(c.sg, sv);
++            return tolN * tolN * pt[2] * pt[2] - ((pt[0] - c.e[0]*pt[2]) ** 2 + (pt[1] - c.e[1]*pt[2]) ** 2); },
+           2 * ni, 2);
+         if (near) grids.push({ g: near, near: true });
+       }
+@@ -842,7 +879,7 @@
+       for (const h of coverLines) {
+         const g = bivSample(
+           (tv) => ({ sg: segOf0(tv), off: h.cA + (h.cB - h.cA) * tv }),
+-          (c, sv) => { const pt = segPt(c.sg, sv); return h.n[0] * pt[0] + h.n[1] * pt[1] + c.off; },
++          (c, sv) => { const pt = pointH(c.sg, sv); return h.n[0] * pt[0] + h.n[1] * pt[1] + c.off * pt[2]; },
+           Math.max(1, ni), 2);
+         if (g) grids.push({ g, unit: true });
+       }

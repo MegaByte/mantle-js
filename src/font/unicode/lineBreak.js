@@ -1,9 +1,12 @@
-// Line breaking (UAX #14), Unicode 17 rule set. Classes are pre-resolved per LB1
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// Line breaking (UAX #14), Unicode 18 rule set. Classes are pre-resolved per LB1
 // in the table (AI/SG/XX->AL, CJ->NS, SA->CM/AL), so this implements LB2-LB31.
 // Returns a break action before each index: PROHIBITED / ALLOWED / MANDATORY.
-import { lineBreak, Lb } from "./tables/lineBreak.js";
-import { eastAsianWidth, Eaw } from "./tables/eastAsianWidth.js";
-import { extPict } from "./tables/extPict.js";
+import { lineBreak, Lb } from './tables/lineBreak.js';
+import { eastAsianWidth, Eaw } from './tables/eastAsianWidth.js';
+import { extPict } from './tables/extPict.js';
 
 const extPictTrie = (cp) => extPict.get(cp);
 
@@ -13,9 +16,52 @@ export const MANDATORY = 2;
 
 // Class ids (by name, so they track the generated enum).
 const {
-  AL, CM, BA, LF, BK, CR, SP, EX, QU, QU_PI, QU_PF, PR, PO, OP, CP, IS, HY, SY,
-  NU, CL, NL, GL, BB, HH, HL, JL, JV, JT, NS, AK, VI, AS, ID, VF, ZW, ZWJ, B2,
-  IN, WJ, EB, H2, H3, CB, AP, RI, EM,
+  AL,
+  CM,
+  BA,
+  LF,
+  BK,
+  CR,
+  SP,
+  EX,
+  QU,
+  QU_PI,
+  QU_PF,
+  PR,
+  PO,
+  OP,
+  CP,
+  IS,
+  HY,
+  SY,
+  NU,
+  CL,
+  NL,
+  GL,
+  BB,
+  HH,
+  HL,
+  JL,
+  JV,
+  JT,
+  NS,
+  AK,
+  VI,
+  AS,
+  ID,
+  VF,
+  ZW,
+  ZWJ,
+  B2,
+  IN,
+  WJ,
+  EB,
+  H2,
+  H3,
+  CB,
+  AP,
+  RI,
+  EM,
 } = Lb;
 
 const cls = (cp) => lineBreak.get(cp);
@@ -26,10 +72,8 @@ const eaIsWide = (cp) => {
   return w === Eaw.F || w === Eaw.W || w === Eaw.H;
 };
 
-/**
- * Compute line-break actions. Returns array of length n+1; entry i is the
- * action for a break BEFORE code point i (entry 0 = sot PROHIBITED, n = eot
- * MANDATORY). Input is an array of code points.
+/*
+
  */
 export function lineBreakActions(cps) {
   const n = cps.length;
@@ -72,7 +116,7 @@ export function lineBreakActions(cps) {
   // This carries the context for the (CL|CP) × (PR|PO) joint, which (unlike the
   // other LB25 joints) only holds when the bracket closes a number.
   const numNoBreak = new Array(n + 1).fill(false);
-  for (let i = 0; i < n; ) {
+  for (let i = 0; i < n;) {
     let j = i;
     if (c[j] === PR || c[j] === PO) j++;
     if (c[j] === OP || c[j] === HY) j++;
@@ -148,9 +192,11 @@ function decide(cps, c, raw, attached, baseIdx, numNoBreak, i, b, a, riParity) {
   if (a === WJ || b === WJ) return PROHIBITED;
   // LB12: GL ×
   if (b === GL) return PROHIBITED;
-  // LB12a: [^SP BA HY HH] × GL  (a hyphen, incl. the unambiguous HH, allows a
-  // break before GL/NBSP)
-  if (a === GL && b !== SP && b !== BA && b !== HY && b !== HH) return PROHIBITED;
+  // LB12a: [^SP HY HH] × GL  (a space or a hyphen, incl. the unambiguous HH,
+  // allows a break before GL/NBSP). Unicode 18 replaced the earlier exception
+  // BA with HH, so a plain break-after character — IDEOGRAPHIC SPACE, TAB —
+  // does not open a break before NBSP.
+  if (a === GL && b !== SP && b !== HY && b !== HH) return PROHIBITED;
   // LB13: × CL, CP, EX, SY (IS is handled by LB15c/d so a space can precede it)
   if (a === CL || a === CP || a === EX || a === SY) return PROHIBITED;
   // LB14: OP SP* ×
@@ -164,8 +210,16 @@ function decide(cps, c, raw, attached, baseIdx, numNoBreak, i, b, a, riParity) {
     if (lb.cls === QU_PI) {
       const before = lb.idx - 1 >= 0 ? c[lb.idx - 1] : -2;
       if (
-        lb.idx === 0 || before === BK || before === CR || before === LF || before === NL ||
-        before === OP || isQU(before) || before === GL || before === SP || before === ZW
+        lb.idx === 0 ||
+        before === BK ||
+        before === CR ||
+        before === LF ||
+        before === NL ||
+        before === OP ||
+        isQU(before) ||
+        before === GL ||
+        before === SP ||
+        before === ZW
       ) {
         return PROHIBITED; // LB15a
       }
@@ -175,9 +229,21 @@ function decide(cps, c, raw, attached, baseIdx, numNoBreak, i, b, a, riParity) {
   if (a === QU_PF) {
     const nextC = i + 1 < c.length ? c[i + 1] : -1;
     if (
-      nextC === SP || nextC === GL || nextC === WJ || nextC === CL || isQU(nextC) ||
-      nextC === CP || nextC === EX || nextC === IS || nextC === SY || nextC === BK ||
-      nextC === CR || nextC === LF || nextC === NL || nextC === ZW || nextC === -1
+      nextC === SP ||
+      nextC === GL ||
+      nextC === WJ ||
+      nextC === CL ||
+      isQU(nextC) ||
+      nextC === CP ||
+      nextC === EX ||
+      nextC === IS ||
+      nextC === SY ||
+      nextC === BK ||
+      nextC === CR ||
+      nextC === LF ||
+      nextC === NL ||
+      nextC === ZW ||
+      nextC === -1
     ) {
       return PROHIBITED;
     }
@@ -220,8 +286,15 @@ function decide(cps, c, raw, attached, baseIdx, numNoBreak, i, b, a, riParity) {
     const hyIdx = baseIdx[i - 1]; // the hyphen, seen through any attached CM
     const before = hyIdx - 1 >= 0 ? c[hyIdx - 1] : -1;
     if (
-      hyIdx === 0 || before === BK || before === CR || before === LF || before === NL ||
-      before === SP || before === ZW || before === CB || before === GL
+      hyIdx === 0 ||
+      before === BK ||
+      before === CR ||
+      before === LF ||
+      before === NL ||
+      before === SP ||
+      before === ZW ||
+      before === CB ||
+      before === GL
     ) {
       return PROHIBITED;
     }
@@ -273,7 +346,11 @@ function decide(cps, c, raw, attached, baseIdx, numNoBreak, i, b, a, riParity) {
       const viIdx = baseIdx[i - 1];
       if (c[viIdx] === VI) {
         const pIdx = viIdx - 1 >= 0 ? baseIdx[viIdx - 1] : -1;
-        if (pIdx >= 0 && (c[pIdx] === AK || c[pIdx] === AS || cps[pIdx] === 0x25cc) && (a === AK || dotA))
+        if (
+          pIdx >= 0 &&
+          (c[pIdx] === AK || c[pIdx] === AS || cps[pIdx] === 0x25cc) &&
+          (a === AK || dotA)
+        )
           return PROHIBITED;
       }
     }
@@ -293,4 +370,3 @@ function decide(cps, c, raw, attached, baseIdx, numNoBreak, i, b, a, riParity) {
   // LB31: ALL ÷ ALL
   return ALLOWED;
 }
-

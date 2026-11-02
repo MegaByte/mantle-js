@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // cbdtReader.js — Google CBDT/CBLC bitmap-glyph table reader.
 //
 // CBLC = location (index hierarchy). CBDT = data (PNG bytes).
@@ -15,11 +18,11 @@
 export class CbdtGlyph {
   constructor(pngBytes, metrics, strikePpem) {
     this.pngBytes = pngBytes;
-    this.height   = metrics.height;
-    this.width    = metrics.width;
+    this.height = metrics.height;
+    this.width = metrics.width;
     this.bearingX = metrics.bearingX;
     this.bearingY = metrics.bearingY;
-    this.advance  = metrics.advance;
+    this.advance = metrics.advance;
     this.strikePpem = strikePpem;
   }
 }
@@ -32,37 +35,47 @@ export class CbdtReader {
     this._cbdtOff = -1;
     this._cblcVersion = -1;
     this._numSizes = 0;
-    this._sizes = null;  // parsed lazily
+    this._sizes = null; // parsed lazily
 
     if (!tables.cblc || !tables.cbdt) return;
     this._cblcOff = tables.cblc[0];
     this._cbdtOff = tables.cbdt[0];
     const v = this._view;
     this._cblcVersion = v.getUint32(this._cblcOff + 0, false);
-    if (this._cblcVersion !== 0x00030000) return;  // we support v3.0
+    if (this._cblcVersion !== 0x00030000) return;
     this._numSizes = v.getUint32(this._cblcOff + 4, false);
   }
 
-  get hasBitmaps() { return this._numSizes > 0; }
-  get numStrikes() { return this._numSizes; }
+  get hasBitmaps() {
+    return this._numSizes > 0;
+  }
+  get numStrikes() {
+    return this._numSizes;
+  }
 
   /// Picks the strike whose ppem is closest to targetPpem without
   /// being smaller (same policy as sbixReader).
   pickStrikeForPpem(targetPpem) {
     this._ensureSizes();
     if (!this._sizes || this._sizes.length === 0) return -1;
-    let bestUp = -1, bestUpPpem = Infinity;
-    let largest = 0, largestPpem = 0;
+    let bestUp = -1,
+      bestUpPpem = Infinity;
+    let largest = 0,
+      largestPpem = 0;
     for (let i = 0; i < this._sizes.length; i++) {
       const p = this._sizes[i].ppemX;
-      if (p >= targetPpem && p < bestUpPpem) { bestUp = i; bestUpPpem = p; }
-      if (p > largestPpem) { largest = i; largestPpem = p; }
+      if (p >= targetPpem && p < bestUpPpem) {
+        bestUp = i;
+        bestUpPpem = p;
+      }
+      if (p > largestPpem) {
+        largest = i;
+        largestPpem = p;
+      }
     }
     return bestUp >= 0 ? bestUp : largest;
   }
 
-  /// Returns CbdtGlyph or null when this gid has no bitmap in this
-  /// strike (or the format isn't one we support).
   getBitmapGlyph(gid, strikeIdx) {
     this._ensureSizes();
     if (!this._sizes || strikeIdx < 0 || strikeIdx >= this._sizes.length) return null;
@@ -71,8 +84,8 @@ export class CbdtReader {
     // range covers `gid`.
     for (const sub of size.subTables) {
       if (gid < sub.firstGid || gid > sub.lastGid) continue;
-      if (sub.indexFormat !== 1) continue;            // we only do format 1
-      if (sub.imageFormat !== 17) continue;           // we only do format 17 (small + PNG)
+      if (sub.indexFormat !== 1) continue;
+      if (sub.imageFormat !== 17) continue;
       return this._readFormat17(sub, gid, size.ppemX);
     }
     return null;
@@ -83,18 +96,18 @@ export class CbdtReader {
     // Format 1: u32 sbixOffsets[lastGid - firstGid + 2], relative to
     // sub.imageDataOffset (which is into CBDT).
     const idx = gid - sub.firstGid;
-    const offTable = sub.headerEnd;                   // first byte after the 8-byte index subtable header
+    const offTable = sub.headerEnd; // first byte after the 8-byte index subtable header
     const start = v.getUint32(offTable + idx * 4, false);
-    const end   = v.getUint32(offTable + (idx + 1) * 4, false);
-    if (end <= start) return null;                    // empty slot sentinel
+    const end = v.getUint32(offTable + (idx + 1) * 4, false);
+    if (end <= start) return null; // empty slot sentinel
     const dataStart = this._cbdtOff + sub.imageDataOffset + start;
     // Image format 17: SmallGlyphMetrics(5 bytes) + u32 dataLen + dataLen PNG bytes.
-    const height   = v.getUint8(dataStart + 0);
-    const width    = v.getUint8(dataStart + 1);
+    const height = v.getUint8(dataStart + 0);
+    const width = v.getUint8(dataStart + 1);
     const bearingX = v.getInt8(dataStart + 2);
     const bearingY = v.getInt8(dataStart + 3);
-    const advance  = v.getUint8(dataStart + 4);
-    const dataLen  = v.getUint32(dataStart + 5, false);
+    const advance = v.getUint8(dataStart + 4);
+    const dataLen = v.getUint32(dataStart + 5, false);
     const pngStart = dataStart + 9;
     const png = new Uint8Array(this._bytes.buffer, this._bytes.byteOffset + pngStart, dataLen);
     return new CbdtGlyph(png, { height, width, bearingX, bearingY, advance }, ppem);
@@ -102,7 +115,10 @@ export class CbdtReader {
 
   _ensureSizes() {
     if (this._sizes != null) return;
-    if (this._numSizes === 0) { this._sizes = []; return; }
+    if (this._numSizes === 0) {
+      this._sizes = [];
+      return;
+    }
     const v = this._view;
     const out = [];
     // BitmapSize records start right after the 8-byte CBLC header.
@@ -111,7 +127,7 @@ export class CbdtReader {
       const rOff = this._cblcOff + 8 + i * 48;
       const subArrOff = v.getUint32(rOff + 0, false);
       // subArr size at rOff+4 (indexTablesSize), num at rOff+8.
-      const numSubs   = v.getUint32(rOff + 8, false);
+      const numSubs = v.getUint32(rOff + 8, false);
       // BitmapSize layout (last bytes):
       //   ...
       //   startGlyphIndex u16 (offset 40)
@@ -121,9 +137,9 @@ export class CbdtReader {
       //   bitDepth        u8  (offset 46)
       //   flags           u8  (offset 47)
       const startGid = v.getUint16(rOff + 40, false);
-      const endGid   = v.getUint16(rOff + 42, false);
-      const ppemX    = v.getUint8(rOff + 44);
-      const ppemY    = v.getUint8(rOff + 45);
+      const endGid = v.getUint16(rOff + 42, false);
+      const ppemX = v.getUint8(rOff + 44);
+      const ppemY = v.getUint8(rOff + 45);
       const bitDepth = v.getUint8(rOff + 46);
 
       // Walk the IndexSubTableArray: 8 bytes each
@@ -133,14 +149,18 @@ export class CbdtReader {
       for (let s = 0; s < numSubs; s++) {
         const eOff = subArrBase + s * 8;
         const firstGid = v.getUint16(eOff + 0, false);
-        const lastGid  = v.getUint16(eOff + 2, false);
-        const subOff   = v.getUint32(eOff + 4, false);  // relative to subArrBase
+        const lastGid = v.getUint16(eOff + 2, false);
+        const subOff = v.getUint32(eOff + 4, false); // relative to subArrBase
         const subBase = subArrBase + subOff;
-        const indexFormat   = v.getUint16(subBase + 0, false);
-        const imageFormat   = v.getUint16(subBase + 2, false);
+        const indexFormat = v.getUint16(subBase + 0, false);
+        const imageFormat = v.getUint16(subBase + 2, false);
         const imageDataOffset = v.getUint32(subBase + 4, false);
         subs.push({
-          firstGid, lastGid, indexFormat, imageFormat, imageDataOffset,
+          firstGid,
+          lastGid,
+          indexFormat,
+          imageFormat,
+          imageDataOffset,
           headerEnd: subBase + 8,
         });
       }

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // hitTestWorldMatrixSmoke.mjs — fillHitShape with
 // `worldMatrix` opts inverse-transforms the query point back into
 // em-space before testing.
@@ -5,8 +8,13 @@
 import { fillHitShape, fillHits, fillHitId } from '../../src/hitTest/hitTest.js';
 
 let failures = 0;
-function ok(msg) { console.log('ok', msg); }
-function fail(msg) { failures++; console.error('FAIL', msg); }
+function ok(msg) {
+  console.log('ok', msg);
+}
+function fail(msg) {
+  failures++;
+  console.error('FAIL', msg);
+}
 
 // Hand-rolled bundle: one shape with em-space bbox (10, 20, 30, 40).
 // metaFloats layout is the v3 stride (48 floats per shape):
@@ -16,8 +24,11 @@ function fail(msg) { failures++; console.error('FAIL', msg); }
 function makeBundle(bbox) {
   const stride = 48;
   const meta = new Float32Array(stride);
-  meta[0] = bbox[0]; meta[1] = bbox[1]; meta[2] = bbox[2]; meta[3] = bbox[3];
-  meta[7] = 1.0;     // fill α = 1 so minAlpha gates don't fire
+  meta[0] = bbox[0];
+  meta[1] = bbox[1];
+  meta[2] = bbox[2];
+  meta[3] = bbox[3];
+  meta[7] = 1.0; // fill α = 1 so minAlpha gates don't fire
   return {
     numShapes: 1,
     metaFloats: meta,
@@ -52,7 +63,7 @@ function makeBundle(bbox) {
 // Em-space bbox (10..30, 20..40) maps to world (110..130, 220..240).
 {
   const b = makeBundle([10, 20, 30, 40]);
-  const T = new Float32Array([1, 0, 0,  0, 1, 0,  100, 200, 1]);
+  const T = new Float32Array([1, 0, 0, 0, 1, 0, 100, 200, 1]);
   if (fillHitShape(b, 120, 230, { worldMatrix: T }) === 0)
     ok('T3 world (120,230) hits translated bundle');
   else fail('T3 translated hit expected');
@@ -66,7 +77,7 @@ function makeBundle(bbox) {
 // Em bbox (10..30, 20..40) maps to world (20..60, 40..80).
 {
   const b = makeBundle([10, 20, 30, 40]);
-  const S = new Float32Array([2, 0, 0,  0, 2, 0,  0, 0, 1]);
+  const S = new Float32Array([2, 0, 0, 0, 2, 0, 0, 0, 1]);
   if (fillHitShape(b, 40, 60, { worldMatrix: S }) === 0)
     ok('T4 world (40,60) hits 2x-scaled bundle');
   else fail('T4 scaled hit expected');
@@ -80,10 +91,10 @@ function makeBundle(bbox) {
 // Column-major mat3: [0, 1, 0,  -1, 0, 0,  0, 0, 1]
 // Em (10..30, 20..40) under R(90°): a point (x, y) maps to (-y, x).
 // So em corners map to world: (-20, 10), (-40, 30) → bbox (-40..-20, 10..30).
-// World (-30, 20) should hit. World (20, 30) should miss (was the em-space hit).
+// World (-30, 20) should hit. World (20, 30) should miss (it is the em-space hit).
 {
   const b = makeBundle([10, 20, 30, 40]);
-  const R = new Float32Array([0, 1, 0,  -1, 0, 0,  0, 0, 1]);
+  const R = new Float32Array([0, 1, 0, -1, 0, 0, 0, 0, 1]);
   const got = fillHitShape(b, -30, 20, { worldMatrix: R });
   if (got === 0) ok('T5 rotated world (-30,20) hits');
   else fail(`T5 rotated hit expected, got ${got}`);
@@ -92,7 +103,7 @@ function makeBundle(bbox) {
 // === T6: fillHits with worldMatrix ==================================
 {
   const b = makeBundle([10, 20, 30, 40]);
-  const T = new Float32Array([1, 0, 0,  0, 1, 0,  100, 200, 1]);
+  const T = new Float32Array([1, 0, 0, 0, 1, 0, 100, 200, 1]);
   const hits = fillHits(b, 120, 230, { worldMatrix: T });
   if (hits.length === 1 && hits[0] === 0) ok('T6 fillHits returns [0] under translation');
   else fail(`T6 hits = ${JSON.stringify(hits)}`);
@@ -114,5 +125,5 @@ function makeBundle(bbox) {
 
 console.log('---');
 if (failures) console.error(`HIT-TEST-WORLD-MATRIX FAIL (${failures})`);
-else          console.log('HIT-TEST-WORLD-MATRIX PASS');
+else console.log('HIT-TEST-WORLD-MATRIX PASS');
 process.exit(failures ? 1 : 0);

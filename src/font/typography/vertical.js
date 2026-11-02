@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // font/typography/vertical — opt-in registration for VORG (vertical
 // glyph origins).
 //

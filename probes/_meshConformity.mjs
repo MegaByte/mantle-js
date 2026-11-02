@@ -1,13 +1,16 @@
-// _meshConformity — G7. Audit the LB mesh for T-JUNCTIONS.
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// _meshConformity — audit the LB mesh for T-JUNCTIONS.
 //
 // earcut emits non-conforming output by design, and the CDT path is conforming; the fast mesh
 // then splits crescent hulls (healCracks) to repair interior<->crescent T-junctions. A T-junction
 // is a vertex lying strictly in the interior of another triangle's edge: the two triangles do not
-// share that edge, so at any zoom the rasteriser can leave a sub-pixel CRACK between them.
+// share that edge, so at any zoom the rasterizer can leave a sub-pixel CRACK between them.
 //
 // Audited primitives are the ones that TILE the shape's area: interior (kind 0), quad and cubic
 // hull faces (1, 2, 11), Bezout (4) and rational-quad (5) faces. Strips (3, 9, 10), corner caps
-// (8) and cubic rings deliberately overlap/extend past their neighbours — they are not a tiling,
+// (8) and cubic rings deliberately overlap/extend past their neighbors — they are not a tiling,
 // so a "T-junction" there is meaningless.
 //
 // Reported per shape: T-junction count, and which kinds the edge and the offending vertex belong
@@ -16,11 +19,13 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
-const ROBOTO = Array.from(new Uint8Array(readFileSync(ROOT + '/test/font/fixtures/roboto-regular.ttf')));
+const ROBOTO = Array.from(
+  new Uint8Array(readFileSync(ROOT + '/test/font/fixtures/roboto-regular.ttf')),
+);
 const TIGER = readFileSync(ROOT + '/examples/tiger.svg', 'utf8');
 
 const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="512" height="512"></canvas>
@@ -117,26 +122,44 @@ window.__ready=true;
 
 const server = http.createServer((q, res) => {
   try {
-    if (q.url === '/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(HTML); return; }
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
     const pp = decodeURIComponent(q.url.split('?')[0]);
     res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
     res.end(readFileSync(path.join(ROOT, pp)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const br = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
 
 for (const forceCdt of [false, true]) {
-  const pg = await br.newPage();   // fresh page: the LB mesh cache is module-level
+  const pg = await br.newPage(); // fresh page: the LB mesh cache is module-level
   pg.on('pageerror', (e) => console.error(' [err]', e.message));
-  await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
+  await pg.goto(`http://127.0.0.1:${server.address().port}/`, {
+    waitUntil: 'load',
+    timeout: 90000,
+  });
   await pg.waitForFunction(() => window.__ready === true, { timeout: 120000, polling: 50 });
   const o = await pg.evaluate((t, f, fc) => window.__run(t, f, fc), TIGER, ROBOTO, forceCdt);
-  console.log(`\n  ${forceCdt ? 'FORCE_CDT=1 (CDT path)' : 'default routing (earcut fast mesh where possible)'}`);
+  console.log(
+    `\n  ${forceCdt ? 'FORCE_CDT=1 (CDT path)' : 'default routing (earcut fast mesh where possible)'}`,
+  );
   for (const r of o) {
-    console.log(`    ${r.name.padEnd(7)} ${String(r.shapes).padStart(4)} shapes, ${String(r.tris).padStart(6)} tiling tris -> T-junctions: ${r.tjunc}`);
-    for (const [k, v] of Object.entries(r.pairs).sort((a, b) => b[1] - a[1]).slice(0, 5)) console.log(`             ${k}: ${v}`);
+    console.log(
+      `    ${r.name.padEnd(7)} ${String(r.shapes).padStart(4)} shapes, ${String(r.tris).padStart(6)} tiling tris -> T-junctions: ${r.tjunc}`,
+    );
+    for (const [k, v] of Object.entries(r.pairs)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5))
+      console.log(`             ${k}: ${v}`);
   }
   await pg.close();
 }
-await br.close(); server.close();
+await br.close();
+server.close();

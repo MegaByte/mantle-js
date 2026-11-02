@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // aatKerx.js — Apple Advanced Typography 'kerx' (extended kerning).
 //
 // The AAT counterpart to GPOS pair kerning. Reads the horizontal,
@@ -25,8 +28,8 @@ export class AatKerx {
   constructor(tables) {
     this._view = tables.view;
     this._numGlyphs = tables.numGlyphs;
-    this._tables = tables;     // for 'ankr' (fmt4 type1) + glyf points (type0)
-    this._subtables = null;    // parsed lazily: [{format, off, ...}]
+    this._tables = tables; // for 'ankr' (fmt4 type1) + glyf points (type0)
+    this._subtables = null; // parsed lazily: [{format, off, ...}]
     this._off = -1;
     if (!tables.kerx) return;
     this._off = tables.kerx[0];
@@ -39,8 +42,9 @@ export class AatKerx {
   _ankrAnchor(glyph, anchorIndex) {
     const t = this._tables;
     if (!t.ankr) return null;
-    const v = this._view, off = t.ankr[0];
-    if (v.getUint16(off, false) !== 0) return null;        // version 0
+    const v = this._view,
+      off = t.ankr[0];
+    if (v.getUint16(off, false) !== 0) return null; // version 0
     const lookupOff = off + v.getUint32(off + 4, false);
     const anchorDataOff = off + v.getUint32(off + 8, false);
     const rel = aatLookup(v, lookupOff, glyph, this._numGlyphs);
@@ -52,7 +56,10 @@ export class AatKerx {
     return { x: v.getInt16(a, false), y: v.getInt16(a + 2, false) };
   }
 
-  get hasKerx() { this._ensure(); return this._subtables && this._subtables.length > 0; }
+  get hasKerx() {
+    this._ensure();
+    return this._subtables && this._subtables.length > 0;
+  }
 
   /// Sum of kerning adjustments (font units) for the ordered pair
   /// (leftGid, rightGid) across all horizontal format-0/2 subtables.
@@ -85,7 +92,8 @@ export class AatKerx {
   ///   { idx, markIdx, dxFu, dyFu }
   /// positioning glyph `idx` at `markIdx`'s pen + (dx, dy). Format 0/2
   /// (pairwise) are applied separately via getPairKerning.
-  applyContextualKerning(gids) {
+  // Disabling kerning preserves format-4 mark attachment.
+  applyContextualKerning(gids, kerningEnabled = true) {
     this._ensure();
     const n = gids.length;
     const xAdvance = new Array(n).fill(0);
@@ -94,7 +102,8 @@ export class AatKerx {
     const attach = [];
     if (!this._subtables) return { xAdvance, xOffset, yOffset, attach };
     for (const st of this._subtables) {
-      if (st.format === 1) _kerx1(this._view, st, gids, this._numGlyphs, xAdvance, xOffset, yOffset);
+      if (st.format === 1 && kerningEnabled)
+        _kerx1(this._view, st, gids, this._numGlyphs, xAdvance, xOffset, yOffset);
       else if (st.format === 4) _kerx4(this, st, gids, attach);
     }
     return { xAdvance, xOffset, yOffset, attach };
@@ -104,25 +113,24 @@ export class AatKerx {
     if (this._subtables != null) return;
     this._subtables = [];
     if (this._off < 0) return;
-    const v = this._view, off = this._off;
+    const v = this._view,
+      off = this._off;
     const nTables = v.getUint32(off + 4, false);
     let p = off + 8;
     for (let i = 0; i < nTables; i++) {
       const length = v.getUint32(p, false);
+      if (length < 12) break; // malformed: the walk would not advance, up to 2^32 times
       const coverage = v.getUint32(p + 4, false);
-      // coverage: bit31 vertical, bit30 cross-stream, bit29 variation;
-      // low byte = format. We process horizontal subtables (formats 0/2
-      // pairwise; 1 state-machine; 4 anchor). Cross-stream is honored by
-      // the contextual machines (y-offset) but skipped for pairwise.
-      const format = coverage & 0xFF;
+
+      const format = coverage & 0xff;
       const vertical = (coverage & 0x80000000) !== 0;
       const crossStream = (coverage & 0x40000000) !== 0;
-      const body = p + 12;   // after { length u32, coverage u32, tupleCount u32 }
+      const body = p + 12; // after { length u32, coverage u32, tupleCount u32 }
       if (!vertical) {
         if ((format === 0 || format === 2 || format === 6) && !crossStream)
-          this._subtables.push({ format, off: body, crossStream });
+          this._subtables.push({ format, off: body, crossStream, end: p + length });
         else if (format === 1 || format === 4)
-          this._subtables.push({ format, off: body, crossStream });
+          this._subtables.push({ format, off: body, crossStream, end: p + length });
       }
       p += length;
     }
@@ -144,7 +152,9 @@ function _kerx1(v, st, gids, numGlyphs, xAdvance, xOffset, yOffset) {
   const entryOff = o + v.getUint32(o + 12, false);
   const kernActOff = o + v.getUint32(o + 16, false);
   const stack = [];
-  let state = 0, i = 0, guard = 0;
+  let state = 0,
+    i = 0,
+    guard = 0;
   const guardMax = gids.length * 4 + 16;
   while (guard++ < guardMax) {
     const atEnd = i >= gids.length;
@@ -154,29 +164,31 @@ function _kerx1(v, st, gids, numGlyphs, xAdvance, xOffset, yOffset) {
     const newState = v.getUint16(eOff, false);
     const flags = v.getUint16(eOff + 2, false);
     const kernActionIndex = v.getUint16(eOff + 4, false);
-    if (flags & 0x2000) stack.length = 0;                 // Reset
-    if ((flags & 0x8000) && !atEnd) stack.push(i);        // Push
-    if (kernActionIndex !== 0xFFFF && stack.length > 0) {
+    if (flags & 0x2000) stack.length = 0; // Reset
+    if (flags & 0x8000 && !atEnd) stack.push(i); // Push
+    if (kernActionIndex !== 0xffff && stack.length > 0) {
       // 'kerx': kernActionIndex is an INDEX into the FWORD action array,
-      // popping ONE value per stacked glyph until the stack drains. (The
+      // popping one value per stacked glyph until FFFF or an empty stack. (The
       // classic 'kern' state table used a byte offset with a low-bit
       // list terminator — reading kerx that way sampled values from half
       // the correct offset and stopped on a data bit.)
       let aIdx = kernActionIndex;
       while (stack.length > 0) {
+        const val = v.getInt16(kernActOff + aIdx * 2, false);
+        aIdx++;
+        if (val === -1) break; // FFFF terminates the action list without consuming the remaining stack.
         const idx = stack.pop();
-        const val = v.getInt16(kernActOff + aIdx * 2, false); aIdx++;
         if (st.crossStream) {
-          if (val !== -0x8000) yOffset[idx] += val;        // 0x8000 = cross-stream reset
+          if (val !== -0x8000) yOffset[idx] += val; // 0x8000 = cross-stream reset
         } else {
-          xAdvance[idx] += val;                            // normal → advance + offset
+          xAdvance[idx] += val; // normal → advance + offset
           xOffset[idx] += val;
         }
       }
     }
     state = newState;
     if (atEnd) break;
-    if ((flags & 0x4000) === 0) i += 1;                    // advance unless DontAdvance
+    if ((flags & 0x4000) === 0) i += 1; // advance unless DontAdvance
   }
 }
 
@@ -207,14 +219,16 @@ function _kerx6(v, st, left, right, numGlyphs) {
   const l = aatLookup(v, rowTableOff, left, numGlyphs, isLong ? 4 : 2);
   const r = aatLookup(v, colTableOff, right, numGlyphs, isLong ? 4 : 2);
   const offset = (l < 0 ? 0 : l) + (r < 0 ? 0 : r);
-  return isLong ? v.getInt32(arrayOff + offset * 4, false) : v.getInt16(arrayOff + offset * 2, false);
+  return isLong
+    ? v.getInt32(arrayOff + offset * 4, false)
+    : v.getInt16(arrayOff + offset * 2, false);
 }
 
 // Format 4: anchor / control-point attachment. Same extended state
 // machine as format 1, plus a u32 `flags` (at machine+16) whose top 2
 // bits are the action type and low 24 bits (0x00FFFFFF) an offset to the
 // action-data table. A Mark flag (0x8000) records the marked glyph; an
-// entry with ankrActionIndex != 0xFFFF attaches the CURRENT glyph to the
+// entry with ankrActionIndex != 0xFFFF attaches the current glyph to the
 // mark. Action types — `dx = markX - currX`, `dy = markY - currY`:
 //   type 0 control point  — 2×u16 {markPt, currPt}; coords from the glyph
 //     OUTLINE's Nth point (raw glyf contour points).
@@ -222,15 +236,19 @@ function _kerx6(v, st, left, right, numGlyphs) {
 //     table per glyph.
 //   type 2 coordinate     — 4×FWORD {markX, markY, currX, currY} inline.
 function _kerx4(self, st, gids, attach) {
-  const v = self._view, o = st.off;
+  const v = self._view,
+    o = st.off;
   const nClasses = v.getUint32(o, false);
   const classOff = o + v.getUint32(o + 4, false);
   const stateOff = o + v.getUint32(o + 8, false);
   const entryOff = o + v.getUint32(o + 12, false);
   const tableFlags = v.getUint32(o + 16, false);
   const actionType = (tableFlags >>> 30) & 3;
-  const dataOff = o + (tableFlags & 0x00FFFFFF);
-  let state = 0, i = 0, guard = 0, markIdx = -1;
+  const dataOff = o + (tableFlags & 0x00ffffff);
+  let state = 0,
+    i = 0,
+    guard = 0,
+    markIdx = -1;
   const guardMax = gids.length * 4 + 16;
   while (guard++ < guardMax) {
     const atEnd = i >= gids.length;
@@ -240,29 +258,33 @@ function _kerx4(self, st, gids, attach) {
     const newState = v.getUint16(eOff, false);
     const flags = v.getUint16(eOff + 2, false);
     const ankrActionIndex = v.getUint16(eOff + 4, false);
-    if (markIdx >= 0 && ankrActionIndex !== 0xFFFF && !atEnd) {
-      let mark = null, curr = null;
+    if (markIdx >= 0 && ankrActionIndex !== 0xffff && !atEnd) {
+      let mark = null,
+        curr = null;
       if (actionType === 2) {
         const d = dataOff + ankrActionIndex * 8;
         mark = { x: v.getInt16(d, false), y: v.getInt16(d + 2, false) };
         curr = { x: v.getInt16(d + 4, false), y: v.getInt16(d + 6, false) };
       } else {
-        const d = dataOff + ankrActionIndex * 4;   // 2 × u16 point indices
-        const markPt = v.getUint16(d, false), currPt = v.getUint16(d + 2, false);
+        const d = dataOff + ankrActionIndex * 4; // 2 × u16 point indices
+        const markPt = v.getUint16(d, false),
+          currPt = v.getUint16(d + 2, false);
         if (actionType === 1) {
           mark = self._ankrAnchor(gids[markIdx], markPt);
           curr = self._ankrAnchor(gids[i], currPt);
-        } else { // type 0: glyph outline control points
+        } else {
+          // type 0: glyph outline control points
           mark = _contourPoint(self._tables, gids[markIdx], markPt);
           curr = _contourPoint(self._tables, gids[i], currPt);
         }
       }
-      if (mark && curr) attach.push({ idx: i, markIdx, dxFu: mark.x - curr.x, dyFu: mark.y - curr.y });
+      if (mark && curr)
+        attach.push({ idx: i, markIdx, dxFu: mark.x - curr.x, dyFu: mark.y - curr.y });
     }
-    if ((flags & 0x8000) && !atEnd) markIdx = i;     // Mark
+    if (flags & 0x8000 && !atEnd) markIdx = i; // Mark
     state = newState;
     if (atEnd) break;
-    if ((flags & 0x4000) === 0) i += 1;               // advance unless DontAdvance
+    if ((flags & 0x4000) === 0) i += 1; // advance unless DontAdvance
   }
 }
 
@@ -275,25 +297,36 @@ function _contourPoint(t, gid, pointIndex) {
   if (glen === 0) return null;
   const v = t.view;
   const numContours = v.getInt16(go, false);
-  if (numContours < 0) return null;                 // composite — unsupported here
+  if (numContours < 0) return null; // composite — unsupported here
   const endPtsOff = go + 10;
-  const numPoints = numContours === 0 ? 0 : v.getUint16(endPtsOff + (numContours - 1) * 2, false) + 1;
+  const numPoints =
+    numContours === 0 ? 0 : v.getUint16(endPtsOff + (numContours - 1) * 2, false) + 1;
   if (pointIndex >= numPoints) return null;
   const insLenOff = endPtsOff + numContours * 2;
   const insLen = v.getUint16(insLenOff, false);
-  let p = insLenOff + 2 + insLen;                   // flags array start
+  let p = insLenOff + 2 + insLen; // flags array start
   // Parse flags (run-length encoded via the REPEAT bit 0x08).
   const flags = new Uint8Array(numPoints);
   for (let k = 0; k < numPoints;) {
-    const f = v.getUint8(p++); flags[k++] = f;
-    if (f & 0x08) { let r = v.getUint8(p++); while (r-- > 0 && k < numPoints) flags[k++] = f; }
+    const f = v.getUint8(p++);
+    flags[k++] = f;
+    if (f & 0x08) {
+      let r = v.getUint8(p++);
+      while (r-- > 0 && k < numPoints) flags[k++] = f;
+    }
   }
   // X coords (flag bits: 0x02 = short, 0x10 = same/positive).
-  let x = 0, tx = -1;
+  let x = 0,
+    tx = -1;
   for (let k = 0; k <= pointIndex; k++) {
     const f = flags[k];
-    if (f & 0x02) { const dx = v.getUint8(p++); x += (f & 0x10) ? dx : -dx; }
-    else if (!(f & 0x10)) { x += v.getInt16(p, false); p += 2; }
+    if (f & 0x02) {
+      const dx = v.getUint8(p++);
+      x += f & 0x10 ? dx : -dx;
+    } else if (!(f & 0x10)) {
+      x += v.getInt16(p, false);
+      p += 2;
+    }
     if (k === pointIndex) tx = x;
   }
   // Y coords (must skip the rest of X first — re-walk all X to find Y start).
@@ -304,11 +337,17 @@ function _contourPoint(t, gid, pointIndex) {
     if (f & 0x02) p += 1;
     else if (!(f & 0x10)) p += 2;
   }
-  let y = 0, ty = 0;
+  let y = 0,
+    ty = 0;
   for (let k = 0; k <= pointIndex; k++) {
     const f = flags[k];
-    if (f & 0x04) { const dy = v.getUint8(p++); y += (f & 0x20) ? dy : -dy; }
-    else if (!(f & 0x20)) { y += v.getInt16(p, false); p += 2; }
+    if (f & 0x04) {
+      const dy = v.getUint8(p++);
+      y += f & 0x20 ? dy : -dy;
+    } else if (!(f & 0x20)) {
+      y += v.getInt16(p, false);
+      p += 2;
+    }
     if (k === pointIndex) ty = y;
   }
   return { x: tx, y: ty };
@@ -320,8 +359,9 @@ function _kerx0(v, st, left, right) {
   const o = st.off;
   const nPairs = v.getUint32(o, false);
   const base = o + 16;
-  const key = (left * 0x10000) + right;
-  let lo = 0, hi = nPairs - 1;
+  const key = left * 0x10000 + right;
+  let lo = 0,
+    hi = nPairs - 1;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
     const u = base + mid * 6;
@@ -334,18 +374,19 @@ function _kerx0(v, st, left, right) {
 }
 
 // Format 2: rowWidth(u32) leftOffsetTable(u32) rightOffsetTable(u32)
-// arrayOffset(u32). The left/right class lookups return BYTE offsets
-// (left = row offset already × rowWidth; right = column offset). The
-// kerning value is the s16 at arrayBase + leftVal + rightVal. All
-// offsets are relative to the SUBTABLE BODY start (st.off).
+// arrayOffset(u32). The left and right class lookups add up to an INDEX
+// into the array of s16 kerning values (not a byte offset: HarfBuzz reads
+// them that way, and 602 of 602 pairs of a real kerx font kern exactly so).
+// Every offset is relative to the SUBTABLE START (the 12-byte header
+// included), as for format 6. A cell past the subtable's end kerns by 0.
 function _kerx2(v, st, left, right, numGlyphs) {
-  const o = st.off;
-  const leftTableOff  = o + v.getUint32(o + 4, false);
-  const rightTableOff = o + v.getUint32(o + 8, false);
-  const arrayOff      = o + v.getUint32(o + 12, false);
+  const o = st.off,
+    sub = o - 12;
+  const leftTableOff = sub + v.getUint32(o + 4, false);
+  const rightTableOff = sub + v.getUint32(o + 8, false);
+  const arrayOff = sub + v.getUint32(o + 12, false);
   const lv = aatLookup(v, leftTableOff, left, numGlyphs);
   const rv = aatLookup(v, rightTableOff, right, numGlyphs);
-  const leftVal  = lv < 0 ? 0 : lv;
-  const rightVal = rv < 0 ? 0 : rv;
-  return v.getInt16(arrayOff + leftVal + rightVal, false);
+  const at = arrayOff + 2 * ((lv < 0 ? 0 : lv) + (rv < 0 ? 0 : rv));
+  return at + 2 <= st.end ? v.getInt16(at, false) : 0;
 }

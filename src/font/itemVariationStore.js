@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // itemVariationStore.js — OpenType ItemVariationStore reader.
 //
 // Shared between HVAR / MVAR / VVAR / GDEF / CFF2 — each of these
@@ -14,10 +17,10 @@ export class ItemVariationStore {
   constructor(tables, off) {
     const v = tables.view;
     const regionListOff = off + v.getUint32(off + 2, false);
-    const ivdCount     = v.getUint16(off + 6, false);
+    const ivdCount = v.getUint16(off + 6, false);
     this._tables = tables;
     this._off = off;
-    const axisCount   = v.getUint16(regionListOff + 0, false);
+    const axisCount = v.getUint16(regionListOff + 0, false);
     const regionCount = v.getUint16(regionListOff + 2, false);
     this._axisCount = axisCount;
     this._regions = new Array(regionCount);
@@ -28,8 +31,8 @@ export class ItemVariationStore {
         const ra = r + a * 6;
         region[a] = {
           start: v.getInt16(ra + 0, false) / 16384,
-          peak:  v.getInt16(ra + 2, false) / 16384,
-          end:   v.getInt16(ra + 4, false) / 16384,
+          peak: v.getInt16(ra + 2, false) / 16384,
+          end: v.getInt16(ra + 4, false) / 16384,
         };
       }
       this._regions[i] = region;
@@ -41,10 +44,14 @@ export class ItemVariationStore {
     }
   }
 
-  get axisCount() { return this._axisCount; }
+  get axisCount() {
+    return this._axisCount;
+  }
   /// Region count — number of distinct axis-space regions across all
   /// IVD subtables. CFF2 blend uses this implicitly via vsindex.
-  get regionCount() { return this._regions.length; }
+  get regionCount() {
+    return this._regions.length;
+  }
   /// Number of regions referenced by ItemVariationData subtable `outer`.
   /// CFF2 blend uses this to size its operand pop.
   regionIndexCount(outerIdx) {
@@ -54,13 +61,13 @@ export class ItemVariationStore {
 
   _parseIvd(off) {
     const v = this._tables.view;
-    const itemCount       = v.getUint16(off + 0, false);
-    const wordDeltaCount  = v.getUint16(off + 2, false);
+    const itemCount = v.getUint16(off + 0, false);
+    const wordDeltaCount = v.getUint16(off + 2, false);
     // Bit 15 = LONG_WORDS (spec 1.9+): the "word" entries are int32 and
     // the rest int16 (vs int16/int8). Left unmasked it inflated rowSize
     // ~32770 bytes and every delta read garbage.
-    const longWords       = (wordDeltaCount & 0x8000) !== 0;
-    const shortDeltaCount = wordDeltaCount & 0x7FFF;
+    const longWords = (wordDeltaCount & 0x8000) !== 0;
+    const shortDeltaCount = wordDeltaCount & 0x7fff;
     const regionIndexCount = v.getUint16(off + 4, false);
     const regionIndices = new Array(regionIndexCount);
     for (let r = 0; r < regionIndexCount; r++)
@@ -86,7 +93,7 @@ export class ItemVariationStore {
       if (c === ra.peak) continue;
       if (c <= ra.start || c >= ra.end) return 0;
       if (c < ra.peak) s *= (c - ra.start) / (ra.peak - ra.start);
-      else             s *= (ra.end - c)   / (ra.end - ra.peak);
+      else s *= (ra.end - c) / (ra.end - ra.peak);
     }
     return s;
   }
@@ -116,8 +123,13 @@ export class ItemVariationStore {
       let delta;
       if (r < ivd.shortDeltaCount) {
         // "word" entries: int32 under LONG_WORDS, else int16.
-        if (ivd.longWords) { delta = v.getInt32(cursor, false); cursor += 4; }
-        else               { delta = v.getInt16(cursor, false); cursor += 2; }
+        if (ivd.longWords) {
+          delta = v.getInt32(cursor, false);
+          cursor += 4;
+        } else {
+          delta = v.getInt16(cursor, false);
+          cursor += 2;
+        }
       } else if (ivd.longWords) {
         delta = v.getInt16(cursor, false);
         cursor += 2;

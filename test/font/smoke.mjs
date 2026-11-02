@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Smoke test: load Arial.ttf, parse, dump glyph for 'A'.
 import { readFileSync } from 'fs';
 import { MantleFontAsset } from '../../src/font/fontAsset.js';

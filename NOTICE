@@ -3,9 +3,12 @@ Copyright 2026 Aaron Kaluszka
 
 Slug shader code Copyright 2017 by Eric Lengyel.
 Licensed MIT OR Apache-2.0 (the permissive reference shaders, not the
-commercial Slug library). Port retained in src/shaders/_slugCoverage.glsl.
+commercial Slug library). The GLSL port is src/shaders/_coverage.glsl in the
+source repository (not shipped in this package); it is inlined, with comments
+stripped, into src/shaders/generated/mantle.frag.glsl and maskBake.frag.glsl and
+into the bundled shader modules src/shaders/bundled.js and bundledSources.js.
 
-The ear-clipping triangulator in src/renderer/lbEarcut.js is a port of
+The ear-clipping triangulator in src/geom/lbEarcut.js is a port of
 earcut (https://github.com/mapbox/earcut), Copyright (c) 2016, Mapbox,
 licensed under the ISC License:
 
@@ -22,6 +25,6 @@ licensed under the ISC License:
   IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 This product includes data derived from the Unicode Character Database (UCD),
-Copyright (C) 1991-2025 Unicode, Inc. The per-codepoint property tables under
-src/font/unicode/tables/ are generated from the UCD pinned to Unicode 17.0.0,
+Copyright (C) 1991-2026 Unicode, Inc. The per-codepoint property tables under
+src/font/unicode/tables/ are generated from the UCD pinned to Unicode 18.0.0,
 distributed under the Unicode License v3 (https://www.unicode.org/license.txt).

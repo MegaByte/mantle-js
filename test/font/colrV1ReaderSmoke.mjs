@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // colrV1ReaderSmoke.mjs — round-trip the in-memory COLR v1 fixture
 // through ColrReader and verify the paint tree.
 //
@@ -50,24 +53,38 @@ assert(colr.getPaint(99) === null, 'getPaint(99) is null');
 const root = colr.getPaint(1);
 assert(root !== null, 'getPaint(1) non-null');
 assert(root.format === 1, `root format = 1, got ${root.format}`);
-assert(Array.isArray(root.layers) && root.layers.length === 2,
-       `root has 2 layers, got ${root.layers && root.layers.length}`);
+assert(
+  Array.isArray(root.layers) && root.layers.length === 2,
+  `root has 2 layers, got ${root.layers && root.layers.length}`,
+);
 
 // Layer 0 → PaintSolid red, alpha=1.0
 const l0 = root.layers[0];
 assert(l0.format === 2, `layer 0 format = 2, got ${l0.format}`);
 assert(l0.paletteIndex === 0, `layer 0 paletteIndex = 0, got ${l0.paletteIndex}`);
 assert(approx(l0.alpha, 1.0), `layer 0 alpha ≈ 1.0, got ${l0.alpha}`);
-assert(l0.rgba && approx(l0.rgba[0], 1) && approx(l0.rgba[1], 0) && approx(l0.rgba[2], 0) && approx(l0.rgba[3], 1),
-       `layer 0 rgba = [1,0,0,1], got ${JSON.stringify(l0.rgba)}`);
+assert(
+  l0.rgba &&
+    approx(l0.rgba[0], 1) &&
+    approx(l0.rgba[1], 0) &&
+    approx(l0.rgba[2], 0) &&
+    approx(l0.rgba[3], 1),
+  `layer 0 rgba = [1,0,0,1], got ${JSON.stringify(l0.rgba)}`,
+);
 
 // Layer 1 → PaintSolid green, alpha=0.5
 const l1 = root.layers[1];
 assert(l1.format === 2, `layer 1 format = 2, got ${l1.format}`);
 assert(l1.paletteIndex === 1, `layer 1 paletteIndex = 1, got ${l1.paletteIndex}`);
 assert(approx(l1.alpha, 0.5), `layer 1 alpha ≈ 0.5, got ${l1.alpha}`);
-assert(l1.rgba && approx(l1.rgba[0], 0) && approx(l1.rgba[1], 1) && approx(l1.rgba[2], 0) && approx(l1.rgba[3], 0.5),
-       `layer 1 rgba = [0,1,0,0.5], got ${JSON.stringify(l1.rgba)}`);
+assert(
+  l1.rgba &&
+    approx(l1.rgba[0], 0) &&
+    approx(l1.rgba[1], 1) &&
+    approx(l1.rgba[2], 0) &&
+    approx(l1.rgba[3], 0.5),
+  `layer 1 rgba = [0,1,0,0.5], got ${JSON.stringify(l1.rgba)}`,
+);
 
 if (process.exitCode === 1) {
   console.error('---\nColr v1 smoke FAILED');

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // loopBlinnMorphSmoke — guards the routing SPLIT under the unified LB flag: a
 // morph (dynamic geometry — bumps _geomGen each setT) is served by the dedicated
 // GPU-resident MORPH route, never by the STATIC route. The static route's
@@ -9,18 +12,27 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 let failures = 0;
-const ok = m => console.log('ok', m);
-const fail = m => { failures++; console.error('FAIL', m); };
+const ok = (m) => console.log('ok', m);
+const fail = (m) => {
+  failures++;
+  console.error('FAIL', m);
+};
 
 // Square → diamond, same shape count + same segment layout (4 lines) → matched,
 // fixed topology. Straight edges → the streaming refresh's earcut-reuse applies.
-const SRC = readFileSync(new URL('../examples/smoke/loopBlinnMorph__SRC.svg', import.meta.url), 'utf8');
-const DST = readFileSync(new URL('../examples/smoke/loopBlinnMorph__DST.svg', import.meta.url), 'utf8');
+const SRC = readFileSync(
+  new URL('../examples/smoke/loopBlinnMorph__SRC.svg', import.meta.url),
+  'utf8',
+);
+const DST = readFileSync(
+  new URL('../examples/smoke/loopBlinnMorph__DST.svg', import.meta.url),
+  'utf8',
+);
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="256" height="256"></canvas>
@@ -85,36 +97,76 @@ window.__done = true;
 
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost');
-  if (u.pathname === '/' || u.pathname === '/index.html') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+  if (u.pathname === '/' || u.pathname === '/index.html') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(HTML);
+    return;
+  }
   const p = decodeURIComponent(u.pathname);
-  const mime = p.endsWith('.js') || p.endsWith('.mjs') ? 'text/javascript' : p.endsWith('.glsl') ? 'text/plain' : 'application/octet-stream';
-  try { res.writeHead(200, { 'content-type': mime + '; charset=utf-8' }); res.end(readFileSync(path.join(ROOT, p))); } catch { try { res.writeHead(404); res.end(); } catch {} }
+  const mime =
+    p.endsWith('.js') || p.endsWith('.mjs')
+      ? 'text/javascript'
+      : p.endsWith('.glsl')
+        ? 'text/plain'
+        : 'application/octet-stream';
+  try {
+    res.writeHead(200, { 'content-type': mime + '; charset=utf-8' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    try {
+      res.writeHead(404);
+      res.end();
+    } catch {}
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${server.address().port}/`;
-const browser = await puppeteer.launch({ headless: false, args: ['--use-angle=metal', '--no-sandbox', '--use-gl=angle'] });
+// HEADLESS EVEN ON THE GPU. Headless reaches the real GPU -- ANGLE (Apple, ANGLE Metal Renderer)
+// reports and TIMES the same either way. A window is not free to the person running this: macOS
+// CLAMPS --window-position, so a headful run cannot be put out of the way and lands
+// on whichever desktop is in front.
+const browser = await launchBrowser({
+  headless: 'new',
+  args: ['--use-angle=metal', '--no-sandbox', '--use-gl=angle'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => { if (m.type() === 'error') console.error('  [console]', m.text()); });
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('  [console]', m.text());
+});
 await page.goto(url, { waitUntil: 'load', timeout: 20000 });
-await page.waitForFunction(() => window.__done === true, { timeout: 30000 }).catch(() => {});
+await page
+  .waitForFunction(() => window.__done === true, { timeout: 30000, polling: 100 })
+  .catch(() => {});
 const r = await page.evaluate(() => window.__result);
-await browser.close(); server.close();
+await browser.close();
+server.close();
 
-if (!r || !r.compiled) { fail('morph LB test did not complete: ' + (r && r.error || 'page error')); }
-else for (const c of r.cases) {
-  const info = `ink ${c.inkA}/${c.inkB}, static ${c.offStatic}/${c.onStatic}, morph ${c.offMorph}/${c.onMorph}`;
-  // A morph bundle must never take the STATIC route (its `!_morphSrc` guard),
-  // regardless of the shared flag. (Cross-engine pixel parity is morphRoute-
-  // Smoke's job — it uses separate per-mode passes to avoid the skipUploads
-  // thrash that alternating modes on one setT would cause; here we assert only
-  // the routing split + that each mode renders.)
-  if (c.onStatic !== 0 || c.offStatic !== 0) fail(`t=${c.t}: morph bundle hit the STATIC LB route (${info}) — must go via the morph route`);
-  // off → Slug morph (no LB route of either kind); on → morph route fires.
-  else if (c.offMorph !== 0) fail(`t=${c.t}: mode 'off' still routed the morph (${info})`);
-  else if (c.onMorph === 0) fail(`t=${c.t}: mode 'auto' did not engage the morph route (${info})`);
-  else if (c.inkA === 0 || c.inkB === 0) fail(`t=${c.t}: nothing rendered (${info})`);
-  else ok(`t=${c.t}: morph via morph route, static route untouched, off→Slug (${info})`);
+if (!r || !r.compiled) {
+  fail('morph LB test did not complete: ' + ((r && r.error) || 'page error'));
+} else
+  for (const c of r.cases) {
+    const info = `ink ${c.inkA}/${c.inkB}, static ${c.offStatic}/${c.onStatic}, morph ${c.offMorph}/${c.onMorph}`;
+    // A morph bundle must never take the STATIC route (its `!_morphSrc` guard),
+    // regardless of the shared flag. (Cross-engine pixel parity is morphRoute-
+    // Smoke's job — it uses separate per-mode passes to avoid the skipUploads
+    // thrash that alternating modes on one setT would cause; here we assert only
+    // the routing split + that each mode renders.)
+    if (c.onStatic !== 0 || c.offStatic !== 0)
+      fail(
+        `t=${c.t}: morph bundle hit the STATIC LB route (${info}) — must go via the morph route`,
+      );
+    // off → Slug morph (no LB route of either kind); on → morph route fires.
+    else if (c.offMorph !== 0) fail(`t=${c.t}: mode 'off' still routed the morph (${info})`);
+    else if (c.onMorph === 0)
+      fail(`t=${c.t}: mode 'auto' did not engage the morph route (${info})`);
+    else if (c.inkA === 0 || c.inkB === 0) fail(`t=${c.t}: nothing rendered (${info})`);
+    else ok(`t=${c.t}: morph via morph route, static route untouched, off→Slug (${info})`);
+  }
+if (failures) {
+  console.error(`\n${failures} failure(s)`);
+  process.exit(1);
 }
-if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
-console.log('\nloopBlinnMorphSmoke: morph bundles route via the morph route, never the static route (unified flag)');
+console.log(
+  '\nloopBlinnMorphSmoke: morph bundles route via the morph route, never the static route (unified flag)',
+);
