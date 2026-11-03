@@ -766,8 +766,10 @@ console.log(
   await f.R.precompileFillsAsync({}); // play starts when the loading call has finished
   const nb2 = bundlesOf(f.W, ['gradient'])[0];
   f.W.resetWaits();
+  f.W.hold(); // (the link this frame starts stays pending until the draw forces it: the block is a wait whatever the frame costs the CPU)
   const fd0 = f.W.model.draws;
   frame(f.R, [nb2], {});
+  f.W.release();
   const fm = f.R.debugStats.needMiss;
   ok(
     f.W.model.draws > fd0 &&

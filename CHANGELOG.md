@@ -3,6 +3,38 @@
 All notable changes to the Mantle JS package are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] - 2026-11-03
+
+This release carries the mesh-caching, culled-draw and native-scene optimizations of
+[mantle-js#1](https://github.com/MegaByte/mantle-js/pull/1) by Ethan Kennerly, adapted to 1.2.
+
+### Changed
+
+- **Memory budget.** `getMemoryStats().policy.order` adds `opaquePrepass`, `instancedMeshes` and
+  `transientHandles` between `pools` and `pointLists`. The budget evicts idle transient handles of
+  bare draws, compacted instanced meshes and prepass depth meshes, and admits prepass meshes; a
+  refused mesh skips the depth prepass without changing pixels. `createBundleHandle` handles and
+  static-cache rasters remain unevictable. Scenes that draw more distinct bundles per frame than the
+  previous caches held keep more GPU memory resident; `memoryBudgetBytes` bounds it.
+
+### Fixed
+
+- **Occlusion culling.** The unified route kept drawing a culled stream after an override retired
+  the cull and missed culls that landed after the first draw. Revealing and re-hiding a `keepHidden`
+  row restored a retired cull.
+
+### Performance
+
+- Keep the meshes of every bundle drawn in the current or previous frame resident: transient handles
+  of `drawBundle` and `drawInstance`, compacted `drawBundleInstanced` meshes and opaque prepass
+  depth meshes. Large scenes no longer re-create and re-upload them each frame.
+- Draw an occlusion-culled bundle's cover pass in one call by laying out each handle's cover mesh in
+  draw-list order.
+- Reuse native-scene `<image>` elements and cloned bundles when draws join, leave or reorder
+  mid-frame.
+
+[1.2.1]: https://github.com/MegaByte/mantle-js/releases/tag/v1.2.1
+
 ## [1.2.0] - 2026-11-02
 
 ### Added
