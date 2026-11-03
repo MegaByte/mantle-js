@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Eagerly register every optional shaper + reader. Importing `font`
 // pulls in everything. Consumers who want a smaller bundle should
 // import the subset they need directly:
@@ -17,19 +20,21 @@
 // `font/variations/`, `font/math/`, `font/formats/`,
 // `font/typography/` for the per-subsystem entries.
 import { registerAllScriptShapers } from './scripts/index.js';
-import { registerColorEmojiReaders }   from './color/index.js';
+import { registerColorEmojiReaders } from './color/index.js';
+import { registerSvgInOtImport } from './color/svgInOtImport.js';
 import { registerVariableFontReaders } from './variations/index.js';
-import { registerMathReader }          from './math/index.js';
-import { registerCffReader }           from './formats/cff.js';
-import { registerWoff2Reader }         from './formats/woff2.js';
-import { registerLegacyKernReader }    from './typography/legacyKern.js';
-import { registerVerticalReader }      from './typography/vertical.js';
-import { registerBaselineReader }      from './typography/baseline.js';
+import { registerMathReader } from './math/index.js';
+import { registerCffReader } from './formats/cff.js';
+import { registerWoff2Reader } from './formats/woff2.js';
+import { registerLegacyKernReader } from './typography/legacyKern.js';
+import { registerVerticalReader } from './typography/vertical.js';
+import { registerBaselineReader } from './typography/baseline.js';
 import { registerJustificationReader } from './typography/justification.js';
-import { registerAatReaders }          from './typography/aat.js';
-import { registerBidi }                from './typography/bidi.js';
+import { registerAatReaders } from './typography/aat.js';
+import { registerBidi } from './typography/bidi.js';
 registerAllScriptShapers();
 registerColorEmojiReaders();
+registerSvgInOtImport();
 registerVariableFontReaders();
 registerMathReader();
 registerCffReader();
@@ -57,20 +62,25 @@ registerBidi();
 //     resolveBaseDirection,        // first-strong / paragraph direction
 //   } from '@kontek/mantle/font';
 //
-// All builders return a sections-shape bundle dict createBundle()
-// accepts via `@kontek/mantle` itself — see textBundle.js for
-// the end-to-end (font → renderable bundle) wrapper.
+// Builders return raw outline, band and metadata arrays. createTextBundle()
+// converts them to renderer sections and owns the resulting GPU bundle.
 
 export { MantleFontAsset, decodeIfWoff2, ttcFaceCount } from './fontAsset.js';
 export {
-  buildTextRun, buildStyled, buildFromMarkup,
-  measureText, measureFromMarkup, measureGlyphs, measureGlyphsFromText,
+  buildTextRun,
+  buildStyled,
+  buildFromMarkup,
+  measureText,
+  measureFromMarkup,
+  measureGlyphs,
+  measureGlyphsFromText,
   buildSvgTextGlyphs,
 } from './textRun.js';
+export { BaseDirection, resolveBaseDirection, getBidiClass, isRtlStrong } from './bidi.js';
 export {
-  BaseDirection, resolveBaseDirection, getBidiClass, isRtlStrong,
-} from './bidi.js';
-export {
-  ArabicJoiningType, ArabicForm, getArabicJoiningType,
-  isArabicCodepoint, resolveArabicForms,
+  ArabicJoiningType,
+  ArabicForm,
+  getArabicJoiningType,
+  isArabicCodepoint,
+  resolveArabicForms,
 } from './scripts/arabicJoining.js';

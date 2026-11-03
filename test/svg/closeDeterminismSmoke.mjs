@@ -1,9 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Verifies the importer emits a synthetic close UNCONDITIONALLY per
 // subpath, so two paths with identical Q/L topology produce the same
 // curveFloats.length regardless of whether their endpoints land within
 // the 1e-4 close-detection tolerance band.
 //
-// splitSubpathsWithClose must NOT gate the close-line on abs(lp - fp) >
+// splitSubpathsWithCloseInto must NOT gate the close-line on abs(lp - fp) >
 // 1e-4: two topologically-identical poses whose endpoints straddle that
 // band would then differ by 12 floats (1 LINE = 3 texels × 4), breaking
 // createShapeMorph's topology-match path.
@@ -14,7 +17,10 @@ import { importSvg } from '../../src/svg/importer.js';
 
 let failures = 0;
 const ok = (msg) => console.log('ok', msg);
-const fail = (msg) => { failures++; console.error('FAIL', msg); };
+const fail = (msg) => {
+  failures++;
+  console.error('FAIL', msg);
+};
 
 async function importLen(svg) {
   const sections = await importSvg(svg, {});
@@ -24,9 +30,9 @@ async function importLen(svg) {
 
 // A: open path whose end is well clear of its start (> 1e-4).
 // B: same path but with its end NUDGED to land within the 1e-4 band.
-// C: same path but with its end snapped EXACTLY to its start (== 0).
+// C: same path but with its end snapped exactly to its start (== 0).
 // All three should produce the same curveFloats.length because the
-// synthetic close is now unconditional.
+// synthetic close is unconditional.
 const A = `<?xml version="1.0"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <path d="M 10 10 Q 50 0 90 10 L 90 90 Q 50 100 10 90 L 11 11" fill="#fff"/>
@@ -69,7 +75,7 @@ if (lenD === lenA) {
 // Pose A has a sub-1e-7 quadratic (control points effectively collapsed
 // to a point — bbox ≈ 0). Pose B has the same quadratic with its control
 // point perturbed by 1e-6 (still visually degenerate but bbox crosses the
-// 1e-7 filter). The texture builder must retain the quad in BOTH poses —
+// 1e-7 filter). The texture builder must retain the quad in both poses —
 // dropping one would cause a 16-float divergence (1 quad = 4 texels × 4).
 const E = `<?xml version="1.0"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">

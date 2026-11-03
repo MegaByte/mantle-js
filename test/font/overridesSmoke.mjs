@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // overridesSmoke.mjs — createOverrideTable parity.
 //
 // Validates that the packed override buffer matches the byte layout
@@ -8,19 +11,32 @@
 import { createOverrideTable } from '../../src/animation/overrides.js';
 
 let failures = 0;
-function ok(msg) { console.log('ok', msg); }
-function fail(msg) { failures++; console.error('FAIL', msg); }
-function approx(a, b, eps = 1e-6) { return Math.abs(a - b) < eps; }
+function ok(msg) {
+  console.log('ok', msg);
+}
+function fail(msg) {
+  failures++;
+  console.error('FAIL', msg);
+}
+function approx(a, b, eps = 1e-6) {
+  return Math.abs(a - b) < eps;
+}
 
 // Minimal WebGL2 shim — just enough for createOverrideTable.
 function makeGlStub() {
   const calls = [];
   let lastUpload = null;
   return {
-    NEAREST: 9728, CLAMP_TO_EDGE: 33071,
-    TEXTURE_2D: 3553, TEXTURE_MIN_FILTER: 10241, TEXTURE_MAG_FILTER: 10240,
-    TEXTURE_WRAP_S: 10242, TEXTURE_WRAP_T: 10243,
-    RGBA32F: 34836, RGBA: 6408, FLOAT: 5126,
+    NEAREST: 9728,
+    CLAMP_TO_EDGE: 33071,
+    TEXTURE_2D: 3553,
+    TEXTURE_MIN_FILTER: 10241,
+    TEXTURE_MAG_FILTER: 10240,
+    TEXTURE_WRAP_S: 10242,
+    TEXTURE_WRAP_T: 10243,
+    RGBA32F: 34836,
+    RGBA: 6408,
+    FLOAT: 5126,
     createTexture: () => ({ id: 'tex' }),
     bindTexture: (target, tex) => calls.push(['bind', target, tex && tex.id]),
     texParameteri: () => {},
@@ -31,7 +47,9 @@ function makeGlStub() {
       lastUpload = { w, h, data: new Float32Array(data) };
     },
     deleteTexture: () => {},
-    get lastUpload() { return lastUpload; },
+    get lastUpload() {
+      return lastUpload;
+    },
   };
 }
 
@@ -87,7 +105,8 @@ const STRIDE = 24;
   const gl = makeGlStub();
   const table = createOverrideTable(gl, makeBundle(['hat', 'shirt']));
   const setRes = table.set('hat', { tint: [1, 0, 0, 1] });
-  if (setRes) ok('T2 set("hat", ...) returns true'); else fail('T2 set ret');
+  if (setRes) ok('T2 set("hat", ...) returns true');
+  else fail('T2 set ret');
   table.uploadIfDirty();
   const d = gl.lastUpload.data;
   if (approx(d[8], 1) && approx(d[9], 0) && approx(d[10], 0) && approx(d[11], 1))
@@ -99,8 +118,7 @@ const STRIDE = 24;
   else fail(`T2 mask = ${d[7]}`);
   // Shape 1 must still be identity (tint at texel 2 of shape 1).
   const s1 = STRIDE;
-  if (approx(d[s1 + 8], 1) && approx(d[s1 + 11], 1))
-    ok('T2 shape 1 still identity');
+  if (approx(d[s1 + 8], 1) && approx(d[s1 + 11], 1)) ok('T2 shape 1 still identity');
   else fail(`T2 shape 1 disturbed: ${d.slice(s1 + 8, s1 + 12).join(',')}`);
   table.dispose();
 }
@@ -133,12 +151,12 @@ const STRIDE = 24;
   const table = createOverrideTable(gl, makeBundle(['a']));
   if (!table.hasAny) ok('T4 hasAny=false initially');
   else fail('T4 hasAny should be false initially');
-  table.set('a', { visibility: 2 });   // clamps to 1
+  table.set('a', { visibility: 2 }); // clamps to 1
   table.uploadIfDirty();
   let d = gl.lastUpload.data;
   if (approx(d[6], 1)) ok('T4 visibility >1 clamps to 1');
   else fail(`T4 visibility = ${d[6]}`);
-  table.set('a', { visibility: -1 });   // clamps to 0
+  table.set('a', { visibility: -1 }); // clamps to 0
   table.uploadIfDirty();
   d = gl.lastUpload.data;
   if (approx(d[6], 0)) ok('T4 visibility <0 clamps to 0');
@@ -161,7 +179,7 @@ const STRIDE = 24;
   // Wrong types reject.
   if (!table.set(99, { tint: [1, 0, 0, 1] })) ok('T5 oob index rejected');
   else fail('T5 oob index should reject');
-  if (!table.set(null, {}))  ok('T5 null key rejected');
+  if (!table.set(null, {})) ok('T5 null key rejected');
   else fail('T5 null key should reject');
   table.dispose();
 }
@@ -170,8 +188,12 @@ const STRIDE = 24;
 {
   const gl = makeGlStub();
   const table = createOverrideTable(gl, makeBundle(['p']));
-  table.set('p', { tint: [0.5, 0.5, 0.5, 0.5], visibility: 0.3,
-                    fill: [0.1, 0.2, 0.3, 0.4], strokeWidth: 2 });
+  table.set('p', {
+    tint: [0.5, 0.5, 0.5, 0.5],
+    visibility: 0.3,
+    fill: [0.1, 0.2, 0.3, 0.4],
+    strokeWidth: 2,
+  });
   table.clear('p');
   table.uploadIfDirty();
   const d = gl.lastUpload.data;
@@ -220,8 +242,7 @@ const STRIDE = 24;
   // Mask bits 1 (stroke) and 2 (strokeWidth) → 0x6.
   if (approx(d[7], 6)) ok('T8 overrideMask = 6 for stroke+strokeWidth');
   else fail(`T8 mask = ${d[7]} (expected 6)`);
-  if (approx(d[16], 0.5) && approx(d[19], 1))
-    ok('T8 absolute stroke packed at texel 4');
+  if (approx(d[16], 0.5) && approx(d[19], 1)) ok('T8 absolute stroke packed at texel 4');
   else fail(`T8 stroke texel: ${d.slice(16, 20).join(',')}`);
   if (approx(d[20], 3.5)) ok('T8 absolute strokeWidth packed at texel 5.x');
   else fail(`T8 strokeWidth = ${d[20]}`);
@@ -278,13 +299,12 @@ const STRIDE = 24;
   else fail(`T9 mask = ${d[7]} (expected 7)`);
   if (approx(d[6], 0.8)) ok('T9 visibility preserved alongside absolute overrides');
   else fail(`T9 vis = ${d[6]}`);
-  if (approx(d[0], 2) && approx(d[3], 2))
-    ok('T9 scale (2,2) packs into affine');
+  if (approx(d[0], 2) && approx(d[3], 2)) ok('T9 scale (2,2) packs into affine');
   else fail(`T9 affine: ${d.slice(0, 4).join(',')}`);
   table.dispose();
 }
 
 console.log('---');
 if (failures) console.error(`OVERRIDES-SMOKE FAIL (${failures})`);
-else          console.log('OVERRIDES-SMOKE PASS');
+else console.log('OVERRIDES-SMOKE PASS');
 process.exit(failures ? 1 : 0);

@@ -1,23 +1,34 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // indicReorderSmoke.mjs — syllable identification +
 // pre-base matra reorder + reph reorder.
 
 import {
-  Isc, Ipc,
-  classifyIsc, classifyIpc,
-  findIndicSyllables, pickBaseConsonant, hasInitialReph,
-  reorderSyllable, reorderIndicStream,
+  Isc,
+  Ipc,
+  classifyIsc,
+  classifyIpc,
+  findIndicSyllables,
+  pickBaseConsonant,
+  hasInitialReph,
+  reorderSyllable,
+  reorderIndicStream,
 } from '../../src/font/scripts/indicShaper.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // ----- T1: simple consonant + matra cluster ---------------------
 {
   // क + ि → "ki" (pronounced "kee" — reads visually as ि-क)
   // U+0915 ka + U+093F i-matra
   // Pre-base i-matra → reorder puts i BEFORE ka.
-  const cps = [0x0915, 0x093F];
+  const cps = [0x0915, 0x093f];
   const syl = findIndicSyllables(cps);
   if (syl.length !== 1) fail(`T1 expected 1 syllable, got ${syl.length}`);
   else {
@@ -37,7 +48,7 @@ const ok   = (msg) => console.log('ok ' + msg);
   // U+0930 ra + U+094D halant + U+0915 ka
   // Reorder: reph moves to END, so result is [ka, ra, halant]
   // (or [ka, reph] after GSUB rphf compresses ra+halant).
-  const cps = [0x0930, 0x094D, 0x0915];
+  const cps = [0x0930, 0x094d, 0x0915];
   const syl = findIndicSyllables(cps);
   if (syl.length !== 1) fail(`T2 expected 1 syllable, got ${syl.length}`);
   else {
@@ -61,7 +72,7 @@ const ok   = (msg) => console.log('ok ' + msg);
   //      order after step 1: [0, 1, 3, 2]  (ra, halant, i, ka)
   //   2. reph detected — move first 2 to end:
   //      order after step 2: [3, 2, 0, 1]  (i, ka, ra, halant)
-  const cps = [0x0930, 0x094D, 0x0915, 0x093F];
+  const cps = [0x0930, 0x094d, 0x0915, 0x093f];
   const order = reorderSyllable(cps, 0, 4);
   if (order.length !== 4) fail(`T3 expected 4 elements, got ${order.length}`);
   else if (order[0] !== 3 || order[1] !== 2 || order[2] !== 0 || order[3] !== 1) {
@@ -72,7 +83,7 @@ const ok   = (msg) => console.log('ok ' + msg);
 // ----- T4: no reorder needed for simple syllable ---------------------
 {
   // क + ा → "kaa" — aa-matra is POST-base, no reorder.
-  const cps = [0x0915, 0x093E];
+  const cps = [0x0915, 0x093e];
   const order = reorderSyllable(cps, 0, 2);
   if (order[0] !== 0 || order[1] !== 1) fail(`T4 [${order.join(',')}] should be [0,1]`);
   else ok(`T4 'kaa' (aa-matra post-base): identity reorder`);
@@ -83,7 +94,7 @@ const ok   = (msg) => console.log('ok ' + msg);
   // क + ् + ष + ् + य → "kṣya" — multi-consonant conjunct.
   // ka + halant + sha + halant + ya — all consonants halant-joined.
   // The base is the LAST non-halanted consonant = य (idx 4).
-  const cps = [0x0915, 0x094D, 0x0937, 0x094D, 0x092F];
+  const cps = [0x0915, 0x094d, 0x0937, 0x094d, 0x092f];
   const syl = findIndicSyllables(cps);
   if (syl.length !== 1) fail(`T5 expected 1 syllable for conjunct, got ${syl.length}`);
   else if (pickBaseConsonant(cps, 0, 5) !== 4) {
@@ -97,8 +108,10 @@ const ok   = (msg) => console.log('ok ' + msg);
   const cps = [0x0915, 0x0020];
   const syl = findIndicSyllables(cps);
   if (syl.length !== 2) fail(`T6 expected 2 syllables, got ${syl.length}`);
-  else if (syl[0].start !== 0 || syl[0].end !== 1) fail(`T6 first syl wrong: ${syl[0].start}..${syl[0].end}`);
-  else if (syl[1].start !== 1 || syl[1].end !== 2) fail(`T6 second syl wrong: ${syl[1].start}..${syl[1].end}`);
+  else if (syl[0].start !== 0 || syl[0].end !== 1)
+    fail(`T6 first syl wrong: ${syl[0].start}..${syl[0].end}`);
+  else if (syl[1].start !== 1 || syl[1].end !== 2)
+    fail(`T6 second syl wrong: ${syl[1].start}..${syl[1].end}`);
   else ok(`T6 'ka ' splits into 2 syllables (Indic + non-Indic)`);
 }
 
@@ -106,7 +119,7 @@ const ok   = (msg) => console.log('ok ' + msg);
 {
   // ক + ে → "ke" — Bengali e is PRE-BASE.
   // U+0995 bengali ka + U+09C7 bengali e
-  const cps = [0x0995, 0x09C7];
+  const cps = [0x0995, 0x09c7];
   const order = reorderSyllable(cps, 0, 2);
   // Expected: [1, 0] — e moves before ka.
   if (order[0] !== 1 || order[1] !== 0) {
@@ -122,7 +135,7 @@ const ok   = (msg) => console.log('ok ' + msg);
   // Syllable 1: ka + i  →  reorder [1, 0]
   // Syllable 2: ka + ii →  no reorder [2, 3]
   // Final order: [1, 0, 2, 3]
-  const cps = [0x0915, 0x093F, 0x0915, 0x0940];
+  const cps = [0x0915, 0x093f, 0x0915, 0x0940];
   const order = reorderIndicStream(cps);
   if (order.length !== 4) fail(`T8 expected length 4`);
   else if (order[0] !== 1 || order[1] !== 0 || order[2] !== 2 || order[3] !== 3) {

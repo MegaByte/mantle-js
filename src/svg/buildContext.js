@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Shared importer accumulator state + the simple-fill emitShape entry
 // point that consumers (importer.js, font/textRun.js) use to push shapes
 // into one bundle.
@@ -12,6 +15,8 @@ import { makeTexelBuffer, texelAppend, buildTexturesShape } from './textures.js'
 import { pathBbox } from './bbox.js';
 import { segBboxInto } from './bbox.js';
 import { getCoverQuadMesh } from './mesh.js';
+import { normalizedFillSegs } from './fillNormalize.js';
+import { strokeReachFactor } from '../bundle/strokeReach.js';
 const COVER_QUAD_STRIDE = 12;
 
 /// Build a fresh accumulator. Curve buffer starts with a sentinel
@@ -31,25 +36,57 @@ export function makeBuildContext(opts = {}) {
     // NOTE a transposed AAC (∫clamp(Yl)·dXl on the V bands) measures slower than
     // the H sweep, so AAC has no reason to want the V bands back.
     vBands: opts.vBands !== false,
-    // PAIR BANDS. Each H band lists stripes {b, b+1}. AAC then serves a straddling
+    // Pair bands. Each H band lists stripes {b, b+1}. AAC then serves a straddling
     // cell with ONE walk (-14..-30%); Slug pays +8..15% walking the superset. The
     // two engines want opposite layouts, so this is a build-time choice and the
     // shader is told which it is reading (BUNDLE_FLAG_PAIR_BANDS → the
     // MANTLE_AAC_PAIR_BANDS define). Reading a stripe bundle with the pair walk
     // would silently drop segments.
     pairBands: !!opts.pairBands,
+    // AAC BAND LEVELS (textures.js): coarser H pair bands so a cell taller than a stripe pair walks ONE
+    // list, which keeps AAC's per-pixel work bounded when a shape is drawn a few pixels tall.
+    aacLevels: !!opts.aacLevels,
+    // bands from a fill list without contours wholly inside another of the same winding (fillNormalize.js); false = authored bands
+    normalizeFill: opts.normalizeFill !== false,
+    authoredBandsByShape: [],
+    fillNormByShape: [],
+    // The crossing-axis lanes: fill-only band structures
+    // carry each segment's range on the crossing axis, and every fill walker rejects a segment that misses
+    // its ray before fetching it. On by default; `rayLanes: false` writes the pre layout, which every
+    // reader still takes (the header bit is clear, so no walker rejects) -- a test hook for old bundles.
+    rayLanes: opts.rayLanes !== false,
+    // The cover fan: a fill row's Slug/AAC cover is its shape's convex
+    // hull, in at most 8 vertices, wherever that is under 85% of the box's area. `coverFan: false` builds boxes, a
+    // test hook for the fan's proofs; the bands and curves are the same either way.
+    coverFan: opts.coverFan !== false,
     // opt-in GWN run tree: importSvg({ gwnTree: true }) / createTextBundle({ gwnTree: true }).
     gwnTree: !!opts.gwnTree,
-    // Band-count coefficient for pickBandsAxis. k=32 for BOTH layouts: smaller k
+    // Band-count coefficient for pickBandsAxis. k=32 for both layouts: smaller k
     // hurts dense shapes (fewer, longer band lists), larger k ties within noise
     // while costing band-buffer memory. Pair bands do not want a different k.
     bandK: opts.bandK || 32,
     // Union of segment types (bit per SEG_LINE/QUAD/CUBIC/ARC) across every shape.
-    // A bundle that never uses a type lets BOTH walkers compile that kernel out.
+    // A bundle that never uses a type lets both walkers compile that kernel out.
     segTypeMask: 0,
     totalSegments: 0,
-    curveBuf: makeTexelBuffer(),
-    bandBuf: makeTexelBuffer(),
+    // The band buffer is write-only until texelToBytes narrows it to float32 (every reader: bundleFinalize, scene, textRun,
+    // streamGeometry), so it is stored as float32 from the start: identical bytes, half the import-time memory. `sizeHint` is the
+    // source length: both buffers start near the floor of the texels-per-source-character seen on the corpus, so a large file
+    // skips most of its doublings (a hint only; growth is unchanged).
+    //
+    // The curve buffer is float64 only because importSvg's finalizeBundle hands the unrounded twin to the CPatch converter
+    // (`curves64`, see there). A context whose consumer narrows it to float32 anyway (the scene, text-run and streaming
+    // builders) passes `curve64: false` and stores float32: identical wire bytes (rounding at the store is the rounding of the
+    // downcast), half the memory. The default stays float64 so an `importSvg({ ctx })` caller keeps `curves64`.
+    curve64: opts.curve64 !== false,
+    curveBuf: makeTexelBuffer(
+      opts.curve64 !== false ? Float64Array : Float32Array,
+      opts.sizeHint ? Math.min(1 << 22, opts.sizeHint * 0.06) : 256,
+    ),
+    bandBuf: makeTexelBuffer(
+      Float32Array,
+      opts.sizeHint ? Math.min(1 << 22, opts.sizeHint * 0.2) : 256,
+    ),
     metas: [],
     parents: [],
     shapeIds: [],
@@ -59,6 +96,10 @@ export function makeBuildContext(opts = {}) {
     masksUsed: [],
     maskBindings: [],
     filtersUsed: [],
+    // Parallel to filtersUsed, as clipBindings/clipInstances are to clipsUsed: the referencing shape and the
+    // group instance for a filter inherited from a <g>, or -1 / 0 for a filter a shape names itself.
+    filterBindings: [],
+    filterInstances: [],
     imagesUsed: [],
     vecPatternsUsed: [],
     shapesData: [],
@@ -70,7 +111,7 @@ export function makeBuildContext(opts = {}) {
     /// fanning emoji glyphs through importSvg with opts.ctx).
     nextGid: 1,
   };
-  texelAppend(ctx.curveBuf, 0, 0, 0, 0);  // sentinel — idx=0 = "no segment"
+  texelAppend(ctx.curveBuf, 0, 0, 0, 0); // sentinel — idx=0 = "no segment"
   return ctx;
 }
 
@@ -93,9 +134,12 @@ export function makeBuildContext(opts = {}) {
 /// does, because its 1px cell can straddle a boundary and force a second walk.
 /// Bounds [4, 96].
 export function pickBandsXY(segs, bbox, vBands = true, k = 32) {
-  const w = Math.max(1e-6, bbox[2] - bbox[0]);
-  const h = Math.max(1e-6, bbox[3] - bbox[1]);
-  let nx = 0, ny = 0;
+  // The raw extent: the test below is relative to it (a floor at an absolute 1e-6 made it an absolute
+  // 5e-9 for every shape under 1e-6 across).
+  const w = Math.max(0, bbox[2] - bbox[0]);
+  const h = Math.max(0, bbox[3] - bbox[1]);
+  let nx = 0,
+    ny = 0;
   const sb4 = [0, 0, 0, 0];
   for (const s of segs) {
     segBboxInto(s, sb4, 0);
@@ -113,11 +157,30 @@ export function pickBandsXY(segs, bbox, vBands = true, k = 32) {
   return { bandsX: vBands ? pickBandsAxis(ny, k) : 1, bandsY: pickBandsAxis(nx, k) };
 }
 
+// Upper clamp on bands per axis. It binds only for a single shape past ~288
+// segments (sqrt(288*32) = 96), so raising it cannot change any shape
+// under that size — glyphs, icons and the vast majority of
+// paths are untouched by construction.
+//
+//            400px    800px   1600px
+//   Slug      -20%     -36%     -32%
+//   AAC        -7%      -1%      -3%
+//
+// for +12 KiB of band table and no measurable import cost. Consistent in
+// direction at every render size tested.
+//
+// AAC's documented dislike of fine bands is real but lands elsewhere: at 256
+// segments, 91 -> 181 bands costs AAC ~21%. That range is BELOW the clamp, so
+// this value never causes it — it is a reason not to raise `bandK`, which is a
+// different knob.
+//
+const BAND_AXIS_MAX = 256;
+
 // Per-axis band count from segment count n and coefficient k. k defaults to 32
 // for both layouts (see the bandK note in makeBuildContext); result is clamped
 // to [4, 96].
 export function pickBandsAxis(n, k = 32) {
-  return Math.max(4, Math.min(96, Math.round(Math.sqrt(Math.max(1, n) * k))));
+  return Math.max(4, Math.min(BAND_AXIS_MAX, Math.round(Math.sqrt(Math.max(1, n) * k))));
 }
 
 /// Solid-fill (+ optional solid-stroke) per-shape emit into a
@@ -137,22 +200,103 @@ export function pickBandsAxis(n, k = 32) {
 /// per-shape emit still drives those itself.
 export function emitShape(ctx, segs, opts, gidBox, bboxBox = null) {
   const bb = pathBbox(segs);
-  const { bandsX, bandsY } = pickBandsXY(segs, bb, ctx.vBands !== false, ctx.bandK || 32);
-  // Capture the curve-buffer write head (in FLOAT units) BEFORE this
-  // shape's curves are appended, so the per-shape curve range is
-  // authoritative — glyphLoc (meta texel 4) is a BAND-buffer index, NOT
-  // a curve offset, so it can't be used to recover curve ranges on
-  // multi-shape bundles. The SVG importer already captures this itself;
-  // stamping it here means the shared text-shaping path
-  // (textRun.js → emitShape) gets the same authoritative range for free
-  // (needed by the no-WebGL fallback's native text bundle, which decodes
-  // each glyph's curves back into an SVG <path>).
+  //
+  // TWO boxes, and they are not interchangeable:
+  //   bbMeta     path + halfW. Stored on the row, and it is the box the SHADER indexes bands
+  //              through, so it must also be the box they are BINNED through -- binning through a
+  //              larger one puts a fragment in a band whose list omits its segment.
+  //   strokePad  the whole reach, as a MEMBERSHIP pad on the band lists and as the cover quad's
+  //              pad, so a fragment out on a miter wedge is both listed and rasterized.
+  const hasStroke = opts.strokeWidth > 0 && opts.strokeRgba && opts.strokeRgba[3] > 0;
+  const halfW = hasStroke ? opts.strokeWidth * 0.5 : 0;
+  const strokePad = hasStroke
+    ? halfW *
+      strokeReachFactor(
+        opts.joinStyle | 0,
+        opts.miterLimit ?? 4,
+        opts.capStyle | 0,
+        opts.endCapStyle == null ? opts.capStyle | 0 : opts.endCapStyle,
+      )
+    : 0;
+  const bbMeta = hasStroke ? [bb[0] - halfW, bb[1] - halfW, bb[2] + halfW, bb[3] + halfW] : bb;
+  const { bandsX, bandsY } = pickBandsXY(segs, bbMeta, ctx.vBands !== false, ctx.bandK || 32);
+
   const curveStartF = ctx.curveBuf.count * 4;
   // Skip the per-segment stroke metadata when this shape has no visible stroke
   // — its curve buffer is then read only by the fill walk. A stroked shape
   // shares ONE buffer between fill + stroke, so it needs the full encode.
-  const fillOnly = !(opts.strokeWidth > 0 && opts.strokeRgba && opts.strokeRgba[3] > 0);
-  const info = buildTexturesShape(segs, bandsX, bandsY, bb, ctx.curveBuf, ctx.bandBuf, 0, fillOnly, false, ctx.pairBands === true, ctx.gwnTree === true);
+  const fillOnly = !hasStroke;
+  // emitCurvature: stroke-linejoin:arcs reads a per-segment curvature texel that only exists when
+  // the encoder writes it, and the shader keys that off the row's joinStyle. No caller sets
+  // joinStyle 4 today, so this has never fired; passing `false` unconditionally would hand an
+  // arcs-join stroke whatever floats followed its join texel.
+  let info = buildTexturesShape(
+    segs,
+    bandsX,
+    bandsY,
+    bbMeta,
+    ctx.curveBuf,
+    ctx.bandBuf,
+    strokePad,
+    fillOnly,
+    !fillOnly && (opts.joinStyle | 0) === 4,
+    ctx.pairBands === true,
+    ctx.gwnTree === true,
+    null,
+    false,
+    ctx.aacLevels === true,
+    // The crossing-axis lanes only when nothing strokes this structure: a stroked shape's
+    // ONE structure serves its stroke too, and the stroke walker reads z as its far bound.
+    fillOnly && ctx.rayLanes !== false,
+  );
+  if (info.gwnUnsafe) ctx.gwnUnsafe = true;
+  const authoredEndF = info.curveEndF ?? ctx.curveBuf.count * 4;
+  let authoredBands = null;
+  let fillNorm = 0;
+  if (opts.normalizeFill === true && ctx.normalizeFill !== false && fillOnly) {
+    const status = { status: 0 };
+    const known = opts.fillNormNoop;
+    const normalized =
+      known === undefined
+        ? normalizedFillSegs(opts.fillSegments || segs, opts.fillRule === 'evenodd', status)
+        : null;
+    fillNorm = known === undefined ? status.status | 0 : known;
+    // The caller learns a placement left the outline unchanged, so it can skip the certificate for later placements.
+    if (!normalized && known === undefined && opts.fillNormProbe)
+      opts.fillNormProbe.status = fillNorm;
+    if (normalized) {
+      const authored = info;
+      const counts = pickBandsXY(normalized, bbMeta, ctx.vBands !== false, ctx.bandK || 32);
+      info = buildTexturesShape(
+        normalized,
+        counts.bandsX,
+        counts.bandsY,
+        bbMeta,
+        ctx.curveBuf,
+        ctx.bandBuf,
+        0,
+        true,
+        false,
+        ctx.pairBands === true,
+        ctx.gwnTree === true,
+        null,
+        opts.fillRule === 'evenodd',
+        ctx.aacLevels === true,
+        ctx.rayLanes !== false,
+      );
+      ctx.segTypeMask |= authored.typeMask;
+      if (info.gwnUnsafe) ctx.gwnUnsafe = true;
+      ctx.totalSegments += authored.numSegments | 0;
+      authoredBands = {
+        glyphLoc: [...authored.glyphLoc],
+        bandMaxX: authored.bandMaxX,
+        bandMaxY: authored.bandMaxY,
+      };
+    }
+  }
+  // Morph ranges retain authored geometry; static coverage may use normalized bands.
+  ctx.authoredBandsByShape[ctx.metas.length] = authoredBands;
+  ctx.fillNormByShape[ctx.metas.length] = fillNorm;
   ctx.segTypeMask |= info.typeMask;
   ctx.totalSegments += info.numSegments | 0;
   const gid = gidBox.next++;
@@ -164,7 +308,15 @@ export function emitShape(ctx, segs, opts, gidBox, bboxBox = null) {
   // (a handle uploads them to a per-mount VBO that the analytic stream never
   // refreshes). Not creating them makes a stale Slug render impossible.
   if (!opts.skipCoverQuad) {
-    const mesh = getCoverQuadMesh(segs, gid, fill, opts.fillRule || 'nonzero');
+    const mesh = getCoverQuadMesh(
+      segs,
+      gid,
+      fill,
+      opts.fillRule || 'nonzero',
+      strokePad,
+      ctx.coverFan === true,
+      ctx.coverFanShare || null,
+    );
     if (mesh.length) {
       const nv = mesh.length / COVER_QUAD_STRIDE;
       const [r, g, b, a] = fill;
@@ -174,41 +326,51 @@ export function emitShape(ctx, segs, opts, gidBox, bboxBox = null) {
   }
   ctx.metas.push({
     bbox: [info.bbox[0], info.bbox[1], info.bbox[2], info.bbox[3]],
-    fillColor:   fill.slice(),
+    fillColor: fill.slice(),
     strokeColor: opts.strokeRgba ? opts.strokeRgba.slice() : [0, 0, 0, 0],
     strokeWidth: opts.strokeWidth || 0,
-    fillRule:    opts.fillRule || 'nonzero',
+    fillRule: opts.fillRule || 'nonzero',
     accumGroupId: gid,
-    dashId:       0,
-    glyphLoc:     [info.glyphLoc[0], info.glyphLoc[1]],
-    bandMaxX:     info.bandMaxX,
-    bandMaxY:     info.bandMaxY,
-    capStyle:     opts.capStyle || 0,
+    dashId: 0,
+    glyphLoc: [info.glyphLoc[0], info.glyphLoc[1]],
+    bandMaxX: info.bandMaxX,
+    bandMaxY: info.bandMaxY,
+    capStyle: opts.capStyle || 0,
     // endCapStyle: null = symmetric (cap applies both ends); otherwise
     // a CAP_* enum used only at the segment's far end. Asymmetric caps
     // come from Flash LineStyle2; SVG has no syntax for this.
-    endCapStyle:  (opts.endCapStyle == null) ? null : opts.endCapStyle,
-    joinStyle:    opts.joinStyle || 0,
-    miterLimit:   opts.miterLimit ?? 4,
-    flagsShape:   opts.flagsShape || 0,
-    fillGradId:   0, strokeGradId: 0,
-    clipId:       0, maskId: 0,
-    filterId:     0, blendMode: 0, isolation: 0,
-    imageId:      0,
+    endCapStyle: opts.endCapStyle == null ? null : opts.endCapStyle,
+    joinStyle: opts.joinStyle || 0,
+    miterLimit: opts.miterLimit ?? 4,
+    flagsShape: opts.flagsShape || 0,
+    fillGradId: 0,
+    strokeGradId: 0,
+    clipId: 0,
+    maskId: 0,
+    filterId: 0,
+    blendMode: 0,
+    isolation: 0,
+    imageId: 0,
     // strokeImageId: 1-based atlas id when LineStyle2 carries bitmap-fill
     // stroke (Flash). SVG has no native syntax — populated by SWF
     // ingestion. 0 = no bitmap stroke (use solid / gradient).
     strokeImageId: opts.strokeImageId || 0,
-    imageRect:    [0, 0, 0, 0],
-    atlasSlot:    [0, 0, 0, 0],
-    colrGraphId:  opts.colrGraphId || 0,
+    imageRect: [0, 0, 0, 0],
+    atlasSlot: [0, 0, 0, 0],
+    colrGraphId: opts.colrGraphId || 0,
     // Per-shape curve-buffer start (float units). The SVG importer also
     // sets this on its own meta records; consumers build curveRangesByShape
     // by pairing each shape's begin with the next shape's begin.
     _curveStartF: curveStartF,
+    _curveEndF: authoredEndF,
   });
   ctx.parents.push(opts.parentIdx ?? -1);
   ctx.shapeIds.push(opts.shapeId || '');
+  // The PATH box, not the stroke's. This accumulator becomes a text bundle's globalBBox, which is
+  // a framing box -- font/textSections.js rebuilds the run so its (xmin, ymin) sits at the origin,
+  // so widening it here would move every synthetically bolded run. Recorded, not changed: a bold
+  // run's ink therefore reaches halfW outside its own globalBBox, and a renderer that fits the
+  // content box will cut that half-width at the canvas edge.
   if (bboxBox) {
     if (bb[0] < bboxBox.xmin) bboxBox.xmin = bb[0];
     if (bb[1] < bboxBox.ymin) bboxBox.ymin = bb[1];

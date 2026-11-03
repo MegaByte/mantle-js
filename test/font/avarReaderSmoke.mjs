@@ -1,10 +1,16 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // avarReaderSmoke.mjs — avar axis value remap.
 
 import { AvarTable } from '../../src/font/variations/avarReader.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // Build a synthesized avar table for 1 axis with a non-linear map:
 //   (-1, -1), (0, 0), (0.5, 0.8), (1, 1)
@@ -17,16 +23,19 @@ function buildAvar(segments) {
   const buf = new ArrayBuffer(totalLen);
   const dv = new DataView(buf);
   const b = new Uint8Array(buf);
-  dv.setUint16(0, 1, false);          // major
-  dv.setUint16(2, 0, false);          // minor
-  dv.setUint16(4, 0, false);          // reserved
+  dv.setUint16(0, 1, false); // major
+  dv.setUint16(2, 0, false); // minor
+  dv.setUint16(4, 0, false); // reserved
   dv.setUint16(6, segments.length, false);
   let p = 8;
   for (const seg of segments) {
-    dv.setUint16(p, seg.length, false); p += 2;
+    dv.setUint16(p, seg.length, false);
+    p += 2;
     for (const [from, to] of seg) {
-      dv.setInt16(p, Math.round(from * 16384), false); p += 2;
-      dv.setInt16(p, Math.round(to   * 16384), false); p += 2;
+      dv.setInt16(p, Math.round(from * 16384), false);
+      p += 2;
+      dv.setInt16(p, Math.round(to * 16384), false);
+      p += 2;
     }
   }
   return { bytes: b, view: dv, avar: [0, totalLen] };
@@ -34,7 +43,13 @@ function buildAvar(segments) {
 
 // ----- T1: identity map → input passes through ------------------------
 {
-  const tables = buildAvar([[[-1, -1], [0, 0], [1, 1]]]);
+  const tables = buildAvar([
+    [
+      [-1, -1],
+      [0, 0],
+      [1, 1],
+    ],
+  ]);
   const a = new AvarTable(tables);
   if (!a.hasAvar) fail('T1 hasAvar false');
   else {
@@ -48,7 +63,14 @@ function buildAvar(segments) {
 {
   // Map (-1,-1), (0,0), (0.5,0.8), (1,1). At input 0.5, output 0.8.
   // At 0.25 (halfway between 0 and 0.5), linear interp = 0.4.
-  const tables = buildAvar([[[-1, -1], [0, 0], [0.5, 0.8], [1, 1]]]);
+  const tables = buildAvar([
+    [
+      [-1, -1],
+      [0, 0],
+      [0.5, 0.8],
+      [1, 1],
+    ],
+  ]);
   const a = new AvarTable(tables);
   const r1 = a.remapAxis(0, 0.5);
   const r2 = a.remapAxis(0, 0.25);
@@ -59,12 +81,17 @@ function buildAvar(segments) {
 
 // ----- T3: out-of-range clamps to segment endpoints ------------------
 {
-  const tables = buildAvar([[[-1, -1], [0, 0], [1, 1]]]);
+  const tables = buildAvar([
+    [
+      [-1, -1],
+      [0, 0],
+      [1, 1],
+    ],
+  ]);
   const a = new AvarTable(tables);
   const rLo = a.remapAxis(0, -5);
-  const rHi = a.remapAxis(0,  5);
-  if (rLo !== -1 || rHi !== 1)
-    fail(`T3 out-of-range: ${rLo} / ${rHi}, expected -1 / 1`);
+  const rHi = a.remapAxis(0, 5);
+  if (rLo !== -1 || rHi !== 1) fail(`T3 out-of-range: ${rLo} / ${rHi}, expected -1 / 1`);
   else ok(`T3 out-of-range clamps to segment endpoints`);
 }
 

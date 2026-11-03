@@ -1,4 +1,5 @@
 #version 300 es
+
 precision highp float;
 uniform sampler2D uShapeTex;
 uniform sampler2D uDstTex;
@@ -93,6 +94,19 @@ vec4 sampleIn(sampler2D tex, vec2 uv) {
   return texture(tex, uv) * (s.x * s.y);
 }
 
+vec3 csSrgbToLinear(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+vec3 csLinearToSrgb(vec3 c) {
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+}
+vec4 csConvert(vec4 p, int mode) {
+  if (mode == 0 || p.a <= 0.0) return p;
+  vec3 c = clamp(p.rgb / p.a, 0.0, 1.0);
+  c = mode == 1 ? csSrgbToLinear(c) : csLinearToSrgb(c);
+  return vec4(c * p.a, p.a);
+}
+
 void main() {
 
   vec4 srcPre = sampleIn(uShapeTex, mapIn(vUV, uShapeMap));
@@ -100,6 +114,11 @@ void main() {
 
   float opacity = max(uOpacity, 0.0);
   srcPre = srcPre * opacity;
+
+  if (uBlendMode == 19) {
+    fragColor = min(srcPre + dstPre, vec4(1.0));
+    return;
+  }
 
   if (uBlendMode == 20) {
     float outA = srcPre.a * dstPre.a;

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Decoder for codepoint->uint8 property tries. Three-stage block-dedup + RLE
 // blob (MUT2 magic).
 
@@ -30,19 +33,19 @@ function rleDecode(src, start, len, outLen) {
 
 // blobFromBase64 decodes a generated table module's base64 payload to bytes.
 export function blobFromBase64(b64) {
-  if (typeof atob === "function") {
+  if (typeof atob === 'function') {
     const bin = atob(b64);
     const out = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
     return out;
   }
-  return new Uint8Array(Buffer.from(b64, "base64")); // Node fallback
+  return new Uint8Array(Buffer.from(b64, 'base64')); // Node fallback
 }
 
 export class UnicodeTrie {
   constructor(blob) {
     const dv = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
-    if (dv.getUint32(0, true) !== MAGIC) throw new Error("bad trie magic");
+    if (dv.getUint32(0, true) !== MAGIC) throw new Error('bad trie magic');
     this.def = dv.getUint8(5);
     const stage1Bytes = dv.getUint8(6);
     const numChunks = dv.getUint16(8, true);
@@ -57,8 +60,11 @@ export class UnicodeTrie {
     off += rChunkLen;
     this.blocks = rleDecode(blob, off, rBlockLen, poolLen);
     this.chunkPool = new Uint16Array(numChunks * CHUNK);
-    if (stage1Bytes === 1) for (let i = 0; i < this.chunkPool.length; i++) this.chunkPool[i] = chunkBytes[i];
-    else for (let i = 0; i < this.chunkPool.length; i++) this.chunkPool[i] = chunkBytes[i * 2] | (chunkBytes[i * 2 + 1] << 8);
+    if (stage1Bytes === 1)
+      for (let i = 0; i < this.chunkPool.length; i++) this.chunkPool[i] = chunkBytes[i];
+    else
+      for (let i = 0; i < this.chunkPool.length; i++)
+        this.chunkPool[i] = chunkBytes[i * 2] | (chunkBytes[i * 2 + 1] << 8);
   }
 
   get(cp) {
@@ -84,7 +90,9 @@ export function varint(b64) {
   let i = 5;
   let prev = 0;
   for (let j = 0; j < count; j++) {
-    let v = 0, shift = 0, b;
+    let v = 0,
+      shift = 0,
+      b;
     do {
       b = bytes[i++];
       v |= (b & 0x7f) << shift;
@@ -105,15 +113,25 @@ export function varint(b64) {
 // [sCount:u32][mCount:u32] dv(sKeys) v(sZigzag) dv(mKeys) v(mLens) v(mData).
 function decodeCaseMap(bytes, start) {
   let i = start;
-  const rd4 = () => { const v = (bytes[i] | (bytes[i + 1] << 8) | (bytes[i + 2] << 16) | (bytes[i + 3] << 24)) >>> 0; i += 4; return v; };
+  const rd4 = () => {
+    const v = (bytes[i] | (bytes[i + 1] << 8) | (bytes[i + 2] << 16) | (bytes[i + 3] << 24)) >>> 0;
+    i += 4;
+    return v;
+  };
   const sCount = rd4();
   const mCount = rd4();
   const dec = (count, delta) => {
     const out = new Uint32Array(count);
     let prev = 0;
     for (let j = 0; j < count; j++) {
-      let v = 0, s = 0, b;
-      do { b = bytes[i++]; v |= (b & 0x7f) << s; s += 7; } while (b & 0x80);
+      let v = 0,
+        s = 0,
+        b;
+      do {
+        b = bytes[i++];
+        v |= (b & 0x7f) << s;
+        s += 7;
+      } while (b & 0x80);
       v >>>= 0;
       if (delta) v = prev + v;
       out[j] = v;
@@ -129,17 +147,23 @@ function decodeCaseMap(bytes, start) {
   for (let j = 0; j < mCount; j++) mDataLen += mLens[j];
   const mData = dec(mDataLen, false);
   const mStart = new Uint32Array(mCount);
-  for (let j = 0, acc = 0; j < mCount; j++) { mStart[j] = acc; acc += mLens[j]; }
+  for (let j = 0, acc = 0; j < mCount; j++) {
+    mStart[j] = acc;
+    acc += mLens[j];
+  }
 
   const total = sCount + mCount;
   const keys = new Uint32Array(total);
   const off = new Uint32Array(total + 1);
   const data = new Uint32Array(sCount + mDataLen);
-  let si = 0, mi = 0, ki = 0, di = 0;
+  let si = 0,
+    mi = 0,
+    ki = 0,
+    di = 0;
   while (si < sCount || mi < mCount) {
     if (mi >= mCount || (si < sCount && sKeys[si] < mKeys[mi])) {
       const z = sZig[si];
-      const d = (z & 1) ? -((z + 1) >>> 1) : (z >>> 1);
+      const d = z & 1 ? -((z + 1) >>> 1) : z >>> 1;
       keys[ki] = sKeys[si];
       data[di++] = sKeys[si] + d;
       si++;

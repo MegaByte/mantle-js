@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // hvarReaderSmoke.mjs — HVAR advance-width variations.
 // Verifies that variable fonts' advance widths grow at heavy weights
 // (otherwise glyphs overlap on the page).
@@ -8,13 +11,17 @@ import { registerVariableFontReaders } from '../../src/font/variations/index.js'
 registerVariableFontReaders();
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 const VF = '/System/Library/Fonts/NewYork.ttf';
 if (!existsSync(VF)) {
   ok('all tests skipped (NewYork.ttf not present)');
-  console.log(); console.log('HVAR-READER PASS (skipped)');
+  console.log();
+  console.log('HVAR-READER PASS (skipped)');
   process.exit(0);
 }
 
@@ -48,9 +55,11 @@ void font.name;
     if (font.fvar.axes[i].tag === 'wght') maxCoords[i] = wghtAxis.max;
   const advDef = font.getGlyphAdvanceVar(gidA, defCoords);
   const advMax = font.getGlyphAdvanceVar(gidA, maxCoords);
-  if (advMax <= advDef)
-    fail(`T3 wght=max advance ${advMax} not > wght=default ${advDef}`);
-  else ok(`T3 'A' advance: wght=${wghtAxis.default}→${advDef.toFixed(4)} em, wght=${wghtAxis.max}→${advMax.toFixed(4)} em (+${((advMax/advDef - 1) * 100).toFixed(1)}%)`);
+  if (advMax <= advDef) fail(`T3 wght=max advance ${advMax} not > wght=default ${advDef}`);
+  else
+    ok(
+      `T3 'A' advance: wght=${wghtAxis.default}→${advDef.toFixed(4)} em, wght=${wghtAxis.max}→${advMax.toFixed(4)} em (+${((advMax / advDef - 1) * 100).toFixed(1)}%)`,
+    );
 }
 
 // ----- T4: every glyph in "Hello" widens at heavy weight --------------

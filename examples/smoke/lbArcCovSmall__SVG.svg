@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The arc-coverage disc branch at a size where its chord-moment term is visible. 49 RECOGNIZED circles, 7 radii from 3 to
+     12 em, laid out so the content bbox is the square [8, 8, 504, 504]: the renderer fits the
+     content bbox, so at 512 px the scale is 512/496 = 1.0323 and the device radii are 3.10 to 12.39.
+
+     Nothing to pin. shapeRecognize turns each one into a circle record, buildLoopBlinnMesh returns
+     it as mesh.circles, lbPack emits kind 7 with aC3.w = -1 (disc mode), and _lbCoverage.glsl's
+     DISC branch calls arcCov for cHalf >= -1.5. The per-shape policy always takes a recognized
+     primitive ("it is one analytic distance and wins at every size"), so the route needs no help:
+       SVG=examples/smoke/lbArcCovSmall__SVG.svg N=512 ARMS=auto node probes/_zzEnginePaint.mjs
+
+     WHY SMALL RADII. arcCov uses the exact moment over the chord the pixel cuts; a curvature offset
+     of kappa/24 approximates it, and the difference between the two SHRINKS WITH RADIUS. On the
+     kernel text, over the disc's own edge pixels (test/lbArcCovReachSmoke.mjs):
+
+        r = 3 px   worst pixel 2.80/255, 14 of 56 8-bit values change
+        r = 6 px   worst pixel 2.17/255, 19 of 114
+        r = 12 px  worst pixel 0.61/255, 14 of 224
+        r = 128 px worst pixel 0.09/255, 21 of 2414
+
+     At 128 px the whole term is a tenth of a quantization step, so a large circle renders the two
+     byte-identically and cannot tell them apart; these radii can.
+
+     GPU CHECK. Render this asset as is and with `kPx * mom` in arcCov replaced by `kPx / 24.0`, and
+     diff. EXPECT: the two frames differ, concentrated on the r = 3 and r = 4 rows, with the worst
+     pixel around 3/255 and nothing moving in the interiors. A byte-identical diff, or any movement on
+     art with no recognized primitive (the ellipse branch and every Loop-Blinn curve band still call
+     curveCov, so those must be identical), means the branch is not reached. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <g fill="#1b3a6b">
+    <circle cx="11.000" cy="11.000" r="3"/><circle cx="92.804" cy="11.386" r="3"/><circle cx="174.607" cy="11.772" r="3"/><circle cx="256.000" cy="11.193" r="3"/><circle cx="337.804" cy="11.579" r="3"/><circle cx="419.607" cy="11.000" r="3"/><circle cx="501.000" cy="11.386" r="3"/>
+    <circle cx="12.000" cy="84.667" r="4"/><circle cx="93.470" cy="85.053" r="4"/><circle cx="174.941" cy="85.439" r="4"/><circle cx="256.000" cy="84.860" r="4"/><circle cx="337.470" cy="85.246" r="4"/><circle cx="418.941" cy="84.667" r="4"/><circle cx="500.000" cy="85.053" r="4"/>
+    <circle cx="13.000" cy="160.333" r="5"/><circle cx="94.137" cy="160.719" r="5"/><circle cx="175.274" cy="161.105" r="5"/><circle cx="256.000" cy="160.526" r="5"/><circle cx="337.137" cy="160.912" r="5"/><circle cx="418.274" cy="160.333" r="5"/><circle cx="499.000" cy="160.719" r="5"/>
+    <circle cx="14.000" cy="238.000" r="6"/><circle cx="94.804" cy="238.386" r="6"/><circle cx="175.607" cy="238.772" r="6"/><circle cx="256.000" cy="238.193" r="6"/><circle cx="336.804" cy="238.579" r="6"/><circle cx="417.607" cy="238.000" r="6"/><circle cx="498.000" cy="238.386" r="6"/>
+    <circle cx="16.000" cy="318.667" r="8"/><circle cx="96.137" cy="319.053" r="8"/><circle cx="176.274" cy="319.439" r="8"/><circle cx="256.000" cy="318.860" r="8"/><circle cx="336.137" cy="319.246" r="8"/><circle cx="416.274" cy="318.667" r="8"/><circle cx="496.000" cy="319.053" r="8"/>
+    <circle cx="18.000" cy="403.333" r="10"/><circle cx="97.470" cy="403.719" r="10"/><circle cx="176.941" cy="404.105" r="10"/><circle cx="256.000" cy="403.526" r="10"/><circle cx="335.470" cy="403.912" r="10"/><circle cx="414.941" cy="403.333" r="10"/><circle cx="494.000" cy="403.719" r="10"/>
+    <circle cx="20.000" cy="492.000" r="12"/><circle cx="98.804" cy="492.386" r="12"/><circle cx="177.607" cy="492.772" r="12"/><circle cx="256.000" cy="492.193" r="12"/><circle cx="334.804" cy="492.579" r="12"/><circle cx="413.607" cy="492.000" r="12"/><circle cx="492.000" cy="492.386" r="12"/>
+  </g>
+</svg>

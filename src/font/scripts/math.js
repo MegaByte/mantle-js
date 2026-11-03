@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // font/scripts/math.js — opt-in registration for MATH stretchy
 // variants triggered from codepoint alone (top/bottom braces,
 // brackets, parens; display-size n-ary operators).
@@ -9,7 +12,9 @@
 // glyph size — readable but not stretched to span their content.
 
 import {
-  isCodepointStretchy, isAlwaysStretchy, targetStretchHeight,
+  isCodepointStretchy,
+  isAlwaysStretchy,
+  targetStretchHeight,
 } from '../math/mathStretchy.js';
 import { registerMathStretchy as _register } from '../shaperRegistry.js';
 

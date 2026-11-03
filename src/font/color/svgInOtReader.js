@@ -1,3 +1,15 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+import { viewBoxFit } from '../../svg/transform.js';
+import { parseLengthOr } from '../../svg/length.js';
+import {
+  buildStylesheet,
+  setActiveStylesheet,
+  clearActiveStylesheet,
+} from '../../svg/stylesheet.js';
+import { getStyleProp } from '../../svg/style.js';
+
 // svgInOtReader.js — SVG-in-OT table reader.
 //
 // The OpenType 'SVG ' table embeds SVG documents inside the font.
@@ -8,57 +20,87 @@
 //
 // Spec: https://learn.microsoft.com/en-us/typography/opentype/spec/svg
 
-const GZIP_MAGIC = 0x1F8B;  // gzip header magic — 'SVG ' allows gzipped docs
+const GZIP_MAGIC = 0x1f8b; // gzip header magic — 'SVG ' allows gzipped docs
 
-/// When an SVG-in-OT document covers multiple glyphs, the sub-element
-/// with id="glyph{N}" is the one to render for gid N. Lift that
-/// subtree into its own SVG document so the importer renders only
-/// that piece (everything else stays "defs-only" / hidden).
-///
-/// The lifted document preserves the parent <svg>'s viewBox / width /
-/// height / xmlns so the sub-element's coordinates land in the
-/// original em-space frame. When `subElementId` doesn't match (single-
-/// glyph documents, or callers passing null), `svgText` returns
-/// unchanged.
-///
-/// Strategy: leave the original tree intact, hide every NON-target
-/// `<g id="glyph{N}">` sibling via display="none". The renderer skips
-/// hidden subtrees during the importer walk; defs / gradients /
-/// filters remain reachable for the target subtree to reference.
-///
-/// Optional `outerTransform` is spliced (prepended) onto the target
-/// glyph group's `transform` attribute so callers (e.g. font/textRun
-/// for SVG-in-OT emoji emit) can pipe a per-glyph translate/scale
-/// through the importer's CTM machinery without manual seg transform.
-export function liftGlyphSubElement(svgText, subElementId, outerTransform = null) {
-  if (!subElementId) return svgText;
+/// Instantiate the selected element through <use>, retaining shared definitions
+/// and CSS matches from the source tree. Font calls fit the root viewport to
+/// design units and disable root viewport clipping.
+export function liftGlyphSubElement(
+  svgText,
+  subElementId,
+  outerTransform = null,
+  fontUnitsPerEm = null,
+) {
+  if (!subElementId || typeof svgText !== 'string' || !svgText) return svgText;
   // DOMParser must be wired up (browser default; Node polyfills
   // from xmldom).
   const parser = new DOMParser();
   const doc = parser.parseFromString(svgText, 'image/svg+xml');
   const root = doc.documentElement;
-  if (!root) return svgText;
+  if (!root || root.localName !== 'svg' || doc.getElementsByTagName('parsererror').length)
+    return svgText;
   // Find the target element. Try getElementById first (browser),
   // fall back to a manual walk for xmldom which doesn't index ids.
-  let target = (typeof doc.getElementById === 'function')
-    ? doc.getElementById(subElementId)
-    : null;
+  let target = typeof doc.getElementById === 'function' ? doc.getElementById(subElementId) : null;
   if (!target) target = findById(root, subElementId);
-  if (!target) return svgText;
-  // Walk every `<g id="glyph...">` element under root and hide the
-  // ones whose id isn't subElementId. We only need to neutralize
-  // top-level glyph groups (siblings of the target); nested
-  // <g id="glyph..."> shouldn't occur in well-formed docs.
-  hideOtherGlyphGroups(root, subElementId);
-  if (outerTransform) {
-    // Prepend: outer is applied AFTER any inner transform when CTM
-    // composes L→R.
-    const existing = (typeof target.getAttribute === 'function')
-      ? (target.getAttribute('transform') || '')
-      : '';
-    const spliced = existing
-      ? outerTransform + ' ' + existing
-      : outerTransform;
+  if (!target && !(fontUnitsPerEm > 0)) return svgText;
+
+  freezeSourceStyles(root);
+  if (target && target !== root) {
+    const definitions = doc.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    while (root.firstChild) definitions.appendChild(root.firstChild);
+    root.appendChild(definitions);
+    const instance = doc.createElementNS('http://www.w3.org/2000/svg', 'use');
+    instance.setAttribute('href', '#' + subElementId);
+    root.appendChild(instance);
+    target = instance;
+  }
+  if (fontUnitsPerEm > 0) {
+    const viewport = { parentWidth: fontUnitsPerEm, parentHeight: fontUnitsPerEm };
+    const width = parseLengthOr(root.getAttribute('width'), fontUnitsPerEm, {
+      ...viewport,
+      axis: 'x',
+    });
+    const height = parseLengthOr(root.getAttribute('height'), fontUnitsPerEm, {
+      ...viewport,
+      axis: 'y',
+    });
+    const vb = (root.getAttribute('viewBox') || '')
+      .trim()
+      .split(/[\s,]+/)
+      .map(Number);
+    const fit =
+      vb.length === 4 && vb.every(Number.isFinite) && vb[2] > 0 && vb[3] > 0
+        ? viewBoxFit(
+            vb[0],
+            vb[1],
+            vb[2],
+            vb[3],
+            root.getAttribute('preserveAspectRatio'),
+            0,
+            0,
+            width,
+            height,
+          )
+        : null;
+    const existing = root.getAttribute('transform') || '';
+    root.setAttribute(
+      'transform',
+      [outerTransform, existing, fit && `matrix(${fit.join(' ')})`].filter(Boolean).join(' '),
+    );
+    root.setAttribute('width', String(width));
+    root.setAttribute('height', String(height));
+    // OpenType glyph viewports never clip, including authored root overrides.
+    root.setAttribute('overflow', 'visible');
+    root.setAttribute('clip', 'auto');
+    root.setAttribute(
+      'style',
+      (root.getAttribute('style') || '') + ';overflow:visible!important;clip:auto!important',
+    );
+  } else if (outerTransform) {
+    const existing =
+      typeof target.getAttribute === 'function' ? target.getAttribute('transform') || '' : '';
+    const spliced = existing ? outerTransform + ' ' + existing : outerTransform;
     if (typeof target.setAttribute === 'function') {
       target.setAttribute('transform', spliced);
     }
@@ -70,8 +112,7 @@ export function liftGlyphSubElement(svgText, subElementId, outerTransform = null
 
 function findById(node, id) {
   if (!node || node.nodeType !== 1) return null;
-  if (typeof node.getAttribute === 'function'
-      && node.getAttribute('id') === id) return node;
+  if (typeof node.getAttribute === 'function' && node.getAttribute('id') === id) return node;
   const ch = node.childNodes;
   if (!ch) return null;
   for (let i = 0; i < ch.length; i++) {
@@ -81,31 +122,37 @@ function findById(node, id) {
   return null;
 }
 
-function hideOtherGlyphGroups(root, keepId) {
-  // BFS through element children, marking sibling `glyph{N}` groups
-  // hidden. Stops descending into the target so it stays visible.
-  const stack = [root];
-  while (stack.length > 0) {
-    const n = stack.pop();
-    const ch = n.childNodes;
-    if (!ch) continue;
-    for (let i = 0; i < ch.length; i++) {
-      const c = ch[i];
-      if (c.nodeType !== 1) continue;
-      const id = (typeof c.getAttribute === 'function')
-        ? c.getAttribute('id') : null;
-      if (id && id !== keepId && /^glyph\d+$/.test(id)) {
-        // Hide this sibling subtree.
-        if (typeof c.setAttribute === 'function') {
-          c.setAttribute('display', 'none');
-        }
-        // Don't descend into hidden subtrees — every `glyph{N}` is
-        // a leaf-level group in well-formed SVG-in-OT docs.
-        continue;
+// Resolve author selectors before moving their subjects under <defs>. Keep
+// declarations local: a referenced target inherits from <use>, not from its
+// former ancestors. currentColor and custom properties resolve on the instance.
+function freezeSourceStyles(root) {
+  const rules = buildStylesheet(root);
+  if (!rules) return;
+  setActiveStylesheet(root, rules);
+  const properties = new Set();
+  for (const rule of rules) for (const name of Object.keys(rule.decls)) properties.add(name);
+  const updates = [],
+    sheets = [];
+  function visit(el) {
+    if (el.nodeType !== 1) return;
+    if (el.localName === 'style') sheets.push(el);
+    else {
+      let style = el.getAttribute('style') || '';
+      for (const name of properties) {
+        const value = getStyleProp(el, name, null, false);
+        if (value != null) style += ';' + name + ':' + value + '!important';
       }
-      stack.push(c);
+      updates.push([el, style]);
     }
+    for (let child = el.firstChild; child; child = child.nextSibling) visit(child);
   }
+  try {
+    visit(root);
+  } finally {
+    clearActiveStylesheet(root);
+  }
+  for (const [el, style] of updates) if (style) el.setAttribute('style', style);
+  for (const sheet of sheets) sheet.parentNode.removeChild(sheet);
 }
 
 /// Detect gzip header bytes (1F 8B). Caller is responsible for
@@ -113,8 +160,7 @@ function hideOtherGlyphGroups(root, keepId) {
 /// in a decompressor (browsers have DecompressionStream, Node has
 /// zlib — each environment wires its own).
 export function isGzipped(bytes) {
-  return bytes != null && bytes.length >= 2
-    && bytes[0] === 0x1F && bytes[1] === 0x8B;
+  return bytes != null && bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
 }
 
 /// Per-glyph SVG payload. The bytes may be gzip-compressed; reader
@@ -155,8 +201,12 @@ export class SvgInOtReader {
     this._numEntries = v.getUint16(this._docListOff, false);
   }
 
-  get hasSvg()      { return this._version === 0 && this._numEntries > 0; }
-  get numEntries()  { return this._numEntries; }
+  get hasSvg() {
+    return this._version === 0 && this._numEntries > 0;
+  }
+  get numEntries() {
+    return this._numEntries;
+  }
 
   /// Returns the SvgInOtGlyph for `gid`, or null when no record
   /// covers this gid.
@@ -164,7 +214,8 @@ export class SvgInOtReader {
     if (!this.hasSvg) return null;
     this._ensureRecords();
     // Records are sorted by startGid per spec — binary search.
-    let lo = 0, hi = this._records.length - 1;
+    let lo = 0,
+      hi = this._records.length - 1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
       const r = this._records[mid];
@@ -174,18 +225,18 @@ export class SvgInOtReader {
         const start = r.docOff;
         const end = start + r.docLen;
         // Slice into the original buffer.
-        const svgBytes = new Uint8Array(this._bytes.buffer,
-                                        this._bytes.byteOffset + start,
-                                        r.docLen);
-        const isGzipped = svgBytes.length >= 2
-          && svgBytes[0] === 0x1F && svgBytes[1] === 0x8B;
+        const svgBytes = new Uint8Array(
+          this._bytes.buffer,
+          this._bytes.byteOffset + start,
+          r.docLen,
+        );
+        const isGzipped = svgBytes.length >= 2 && svgBytes[0] === 0x1f && svgBytes[1] === 0x8b;
         // Per spec: when the document covers multiple glyphs, the
         // sub-element with id="glyph{N}" is the one to render for
         // gid N. When the document covers exactly one glyph, the
         // ID is still typically present but the whole document
         // works as a fallback.
-        return new SvgInOtGlyph(svgBytes, isGzipped, `glyph${gid}`,
-                                r.startGid, r.endGid);
+        return new SvgInOtGlyph(svgBytes, isGzipped, `glyph${gid}`, r.startGid, r.endGid);
       }
     }
     return null;
@@ -199,12 +250,11 @@ export class SvgInOtReader {
     for (let i = 0; i < this._numEntries; i++) {
       const recOff = this._docListOff + 2 + i * 12;
       const startGid = v.getUint16(recOff + 0, false);
-      const endGid   = v.getUint16(recOff + 2, false);
-      const docRel   = v.getUint32(recOff + 4, false);
-      const docLen   = v.getUint32(recOff + 8, false);
+      const endGid = v.getUint16(recOff + 2, false);
+      const docRel = v.getUint32(recOff + 4, false);
+      const docLen = v.getUint32(recOff + 8, false);
       // docRel is from the start of the document list.
-      recs[i] = { startGid, endGid,
-                  docOff: this._docListOff + docRel, docLen };
+      recs[i] = { startGid, endGid, docOff: this._docListOff + docRel, docLen };
     }
     this._records = recs;
   }

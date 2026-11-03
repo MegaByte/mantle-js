@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // indicFeatureApplySmoke.mjs — verifies GSUB Indic features fire end-
 // to-end during textRun shaping. Loads Devanagari Sangam MN and emits
 // strings that exercise rphf (reph), then checks the rendered glyph
@@ -10,14 +13,22 @@ import { registerIndicShaping } from '../../src/font/scripts/indic.js';
 registerIndicShaping();
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 let font = null;
 try {
-  font = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc')));
+  font = new MantleFontAsset(
+    new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc')),
+  );
   font.getMetrics(0x0915);
-} catch (e) { console.log('Skip:', e.message); process.exit(0); }
+} catch (e) {
+  console.log('Skip:', e.message);
+  process.exit(0);
+}
 
 // ----- T1: 'रक' (ra + halant + ka) — rphf collapses ra+halant into reph
 // Expected behavior:
@@ -32,8 +43,10 @@ try {
     // glyph[0] should be ka (codepoint 0x0915), glyph[1] should be the
     // reph (codepoint stays at ra = 0x0930 since ligatures carry the
     // first cp). The order proves both rphf ligature + reorder fired.
-    if (glyphs[0].codepoint !== 0x0915) fail(`T1 first cp=${glyphs[0].codepoint.toString(16)}, want 0915 (ka)`);
-    else if (glyphs[1].codepoint !== 0x0930) fail(`T1 second cp=${glyphs[1].codepoint.toString(16)}, want 0930 (ra/reph)`);
+    if (glyphs[0].codepoint !== 0x0915)
+      fail(`T1 first cp=${glyphs[0].codepoint.toString(16)}, want 0915 (ka)`);
+    else if (glyphs[1].codepoint !== 0x0930)
+      fail(`T1 second cp=${glyphs[1].codepoint.toString(16)}, want 0930 (ra/reph)`);
     else ok(`T1 'र्क' (reph) → 2 glyphs [ka, reph] — rphf ligature fired + reorder`);
   } else if (glyphs.length === 3) {
     fail(`T1 'र्क' produced 3 glyphs — rphf ligature NOT applied (reorder-only)`);
@@ -48,7 +61,7 @@ try {
   const { glyphs } = buildSvgTextGlyphs('का', font, 0, 0, 100);
   if (glyphs.length !== 2) fail(`T2 'का' expected 2 glyphs, got ${glyphs.length}`);
   else if (glyphs[0].codepoint !== 0x0915) fail(`T2 first cp not ka`);
-  else if (glyphs[1].codepoint !== 0x093E) fail(`T2 second cp not aa-matra`);
+  else if (glyphs[1].codepoint !== 0x093e) fail(`T2 second cp not aa-matra`);
   else ok(`T2 'का' regression: 2 glyphs [ka, aa-matra], identity order`);
 }
 
@@ -56,7 +69,7 @@ try {
 {
   const { glyphs } = buildSvgTextGlyphs('कि', font, 0, 0, 100);
   if (glyphs.length !== 2) fail(`T3 'कि' expected 2 glyphs, got ${glyphs.length}`);
-  else if (glyphs[0].codepoint !== 0x093F) fail(`T3 first cp not i-matra`);
+  else if (glyphs[0].codepoint !== 0x093f) fail(`T3 first cp not i-matra`);
   else if (glyphs[1].codepoint !== 0x0915) fail(`T3 second cp not ka`);
   else ok(`T3 'कि' pre-matra: [i, ka] (reorder + pre/post feature pass)`);
 }
@@ -71,10 +84,11 @@ try {
   const { glyphs } = buildSvgTextGlyphs('र्कि', font, 0, 0, 100);
   if (glyphs.length !== 3) fail(`T4 'र्कि' expected 3 glyphs (post-rphf), got ${glyphs.length}`);
   else {
-    const cps = glyphs.map(g => g.codepoint);
-    if (cps[0] !== 0x093F) fail(`T4 first cp ${cps[0].toString(16)}, want 093f (i)`);
+    const cps = glyphs.map((g) => g.codepoint);
+    if (cps[0] !== 0x093f) fail(`T4 first cp ${cps[0].toString(16)}, want 093f (i)`);
     else if (cps[1] !== 0x0915) fail(`T4 second cp ${cps[1].toString(16)}, want 0915 (ka)`);
-    else if (cps[2] !== 0x0930) fail(`T4 third cp ${cps[2].toString(16)}, want 0930 (reph from ra)`);
+    else if (cps[2] !== 0x0930)
+      fail(`T4 third cp ${cps[2].toString(16)}, want 0930 (reph from ra)`);
     else ok(`T4 'र्कि' → [i, ka, reph]: pre-reorder rphf + pre-matra move + reph-to-end all fired`);
   }
 }

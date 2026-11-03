@@ -4,12 +4,19 @@
   // prepublishOnly ships it. checkJs is OFF here — type-correctness is gated
   // separately by scripts/checkRendererTypes.mjs over src/renderer.
   "compilerOptions": {
-    "allowJs": true, "checkJs": false,
-    "declaration": true, "emitDeclarationOnly": true,
-    "noEmit": false, "noEmitOnError": false,
-    "skipLibCheck": true, "module": "esnext", "target": "es2020",
-    "moduleResolution": "bundler", "strict": false,
-    "rootDir": "src", "outDir": "types"
+    "allowJs": true,
+    "checkJs": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "noEmit": false,
+    "noEmitOnError": false,
+    "skipLibCheck": true,
+    "module": "esnext",
+    "target": "es2020",
+    "moduleResolution": "bundler",
+    "strict": false,
+    "rootDir": "src",
+    "outDir": "types"
   },
   "include": ["src/**/*.js"]
 }

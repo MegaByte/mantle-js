@@ -1,0 +1,425 @@
+{
+  "fontA": "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",
+  "casesA": [
+    {
+      "location": {
+        "wght": 100,
+        "wdth": 75,
+        "ital": 0
+      },
+      "fonttools": "Thin Condensed",
+      "ribbi": {
+        "familyName": "Stat Test Thin Condensed",
+        "subfamilyName": "Regular",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Thin Condensed",
+        "fullName": "Stat Test Thin Condensed",
+        "postScriptName": "StatTest-ThinCondensed"
+      }
+    },
+    {
+      "location": {
+        "wght": 100,
+        "wdth": 75,
+        "ital": 1
+      },
+      "fonttools": "Thin Condensed Italic",
+      "ribbi": {
+        "familyName": "Stat Test Thin Condensed",
+        "subfamilyName": "Italic",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Thin Condensed Italic",
+        "fullName": "Stat Test Thin Condensed Italic",
+        "postScriptName": "StatTest-ThinCondensedItalic"
+      }
+    },
+    {
+      "location": {
+        "wght": 100,
+        "wdth": 100,
+        "ital": 0
+      },
+      "fonttools": "Thin",
+      "ribbi": {
+        "familyName": "Stat Test Thin",
+        "subfamilyName": "Regular",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Thin",
+        "fullName": "Stat Test Thin",
+        "postScriptName": "StatTest-Thin"
+      }
+    },
+    {
+      "location": {
+        "wght": 100,
+        "wdth": 100,
+        "ital": 1
+      },
+      "fonttools": "Thin Italic",
+      "ribbi": {
+        "familyName": "Stat Test Thin",
+        "subfamilyName": "Italic",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Thin Italic",
+        "fullName": "Stat Test Thin Italic",
+        "postScriptName": "StatTest-ThinItalic"
+      }
+    },
+    {
+      "location": {
+        "wght": 300,
+        "wdth": 75,
+        "ital": 0
+      },
+      "fonttools": "Light Condensed",
+      "ribbi": {
+        "familyName": "Stat Test Light Condensed",
+        "subfamilyName": "Regular",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Light Condensed",
+        "fullName": "Stat Test Light Condensed",
+        "postScriptName": "StatTest-LightCondensed"
+      }
+    },
+    {
+      "location": {
+        "wght": 300,
+        "wdth": 75,
+        "ital": 1
+      },
+      "fonttools": "Light Condensed Italic",
+      "ribbi": {
+        "familyName": "Stat Test Light Condensed",
+        "subfamilyName": "Italic",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Light Condensed Italic",
+        "fullName": "Stat Test Light Condensed Italic",
+        "postScriptName": "StatTest-LightCondensedItalic"
+      }
+    },
+    {
+      "location": {
+        "wght": 300,
+        "wdth": 100,
+        "ital": 0
+      },
+      "fonttools": "Light",
+      "ribbi": {
+        "familyName": "Stat Test Light",
+        "subfamilyName": "Regular",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Light",
+        "fullName": "Stat Test Light",
+        "postScriptName": "StatTest-Light"
+      }
+    },
+    {
+      "location": {
+        "wght": 300,
+        "wdth": 100,
+        "ital": 1
+      },
+      "fonttools": "Light Italic",
+      "ribbi": {
+        "familyName": "Stat Test Light",
+        "subfamilyName": "Italic",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Light Italic",
+        "fullName": "Stat Test Light Italic",
+        "postScriptName": "StatTest-LightItalic"
+      }
+    },
+    {
+      "location": {
+        "wght": 400,
+        "wdth": 75,
+        "ital": 0
+      },
+      "fonttools": "Condensed",
+      "ribbi": {
+        "familyName": "Stat Test Condensed",
+        "subfamilyName": "Regular",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Condensed",
+        "fullName": "Stat Test Condensed",
+        "postScriptName": "StatTest-Condensed"
+      }
+    },
+    {
+      "location": {
+        "wght": 400,
+        "wdth": 75,
+        "ital": 1
+      },
+      "fonttools": "Condensed Italic",
+      "ribbi": {
+        "familyName": "Stat Test Condensed",
+        "subfamilyName": "Italic",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Condensed Italic",
+        "fullName": "Stat Test Condensed Italic",
+        "postScriptName": "StatTest-CondensedItalic"
+      }
+    },
+    {
+      "location": {
+        "wght": 400,
+        "wdth": 100,
+        "ital": 0
+      },
+      "fonttools": "Regular",
+      "ribbi": {
+        "familyName": "Stat Test",
+        "subfamilyName": "Regular",
+        "typographicFamilyName": null,
+        "typographicSubfamilyName": null,
+        "fullName": "Stat Test Regular",
+        "postScriptName": "StatTest-Regular"
+      }
+    },
+    {
+      "location": {
+        "wght": 400,
+        "wdth": 100,
+        "ital": 1
+      },
+      "fonttools": "Italic",
+      "ribbi": {
+        "familyName": "Stat Test",
+        "subfamilyName": "Italic",
+        "typographicFamilyName": null,
+        "typographicSubfamilyName": null,
+        "fullName": "Stat Test Italic",
+        "postScriptName": "StatTest-Italic"
+      }
+    },
+    {
+      "location": {
+        "wght": 700,
+        "wdth": 75,
+        "ital": 0
+      },
+      "fonttools": "Bold Condensed",
+      "ribbi": {
+        "familyName": "Stat Test Condensed",
+        "subfamilyName": "Bold",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Bold Condensed",
+        "fullName": "Stat Test Bold Condensed",
+        "postScriptName": "StatTest-BoldCondensed"
+      }
+    },
+    {
+      "location": {
+        "wght": 700,
+        "wdth": 75,
+        "ital": 1
+      },
+      "fonttools": "Bold Oblique Combo Condensed",
+      "ribbi": {
+        "familyName": "Stat Test Bold Oblique Combo Condensed",
+        "subfamilyName": "Regular",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Bold Oblique Combo Condensed",
+        "fullName": "Stat Test Bold Oblique Combo Condensed",
+        "postScriptName": "StatTest-BoldObliqueComboCondensed"
+      }
+    },
+    {
+      "location": {
+        "wght": 700,
+        "wdth": 100,
+        "ital": 0
+      },
+      "fonttools": "Bold",
+      "ribbi": {
+        "familyName": "Stat Test",
+        "subfamilyName": "Bold",
+        "typographicFamilyName": null,
+        "typographicSubfamilyName": null,
+        "fullName": "Stat Test Bold",
+        "postScriptName": "StatTest-Bold"
+      }
+    },
+    {
+      "location": {
+        "wght": 700,
+        "wdth": 100,
+        "ital": 1
+      },
+      "fonttools": "Bold Oblique Combo",
+      "ribbi": {
+        "familyName": "Stat Test Bold Oblique Combo",
+        "subfamilyName": "Regular",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Bold Oblique Combo",
+        "fullName": "Stat Test Bold Oblique Combo",
+        "postScriptName": "StatTest-BoldObliqueCombo"
+      }
+    },
+    {
+      "location": {
+        "wght": 900,
+        "wdth": 75,
+        "ital": 0
+      },
+      "fonttools": "Black Condensed",
+      "ribbi": {
+        "familyName": "Stat Test Black Condensed",
+        "subfamilyName": "Regular",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Black Condensed",
+        "fullName": "Stat Test Black Condensed",
+        "postScriptName": "StatTest-BlackCondensed"
+      }
+    },
+    {
+      "location": {
+        "wght": 900,
+        "wdth": 75,
+        "ital": 1
+      },
+      "fonttools": "Black Condensed Italic",
+      "ribbi": {
+        "familyName": "Stat Test Black Condensed",
+        "subfamilyName": "Italic",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Black Condensed Italic",
+        "fullName": "Stat Test Black Condensed Italic",
+        "postScriptName": "StatTest-BlackCondensedItalic"
+      }
+    },
+    {
+      "location": {
+        "wght": 900,
+        "wdth": 100,
+        "ital": 0
+      },
+      "fonttools": "Black",
+      "ribbi": {
+        "familyName": "Stat Test Black",
+        "subfamilyName": "Regular",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Black",
+        "fullName": "Stat Test Black",
+        "postScriptName": "StatTest-Black"
+      }
+    },
+    {
+      "location": {
+        "wght": 900,
+        "wdth": 100,
+        "ital": 1
+      },
+      "fonttools": "Black Italic",
+      "ribbi": {
+        "familyName": "Stat Test Black",
+        "subfamilyName": "Italic",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Black Italic",
+        "fullName": "Stat Test Black Italic",
+        "postScriptName": "StatTest-BlackItalic"
+      }
+    }
+  ],
+  "specA": [
+    {
+      "location": {
+        "wght": 280,
+        "wdth": 100,
+        "ital": 0
+      },
+      "name": "Light"
+    },
+    {
+      "location": {
+        "wght": 300,
+        "wdth": 100,
+        "ital": 0
+      },
+      "name": "Light"
+    },
+    {
+      "location": {
+        "wght": 450,
+        "wdth": 100,
+        "ital": 0
+      },
+      "name": "Regular"
+    },
+    {
+      "location": {
+        "wght": 700,
+        "wdth": 75,
+        "ital": 1
+      },
+      "name": "Bold Oblique Combo Condensed"
+    },
+    {
+      "location": {
+        "wght": 700,
+        "wdth": 100,
+        "ital": 1
+      },
+      "name": "Bold Oblique Combo"
+    }
+  ],
+  "fontB": "AAEAAAAMAIAAAwBAT1MvMkFYQf4AAAFIAAAAYFNUQVT2KOBDAAADuAAAAFxjbWFwAHEAvAAAAbQAAAA4ZnZhcvVp3v8AAAQUAAAAOGdseWZ8AHv8AAAB+AAAAFhoZWFkLw6R+AAAAMwAAAA2aGhlYQUWAfYAAAEEAAAAJGhtdHgCWAAAAAABqAAAAApsb2NhAEIALAAAAewAAAAKbWF4cAAGAAUAAAEoAAAAIG5hbWVt4KU0AAACUAAAAThwb3N0LvBy1wAAA4gAAAAwAAEAAAABAADx55ljXw889QADA+gAAAAA5wInkgAAAADnAieSAAAAAAH0AfQAAAADAAIAAAAAAAAAAQAAAyD/OAAAAlgAAABkAfQAAQAAAAAAAAAAAAAAAAAAAAEAAQAAAAQAAwABAAAAAAACAAAAAAAAAAAAAAAAAAAAAAADAlgBkAAFAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAA/Pz8/AAAAYQBiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAJYAAAAAAAAAAAAAAAAAAIAAAADAAAAFAADAAEAAAAUAAQAJAAAAAQABAABAAAAYv//AAAAYf//AAAAAQAEAAAAAQADAAAACwAWACEALAAAAAEAAAAAAfQB9AACAAAxESEB9AH0AAABAAAAAAH0AfQAAgAAMREhAfQB9AAAAQAAAAAB9AH0AAIAADERIQH0AfQAAAEAAAAAAfQB9AACAAAxESEB9AH0AAAAAA4ArgABAAAAAAABAAkAAAABAAAAAAACAAcACQABAAAAAAEAAAYAEAABAAAAAAEBAAUAFgABAAAAAAECAAQAGwABAAAAAAEDAAkAHwABAAAAAAEEAAYAKAADAAEECQABABIALgADAAEECQACAA4AQAADAAEECQEAAAwATgADAAEECQEBAAoAWgADAAEECQECAAgAZAADAAEECQEDABIAbAADAAEECQEEAAwAflN0YXQgVGVzdFJlZ3VsYXJXZWlnaHRXaWR0aEJvbGRDb25kZW5zZWROb3JtYWwAUwB0AGEAdAAgAFQAZQBzAHQAUgBlAGcAdQBsAGEAcgBXAGUAaQBnAGgAdABXAGkAZAB0AGgAQgBvAGwAZABDAG8AbgBkAGUAbgBzAGUAZABOAG8AcgBtAGEAbAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAABEAQIARQVhLmFsdAABAAEACAACAAAAFAAEAAAAJAACd2dodAEAAAF3ZHRoAQEAAAAIABQAIAAsAAEAAAACAAIBkAAAAAEAAAAAAQICvAAAAAEAAQAAAQMASwAAAAEAAQACAQQAZAAAAAEAAAAQAAIAAgAUAAAADHdnaHQAZAAAAZAAAAOEAAAAAAEAd2R0aABLAAAAZAAAAGQAAAAAAQE=",
+  "casesB": [
+    {
+      "location": {
+        "wght": 700,
+        "wdth": 75
+      },
+      "fonttools": "Bold Condensed",
+      "spec": "Condensed Bold",
+      "ribbi": {
+        "familyName": "Stat Test Condensed",
+        "subfamilyName": "Bold",
+        "typographicFamilyName": "Stat Test",
+        "typographicSubfamilyName": "Bold Condensed",
+        "fullName": "Stat Test Bold Condensed",
+        "postScriptName": "StatTest-BoldCondensed"
+      }
+    }
+  ],
+  "fontC": "AAEAAAANAIAAAwBQR1BPU7AtvtUAAAPsAAAAUEdTVULwVijYAAAEPAAAAKdPUy8yQVhCAAAAAVgAAABgY21hcABxALwAAAHEAAAAOGZ2YXL1ad7/AAAE5AAAADhnbHlmfAB7/AAAAggAAABYaGVhZC8OkfgAAADcAAAANmhoZWEFFgH2AAABFAAAACRobXR4AlgAAAAAAbgAAAAKbG9jYQBCACwAAAH8AAAACm1heHAABgAFAAABOAAAACBuYW1l+m27CAAAAmAAAAFZcG9zdC7wctcAAAO8AAAAMAABAAAAAQAASMb00l8PPPUAAwPoAAAAAOcCJ5IAAAAA5wInkgAAAAAB9AH0AAAAAwACAAAAAAAAAAEAAAMg/zgAAAJYAAAAZAH0AAEAAAAAAAAAAAAAAAAAAAABAAEAAAAEAAMAAQAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAwJYAZAABQAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAPz8/PwAAAGEAYgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAICWAAAAAAAAAAAAAAAAAACAAAAAwAAABQAAwABAAAAFAAEACQAAAAEAAQAAQAAAGL//wAAAGH//wAAAAEABAAAAAEAAwAAAAsAFgAhACwAAAABAAAAAAH0AfQAAgAAMREhAfQB9AAAAQAAAAAB9AH0AAIAADERIQH0AfQAAAEAAAAAAfQB9AACAAAxESEB9AH0AAABAAAAAAH0AfQAAgAAMREhAfQB9AAAAAAOAK4AAQAAAAAAAQAJAAAAAQAAAAAAAgAHAAkAAQAAAAABAAAGABAAAQAAAAABAQAFABYAAwABBAkAAQASABsAAwABBAkAAgAOAC0AAwABBAkBAAAMADsAAwABBAkBAQAKAEcAAwABBAkBAgAWAFEAAwABBAkBAwAOAGcAAwABBAkBBAAeAHUAAwABBAkBBQAGAJMAAwABBAkBBgAIAJkAAwABBAkBBwAKAKFTdGF0IFRlc3RSZWd1bGFyV2VpZ2h0V2lkdGgAUwB0AGEAdAAgAFQAZQBzAHQAUgBlAGcAdQBsAGEAcgBXAGUAaQBnAGgAdABXAGkAZAB0AGgAQQBsAHQAZQByAG4AYQB0AGUAIABhAFIAbwB1AG4AZAAgAGIAVQBzAGUAIAB0AGgAZQAgAHIAbwB1AG4AZAAgAGIAYgBiAGIAVABoAGkAbgBUAGgAaQBjAGsAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAARAECAEUFYS5hbHQAAQAAAA4AFgAKAAEAFAABREZMVAAYAAFrZXJuABQAAgAAAAEAGgAKAAAAAAABAAAAAP//AAEAAAABAAwABAAAAAEAEgABAAEAAQABAAP/zgABAAAACgAaABIAAURGTFQAJAADACAAKAAwAANjdjAyADBsaWdhADZzczAxADwAOgAAAAEAAAABACoAAQAAAAEAKAAEAAAAAQAyADYAAQABAAAAAQACACYAAQAAAAEAOwABAAEAL///AAD//wADAAAAAQACAAEAIwABACkAAAECAAABAwEEAQUAAgEGAAEAAGIAAQABAAMAAQABAAEAAQAEAAMAAgABAAABAAAAEAACAAIAFAAAAAx3Z2h0AGQAAAGQAAADhAAAAAABAHdkdGgASwAAAGQAAABkAAAAAAEB",
+  "features": [
+    {
+      "tag": "cv02",
+      "tables": ["GSUB"],
+      "uiName": "Round b",
+      "tooltip": "Use the round b",
+      "sample": "bbb",
+      "params": 2,
+      "characters": [98]
+    },
+    {
+      "tag": "liga",
+      "tables": ["GSUB"],
+      "uiName": null,
+      "tooltip": null,
+      "sample": null,
+      "params": 0,
+      "characters": []
+    },
+    {
+      "tag": "ss01",
+      "tables": ["GSUB"],
+      "uiName": "Alternate a",
+      "tooltip": null,
+      "sample": null,
+      "params": 0,
+      "characters": []
+    },
+    {
+      "tag": "kern",
+      "tables": ["GPOS"],
+      "uiName": null,
+      "tooltip": null,
+      "sample": null,
+      "params": 0,
+      "characters": []
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Miter-clip at a near-reversal. The clip fixes the bisector component only; the cut is what bounds the rest. -->
+  <rect width="200" height="200" fill="#ffffff"/>
+  <path d="M 180 100 Q 140 100 100 100 Q 115 100.5 130 101" fill="none" stroke="#000000" stroke-width="12" stroke-linecap="butt" stroke-linejoin="miter-clip" stroke-miterlimit="1"/>
+</svg>

@@ -1,8 +1,11 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // loopBlinn.js — additive Loop-Blinn hybrid fill mesh builder.
 //
 // Resolution-independent SOLID-FILL alternative to the Slug per-fragment
 // ray-cast: triangulate the interior, emit one control-hull region per curve
-// carrying its EXACT implicit; the fragment shader keeps the fill side (cheap
+// carrying its exact implicit; the fragment shader keeps the fill side (cheap
 // ALU, no ray-cast). Watertight on quads + cubics (convex / deep-concave /
 // inflecting-S) and punch-out holes, with exact closed-form math (no sampling).
 //
@@ -12,7 +15,7 @@
 // Curve implicit (the key idea, no klmn case tables):
 //   - quadratic: control triangle (P0,P1,P2), texcoords (0,0),(½,0),(1,1),
 //     implicit f = u²−v.
-//   - cubic: the EXACT Bezout resultant Res_t(x(t)−x, y(t)−y) — a 3×3
+//   - cubic: the exact Bezout resultant Res_t(x(t)−x, y(t)−y) — a 3×3
 //     determinant of linear forms in (x,y), evaluated in a per-curve normalized
 //     frame for 32-bit precision. Machine-exact (|det| on the curve ~1e-14).
 //
@@ -26,75 +29,179 @@
 
 import { SEG_LINE, SEG_QUAD, SEG_CUBIC, SEG_RQUAD } from '../primitives/seg.js';
 
-
 /** @typedef {{type:number,p1:number[],p2?:number[],p3?:number[],p4?:number[]}} Seg */
 
-
-
-
-
-
-
-import { earcut } from './lbEarcut.js';
-import { _setKeyOrigin, circleFromContours, ellipseFromContours, extractAnnuli } from './lbContour.js';
-export { curveRangeToContours, _setKeyOrigin } from './lbContour.js';   // barrel: decode surface
-export { bezoutCubicImplicit, evalBezout, cubicKLMN, partitionCubicSplitTs, uvInHull } from './lbCubicMath.js';   // barrel: public math surface
-export { LB_VERT_FLOATS, LB_MAX_VERTS_PER_MESH, LB_MAX_VERTS_PER_BUNDLE, packLoopBlinnMesh, transformLoopBlinnRaw, lbCanonicalFrame, lbCanonicalHash, lbCanonicalHashes } from './lbPack.js';   // barrel: pack/reuse surface
+import { mantleWarn } from '../core/diagnostics.js';
+import { earcut } from '../geom/lbEarcut.js';
+import { _setKeyOrigin, extractAnnuli } from '../geom/lbContour.js';
+import { circleFromContours, ellipseFromContours } from '../geom/shapeRecognize.js';
+export {
+  curveRangeToContours,
+  _setKeyOrigin,
+  lbFrameOrigin,
+  translateContours,
+} from '../geom/lbContour.js'; // barrel: decode surface
+export {
+  bezoutCubicImplicit,
+  evalBezout,
+  cubicKLMN,
+  partitionCubicSplitTs,
+  uvInHull,
+} from '../geom/lbCubicMath.js'; // barrel: public math surface
+export {
+  LB_VERT_FLOATS,
+  LB_VERT_BYTES,
+  LB_MAX_VERTS_PER_MESH,
+  LB_MAX_VERTS_PER_BUNDLE,
+  packLoopBlinnMesh,
+  transformLoopBlinnRaw,
+  translateLoopBlinnRaw,
+  lbCanonicalFrame,
+  lbCanonicalHash,
+  lbCanonicalHashes,
+  setLbShapeMemoryBudget,
+  getLbShapeMemoryBudget,
+  lbVertexBytes,
+  lbRawMinVertexBytes,
+} from './lbPack.js'; // barrel: pack/reuse surface
 import { _healCand } from './lbInteriorSplit.js';
-import { buildRims, turnsEqual, layoutRims, triangulateLayout, rimLens, assemble, healCracks, buildLoopBlinnMesh, resolveSelfOverlap } from './lbFastMesh.js';
-export { selfOrientRows, buildLoopBlinnMesh, dropDegenerateFaces } from './lbFastMesh.js';   // barrel: fast-path surface
+import {
+  buildRims,
+  turnsEqual,
+  layoutRims,
+  triangulateLayout,
+  rimLens,
+  assemble,
+  healCracks,
+  buildLoopBlinnMesh,
+  resolveSelfOverlap,
+} from './lbFastMesh.js';
+export {
+  selfOrientRows,
+  buildLoopBlinnMesh,
+  dropDegenerateFaces,
+  setPreferBezout,
+  getPreferBezout,
+} from './lbFastMesh.js'; // barrel: fast-path surface
 import { buildLoopBlinnPartition } from './lbPartition.js';
-export { buildLoopBlinnPartitionPair, partitionPairMidError } from './lbPartitionPair.js';   // barrel: morph-pair surface
+import { cutPinches } from './lbFastResolve.js';
+export { buildLoopBlinnPartitionPair } from './lbPartitionPair.js'; // barrel: morph-pair surface
 
-
-
-
-
-
-
-
+// A decline is a null RETURN, NOT A THROW. buildLoopBlinnPartition reports a shape it cannot
+// partition by returning null, so anything it THROWS is a bug in this code — and catching that
+// into the same per-shape Slug fallback made a TypeError or a missing import indistinguishable
+// from a geometric decline. Programming errors are rethrown (the callers' own handlers still fall
+// back to Slug, and lbBuildCore reports the swallow once); anything else is recorded in
+// __lbPartitionErr for the build-route smoke and reported once through the package's warn helper.
+let _warnedPartitionThrow = false;
+function partitionThrew(e9) {
+  if (typeof globalThis !== 'undefined')
+    globalThis.__lbPartitionErr = String((e9 && e9.stack) || e9).slice(0, 500);
+  if (!_warnedPartitionThrow) {
+    _warnedPartitionThrow = true;
+    mantleWarn(
+      '[mantle] the Loop-Blinn partition threw and this shape fell back to Slug; ' +
+        'reported once per session:\n' +
+        String((e9 && e9.stack) || e9),
+    );
+  }
+  if (e9 instanceof TypeError || e9 instanceof ReferenceError || e9 instanceof RangeError) throw e9;
+}
 
 export function buildLoopBlinnCDT(contours, opts) {
   _healCand.length = 0;
   _setKeyOrigin(contours);
   const circ = circleFromContours(contours);
-  if (circ) return { interior: new Float32Array(0), interiorEdges: null, quads: [], cubics: [], edges: [], fallback: [], circles: [circ], _topo: null };
+  if (circ)
+    return {
+      interior: new Float32Array(0),
+      interiorEdges: null,
+      quads: [],
+      cubics: [],
+      edges: [],
+      fallback: [],
+      circles: [circ],
+      _topo: null,
+    };
   const ell = ellipseFromContours(contours);
-  if (ell) return { interior: new Float32Array(0), interiorEdges: null, quads: [], cubics: [], edges: [], fallback: [], circles: [ell], _topo: null };
+  if (ell)
+    return {
+      interior: new Float32Array(0),
+      interiorEdges: null,
+      quads: [],
+      cubics: [],
+      edges: [],
+      fallback: [],
+      circles: [ell],
+      _topo: null,
+    };
   // Pull out concentric circular RINGS → exact annulus SDF; the rest builds below.
   const _ann = extractAnnuli(contours, opts && opts.fillRule);
   contours = _ann.rest;
-  if (!contours.length) return { interior: new Float32Array(0), interiorEdges: null, quads: [], cubics: [], edges: [], fallback: [], annuli: _ann.annuli, _topo: null };
-  // DEFAULT ROUTE (post-annulus): line/quad/rquad/cubic shapes build the exact partition
-  // (control points in the CDT, exact partition, one side-bit per segment).
-  // Runs AFTER annulus extraction so full circle pairs keep the exact SDF path
-  // (kappa-circle cubics have near-degenerate klmn frames), but only when the
-  // extraction is ALL-OR-NOTHING — a partially consumed shape (one ring of a
-  // two-ring composite) would leave partition building half the geometry (arcRing).
+  if (!contours.length)
+    return {
+      interior: new Float32Array(0),
+      interiorEdges: null,
+      quads: [],
+      cubics: [],
+      edges: [],
+      fallback: [],
+      annuli: _ann.annuli,
+      _topo: null,
+    };
+
   if (!_ann.annuli.length) {
     let ok9 = true;
-    for (const c9 of contours) { for (const s9 of c9) { if (s9.type !== SEG_LINE && s9.type !== SEG_QUAD && s9.type !== SEG_RQUAD && s9.type !== SEG_CUBIC) { ok9 = false; break; } } if (!ok9) break; }
+    for (const c9 of contours) {
+      for (const s9 of c9) {
+        if (
+          s9.type !== SEG_LINE &&
+          s9.type !== SEG_QUAD &&
+          s9.type !== SEG_RQUAD &&
+          s9.type !== SEG_CUBIC
+        ) {
+          ok9 = false;
+          break;
+        }
+      }
+      if (!ok9) break;
+    }
     if (ok9) {
       let pp9 = null;
-      try { pp9 = buildLoopBlinnPartition(contours, opts); }
-      catch (e9) { pp9 = null; if (typeof globalThis !== 'undefined') globalThis.__lbPartitionErr = String(e9 && e9.stack || e9).slice(0, 500); }
+      try {
+        pp9 = buildLoopBlinnPartition(contours, opts);
+      } catch (e9) {
+        pp9 = null;
+        partitionThrew(e9);
+      }
       if (pp9) return pp9;
       // The partition DECLINED (returned null). One cause is a SELF-OVERLAPPING
       // outline: two segments of a contour overlap with opposite winding (common
       // in exported art where strokes were flattened to fills), leaving a
-      // winding-0 sliver the per-crescent fill-side test cannot honour — both
+      // winding-0 sliver the per-crescent fill-side test cannot honor — both
       // overlapping crescents paint the sliver (each reads its own f<0) while the
       // true fill is empty there, so the shape over-paints AIR and declines
-      // (Assist-Ants head, Broccoli). Retry ONCE from the exact union silhouette
+      // Retry ONCE from the exact union silhouette
       // (native cubics preserved), which has no winding-0 straddle. resolveSelfOverlap
-      // returns the SAME contours unless the outline genuinely self-intersects, so
+      // returns the same contours unless the outline genuinely self-intersects, so
       // a shape that declined for any OTHER reason changes nothing and this second
       // build is skipped — clean shapes never pay for it and stay byte-identical.
       // STATIC only — morphs build through buildLoopBlinnPartitionPair, untouched.
-      const contours9 = resolveSelfOverlap(contours, opts && opts.fillRule);
-      if (contours9 !== contours) {
-        try { pp9 = buildLoopBlinnPartition(contours9, opts); }
-        catch (e9) { pp9 = null; if (typeof globalThis !== 'undefined') globalThis.__lbPartitionErr = String(e9 && e9.stack || e9).slice(0, 500); }
+      //
+      // ...and resolveSelfOverlap has a THIRD answer: null, for an outline it cannot resolve. `!== contours`
+      // alone would read that as a new set and retry on null, throwing inside the partition -- the shape
+      // would decline by CRASHING rather than by deciding, and spend the once-per-session swallow report,
+      // which is the channel a real build failure has to arrive on. So null is not retried.
+      // A resolved crossing can come back pinched; cut it into its loops.
+      const r9 = resolveSelfOverlap(contours, opts && opts.fillRule);
+      const contours9 = r9 && r9 !== contours ? cutPinches(r9) : r9;
+      if (contours9 && contours9 !== contours) {
+        try {
+          pp9 = buildLoopBlinnPartition(contours9, opts);
+        } catch (e9) {
+          pp9 = null;
+          partitionThrew(e9);
+        }
         if (pp9) return pp9;
       }
     }
@@ -116,8 +223,10 @@ export function buildLoopBlinnCDT(contours, opts) {
 // morph/road that deforms a fixed topology refreshes in O(n). Falls back to a
 // full buildLoopBlinnMesh when the structure changed (a curve flipped
 // convex↔concave, gained/lost an inflection, or a loop/cusp appeared).
-export function refreshLoopBlinnMesh(prev, contours) {
-  if (!prev || !prev._topo) return buildLoopBlinnMesh(contours);
+export function refreshLoopBlinnMesh(prev, contours, fillRule) {
+  // The fallback is a FULL rebuild, so it needs the same rule the original build used; without it
+  // a refresh silently reinterpreted an even-odd shape as nonzero.
+  if (!prev || !prev._topo) return buildLoopBlinnMesh(contours, true, fillRule);
   // Same per-build setup as buildLoopBlinnMesh: the vertex-key origin is
   // scale-aware GLOBAL state (without the reset, rim quantization keys
   // against whichever shape built LAST — refresh output depended on
@@ -130,11 +239,24 @@ export function refreshLoopBlinnMesh(prev, contours) {
   _setKeyOrigin(contours);
   const r = buildRims(contours, !!prev._topo.ramped);
   const { coords, holeStarts, spans } = layoutRims(r.rims);
-  const t = prev._topo, lens = rimLens(r.rims);
-  let same = lens.length === t.rimLens.length && holeStarts.length === t.holeStarts.length
-          && r.fallback.length === prev.fallback.length;
-  if (same) for (let i = 0; i < lens.length; i++) if (lens[i] !== t.rimLens[i]) { same = false; break; }
-  if (same) for (let i = 0; i < holeStarts.length; i++) if (holeStarts[i] !== t.holeStarts[i]) { same = false; break; }
+  const t = prev._topo,
+    lens = rimLens(r.rims);
+  let same =
+    lens.length === t.rimLens.length &&
+    holeStarts.length === t.holeStarts.length &&
+    r.fallback.length === prev.fallback.length;
+  if (same)
+    for (let i = 0; i < lens.length; i++)
+      if (lens[i] !== t.rimLens[i]) {
+        same = false;
+        break;
+      }
+  if (same)
+    for (let i = 0; i < holeStarts.length; i++)
+      if (holeStarts[i] !== t.holeStarts[i]) {
+        same = false;
+        break;
+      }
   // Rim STRUCTURE check (not just lengths): equal-length rims can still have a
   // different convex/reflex layout — a curve flipping convex↔concave, or a
   // ring-road slot teleporting to a different depth band when scroll crosses a
@@ -150,19 +272,35 @@ export function refreshLoopBlinnMesh(prev, contours) {
     let sgn = 0;
     const tr = t.tris;
     for (let k = 0; k < tr.length; k += 3) {
-      const a = coords[tr[k]], b = coords[tr[k + 1]], c = coords[tr[k + 2]];
+      const a = coords[tr[k]],
+        b = coords[tr[k + 1]],
+        c = coords[tr[k + 2]];
       const ar = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-      const s = ar > 1e-7 ? 1 : ar < -1e-7 ? -1 : 0;
-      if (s === 0 || (sgn !== 0 && s !== sgn)) { same = false; break; }
+      // AN AREA AGAINST THE TRIANGLE'S own SIZE, not against a constant. This asks whether the
+      // triangle is non-degenerate, and an area scales as the SQUARE of the coordinates -- so a
+      // fixed 1e-7 calls a small shape's honest triangle degenerate and a large shape's collapsed
+      // one healthy. Over a 2^-4..2^4 sweep that threshold swings by 2^16.
+      const e2m = Math.max(
+        (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2,
+        (c[0] - b[0]) ** 2 + (c[1] - b[1]) ** 2,
+        (a[0] - c[0]) ** 2 + (a[1] - c[1]) ** 2,
+      );
+      const aEps = 1e-10 * e2m;
+      const s = ar > aEps ? 1 : ar < -aEps ? -1 : 0;
+      if (s === 0 || (sgn !== 0 && s !== sgn)) {
+        same = false;
+        break;
+      }
       if (sgn === 0) sgn = s;
     }
   }
   const tris = same ? t.tris : triangulateLayout(coords, spans);
   const mesh = assemble(r, coords, tris, holeStarts, t.ramped);
-  // Whole-arc band snapshot BEFORE healing (same as buildLoopBlinnMesh).
-  if (t.ramped) mesh.bandArcs = mesh.quads.filter((q) => !q.circle && !q.tc)
-    .map((q) => ({ tri: q.tri, sign: q.sign, w: q.w, e1: q.e1, e2: q.e2 }));
+
+  if (t.ramped)
+    mesh.bandArcs = mesh.quads
+      .filter((q) => !q.circle && !q.tc)
+      .map((q) => ({ tri: q.tri, sign: q.sign, w: q.w, e1: q.e1, e2: q.e2 }));
   if (t.ramped) healCracks(mesh);
   return mesh;
 }
-

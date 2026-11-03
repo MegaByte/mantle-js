@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><defs><pattern id="base" width="26" height="26" patternUnits="userSpaceOnUse"><rect width="26" height="26" fill="#ffffff"/><rect width="13" height="26" fill="#0090ff"/></pattern><pattern id="p" href="#base" x="3"/></defs><rect x="10" y="20" width="80" height="60" fill="url(#p)"/></svg>

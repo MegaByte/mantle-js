@@ -1,9 +1,11 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // _strokeQuadBench — is the closed-form quad closest-point actually CHEAPER than
-// the 5-sample seed + 3 Newton steps it replaced?
+// a 5-sample seed + 3 Newton steps?
 //
-// e195c8a3's message claims "both cheaper and more accurate". The accuracy half
-// was measured (float32 vs a float64 reference); the cost half was asserted, and
-// it is not obvious: Cardano buys its exactness with a sqrt plus either two
+// The closed form is more accurate (float32 vs a float64 reference); whether it is
+// also cheaper is not obvious: Cardano buys its exactness with a sqrt plus either two
 // pow(.,1/3) or an acos and three cos, all of which are multi-cycle on a GPU,
 // against 8 cheap polynomial evaluations.
 //
@@ -16,7 +18,7 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const N = +(process.env.N || 512);
@@ -31,8 +33,9 @@ function svg() {
     const y = 6 + (i * 116) / STROKES;
     const cx = 20 + ((i * 37) % 88);
     const cy = 4 + ((i * 53) % 120);
-    b += `<path d="M6 ${y.toFixed(2)} Q${cx} ${cy} 122 ${(128 - y).toFixed(2)}" `
-       + `fill="none" stroke="#000" stroke-width="7" stroke-opacity="0.5"/>`;
+    b +=
+      `<path d="M6 ${y.toFixed(2)} Q${cx} ${cy} 122 ${(128 - y).toFixed(2)}" ` +
+      `fill="none" stroke="#000" stroke-width="7" stroke-opacity="0.5"/>`;
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">${b}</svg>`;
 }
@@ -62,20 +65,37 @@ window.__ready = true;
 
 const server = http.createServer((q, res) => {
   const f = q.url.split('?')[0];
-  if (f === '/') { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(HTML); return; }
+  if (f === '/') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(HTML);
+    return;
+  }
   try {
     const body = readFileSync(path.join(ROOT, f));
     const ext = path.extname(f);
-    res.writeHead(200, { 'Content-Type': ext === '.js' || ext === '.mjs' ? 'text/javascript' : ext === '.glsl' ? 'text/plain' : 'application/octet-stream' });
+    res.writeHead(200, {
+      'Content-Type':
+        ext === '.js' || ext === '.mjs'
+          ? 'text/javascript'
+          : ext === '.glsl'
+            ? 'text/plain'
+            : 'application/octet-stream',
+    });
     res.end(body);
-  } catch { res.writeHead(404); res.end('nf'); }
+  } catch {
+    res.writeHead(404);
+    res.end('nf');
+  }
 });
 await new Promise((r) => server.listen(0, r));
-const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+const browser = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
 const pg = await browser.newPage();
 pg.on('pageerror', (e) => console.error(' [err]', e.message));
 await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 120000 });
 await pg.waitForFunction('window.__ready === true', { timeout: 180000, polling: 50 });
 const o = await pg.evaluate(() => window.__out);
-await browser.close(); server.close();
-console.log(`  ${STROKES} stroked quads @${N}px — median ${o.med.toFixed(3)} ms  (p25 ${o.p25.toFixed(3)}, min ${o.min.toFixed(3)})`);
+await browser.close();
+server.close();
+console.log(
+  `  ${STROKES} stroked quads @${N}px — median ${o.med.toFixed(3)} ms  (p25 ${o.p25.toFixed(3)}, min ${o.min.toFixed(3)})`,
+);

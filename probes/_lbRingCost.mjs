@@ -1,16 +1,21 @@
-// _lbRingCost — LB draw cost + mesh size for cubic-heavy bundles. Used to price the cubic
-// exterior rings (which replace the relative hull dilation) against the pre-ring mesh.
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// _lbRingCost — LB draw cost + mesh size for cubic-heavy bundles: prices the cubic
+// exterior rings (in place of a relative hull dilation) against a mesh without them.
 import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const N = 512;
 const SVGS = {};
 for (const f of ['tiger.svg', 'fish.svg']) {
-  try { SVGS[f] = readFileSync(path.join(ROOT, 'examples', f), 'utf8'); } catch {}
+  try {
+    SVGS[f] = readFileSync(path.join(ROOT, 'examples', f), 'utf8');
+  } catch {}
 }
 const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas>
 <script type="module">
@@ -41,14 +46,31 @@ window.__run=async(svgs)=>{
 };
 window.__ready=true;
 </script></body></html>`;
-const server=http.createServer((q,res)=>{try{if(q.url==='/'){res.writeHead(200,{'content-type':'text/html'});res.end(HTML);return;}
-const pp=decodeURIComponent(q.url.split('?')[0]);res.writeHead(200,{'content-type':pp.endsWith('.glsl')?'text/plain':'text/javascript'});
-res.end(readFileSync(path.join(ROOT,pp)));}catch{if(!res.headersSent)res.writeHead(404);res.end();}});
-await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const br=await puppeteer.launch({headless:'new',args:['--no-sandbox']});
-const pg=await br.newPage(); pg.on('pageerror',e=>console.error(' [err]',e.message));
-await pg.goto(`http://127.0.0.1:${server.address().port}/`,{waitUntil:'load',timeout:90000});
-await pg.waitForFunction(()=>window.__ready===true,{timeout:120000, polling:50});
-const o=await pg.evaluate((s)=>window.__run(s), SVGS);
-await br.close(); server.close();
-for(const r of o) console.log(`  ${r.name.padEnd(12)} verts=${String(r.verts).padStart(7)}  draw=${r.ms.toFixed(3)}ms`);
+const server = http.createServer((q, res) => {
+  try {
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
+    const pp = decodeURIComponent(q.url.split('?')[0]);
+    res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, pp)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
+const pg = await br.newPage();
+pg.on('pageerror', (e) => console.error(' [err]', e.message));
+await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
+await pg.waitForFunction(() => window.__ready === true, { timeout: 120000, polling: 50 });
+const o = await pg.evaluate((s) => window.__run(s), SVGS);
+await br.close();
+server.close();
+for (const r of o)
+  console.log(
+    `  ${r.name.padEnd(12)} verts=${String(r.verts).padStart(7)}  draw=${r.ms.toFixed(3)}ms`,
+  );

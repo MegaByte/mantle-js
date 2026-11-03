@@ -1,0 +1,62 @@
+{
+  "_": "Predicted GPU pixel differences for a CPatch change set (coverage guard, seam accounting, frame-record bake, exact-crossing cuts, hull redundancy test), a base tree against the tree that follows it. Every number below comes from the CPU: the kernel model (src/renderer/cpatchCov.js), the exact box-filter reference (probes/cpatchGate/_rowGateAaRef.mjs, SLICES=32 CANVAS=512) and the scale-1 mesh count (probes/_cpatchMeshCensus.mjs, 1471 shapes over examples/ + examples/_bench/ + examples/smoke/). Run probes/cpatchQuality/_gpuQualityCheck.mjs to confirm them.",
+
+  "_theClaim": "FOUR OF THE FIVE ITEMS PREDICT ZERO PIXELS, and that is the claim rather than an absence of one. The coverage guard refuses nothing on this corpus (the mesh count is byte-identical, 0 of 1471 shapes moved); seam accounting only counts; the bake changes which contours RECORD a trace, not what any contour converts to; the redundancy test's default reproduces the base reference total to the digit. Only the exact-crossing cut moves a decomposition, and only tiger's.",
+
+  "_falsifiable": "A difference on lbMemBudget or the star falsifies all four zero claims at once -- neither asset has a shape the crossing audit touched. A tiger diff larger than maxPixels falsifies the claim that the exact-crossing cut is confined to the 24 crossings the audit found. A tiger diff in which NEITHER the all-seam count nor the texel count moved means the two dumps came from the same tree and the pixel count is not evidence about anything. (texels alone is the wrong witness: the plane texture is a padded allocation and tiger sits at 589824 either way, while all-seam moves 606 -> 601.)",
+
+  "size": 512,
+
+  "assets": {
+    "tiger": {
+      "asset": "examples/tiger.svg",
+      "shapes": 298,
+      "movedShapes": [48, 126, 140, 145, 288],
+      "coverageMoved": [288, 48],
+      "note": "Five shapes decompose differently under the exact-crossing cut. Only #288 and #48 change their COVERAGE; #126, #140 and #145 move a cell split at an unchanged patch count and an unchanged exact-reference error (to 1e-9).",
+      "exactReferenceErrorPx2": { "base": 1726.707, "head": 1724.707, "delta": -2.0 },
+      "perShape": {
+        "288": {
+          "patches": "13 -> 7",
+          "blocks": "55 -> 35",
+          "verts": "234 -> 123",
+          "errPx2": "5.499 -> 3.355"
+        },
+        "48": {
+          "patches": "58 -> 58",
+          "blocks": "296 -> 295",
+          "verts": "1236 -> 1227",
+          "errPx2": "26.531 -> 26.674"
+        }
+      },
+      "maxPixels": 400,
+      "wireMustChange": true,
+      "expect": "order 50-300 pixels differ, all of them inside shapes #288 and #48. The frame should be CLOSER to Slug and AAC, not further: the exact reference moves -2.000 px^2 and -2.144 of that is #288 alone. #288 is also 20 fewer blocks and 111 fewer vertices, which shows up as all-seam 606 -> 601, not as a smaller plane texture."
+    },
+    "lbMemBudget": {
+      "asset": "examples/smoke/lbMemBudget__SVG.svg",
+      "shapes": 400,
+      "maxPixels": 0,
+      "texelsMustMatch": true,
+      "expect": "ZERO pixels and an unchanged texel count. No shape of this asset is in the mesh count's moved list, and the one contour the bake newly records converts to the same patches either way -- which the bake arm checks directly on one tree."
+    },
+    "star": {
+      "asset": "examples/smoke/engineDeclineIsolation__STAR.svg",
+      "shapes": 1,
+      "patches": 301,
+      "allSeamPatches": 40,
+      "maxPixels": 0,
+      "texelsMustMatch": true,
+      "expect": "ZERO pixels. This is the asset where a redundancy-test change would show. Any difference here means the redundancy test changed."
+    }
+  },
+
+  "bakeArm": {
+    "_": "The bake's own check, on ONE tree: render each asset, then render it again through bakeCPatchBundle -> createBundle({cpatchBake}).",
+    "expect": "byte-identical frames and an unchanged texel count on every asset. Measured on the CPU over the corpus: 2831 bake entries, 1633 replay hits, 0 misfits, 0 misses, and 1470 of 1471 shapes byte-identical through the bake.",
+    "poolSplit": "The pooled build must match the serial one. A pool that pre-splits any contour above 24 curves with countFirstPieces and converts the pieces ALONE produces a different decomposition from the whole-contour search -- and the pool only runs where Worker exists, so the browser's 'searched' frame would be the split one while the bake (which turns pooling off) records the serial one; node has no Worker, so a corpus check's searched arm is always the serial decomposition and cannot show it. With the split taken on every route, the pooled and baked streams are byte-identical: star 1/1, lbMemBudget 400/400, tiger 296/296 (test/cpatchPoolSplitParitySmoke.mjs). Expect 0 on all three.",
+    "knownGap": "One asset, examples/smoke/glslEmuFidelity__SVG.svg, replays to a different wire with every contour reporting a HIT. It reads the same with the frame record in and out, so it is not about the bake; it is not in the asset list above and is recorded here so a run does not mistake it for a regression. It is not the pool split either (that signature is a contour above 24 curves); diagnose it on its own."
+  },
+
+  "_howToFalsifyTheZeroes": "Run --save on one tree twice and --diff the two dumps: that is the A/A control, and it must report 0 pixels on every asset. A non-zero A/A means the harness, not the change, is what the numbers below are measuring."
+}

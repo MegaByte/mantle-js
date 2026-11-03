@@ -1,4 +1,6 @@
 #version 300 es
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
 // PaintComposite — COLRv1 binary composite with 28 modes. Per the
 // OpenType spec, PaintCompositeMode enumerates the 12 Porter-Duff
 // modes (0..11), additive Plus (12), then the 15 CSS blend modes
@@ -6,7 +8,8 @@
 // blend-mode helpers and rewrites both halves of the COLR enum into
 // the helper's internal numbering.
 //
-// PD half (modes 0..12) writes the answer directly from `porterDuff`.
+// PD half (modes 0..12) writes the answer directly from `porterDuffK`, whose weights
+// the CPU sets from the mode (uPD).
 // Blend half (modes 13..27) follows CSS Compositing & Blending Level 1
 // rules: blend(src, dst) in unpremultiplied RGB, then composite the
 // result over the destination using src-over. The same pattern as
@@ -34,7 +37,12 @@ in vec2 vUV;
 uniform sampler2D uSrc;
 uniform sampler2D uDst;
 uniform int uMode;       // 0..27 COLR PaintCompositeMode
+uniform vec4 uPD;        // the Porter-Duff half's weights (see _porterDuffHelpers.glsl), set on the CPU
+uniform vec4 uSrcMap;    // vUV -> uSrc uv, and uDstMap -> uDst uv: each input covers its own rect
+uniform vec4 uDstMap;    //   (see @@FILTER_RECT@@)
 out vec4 fragColor;
+
+@@FILTER_RECT@@
 
 @@PORTER_DUFF_HELPERS@@
 @@BLEND_HELPERS@@
@@ -49,10 +57,11 @@ int colrModeToBlend(int m) {
 }
 
 void main() {
-  vec4 src = texture(uSrc, vUV);
-  vec4 dst = texture(uDst, vUV);
+  vec4 src = sampleIn(uSrc, mapIn(vUV, uSrcMap));
+  vec4 dst = sampleIn(uDst, mapIn(vUV, uDstMap));
   if (uMode <= 12) {
-    fragColor = porterDuff(uMode, src, dst);
+    vec4 pd = porterDuffK(uPD, src, dst);
+    fragColor = uMode == 12 ? clamp(pd, vec4(0.0), vec4(1.0)) : pd;   // Plus saturates
     return;
   }
   // Blend modes 13..27 — unpremultiply, blend in straight RGB, then

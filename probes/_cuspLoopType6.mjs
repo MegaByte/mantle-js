@@ -1,4 +1,7 @@
-// _cuspLoopType6 — CUSP cubics are recovered EXACTLY on the tree-hard fill via a new type-6 hard
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// _cuspLoopType6 — CUSP cubics are recovered exactly on the tree-hard fill via a new type-6 hard
 // cubic piece (raw control points wound by the exact +x ray-crossing hardCrossCubic), replacing the
 // old straight-line fallback that miscounted a cusp by ~504 px. Self-intersecting LOOP cubics
 // CANNOT be made exact on the tree (the far-node chord approximation and the piece winding both
@@ -8,21 +11,37 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const N = 512;
 
 // stroke-covered (opaque, wide, solid) closed cubic → routes tree-hard under aacFill:'auto'
-const shape = (P) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${N} ${N}" width="${N}" height="${N}">`
-  + `<path fill="#c0392b" stroke="#111" stroke-width="10" fill-rule="nonzero" `
-  + `d="M ${P[0][0]} ${P[0][1]} C ${P[1][0]} ${P[1][1]} ${P[2][0]} ${P[2][1]} ${P[3][0]} ${P[3][1]} Z"/></svg>`;
+const shape = (P) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${N} ${N}" width="${N}" height="${N}">` +
+  `<path fill="#c0392b" stroke="#111" stroke-width="10" fill-rule="nonzero" ` +
+  `d="M ${P[0][0]} ${P[0][1]} C ${P[1][0]} ${P[1][1]} ${P[2][0]} ${P[2][1]} ${P[3][0]} ${P[3][1]} Z"/></svg>`;
 
 const CASES = {
-  loop:  shape([[120, 260], [400, 60], [120, 60], [400, 260]]),    // symmetric self-touch (klmn null)
-  tilt:  shape([[100, 300], [450, 380], [420, 120], [180, 360]]),  // GENUINE distinct-crossing loop (klmn ok)
-  cusp:  shape([[100, 300], [500, 300], [100, 100], [500, 100]]),  // klmn null real cusp (P0!=P3)
+  loop: shape([
+    [120, 260],
+    [400, 60],
+    [120, 60],
+    [400, 260],
+  ]), // symmetric self-touch (klmn null)
+  tilt: shape([
+    [100, 300],
+    [450, 380],
+    [420, 120],
+    [180, 360],
+  ]), // GENUINE distinct-crossing loop (klmn ok)
+  cusp: shape([
+    [100, 300],
+    [500, 300],
+    [100, 100],
+    [500, 100],
+  ]), // klmn null real cusp (P0!=P3)
 };
 
 const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas>
@@ -52,40 +71,61 @@ window.__ready = true;
 
 const server = http.createServer((req, res) => {
   let f = decodeURIComponent(req.url.split('?')[0]);
-  if (f === '/') { res.setHeader('content-type', 'text/html'); return res.end(HTML); }
+  if (f === '/') {
+    res.setHeader('content-type', 'text/html');
+    return res.end(HTML);
+  }
   try {
     const body = readFileSync(path.join(ROOT, f));
-    res.setHeader('content-type', f.endsWith('.js') || f.endsWith('.mjs') ? 'text/javascript'
-      : f.endsWith('.glsl') ? 'text/plain' : 'application/octet-stream');
+    res.setHeader(
+      'content-type',
+      f.endsWith('.js') || f.endsWith('.mjs')
+        ? 'text/javascript'
+        : f.endsWith('.glsl')
+          ? 'text/plain'
+          : 'application/octet-stream',
+    );
     res.end(body);
-  } catch { res.statusCode = 404; res.end('nf'); }
+  } catch {
+    res.statusCode = 404;
+    res.end('nf');
+  }
 });
-await new Promise(r => server.listen(0, r));
+await new Promise((r) => server.listen(0, r));
 const port = server.address().port;
 
-const br = await puppeteer.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--no-sandbox'] });
+const br = await launchBrowser({
+  args: ['--use-gl=angle', '--use-angle=swiftshader', '--no-sandbox'],
+});
 const pg = await br.newPage();
-pg.on('pageerror', e => console.error('[PGERR]', e.message));
+pg.on('pageerror', (e) => console.error('[PGERR]', e.message));
 await pg.goto(`http://localhost:${port}/`, { waitUntil: 'load' });
 await pg.waitForFunction('window.__ready === true', { timeout: 20000 });
 const o = await pg.evaluate((c) => window.__run(c), CASES);
-await br.close(); server.close();
+await br.close();
+server.close();
 
 let fail = 0;
-const ok = (c, m) => c ? console.log('  ok ' + m) : (fail++, console.error('  FAIL ' + m));
+const ok = (c, m) => (c ? console.log('  ok ' + m) : (fail++, console.error('  FAIL ' + m)));
 console.log('  result:', JSON.stringify(o));
-// CUSP: recovered EXACTLY on the tree via the type-6 hard cubic piece (was 504 px on the old line
-// fallback). A cusp is a single strand, so nothing pokes out from under the covering stroke → 0 px.
-ok(o.cusp.engine === 'noaa-tree', `cusp routes tree-hard via type-6 (got ${o.cusp.engine})`);
-ok(o.cusp.nDiff === 0 && o.cusp.maxDiff === 0, `cusp tree-hard is EXACT vs Slug (${o.cusp.nDiff} px >16, max ${o.cusp.maxDiff})`);
-// LOOPS: opaque-stroke-covered self-intersecting loops stay on the tree, wound EXACTLY by type-6
-// pieces (hardCrossCubic) — the genuine distinct-crossing loop `tilt` was 5946 px on the old type-4
-// klm implicit. The winding is now correct; only a sub-pixel hard-vs-AA residual remains at the
+// CUSP: recovered exactly on the tree via the type-6 hard cubic piece (a line fallback misses
+// hundreds of px). A cusp is a single strand, so nothing pokes out from under the covering stroke → 0 px.
+ok(o.cusp.engine === 'hard-tree', `cusp routes tree-hard via type-6 (got ${o.cusp.engine})`);
+ok(
+  o.cusp.nDiff === 0 && o.cusp.maxDiff === 0,
+  `cusp tree-hard is EXACT vs Slug (${o.cusp.nDiff} px >16, max ${o.cusp.maxDiff})`,
+);
+// LOOPS: opaque-stroke-covered self-intersecting loops stay on the tree, wound exactly by type-6
+// pieces (hardCrossCubic) — on a type-4 klm implicit the genuine distinct-crossing loop `tilt`
+// misses thousands of px. The winding is correct; only a sub-pixel hard-vs-AA residual remains at the
 // self-crossing (the one fill edge the covering stroke can't mask), which the no-AA route accepts.
 // A loop that is NOT opaque-stroke-covered never reaches here — it renders on an AA engine (exact).
 for (const k of ['loop', 'tilt']) {
-  ok(o[k].engine === 'noaa-tree', `${k} loop stays on the tree via type-6 (got ${o[k].engine})`);
-  ok(o[k].nDiff < 120, `${k} winding correct; only a sub-pixel self-crossing residual (${o[k].nDiff} px >16, max ${o[k].maxDiff})`);
+  ok(o[k].engine === 'hard-tree', `${k} loop stays on the tree via type-6 (got ${o[k].engine})`);
+  ok(
+    o[k].nDiff < 120,
+    `${k} winding correct; only a sub-pixel self-crossing residual (${o[k].nDiff} px >16, max ${o[k].maxDiff})`,
+  );
 }
 console.log(fail ? `\nCUSP-LOOP-TYPE6 FAIL (${fail})` : '\nCUSP-LOOP-TYPE6 PASS');
 process.exit(fail ? 1 : 0);

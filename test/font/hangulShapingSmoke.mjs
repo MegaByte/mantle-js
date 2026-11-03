@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Jamo dispatch + NFC modern Hangul.
 //   T1: NFC pre-pass normalizes (L V T) jamo → precomposed syllable
 //       BEFORE textRun's per-codepoint stream builds. Modern Korean
@@ -12,14 +15,19 @@ import { MantleFontAsset } from '../../src/font/fontAsset.js';
 import { buildSvgTextGlyphs } from '../../src/font/textRun.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // AppleGothic.ttf is the canonical Korean font on macOS.
 let font;
 try {
-  font = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/AppleGothic.ttf')));
-  font.getMetrics(0xAC01);
+  font = new MantleFontAsset(
+    new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/AppleGothic.ttf')),
+  );
+  font.getMetrics(0xac01);
 } catch (e) {
   console.log('Skip (no AppleGothic):', e.message);
   process.exit(0);
@@ -31,7 +39,8 @@ try {
   const decomp = '각';
   const nfc = decomp.normalize('NFC');
   if (nfc.length !== 1) fail(`T1 NFC didn't compose: len=${nfc.length}`);
-  else if (nfc.codePointAt(0) !== 0xAC01) fail(`T1 NFC wrong cp: U+${nfc.codePointAt(0).toString(16)}`);
+  else if (nfc.codePointAt(0) !== 0xac01)
+    fail(`T1 NFC wrong cp: U+${nfc.codePointAt(0).toString(16)}`);
   else ok(`T1 NFC composes (L,V,T) → U+AC01 (modern path)`);
 }
 
@@ -58,9 +67,13 @@ try {
   // exactly 1 entry.
   const { glyphs } = buildSvgTextGlyphs('한', font, 0, 0, 100);
   if (glyphs.length !== 1) fail(`T3 '한' expected 1 glyph, got ${glyphs.length}`);
-  else if (glyphs[0].codepoint !== 0xD55C) fail(`T3 cp ${glyphs[0].codepoint.toString(16)} != d55c`);
+  else if (glyphs[0].codepoint !== 0xd55c)
+    fail(`T3 cp ${glyphs[0].codepoint.toString(16)} != d55c`);
   else if (glyphs[0].segs.length === 0) fail(`T3 '한' produced 0 segs (cmap miss?)`);
-  else ok(`T3 '한' precomposed: 1 glyph, ${glyphs[0].segs.length} segs, advance=${glyphs[0].advance.toFixed(2)}px`);
+  else
+    ok(
+      `T3 '한' precomposed: 1 glyph, ${glyphs[0].segs.length} segs, advance=${glyphs[0].advance.toFixed(2)}px`,
+    );
 }
 
 // ----- T4: jamo-only string (no NFC composition) lands as 3 cps ------
@@ -68,11 +81,13 @@ try {
   // If a user feeds raw jamo without NFC normalization upstream,
   // textRun's normalize() inside the per-span loop catches it.
   // Verify the precomposed form still wins.
-  const decomp = '각';  // ᄀ + ᅡ + ᆨ
+  const decomp = '각'; // ᄀ + ᅡ + ᆨ
   const { glyphs } = buildSvgTextGlyphs(decomp, font, 0, 0, 100);
   // After NFC, this becomes 1 codepoint U+AC01 → 1 glyph.
-  if (glyphs.length !== 1) fail(`T4 decomp jamo expected 1 glyph (NFC composes), got ${glyphs.length}`);
-  else if (glyphs[0].codepoint !== 0xAC01) fail(`T4 cp ${glyphs[0].codepoint.toString(16)} != ac01`);
+  if (glyphs.length !== 1)
+    fail(`T4 decomp jamo expected 1 glyph (NFC composes), got ${glyphs.length}`);
+  else if (glyphs[0].codepoint !== 0xac01)
+    fail(`T4 cp ${glyphs[0].codepoint.toString(16)} != ac01`);
   else ok(`T4 raw jamo (L+V+T) → NFC composes upstream → 1 precomposed glyph`);
 }
 

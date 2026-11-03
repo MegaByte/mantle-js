@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Hand-traced expected node bboxes for representative graph topologies,
 // validating computeNodeBboxes against the kinds of graphs the importer
 // and colrPaintToGraph emit.
@@ -9,23 +12,28 @@ import { computeNodeBboxes } from '../src/filterGraph/bbox.js';
 
 let failures = 0;
 function assert(cond, msg) {
-  if (!cond) { console.error('FAIL:', msg); failures++; }
-  else       { console.log('ok:', msg); }
+  if (!cond) {
+    console.error('FAIL:', msg);
+    failures++;
+  } else {
+    console.log('ok:', msg);
+  }
 }
 function eqBbox(a, b, label) {
-  return assert(a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h,
-    `${label}: expected {x:${b.x},y:${b.y},w:${b.w},h:${b.h}}, got {x:${a.x},y:${a.y},w:${a.w},h:${a.h}}`);
+  return assert(
+    a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h,
+    `${label}: expected {x:${b.x},y:${b.y},w:${b.w},h:${b.h}}, got {x:${a.x},y:${a.y},w:${a.w},h:${a.h}}`,
+  );
 }
 
 const SRC = { x: 100, y: 100, w: 80, h: 80 };
-const CW = 400, CH = 300;
+const CW = 400,
+  CH = 300;
 
 // --- 1: single feGaussianBlur σ=4 expands by ±12 ---
 {
   const graph = {
-    nodes: [
-      { type: 'feGaussianBlur', inputs: [-1], params: { sigmaX: 4, sigmaY: 4 } },
-    ],
+    nodes: [{ type: 'feGaussianBlur', inputs: [-1], params: { sigmaX: 4, sigmaY: 4 } }],
     rootOut: 0,
   };
   const { bboxes, rootBbox } = computeNodeBboxes(graph, SRC, CW, CH);
@@ -38,7 +46,7 @@ const CW = 400, CH = 300;
   const graph = {
     nodes: [
       { type: 'feGaussianBlur', inputs: [-1], params: { sigmaX: 4, sigmaY: 4 } },
-      { type: 'feOffset',       inputs: [0],  params: { dx: 50, dy: 30 } },
+      { type: 'feOffset', inputs: [0], params: { dx: 50, dy: 30 } },
     ],
     rootOut: 1,
   };
@@ -63,8 +71,8 @@ const CW = 400, CH = 300;
   const graph = {
     nodes: [
       { type: 'feOffset', inputs: [-1], params: { dx: -30, dy: 0 } },
-      { type: 'feOffset', inputs: [-1], params: { dx: 40,  dy: 20 } },
-      { type: 'feMerge',  inputs: [0, 1], params: {} },
+      { type: 'feOffset', inputs: [-1], params: { dx: 40, dy: 20 } },
+      { type: 'feMerge', inputs: [0, 1], params: {} },
     ],
     rootOut: 2,
   };
@@ -111,8 +119,7 @@ const CW = 400, CH = 300;
   const graph = {
     nodes: [
       { type: 'PaintSolid', inputs: [], params: { rgba: [1, 0, 0, 1] } },
-      { type: 'PaintTransform', inputs: [0],
-        params: { affine: [0.5, 0, 0, 0.5, 100, 50] } },
+      { type: 'PaintTransform', inputs: [0], params: { affine: [0.5, 0, 0, 0.5, 100, 50] } },
     ],
     rootOut: 1,
   };
@@ -131,9 +138,20 @@ const CW = 400, CH = 300;
     nodes: [
       { type: 'PaintSolid', inputs: [], params: { rgba: [1, 0, 0, 1] } },
       // 45° rotation about origin (about (0,0) not bbox center).
-      { type: 'PaintTransform', inputs: [0],
-        params: { affine: [Math.cos(Math.PI/4), Math.sin(Math.PI/4),
-                           -Math.sin(Math.PI/4), Math.cos(Math.PI/4), 0, 0] } },
+      {
+        type: 'PaintTransform',
+        inputs: [0],
+        params: {
+          affine: [
+            Math.cos(Math.PI / 4),
+            Math.sin(Math.PI / 4),
+            -Math.sin(Math.PI / 4),
+            Math.cos(Math.PI / 4),
+            0,
+            0,
+          ],
+        },
+      },
     ],
     rootOut: 1,
   };
@@ -142,8 +160,10 @@ const CW = 400, CH = 300;
   // the (180, 180) corner to (180·c - 180·s, 180·s + 180·c) ≈ (0, 255).
   // Without belabouring the math: just verify rotation produces a
   // larger bbox than the source's 80×80.
-  assert(bboxes[1].w > 80 || bboxes[1].h > 80,
-    `45° rotation produces larger bbox than source (got w=${bboxes[1].w}, h=${bboxes[1].h})`);
+  assert(
+    bboxes[1].w > 80 || bboxes[1].h > 80,
+    `45° rotation produces larger bbox than source (got w=${bboxes[1].w}, h=${bboxes[1].h})`,
+  );
 }
 
 // --- 9: feTile bbox = whole canvas ---
@@ -161,10 +181,10 @@ const CW = 400, CH = 300;
   const graph = {
     nodes: [
       { type: 'feGaussianBlur', inputs: [-2], params: { sigmaX: 6, sigmaY: 6 } },
-      { type: 'feOffset',       inputs: [0],  params: { dx: 10, dy: 8 } },
-      { type: 'feFlood',        inputs: [],   params: { rgba: [0, 0, 0, 0.5] } },
-      { type: 'feComposite',    inputs: [2, 1], params: { op: 1 } },
-      { type: 'feMerge',        inputs: [3, -1], params: {} },
+      { type: 'feOffset', inputs: [0], params: { dx: 10, dy: 8 } },
+      { type: 'feFlood', inputs: [], params: { rgba: [0, 0, 0, 0.5] } },
+      { type: 'feComposite', inputs: [2, 1], params: { op: 1 } },
+      { type: 'feMerge', inputs: [3, -1], params: {} },
     ],
     rootOut: 4,
   };
@@ -187,5 +207,5 @@ const CW = 400, CH = 300;
 
 console.log('---');
 if (failures) console.error(`FILTER-BBOX FAIL (${failures})`);
-else          console.log('FILTER-BBOX PASS');
+else console.log('FILTER-BBOX PASS');
 process.exit(failures ? 1 : 0);

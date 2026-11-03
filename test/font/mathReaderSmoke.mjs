@@ -1,18 +1,51 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // mathReaderSmoke.mjs — OT MATH reader against STIX Two Math.
 
 import { readFileSync } from 'fs';
 import { MantleFontAsset } from '../../src/font/fontAsset.js';
-import { MathKernCorner } from '../../src/font/math/mathReader.js';
+import { MathKernCorner, MathReader } from '../../src/font/math/mathReader.js';
 import { registerMathReader } from '../../src/font/math/index.js';
 registerMathReader();
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
+
+// Absent and unsupported tables must not interpret unrelated SFNT header bytes.
+for (const present of [false, true]) {
+  const view = new DataView(new ArrayBuffer(64));
+  view.setUint16(0, 1, false);
+  view.setUint16(16, 2, false);
+  const math = new MathReader({ view, math: present ? [16, 10] : null });
+  for (const gid of [0, 1, 2]) {
+    if (
+      math.getItalicCorrection(gid) !== 0 ||
+      !Number.isNaN(math.getTopAccentAttachment(gid)) ||
+      math.isExtendedShape(gid)
+    )
+      fail('absent glyph-info defaults');
+    for (const corner of [0, 1, 2, 3])
+      if (math.getMathKern(gid, corner, 0) !== 0) fail('absent kern default');
+  }
+  if (math.hasTable || math.hasMathGlyphInfo || math.hasMathVariants) fail('absent table flags');
+  else
+    ok(
+      present
+        ? 'unsupported MATH major version uses empty glyph info'
+        : 'absent MATH uses empty glyph info',
+    );
+}
 
 let font = null;
 try {
-  font = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/STIXTwoMath.otf')));
+  font = new MantleFontAsset(
+    new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/STIXTwoMath.otf')),
+  );
   font.getMetrics(0x41);
 } catch (e) {
   console.log('Skip (no STIXTwoMath):', e.message);
@@ -24,7 +57,8 @@ try {
   const math = font.math;
   if (!math.hasTable) fail('T1 STIXTwoMath has no MATH table');
   else if (!math.hasMathGlyphInfo) fail('T1 MATH but no MathGlyphInfo');
-  else if (!math.hasMathVariants) ok(`T1 STIXTwoMath: MATH + MathGlyphInfo present (Variants missing but uncommon)`);
+  else if (!math.hasMathVariants)
+    ok(`T1 STIXTwoMath: MATH + MathGlyphInfo present (Variants missing but uncommon)`);
   else ok(`T1 STIXTwoMath: MATH + MathGlyphInfo + MathVariants all present`);
 }
 
@@ -38,24 +72,30 @@ try {
   else if (c.scriptPercentScaleDown < 50 || c.scriptPercentScaleDown > 100) {
     fail(`T2 scriptPercentScaleDown out of range: ${c.scriptPercentScaleDown}`);
   } else if (c.superscriptShiftUp === 0) fail(`T2 superscriptShiftUp zero`);
-  else ok(`T2 MathConstants: axisH=${c.axisHeight} fracRule=${c.fractionRuleThickness} scriptPct=${c.scriptPercentScaleDown}% supShiftUp=${c.superscriptShiftUp}`);
+  else
+    ok(
+      `T2 MathConstants: axisH=${c.axisHeight} fracRule=${c.fractionRuleThickness} scriptPct=${c.scriptPercentScaleDown}% supShiftUp=${c.superscriptShiftUp}`,
+    );
 }
 
 // ----- T3: Italic correction on math italic 'f' (U+1D453) -----------
 {
   // Mathematical italic f: U+1D453. Slanted glyph, should have italic
   // correction so 'f+' doesn't overlap.
-  const gid = font.codepointToGlyphId(0x1D453);
+  const gid = font.codepointToGlyphId(0x1d453);
   if (!gid) fail(`T3 STIXTwoMath has no glyph for U+1D453 (math italic f)`);
   else {
     const ic = font.math.getItalicCorrection(gid);
     if (ic <= 0) {
       // Acceptable: not every italic glyph has explicit italic correction.
       // Try one more candidate.
-      const gid2 = font.codepointToGlyphId(0x1D43F); // math italic O
+      const gid2 = font.codepointToGlyphId(0x1d43f); // math italic O
       const ic2 = gid2 ? font.math.getItalicCorrection(gid2) : 0;
       if (ic2 > 0) ok(`T3 italic correction on U+1D43F = ${ic2} font units`);
-      else ok(`T3 italic correction on math italics: ${ic} for U+1D453, ${ic2} for U+1D43F (font may omit explicit IC for these gids)`);
+      else
+        ok(
+          `T3 italic correction on math italics: ${ic} for U+1D453, ${ic2} for U+1D43F (font may omit explicit IC for these gids)`,
+        );
     } else {
       ok(`T3 italic correction on U+1D453 (math italic f) = ${ic} font units`);
     }
@@ -66,12 +106,13 @@ try {
 {
   // Math italic w should have a top-accent attachment point if the
   // font supports accented variables (\\hat{w}, \\vec{w}, etc.).
-  const gid = font.codepointToGlyphId(0x1D464); // math italic w
+  const gid = font.codepointToGlyphId(0x1d464); // math italic w
   if (!gid) ok(`T4 no glyph for U+1D464`);
   else {
     const tax = font.math.getTopAccentAttachment(gid);
     if (Number.isNaN(tax)) ok(`T4 no top-accent attachment for U+1D464 (fallback to bbox-center)`);
-    else if (tax > 0) ok(`T4 top-accent X for U+1D464 (math italic w) = ${tax} font units from origin`);
+    else if (tax > 0)
+      ok(`T4 top-accent X for U+1D464 (math italic w) = ${tax} font units from origin`);
     else fail(`T4 top-accent X invalid: ${tax}`);
   }
 }
@@ -80,9 +121,10 @@ try {
 {
   // Math italic f has the most distinctive math kern of any letter
   // (slants at top-right + bottom-left). Probe both corners.
-  const gid = font.codepointToGlyphId(0x1D453);
-  if (!gid) { ok('T5 no gid for U+1D453; skip'); }
-  else {
+  const gid = font.codepointToGlyphId(0x1d453);
+  if (!gid) {
+    ok('T5 no gid for U+1D453; skip');
+  } else {
     const c = font.math.getConstants();
     // Probe at the glyph's "axis height" — where a sub/sup typically sits.
     const trAxis = font.math.getMathKern(gid, MathKernCorner.TopRight, c.axisHeight);
@@ -96,7 +138,7 @@ try {
   // A summation sign (U+2211) or integral (U+222B) is typically marked
   // as an "extended shape" in math fonts (tall glyph).
   const sumGid = font.codepointToGlyphId(0x2211);
-  const intGid = font.codepointToGlyphId(0x222B);
+  const intGid = font.codepointToGlyphId(0x222b);
   if (sumGid) {
     ok(`T6 isExtendedShape(U+2211 ∑) = ${font.math.isExtendedShape(sumGid)}`);
   } else {

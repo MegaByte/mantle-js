@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Join wedge, open chain: three quads, with interior joins the encoder never marks. -->
+  <rect width="200" height="200" fill="#ffffff"/>
+  <path d="M 55 105 Q 85.129 31.755399999999995 89.7754 34.26119999999999 Q 102.78399999999999 36.5008 101.5168 41.6246 Q 89.0538 72.18260000000001 76.0584 74.4948" fill="none" stroke="#000000" stroke-width="26.400000000000002" stroke-linecap="butt" stroke-linejoin="miter-clip" stroke-miterlimit="1"/>
+</svg>

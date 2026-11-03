@@ -1,32 +1,10 @@
-// buildShaders.mjs — the shader build step.
-//
-// Assembles every shader (splices @@MARKER@@ helper includes via the same
-// preprocess() the runtime uses) and writes one ASSEMBLED, VALID .glsl FILE per
-// shader into `src/shaders/generated/`. The on-disk SOURCE .glsl are NOT valid
-// standalone GLSL — main shaders carry @@MARKER@@ placeholders and call helper
-// functions that live in other files, and the helpers have no #version/main().
-// The generated files inline the helpers, so each is a self-contained valid
-// translation unit.
-//
-// Why FILES (not a JS string-literal module): so DOWNSTREAM tooling can process
-// them — a GLSL minifier/validator reads .glsl, a bundler imports them via
-// `?raw` + a glsl-minify plugin, and importing only the files a build uses
-// tree-shakes the rest. GLSL buried in JS string literals is opaque to both a
-// GLSL minifier and a JS minifier, which is exactly the problem this avoids.
-//
-// Two deliberate properties (per consumer request):
-//   • UNMINIFIED by default — downstream decides the ultimate minification with
-//     its own tooling (or import minifyGlsl from '@kontek/mantle/shaders').
-//     `--minify` opts into the built-in conservative pass.
-//   • PER-FILE, so a build pulls in only the shaders it uses. The
-//     SHADER_FILENAMES / shaderKeysFor(spec) registry (the same one the runtime
-//     loadShaders(spec) uses) maps a feature set → which files to import.
-//
-//   node scripts/buildShaders.mjs            (assembled, unminified)
-//   node scripts/buildShaders.mjs --minify   (pre-minified)
-//
-// If `glslangValidator` is on PATH it validates each file and fails the build on
-// a GLSL error; optional — the shader render tests are the authoritative check.
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// Assemble shader includes into standalone GLSL translation units and bundled JS modules.
+// Output is unminified unless --minify is passed. Consumers can import individual GLSL
+// files through a bundler or use the bundled modules without runtime file loading.
+// Validate with glslangValidator when installed; render tests also check compilation.
 
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -36,6 +14,8 @@ import {
   SHADER_FILENAMES as SHADER_NAMES,
   HELPER_FILENAMES as HELPER_INCLUDES,
   assembleShader,
+  bundledModuleSource,
+  bundledSourcesModuleSource,
 } from '../src/shaders/index.js';
 
 const MINIFY = process.argv.includes('--minify');
@@ -65,45 +45,158 @@ mkdirSync(OUT_DIR, { recursive: true });
 // Clear stale generated files so a removed/renamed shader doesn't linger.
 for (const f of readdirSync(OUT_DIR)) if (f.endsWith('.glsl')) rmSync(path.join(OUT_DIR, f));
 
-let rawTotal = 0, outTotal = 0, count = 0;
+let rawTotal = 0,
+  outTotal = 0,
+  count = 0;
 const written = [];
-for (const [, file] of SHADER_NAMES) {
+const assembled = []; // [key, glsl] for bundled.js
+const rawSources = []; // [key, source] for bundledSources.js
+for (const [key, file] of SHADER_NAMES) {
   let raw;
-  try { raw = read(file); }
-  catch { continue; }   // optional shader absent from the tree → renderer null-gates it
-  const glsl = assembleShader(raw, helpers, { minify: MINIFY });   // valid GLSL
+  try {
+    raw = read(file);
+  } catch {
+    continue;
+  } // optional shader absent from the tree → renderer null-gates it
+  const glsl = assembleShader(raw, helpers, { minify: MINIFY }); // valid GLSL
   validate(file, glsl);
   writeFileSync(path.join(OUT_DIR, file), glsl);
-  rawTotal += raw.length; outTotal += glsl.length; count++;
+  rawTotal += raw.length;
+  outTotal += glsl.length;
+  count++;
   written.push(file);
+  assembled.push([key, glsl]);
+  rawSources.push([key, raw]);
 }
+
+// bundled.js (named, assembled exports) and bundledSources.js (the compact form loadShaders() splices): the same assembled text as JS string exports, so `bundleShaders.fromPackage()` / `loadShaders()`
+// need no fetch and no asset emission under any bundler (see the header of src/shaders/index.js).
+writeFileSync(path.join(SHADERS_DIR, 'bundled.js'), bundledModuleSource(assembled));
+writeFileSync(
+  path.join(SHADERS_DIR, 'bundledSources.js'),
+  bundledSourcesModuleSource(
+    rawSources,
+    HELPER_INCLUDES.map(([marker, file]) => [marker, helpers[marker]]),
+  ),
+);
 
 // Fill-shader feature variants are NOT separate generated files — the single
 // mantle.frag.glsl guards each optional feature with `#ifndef MANTLE_NO_<FEAT>`
 // (the standard GLSL way), and the renderer compiles a lean program by
-// prepending `#define MANTLE_NO_<FEAT>` via createRenderer's opts.fillDefines
-// (see fillOmitDefines / FILL_FEATURES in src/shaders/index.js). One artifact,
+// prepending `#define MANTLE_NO_<FEAT>` per bundle -- its fill variants (see omitDefinesFor /
+// FILL_FEATURES in src/renderer/fillOmit.js). One artifact,
 // variants chosen at compile time.
 
 // A small banner file documents how to consume the dir + warns against edits.
-writeFileSync(path.join(OUT_DIR, 'README.md'),
-`# generated/ — AUTO-GENERATED by scripts/buildShaders.mjs — DO NOT EDIT
+writeFileSync(
+  path.join(OUT_DIR, 'README.md'),
+  `# Generated shaders
 
-Assembled (\`@@MARKER@@\` helper includes spliced)${MINIFY ? ' + minified' : ', unminified'} valid GLSL,
-one file per shader (the SOURCE \`../*.glsl\` carry markers and aren't standalone).
+Generated by \`scripts/buildShaders.mjs\`. Edit the shader sources and run
+\`npm run build:shaders\` to regenerate these files.
 
-Consume with a bundler (only the files you import land in the build → tree-shaken;
-run your own glsl-minify plugin since these are unminified):
+Each file is an assembled${MINIFY ? ', minified' : ', unminified'} GLSL translation unit.
+The package also includes \`../bundled.js\` and \`../bundledSources.js\` for loading
+without runtime GLSL fetches.
 
-    import fillVert from '@kontek/mantle/shaders/generated/mantle.vert.glsl?raw';
-    import fillFrag from '@kontek/mantle/shaders/generated/mantle.frag.glsl?raw';
-    const renderer = createRenderer(gl, { fillVert, fillFrag /* ...needed only */ });
+Use \`await bundleShaders.fromPackage()\` from \`@kontek/mantle/shaders\` for the
+bundled sources. To process individual GLSL files with a bundler:
 
-Use SHADER_FILENAMES / shaderKeysFor(spec) from '@kontek/mantle/shaders' to map a
-feature set → which files to import. Regenerate after editing any source .glsl:
-\`npm run build:shaders\`.
-`);
+\`\`\`js
+import fillVert from '@kontek/mantle/shaders/generated/mantle.vert.glsl?raw';
+import fillFrag from '@kontek/mantle/shaders/generated/mantle.frag.glsl?raw';
+\`\`\`
 
-console.log(`buildShaders: ${count} shaders → ${path.relative(process.cwd(), OUT_DIR)}/*.glsl`
-  + ` (${MINIFY ? 'minified' : 'assembled, unminified'}, ${outTotal} bytes)`);
-console.log(`glslangValidator: ${hasGlslang ? 'ran' : 'not installed (skipped — render tests are the compile check)'}`);
+Supply any additional shaders required by the renderer's features.
+\`SHADER_FILENAMES\` and \`shaderKeysFor(spec)\` from \`@kontek/mantle/shaders\`
+identify the files for a feature set.
+`,
+);
+
+console.log(
+  `buildShaders: ${count} shaders → ${path.relative(process.cwd(), OUT_DIR)}/*.glsl` +
+    ` (${MINIFY ? 'minified' : 'assembled, unminified'}, ${outTotal} bytes)`,
+);
+console.log(`bundled.js: ${assembled.length} shaders → src/shaders/bundled.js`);
+console.log(
+  `glslangValidator: ${hasGlslang ? 'ran' : 'not installed (skipped — render tests are the compile check)'}`,
+);
+
+// ── VARYING BUDGET ────────────────────────────────────────────────────────
+// WebGL2 / GLES 3.0 guarantee only MAX_VARYING_COMPONENTS = 60. Exceeding it
+// is a LINK failure, and this renderer answers a failed link by falling back
+// to another engine — so on a minimum-spec device the symptom is not an error
+// but Loop-Blinn quietly never being used, on that class of device only.
+//
+// loopBlinn.frag sits at 59 of 60. One more float varying breaks it there
+// while every development machine (64-128 components) stays green. Fail the
+// build instead, where it is one line of output rather than a field report.
+const VARYING_FLOOR = 60; // GLES 3.0 guaranteed minimum
+const COMPONENTS = {
+  float: 1,
+  int: 1,
+  uint: 1,
+  bool: 1,
+  vec2: 2,
+  ivec2: 2,
+  uvec2: 2,
+  bvec2: 2,
+  vec3: 3,
+  ivec3: 3,
+  uvec3: 3,
+  bvec3: 3,
+  vec4: 4,
+  ivec4: 4,
+  uvec4: 4,
+  bvec4: 4,
+  mat2: 4,
+  mat2x3: 6,
+  mat2x4: 8,
+  mat3x2: 6,
+  mat3: 9,
+  mat3x4: 12,
+  mat4x2: 8,
+  mat4x3: 12,
+  mat4: 16,
+};
+const IN_DECL =
+  /^[ \t]*(?:flat[ \t]+|smooth[ \t]+|centroid[ \t]+|noperspective[ \t]+)*in[ \t]+(\w+)[ \t]+(\w+)[ \t]*(?:\[[ \t]*(\d+)[ \t]*\])?[ \t]*;/gm;
+
+function varyingComponents(src) {
+  let total = 0;
+  for (const m of src.matchAll(IN_DECL)) {
+    const size = COMPONENTS[m[1]];
+    if (size === undefined) continue; // a struct or unknown type — skip
+    total += size * (m[3] ? parseInt(m[3], 10) : 1);
+  }
+  return total;
+}
+
+const overBudget = [];
+const nearBudget = [];
+for (const file of readdirSync(OUT_DIR)) {
+  if (!file.endsWith('.frag.glsl')) continue; // the FRAGMENT side consumes them
+  const used = varyingComponents(readFileSync(path.join(OUT_DIR, file), 'utf8'));
+  if (used > VARYING_FLOOR) overBudget.push([file, used]);
+  else if (used >= VARYING_FLOOR - 1) nearBudget.push([file, used]);
+}
+for (const [file, used] of nearBudget) {
+  console.log(
+    `varying budget: ${file} uses ${used}/${VARYING_FLOOR} components ` +
+      '— at the GLES 3.0 floor. Pack into an existing varying before adding another.',
+  );
+}
+if (overBudget.length) {
+  for (const [file, used] of overBudget) {
+    console.error(
+      `varying budget EXCEEDED: ${file} uses ${used} components, ` +
+        `over the ${VARYING_FLOOR} WebGL2 guarantees.`,
+    );
+  }
+  console.error(
+    'This links on most GPUs and FAILS on minimum-spec ones, where the ' +
+      'renderer silently falls back to another engine. Pack varyings (scalars into ' +
+      'unused vec4 lanes) rather than raising the floor.',
+  );
+  process.exit(1);
+}

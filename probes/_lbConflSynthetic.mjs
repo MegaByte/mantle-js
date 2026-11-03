@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Minimal conflation repro: two adjacent filled shapes over a GREEN background,
 // LB vs Slug. Tests ABUTTING (shared edge) vs OVERLAPPING (one over the other) to
 // pin whether the seam is abutting-conflation (1-ab) or an overlap edge-placement
@@ -6,7 +9,7 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const N = 200;
@@ -22,7 +25,7 @@ const OVERLAP = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
 const CIRCLES = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
   <circle cx="80" cy="100" r="55" fill="#e0b080"/>
   <circle cx="120" cy="100" r="55" fill="#603018"/></svg>`;
-// CASE D: two paths sharing the SAME curved edge (100,20)->(100,180) — abut along a CURVE.
+// CASE D: two paths sharing the same curved edge (100,20)->(100,180) — abut along a CURVE.
 const CURVEABUT = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
   <path d="M20 20 L100 20 C130 73 70 127 100 180 L20 180 Z" fill="#e0b080"/>
   <path d="M100 20 C130 73 70 127 100 180 L180 180 L180 20 Z" fill="#603018"/></svg>`;
@@ -39,7 +42,9 @@ const CURVEGAP = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
   <path d="M20 20 L99.6 20 C129.6 73 69.6 127 99.6 180 L20 180 Z" fill="#e0b080"/>
   <path d="M100.4 20 C130.4 73 70.4 127 100.4 180 L180 180 L180 20 Z" fill="#603018"/></svg>`;
 const CASES = { ABUT, OVERLAP, CIRCLES, CURVEABUT, CURVEOVL, GAP, CURVEGAP };
-const HTML = (svg) => `<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas>
+const HTML = (
+  svg,
+) => `<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas>
 <script type="module">
 import { importSvg, createBundle, createRenderer, loadShaders } from '/src/index.js';
 const gl = document.getElementById('c').getContext('webgl2', { antialias:false, premultipliedAlpha:true, preserveDrawingBuffer:true, depth:true, stencil:true });
@@ -61,23 +66,49 @@ const sy=100, prof=[]; for(let x=90;x<=112;x++) prof.push([x,[lb[((${N}-1-sy)*${
 window.__out={ lbBleed:greenBleed(lb), slugBleed:greenBleed(slug), prof };
 window.__ready=true;
 </script></body></html>`;
-const server=http.createServer((req,res)=>{ try{
-  if(req.url.startsWith('/case')){ const c=req.url.slice(5); res.writeHead(200,{'content-type':'text/html; charset=utf-8'}); res.end(HTML(CASES[c])); return; }
-  const p=decodeURIComponent(req.url.split('?')[0]);
-  res.writeHead(200,{'content-type':p.endsWith('.glsl')?'text/plain':'text/javascript'});res.end(readFileSync(path.join(ROOT,p)));
-}catch{if(!res.headersSent)res.writeHead(404);res.end();}});
-await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const port=server.address().port;
-const browser=await puppeteer.launch({headless:false,args:['--no-sandbox','--use-angle=metal','--enable-gpu']});
-for(const c of Object.keys(CASES)){
-  const page=await browser.newPage();
-  page.on('console',m=>{if(m.type()==='error')console.error('['+c+' err]',m.text());});
-  await page.goto(`http://127.0.0.1:${port}/case${c}`,{waitUntil:'load',timeout:20000});
-  await page.waitForFunction(()=>window.__ready===true,{timeout:15000});
-  const o=await page.evaluate(()=>window.__out);
-  console.log(`\n=== ${c} ===  LB green-bleed=${o.lbBleed.n}px (worst ${o.lbBleed.worst}@x${o.lbBleed.wx})  Slug=${o.slugBleed.n}px (worst ${o.slugBleed.worst})`);
+const server = http.createServer((req, res) => {
+  try {
+    if (req.url.startsWith('/case')) {
+      const c = req.url.slice(5);
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML(CASES[c]));
+      return;
+    }
+    const p = decodeURIComponent(req.url.split('?')[0]);
+    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const port = server.address().port;
+// HEADLESS EVEN ON THE GPU. Headless Chrome reaches the real GPU: ANGLE (Apple, ANGLE Metal
+// Renderer) reports and TIMES the same headless or headful.
+// A window is not free to the person running this: macOS CLAMPS --window-position (measured:
+// screenX/Y 83,65 whatever you pass), so a headful run cannot be put out of the way and lands
+// on whichever desktop is in front.
+const browser = await launchBrowser({
+  headless: 'new',
+  args: ['--no-sandbox', '--use-angle=metal', '--enable-gpu'],
+});
+for (const c of Object.keys(CASES)) {
+  const page = await browser.newPage();
+  page.on('console', (m) => {
+    if (m.type() === 'error') console.error('[' + c + ' err]', m.text());
+  });
+  await page.goto(`http://127.0.0.1:${port}/case${c}`, { waitUntil: 'load', timeout: 20000 });
+  await page.waitForFunction(() => window.__ready === true, { timeout: 15000 });
+  const o = await page.evaluate(() => window.__out);
+  console.log(
+    `\n=== ${c} ===  LB green-bleed=${o.lbBleed.n}px (worst ${o.lbBleed.worst}@x${o.lbBleed.wx})  Slug=${o.slugBleed.n}px (worst ${o.slugBleed.worst})`,
+  );
   console.log('  profile y=100 (x: LB | Slug):');
-  for(const [x,l,s] of o.prof) if(Math.abs(l[0]-s[0])+Math.abs(l[1]-s[1])+Math.abs(l[2]-s[2])>10) console.log(`    x=${x}  LB=[${l}]  Slug=[${s}]`);
+  for (const [x, l, s] of o.prof)
+    if (Math.abs(l[0] - s[0]) + Math.abs(l[1] - s[1]) + Math.abs(l[2] - s[2]) > 10)
+      console.log(`    x=${x}  LB=[${l}]  Slug=[${s}]`);
   await page.close();
 }
-await browser.close(); server.close();
+await browser.close();
+server.close();

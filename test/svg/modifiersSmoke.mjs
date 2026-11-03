@@ -1,4 +1,7 @@
-// modifiersSmoke.mjs — verify Lottie-flavoured path-segment modifiers
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// modifiersSmoke.mjs — verify Lottie-flavored path-segment modifiers
 // in svg/modifiers.js + filter-effect synthesizers in svg/effectsSynth.js.
 //
 // Verifies the math + geometry by feeding small segment lists through
@@ -6,16 +9,28 @@
 // endpoint positions, total arc length).
 
 import {
-  trimPath, puckerBloat, repeater, roundCorners, offsetPath, polystar,
+  trimPath,
+  puckerBloat,
+  repeater,
+  roundCorners,
+  offsetPath,
+  polystar,
 } from '../../src/svg/modifiers.js';
 import { tintGraph, tritoneGraph } from '../../src/svg/effectsSynth.js';
 import { SEG_LINE, SEG_QUAD, SEG_CUBIC, mkLine, mkCubic } from '../../src/svg/segment.js';
 import { SRC_GRAPHIC } from '../../src/filterGraph/filterGraph.js';
 
 let failures = 0;
-function ok(msg)   { console.log('ok', msg); }
-function fail(msg) { failures++; console.error('FAIL', msg); }
-function approx(a, b, eps = 1e-6) { return Math.abs(a - b) < eps; }
+function ok(msg) {
+  console.log('ok', msg);
+}
+function fail(msg) {
+  failures++;
+  console.error('FAIL', msg);
+}
+function approx(a, b, eps = 1e-6) {
+  return Math.abs(a - b) < eps;
+}
 
 // ────────────────────────────────────────────────────────────────
 // Trim Path
@@ -87,7 +102,9 @@ const unitSquare = [
   // Pucker (amount=-0.5): vertex (0,0) → (0.5 - 0.5*0.5, 0.5 - 0.5*0.5) = (0.25, 0.25).
   const out = puckerBloat(unitSquare, -0.5);
   if (!approx(out[0].p1[0], 0.25) || !approx(out[0].p1[1], 0.25))
-    fail(`puckerBloat pucker: vertex (0,0) → (${out[0].p1[0]}, ${out[0].p1[1]}); want (0.25, 0.25)`);
+    fail(
+      `puckerBloat pucker: vertex (0,0) → (${out[0].p1[0]}, ${out[0].p1[1]}); want (0.25, 0.25)`,
+    );
   else ok('puckerBloat amount=-0.5 halves square inward');
 })();
 
@@ -121,11 +138,13 @@ const unitSquare = [
 (() => {
   // Square with r=0.1: each corner becomes line+quad. Closed-path,
   // so all 4 corners get rounded → 8 segs out (4 line + 4 quad).
-  const sq = unitSquare.map(s => ({ ...s }));   // defensive copy
+  const sq = unitSquare.map((s) => ({ ...s })); // defensive copy
   const out = roundCorners(sq, 0.1);
   if (out.length !== 8) fail(`roundCorners square: expected 8 segs got ${out.length}`);
-  else if (out.filter(s => s.type === SEG_QUAD).length !== 4)
-    fail(`roundCorners square: expected 4 quads got ${out.filter(s => s.type === SEG_QUAD).length}`);
+  else if (out.filter((s) => s.type === SEG_QUAD).length !== 4)
+    fail(
+      `roundCorners square: expected 4 quads got ${out.filter((s) => s.type === SEG_QUAD).length}`,
+    );
   else ok('roundCorners square r=0.1 → 4 line + 4 quad');
 })();
 
@@ -189,8 +208,10 @@ const unitSquare = [
   // Square (4-gon) with outerRoundness=0.5 → 4 line + 4 quad = 8 segs.
   const out = polystar(0, 0, 4, 10, 0, 0.5, 0, -90, false);
   if (out.length !== 8) fail(`polystar rounded square: expected 8 segs got ${out.length}`);
-  else if (out.filter(s => s.type === SEG_QUAD).length !== 4)
-    fail(`polystar rounded square: expected 4 quads got ${out.filter(s => s.type === SEG_QUAD).length}`);
+  else if (out.filter((s) => s.type === SEG_QUAD).length !== 4)
+    fail(
+      `polystar rounded square: expected 4 quads got ${out.filter((s) => s.type === SEG_QUAD).length}`,
+    );
   else ok('polystar rounded square r=0.5 → 4 line + 4 quad');
 })();
 
@@ -207,8 +228,7 @@ const unitSquare = [
     fail(`tintGraph: wrong node types`);
   else if (g.nodes[0].inputs[0] !== SRC_GRAPHIC)
     fail(`tintGraph: first node should sample SRC_GRAPHIC`);
-  else if (g.nodes[1].inputs[0] !== 0)
-    fail(`tintGraph: second node should feed from node 0`);
+  else if (g.nodes[1].inputs[0] !== 0) fail(`tintGraph: second node should feed from node 0`);
   else if (g.nodes[1].params.lutBytes.length !== 256 * 4 * 4)
     fail(`tintGraph: LUT size wrong (${g.nodes[1].params.lutBytes.length})`);
   else ok('tintGraph: 2-node graph (colorMatrix + CT) with correct topology');
@@ -244,4 +264,7 @@ const unitSquare = [
 // ────────────────────────────────────────────────────────────────
 
 if (failures === 0) console.log('\nMODIFIERS PASS');
-else { console.error(`\nMODIFIERS FAIL (${failures})`); process.exit(1); }
+else {
+  console.error(`\nMODIFIERS FAIL (${failures})`);
+  process.exit(1);
+}

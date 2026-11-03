@@ -1,4 +1,7 @@
-// _hsrDepthPrepass — SPIKE: is the "merged bundle is 4.5x faster on overlapping opaque
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// _hsrDepthPrepass — is the "merged bundle is 4.5x faster on overlapping opaque
 // content" effect actually hidden-surface removal via the depth buffer, and if so can a
 // depth PREPASS over provably-interior opaque occupancy cells recover it with BIT-IDENTICAL AA?
 //
@@ -12,7 +15,7 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -22,25 +25,50 @@ const shape = (cx, cy, r, fill) =>
   `<path fill="${fill}" d="M ${cx - r} ${cy} C ${cx - r} ${cy - r * 1.3} ${cx + r} ${cy - r * 1.3} ${cx + r} ${cy} C ${cx + r} ${cy + r * 1.3} ${cx - r} ${cy + r * 1.3} ${cx - r} ${cy} Z"/>`;
 
 // The ORIGINAL overlap layout from _atlasMultiBundle: positions repeat with period 15
-// (i%3, i%5), so for K>15 many shapes are EXACT DUPLICATES of a later one.
-const overlapParts = (K) => Array.from({ length: K }, (_, i) =>
-  shape(256 + (i % 3) * 8, 256 + (i % 5) * 8, 90, `hsl(${i * 37 % 360},60%,50%)`));
+// (i%3, i%5), so for K>15 many shapes are exact DUPLICATES of a later one.
+const overlapParts = (K) =>
+  Array.from({ length: K }, (_, i) =>
+    shape(256 + (i % 3) * 8, 256 + (i % 5) * 8, 90, `hsl(${(i * 37) % 360},60%,50%)`),
+  );
 // DISTINCT overlapping: heavy overlap but no shape is ever contained in another, so the
 // CPU occlusion culler provably cannot fire. This is the honest HSR test.
-const overlapDistinctParts = (K) => Array.from({ length: K }, (_, i) => {
-  const a = i * 2.39996;                       // golden-angle spiral, all radii equal
-  const rad = 26 * Math.sqrt(i / Math.max(1, K - 1));
-  return shape(256 + Math.cos(a) * rad, 256 + Math.sin(a) * rad, 90, `hsl(${i * 37 % 360},60%,50%)`);
-});
+const overlapDistinctParts = (K) =>
+  Array.from({ length: K }, (_, i) => {
+    const a = i * 2.39996; // golden-angle spiral, all radii equal
+    const rad = 26 * Math.sqrt(i / Math.max(1, K - 1));
+    return shape(
+      256 + Math.cos(a) * rad,
+      256 + Math.sin(a) * rad,
+      90,
+      `hsl(${(i * 37) % 360},60%,50%)`,
+    );
+  });
 // No overlap, but every shape is LARGE enough to clear the occupancy area gate
 // (bbox >= 2% of doc area). This is the honest PURE-OVERHEAD case: the prepass builds and
 // draws real cells that can never occlude anything.
-const disjointBigParts = (K) => { const g = Math.ceil(Math.sqrt(K)); const cell = N / g; const r = cell * 0.47;
+const disjointBigParts = (K) => {
+  const g = Math.ceil(Math.sqrt(K));
+  const cell = N / g;
+  const r = cell * 0.47;
   return Array.from({ length: K }, (_, i) =>
-    shape((i % g + 0.5) * cell, (Math.floor(i / g) + 0.5) * cell, r, `hsl(${i * 37 % 360},60%,50%)`)); };
+    shape(
+      ((i % g) + 0.5) * cell,
+      (Math.floor(i / g) + 0.5) * cell,
+      r,
+      `hsl(${(i * 37) % 360},60%,50%)`,
+    ),
+  );
+};
 // No overlap at all: the prepass is PURE OVERHEAD here.
-const disjointParts = (K) => Array.from({ length: K }, (_, i) =>
-  shape(28 + (i % 8) * 60, 28 + (Math.floor(i / 8) % 8) * 60, 22, `hsl(${i * 37 % 360},60%,50%)`));
+const disjointParts = (K) =>
+  Array.from({ length: K }, (_, i) =>
+    shape(
+      28 + (i % 8) * 60,
+      28 + (Math.floor(i / 8) % 8) * 60,
+      22,
+      `hsl(${(i * 37) % 360},60%,50%)`,
+    ),
+  );
 
 const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas>
 <script type="module">
@@ -237,42 +265,76 @@ window.__ready=true;
 
 const server = http.createServer((req, res) => {
   try {
-    if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML);
+      return;
+    }
     const p = decodeURIComponent(req.url.split('?')[0]);
     res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
     res.end(readFileSync(path.join(ROOT, p)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
-const browser = await puppeteer.launch({ headless: false, args: ['--no-sandbox', '--use-angle=metal'] });
+// HEADLESS EVEN ON THE GPU. Headless Chrome reaches the real GPU: ANGLE (Apple, ANGLE Metal
+// Renderer) reports and TIMES the same headless or headful.
+// A window is not free to the person running this: macOS CLAMPS --window-position (measured:
+// screenX/Y 83,65 whatever you pass), so a headful run cannot be put out of the way and lands
+// on whichever desktop is in front.
+const browser = await launchBrowser({
+  headless: 'new',
+  args: ['--no-sandbox', '--use-angle=metal'],
+});
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.error('[page-err]', e.message));
-page.on('console', (m) => { if (m.type() === 'error') console.error('[console]', m.text()); });
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('[console]', m.text());
+});
 await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 120000 });
 await page.waitForFunction(() => window.__ready === true, { timeout: 120000 });
 
 const rows = [];
-const LAYOUTS = [['overlapDup', overlapParts], ['overlapDistinct', overlapDistinctParts], ['disjointBig', disjointBigParts], ['disjointSmall', disjointParts]];
+const LAYOUTS = [
+  ['overlapDup', overlapParts],
+  ['overlapDistinct', overlapDistinctParts],
+  ['disjointBig', disjointBigParts],
+  ['disjointSmall', disjointParts],
+];
 for (const K of (process.env.KS || '8,32,64').split(',').map(Number)) {
   for (const [name, gen] of LAYOUTS) {
     const out = await page.evaluate((p) => window.__run(p), gen(K));
     rows.push([`K=${String(K).padStart(2)} ${name}`, out]);
   }
 }
-await browser.close(); server.close();
+await browser.close();
+server.close();
 
 const f = (x) => x.toFixed(3);
 console.log(`\n@ ${N}×${N}, min-of-11 runs of 20 frames, ms/frame\n`);
-console.log('  scene                     |  draws (base/merged/mergedNC/prepass) |    base   merged  mergedNC  prepass  | ctl   | spd(merged) spd(prepass)');
+console.log(
+  '  scene                     |  draws (base/merged/mergedNC/prepass) |    base   merged  mergedNC  prepass  | ctl   | spd(merged) spd(prepass)',
+);
 for (const [name, o] of rows) {
-  console.log(`  ${name.padEnd(25)} | ${String(o.drawsA).padStart(5)} ${String(o.drawsB).padStart(6)} ${String(o.drawsC).padStart(9)} ${String(o.drawsP).padStart(8)}      | ${f(o.msA).padStart(7)} ${f(o.msB).padStart(8)} ${f(o.msC).padStart(9)} ${f(o.msP).padStart(8)} | ${f(o.msCtl).padStart(6)} | ${(o.msA / o.msB).toFixed(2)}×       ${(o.msA / o.msP).toFixed(2)}×   [prepass vs mergedNC ${(o.msC / o.msP).toFixed(2)}×, vs ctl ${(o.msCtl / o.msP).toFixed(2)}×]`);
+  console.log(
+    `  ${name.padEnd(25)} | ${String(o.drawsA).padStart(5)} ${String(o.drawsB).padStart(6)} ${String(o.drawsC).padStart(9)} ${String(o.drawsP).padStart(8)}      | ${f(o.msA).padStart(7)} ${f(o.msB).padStart(8)} ${f(o.msC).padStart(9)} ${f(o.msP).padStart(8)} | ${f(o.msCtl).padStart(6)} | ${(o.msA / o.msB).toFixed(2)}×       ${(o.msA / o.msP).toFixed(2)}×   [prepass vs mergedNC ${(o.msC / o.msP).toFixed(2)}×, vs ctl ${(o.msCtl / o.msP).toFixed(2)}×]`,
+  );
 }
 console.log('\n  PIXEL DIFF vs baseline   (maxΔ / differing px of ' + rows[0][1].total + ')');
-console.log('  scene                     |   merged(cull ON)  |  mergedNC(depth only) |     PREPASS      | prepass vs mergedNC');
+console.log(
+  '  scene                     |   merged(cull ON)  |  mergedNC(depth only) |     PREPASS      | prepass vs mergedNC',
+);
 for (const [name, o] of rows) {
   const g = (d) => `${String(d.maxd).padStart(3)}/${String(d.nd).padStart(6)}`;
-  console.log(`  ${name.padEnd(25)} |   ${g(o.dMerged).padEnd(16)} |   ${g(o.dMergedNC).padEnd(19)} | ${g(o.dPrepass).padEnd(16)} | ${g(o.dPrepassVsNC)}`);
+  console.log(
+    `  ${name.padEnd(25)} |   ${g(o.dMerged).padEnd(16)} |   ${g(o.dMergedNC).padEnd(19)} | ${g(o.dPrepass).padEnd(16)} | ${g(o.dPrepassVsNC)}`,
+  );
 }
 console.log('\n  PREPASS cost: (opaque shapes with cells / SOLID_IN cells / verts)');
-for (const [name, o] of rows) console.log(`  ${name.padEnd(25)} | ${o.ppShapes} shapes, ${o.ppCells} cells, ${o.ppVerts} verts, ${o.ppGated} AA-gated out`);
+for (const [name, o] of rows)
+  console.log(
+    `  ${name.padEnd(25)} | ${o.ppShapes} shapes, ${o.ppCells} cells, ${o.ppVerts} verts, ${o.ppGated} AA-gated out`,
+  );

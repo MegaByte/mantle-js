@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Butt-end locality. The curve folds back ACROSS its own start plane 29 units to the side; the returning arm must keep its ink. -->
+  <rect width="200" height="200" fill="#ffffff"/>
+  <path d="M 120 100 Q 190 100 60 40" fill="none" stroke="#000000" stroke-width="18" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="4"/>
+</svg>

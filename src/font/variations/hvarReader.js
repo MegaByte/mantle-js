@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // hvarReader.js — OpenType 'HVAR' table reader (Horizontal Metrics
 // Variations). Returns the per-glyph advance-width delta at a given
 // normalized variation coordinate vector. Without HVAR a variable
@@ -21,23 +24,21 @@ export class HvarTable {
     const off = tables.hvar[0];
     const major = v.getUint16(off + 0, false);
     if (major !== 1) return;
-    const ivsOff      = v.getUint32(off + 4, false);
-    const advMapOff   = v.getUint32(off + 8, false);
-    const lsbMapOff   = v.getUint32(off + 12, false);
+    const ivsOff = v.getUint32(off + 4, false);
+    const advMapOff = v.getUint32(off + 8, false);
+    const lsbMapOff = v.getUint32(off + 12, false);
     // const rsbMapOff   = v.getUint32(off + 16, false);  // unused
     this._tables = tables;
     this._tableOff = off;
     this._ivs = new ItemVariationStore(tables, off + ivsOff);
-    this._advMap = advMapOff > 0
-      ? new DeltaSetIndexMap(tables, off + advMapOff)
-      : null;
-    this._lsbMap = lsbMapOff > 0
-      ? new DeltaSetIndexMap(tables, off + lsbMapOff)
-      : null;
+    this._advMap = advMapOff > 0 ? new DeltaSetIndexMap(tables, off + advMapOff) : null;
+    this._lsbMap = lsbMapOff > 0 ? new DeltaSetIndexMap(tables, off + lsbMapOff) : null;
     this._present = true;
   }
 
-  get hasHvar() { return this._present; }
+  get hasHvar() {
+    return this._present;
+  }
 
   /// Advance-width delta (in font units) for `gid` at normalized
   /// coords `nCoords`. Returns 0 when HVAR doesn't have data for

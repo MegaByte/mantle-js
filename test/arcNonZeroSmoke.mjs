@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // arcNonZeroSmoke.mjs — verifies the arc → nonzero-fill path renders
 // closed all-arc contours correctly under nonzero parity, compared
 // against the even-odd version.
@@ -6,7 +9,7 @@
 //   T1 — full circle via 2 native arcs (closed contour). Should fill
 //        the entire disc under either parity.
 //   T2 — annulus via outer arc-circle + inner arc-circle (opposite
-//        sweep direction). Non-zero should fill ONLY the annulus.
+//        sweep direction). Non-zero should fill only the annulus.
 //        Even-odd should also fill only the annulus (rings are the
 //        canonical even-odd test).
 //   T3 — half-disc via one arc + a closing line. Should fill the
@@ -16,7 +19,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -57,7 +60,7 @@ async function bundleFromArcScene(fillMode, shapes) {
 }
 
 function readDisc() {
-  // Sample the (100, 100) pixel and a ring of points to characterise
+  // Sample the (100, 100) pixel and a ring of points to characterize
   // the rendered fill.
   const buf = new Uint8Array(4);
   function pix(x, y) {
@@ -151,30 +154,40 @@ const server = http.createServer((req, res) => {
     return;
   }
   let p = decodeURIComponent(u.pathname);
-  const mime = p.endsWith('.js') || p.endsWith('.mjs') ? 'text/javascript'
-             : p.endsWith('.glsl') ? 'text/plain' : 'application/octet-stream';
+  const mime =
+    p.endsWith('.js') || p.endsWith('.mjs')
+      ? 'text/javascript'
+      : p.endsWith('.glsl')
+        ? 'text/plain'
+        : 'application/octet-stream';
   try {
     res.writeHead(200, { 'content-type': mime + '; charset=utf-8' });
     res.end(readFileSync(path.join(ROOT, p)));
   } catch {
-    try { res.writeHead(404); res.end(); } catch {}
+    try {
+      res.writeHead(404);
+      res.end();
+    } catch {}
   }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${server.address().port}/`;
 
-const browser = await puppeteer.launch({
+const browser = await launchBrowser({
   headless: 'new',
-  args: ['--enable-unsafe-swiftshader', '--no-sandbox'],
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
 });
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', msg => {
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (msg) => {
   if (msg.type() === 'error') console.error('  [console-err]', msg.text());
 });
 await page.setViewport({ width: 300, height: 300 });
 await page.goto(url, { waitUntil: 'load', timeout: 10000 });
-await page.waitForFunction(() => window.__done === true, { timeout: 30000 });
+await page.waitForFunction(() => window.__done === true, { timeout: 30000, polling: 100 });
 const results = await page.evaluate(() => window.__result);
 await browser.close();
 server.close();
@@ -182,8 +195,10 @@ server.close();
 for (const name of Object.keys(results)) {
   const r = results[name];
   if (r.pngDataUrl) {
-    writeFileSync(path.join(OUT, name + '.png'),
-      Buffer.from(r.pngDataUrl.slice('data:image/png;base64,'.length), 'base64'));
+    writeFileSync(
+      path.join(OUT, name + '.png'),
+      Buffer.from(r.pngDataUrl.slice('data:image/png;base64,'.length), 'base64'),
+    );
   }
   const summary = { ...r };
   delete summary.pngDataUrl;
@@ -191,23 +206,26 @@ for (const name of Object.keys(results)) {
 }
 
 let failures = 0;
-const ok = m => console.log('ok', m);
-const fail = m => { failures++; console.error('FAIL', m); };
+const ok = (m) => console.log('ok', m);
+const fail = (m) => {
+  failures++;
+  console.error('FAIL', m);
+};
 
-const isRed   = px => px[0] > 240 && px[1] < 16  && px[2] < 16;
-const isBlack = px => px[0] < 16  && px[1] < 16  && px[2] < 16;
+const isRed = (px) => px[0] > 240 && px[1] < 16 && px[2] < 16;
+const isBlack = (px) => px[0] < 16 && px[1] < 16 && px[2] < 16;
 
 // T1 — full circle fills the entire disc under either parity.
 {
   const t = results.T1_nonzero;
-  if (isRed(t.center))     ok('T1 nonzero: full disc filled (center red)');
+  if (isRed(t.center)) ok('T1 nonzero: full disc filled (center red)');
   else fail(`T1 nonzero center expected red, got ${JSON.stringify(t.center)}`);
-  if (isRed(t.midRadius))  ok('T1 nonzero: mid-radius filled');
+  if (isRed(t.midRadius)) ok('T1 nonzero: mid-radius filled');
   else fail(`T1 nonzero midRadius expected red, got ${JSON.stringify(t.midRadius)}`);
 }
 {
   const t = results.T1_evenodd;
-  if (isRed(t.center))     ok('T1 evenodd: full disc filled (center red)');
+  if (isRed(t.center)) ok('T1 evenodd: full disc filled (center red)');
   else fail(`T1 evenodd center expected red, got ${JSON.stringify(t.center)}`);
 }
 
@@ -218,9 +236,9 @@ const isBlack = px => px[0] < 16  && px[1] < 16  && px[2] < 16;
   // The auto-globalBBox scales the geometry; the sampling rings need
   // to be relative to the rendered geometry. Center is the hole;
   // nearEdge should be in the annulus ring.
-  if (isBlack(t.center))   ok('T2 nonzero: annulus hole at center is black');
+  if (isBlack(t.center)) ok('T2 nonzero: annulus hole at center is black');
   else fail(`T2 nonzero center expected black, got ${JSON.stringify(t.center)}`);
-  if (isRed(t.nearEdge))   ok('T2 nonzero: annulus ring sampled in fill is red');
+  if (isRed(t.nearEdge)) ok('T2 nonzero: annulus ring sampled in fill is red');
   else fail(`T2 nonzero nearEdge expected red, got ${JSON.stringify(t.nearEdge)}`);
 }
 

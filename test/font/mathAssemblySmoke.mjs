@@ -1,8 +1,11 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // mathAssemblySmoke.mjs — verifies MATH GlyphAssembly stitching.
 //
 // STIX Two Math ships GlyphAssembly recipes for stretchy operators
 // (parentheses, integrals, sums, braces) so they can scale beyond
-// the largest pre-built variant. mathReader.buildAssembly() now
+// the largest pre-built variant. mathReader.buildAssembly()
 // produces the per-part offset list a layout engine needs.
 
 import { readFileSync, existsSync } from 'fs';
@@ -11,8 +14,11 @@ import { registerMathReader } from '../../src/font/math/index.js';
 registerMathReader();
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // Locate any MATH font. STIX Two Math is the canonical reference;
 // on macOS Cambria Math / Lucida Bright Math also work.
@@ -23,7 +29,10 @@ const candidates = [
 ];
 let mathFontPath = null;
 for (const p of candidates) {
-  if (existsSync(p)) { mathFontPath = p; break; }
+  if (existsSync(p)) {
+    mathFontPath = p;
+    break;
+  }
 }
 if (!mathFontPath) {
   console.log('Skip MATH assembly smoke: no STIX Math font found');
@@ -44,11 +53,13 @@ const math = font.math;
 // ----- T2: find a gid with vertical assembly -----------------------
 // Sweep gids looking for one whose getMathVariants returns assembly.
 {
-  let asmGid = -1, asmDesc = null;
+  let asmGid = -1,
+    asmDesc = null;
   for (let g = 1; g < 5000; g++) {
     const v = math.getMathVariants(g, 'v');
     if (v && v.assembly && v.assembly.parts.length >= 2) {
-      asmGid = g; asmDesc = v;
+      asmGid = g;
+      asmDesc = v;
       break;
     }
   }
@@ -68,7 +79,8 @@ const math = font.math;
   for (let g = 1; g < 5000; g++) {
     const v = math.getMathVariants(g, 'v');
     if (v && v.assembly && v.assembly.parts.length >= 3) {
-      testGid = g; testDesc = v;
+      testGid = g;
+      testDesc = v;
       break;
     }
   }
@@ -76,9 +88,8 @@ const math = font.math;
     console.log('T3 SKIP: no ≥3-part assembly found');
   } else {
     // Pick a target much larger than the largest pre-built variant.
-    const maxVariantAdv = testDesc.variants.length > 0
-      ? testDesc.variants[testDesc.variants.length - 1].advance
-      : 0;
+    const maxVariantAdv =
+      testDesc.variants.length > 0 ? testDesc.variants[testDesc.variants.length - 1].advance : 0;
     const target = Math.max(maxVariantAdv * 3, 10000);
     const asm = math.buildAssembly(testGid, target, 'v');
     if (!asm) fail('T3 buildAssembly returned null for gid with assembly');
@@ -87,9 +98,14 @@ const math = font.math;
       // Allow small undershoot due to integer arithmetic on overlap rounding.
       fail(`T3 assembly totalAdvance=${asm.totalAdvance} fu, target=${target} fu (gap > 5%)`);
     } else {
-      ok(`T3 assembly built for gid=${testGid} target=${target}fu: ` +
-         `${asm.parts.length} parts, totalAdvance=${asm.totalAdvance}fu, ` +
-         `first 3 parts: ${asm.parts.slice(0,3).map(p=>`{gid=${p.glyphID},off=${p.offset}}`).join(', ')}`);
+      ok(
+        `T3 assembly built for gid=${testGid} target=${target}fu: ` +
+          `${asm.parts.length} parts, totalAdvance=${asm.totalAdvance}fu, ` +
+          `first 3 parts: ${asm.parts
+            .slice(0, 3)
+            .map((p) => `{gid=${p.glyphID},off=${p.offset}}`)
+            .join(', ')}`,
+      );
     }
   }
 }
@@ -112,7 +128,10 @@ const math = font.math;
   let testGid = -1;
   for (let g = 1; g < 5000; g++) {
     const v = math.getMathVariants(g, 'v');
-    if (v && v.assembly) { testGid = g; break; }
+    if (v && v.assembly) {
+      testGid = g;
+      break;
+    }
   }
   if (testGid > 0) {
     const asm = math.buildAssembly(testGid, 1, 'v'); // tiny target

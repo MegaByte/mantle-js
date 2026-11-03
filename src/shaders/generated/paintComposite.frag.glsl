@@ -5,27 +5,37 @@ in vec2 vUV;
 uniform sampler2D uSrc;
 uniform sampler2D uDst;
 uniform int uMode;
+uniform vec4 uPD;
+uniform vec4 uSrcMap;
+uniform vec4 uDstMap;
 out vec4 fragColor;
 
-vec4 porterDuff(int mode, vec4 src, vec4 dst) {
-  float as = src.a, ad = dst.a;
-  float Fa, Fb;
-  if      (mode ==  0) { Fa = 0.0;       Fb = 0.0;       }
-  else if (mode ==  1) { Fa = 1.0;       Fb = 0.0;       }
-  else if (mode ==  2) { Fa = 0.0;       Fb = 1.0;       }
-  else if (mode ==  3) { Fa = 1.0;       Fb = 1.0 - as;  }
-  else if (mode ==  4) { Fa = 1.0 - ad;  Fb = 1.0;       }
-  else if (mode ==  5) { Fa = ad;        Fb = 0.0;       }
-  else if (mode ==  6) { Fa = 0.0;       Fb = as;        }
-  else if (mode ==  7) { Fa = 1.0 - ad;  Fb = 0.0;       }
-  else if (mode ==  8) { Fa = 0.0;       Fb = 1.0 - as;  }
-  else if (mode ==  9) { Fa = ad;        Fb = 1.0 - as;  }
-  else if (mode == 10) { Fa = 1.0 - ad;  Fb = as;        }
-  else if (mode == 11) { Fa = 1.0 - ad;  Fb = 1.0 - as;  }
-  else                 { Fa = 1.0;       Fb = 1.0;       }
-  vec4 outc = Fa * src + Fb * dst;
-  if (mode == 12) outc = clamp(outc, vec4(0.0), vec4(1.0));
-  return outc;
+vec2 mapIn(vec2 uv, vec4 m) {
+  return uv * m.xy + m.zw;
+}
+
+vec4 sampleIn(sampler2D tex, vec2 uv) {
+  vec2 s = step(vec2(0.0), uv) * step(uv, vec2(1.0));
+  return texture(tex, uv) * (s.x * s.y);
+}
+
+vec3 csSrgbToLinear(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+vec3 csLinearToSrgb(vec3 c) {
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+}
+vec4 csConvert(vec4 p, int mode) {
+  if (mode == 0 || p.a <= 0.0) return p;
+  vec3 c = clamp(p.rgb / p.a, 0.0, 1.0);
+  c = mode == 1 ? csSrgbToLinear(c) : csLinearToSrgb(c);
+  return vec4(c * p.a, p.a);
+}
+
+vec4 porterDuffK(vec4 k, vec4 src, vec4 dst) {
+  float Fa = k.x + k.y * dst.a;
+  float Fb = k.z + k.w * src.a;
+  return Fa * src + Fb * dst;
 }
 
 vec3 unpre(vec4 c) { return c.a > 0.0 ? c.rgb / c.a : c.rgb; }
@@ -112,10 +122,11 @@ int colrModeToBlend(int m) {
 }
 
 void main() {
-  vec4 src = texture(uSrc, vUV);
-  vec4 dst = texture(uDst, vUV);
+  vec4 src = sampleIn(uSrc, mapIn(vUV, uSrcMap));
+  vec4 dst = sampleIn(uDst, mapIn(vUV, uDstMap));
   if (uMode <= 12) {
-    fragColor = porterDuff(uMode, src, dst);
+    vec4 pd = porterDuffK(uPD, src, dst);
+    fragColor = uMode == 12 ? clamp(pd, vec4(0.0), vec4(1.0)) : pd;
     return;
   }
 

@@ -1,12 +1,10 @@
 #version 300 es
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
 // feMorphology — separable per-channel max (dilate) / min (erode) over
 // a rectangular kernel of pixel radius uRadius along uDir. Two-pass:
 // horizontal then vertical. Premultiplied RGBA is preserved.
 //
-// SVG Filter Effects § feMorphology mandates `operator="erode"` to take
-// the per-channel minimum and `operator="dilate"` to take the maximum.
-// We compute per-channel min/max so colored inputs morph correctly
-// (matching Chromium and Firefox).
 precision highp float;
 uniform sampler2D uTex;
 uniform vec2  uTexel;     // 1 / inRect.size — one CANVAS pixel, in input uv
@@ -22,26 +20,21 @@ out vec4 fragColor;
 void main() {
   vec2 uv = mapIn(vUV, uInMap);
   if (uRadius < 0.5) { fragColor = sampleIn(uTex, uv); return; }
-  // Cap the kernel at 64 px/axis for performance. MUST match the C#
-  // MantleFilterFeMorphology cap + rounding (ceil) so dilate/erode of a
-  // radius in 33..64 px renders identically on both runtimes; beyond 64 px
-  // the result is thick-stroke emulation where extra reach past the
-  // silhouette doesn't matter visually.
+  // One pass reaches 64 px; filterGraph/primitives/morphology.js runs a wider radius as several passes.
   int r = int(min(ceil(uRadius), 64.0));
-  // Erode picks the lowest sample (alpha collapses around silhouette
-  // edges). Dilate picks the highest. We start with the center sample
-  // so the running accumulator is always a real RGBA point on the
-  // input surface (not an artificial sentinel).
+
   vec4 acc = sampleIn(uTex, uv);
-  for (int i = 1; i <= 64; ++i) {
-    if (i > r) break;
-    vec2 d = uDir * uTexel * float(i);
-    vec4 p = sampleIn(uTex, uv + d);
-    vec4 n = sampleIn(uTex, uv - d);
-    if (uOperator == 1) {
-      acc = max(acc, max(p, n));   // dilate
-    } else {
-      acc = min(acc, min(p, n));   // erode
+  if (uOperator == 1) {
+    for (int i = 1; i <= 64; ++i) {
+      if (i > r) break;
+      vec2 d = uDir * uTexel * float(i);
+      acc = max(acc, max(sampleIn(uTex, uv + d), sampleIn(uTex, uv - d)));   // dilate
+    }
+  } else {
+    for (int i = 1; i <= 64; ++i) {
+      if (i > r) break;
+      vec2 d = uDir * uTexel * float(i);
+      acc = min(acc, min(sampleIn(uTex, uv + d), sampleIn(uTex, uv - d)));   // erode
     }
   }
   fragColor = acc;

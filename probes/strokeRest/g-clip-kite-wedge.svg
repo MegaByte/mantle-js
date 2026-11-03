@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Join wedge, closed chain: every vertex is interior, and at miterlimit 1 every join is past its limit. The clipped kite must stop at the incoming segment perpendicular, not run backwards past it. -->
+  <rect width="200" height="200" fill="#ffffff"/>
+  <path d="M 183 80 Q 165.6515 98.68809999999999 147.9766 117.0702 Q 86.831 119.6525 27.587700000000012 104.3015 Q 16.758700000000005 96.2129 183 80 Z" fill="none" stroke="#000000" stroke-width="20.4" stroke-linecap="butt" stroke-linejoin="miter-clip" stroke-miterlimit="1"/>
+</svg>

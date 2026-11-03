@@ -1,14 +1,19 @@
-// Unicode grapheme cluster boundaries (UAX #29), Unicode 17 rule set incl.
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// Unicode grapheme cluster boundaries (UAX #29), Unicode 18 rule set incl.
 // GB9c (Indic conjunct) and GB11 (emoji ZWJ). Table-driven fallback for when the
 // platform segmenter (Intl.Segmenter) is unavailable or behind the pinned version.
-import { graphemeBreak, Gcb } from "./tables/graphemeBreak.js";
-import { extPict } from "./tables/extPict.js";
-import { incb, Incb } from "./tables/incb.js";
+import { graphemeBreak, Gcb } from './tables/graphemeBreak.js';
+import { extPict } from './tables/extPict.js';
+import { incb, Incb } from './tables/incb.js';
 
 const gcb = (cp) => graphemeBreak.get(cp);
 
 // xpic-run state (for GB11): NONE | run is ExtPict Extend* | run is ExtPict Extend* ZWJ
-const X_NONE = 0, X_PICT = 1, X_PICT_ZWJ = 2;
+const X_NONE = 0,
+  X_PICT = 1,
+  X_PICT_ZWJ = 2;
 
 /**
  * Return an array of boundary indices [0, ..., n] such that consecutive pairs
@@ -22,9 +27,8 @@ export function graphemeBoundaries(cps) {
   let L = cps[0];
   let lc = gcb(L);
   let riCount = lc === Gcb.Regional_Indicator ? 1 : 0;
-  // InCB left-state
-  let incbConsonant = incb.get(L) === Incb.Consonant;
-  let incbLinker = false;
+
+  let incbLinker = incb.get(L) === Incb.Linker;
   // GB11 left-state
   let xstate = extPict.get(L) ? X_PICT : X_NONE;
 
@@ -35,18 +39,30 @@ export function graphemeBoundaries(cps) {
     const rpict = extPict.get(R) !== 0;
 
     let brk;
-    if (lc === Gcb.CR && rc === Gcb.LF) brk = false; // GB3
-    else if (lc === Gcb.Control || lc === Gcb.CR || lc === Gcb.LF) brk = true; // GB4
-    else if (rc === Gcb.Control || rc === Gcb.CR || rc === Gcb.LF) brk = true; // GB5
-    else if (lc === Gcb.L && (rc === Gcb.L || rc === Gcb.V || rc === Gcb.LV || rc === Gcb.LVT)) brk = false; // GB6
-    else if ((lc === Gcb.LV || lc === Gcb.V) && (rc === Gcb.V || rc === Gcb.T)) brk = false; // GB7
-    else if ((lc === Gcb.LVT || lc === Gcb.T) && rc === Gcb.T) brk = false; // GB8
-    else if (rc === Gcb.Extend || rc === Gcb.ZWJ) brk = false; // GB9
-    else if (rc === Gcb.SpacingMark) brk = false; // GB9a
-    else if (lc === Gcb.Prepend) brk = false; // GB9b
-    else if (incbConsonant && incbLinker && ri === Incb.Consonant) brk = false; // GB9c
-    else if (xstate === X_PICT_ZWJ && rpict) brk = false; // GB11
-    else if (lc === Gcb.Regional_Indicator && rc === Gcb.Regional_Indicator && (riCount & 1) === 1) brk = false; // GB12/13
+    if (lc === Gcb.CR && rc === Gcb.LF)
+      brk = false; // GB3
+    else if (lc === Gcb.Control || lc === Gcb.CR || lc === Gcb.LF)
+      brk = true; // GB4
+    else if (rc === Gcb.Control || rc === Gcb.CR || rc === Gcb.LF)
+      brk = true; // GB5
+    else if (lc === Gcb.L && (rc === Gcb.L || rc === Gcb.V || rc === Gcb.LV || rc === Gcb.LVT))
+      brk = false; // GB6
+    else if ((lc === Gcb.LV || lc === Gcb.V) && (rc === Gcb.V || rc === Gcb.T))
+      brk = false; // GB7
+    else if ((lc === Gcb.LVT || lc === Gcb.T) && rc === Gcb.T)
+      brk = false; // GB8
+    else if (rc === Gcb.Extend || rc === Gcb.ZWJ)
+      brk = false; // GB9
+    else if (rc === Gcb.SpacingMark)
+      brk = false; // GB9a
+    else if (lc === Gcb.Prepend)
+      brk = false; // GB9b
+    else if (incbLinker && ri === Incb.Consonant)
+      brk = false; // GB9c
+    else if (xstate === X_PICT_ZWJ && rpict)
+      brk = false; // GB11
+    else if (lc === Gcb.Regional_Indicator && rc === Gcb.Regional_Indicator && (riCount & 1) === 1)
+      brk = false; // GB12/13
     else brk = true; // GB999
 
     if (brk) bounds.push(i);
@@ -54,15 +70,8 @@ export function graphemeBoundaries(cps) {
     // Advance left-states so that L := R.
     riCount = rc === Gcb.Regional_Indicator ? (lc === Gcb.Regional_Indicator ? riCount + 1 : 1) : 0;
 
-    if (ri === Incb.Consonant) {
-      incbConsonant = true;
-      incbLinker = false;
-    } else if (incbConsonant && (ri === Incb.Linker || ri === Incb.Extend)) {
-      if (ri === Incb.Linker) incbLinker = true;
-    } else {
-      incbConsonant = false;
-      incbLinker = false;
-    }
+    if (ri === Incb.Linker) incbLinker = true;
+    else if (ri !== Incb.Extend) incbLinker = false; // Extend continues the run
 
     if (rpict) xstate = X_PICT;
     else if (xstate === X_PICT && rc === Gcb.Extend) xstate = X_PICT;
@@ -80,7 +89,7 @@ export function graphemeBoundaries(cps) {
 export function eachGrapheme(str, cb) {
   const cps = [];
   const idx = [];
-  for (let i = 0; i < str.length; ) {
+  for (let i = 0; i < str.length;) {
     const cp = str.codePointAt(i);
     cps.push(cp);
     idx.push(i);

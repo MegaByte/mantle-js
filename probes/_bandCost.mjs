@@ -1,9 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // _bandCost — decide the LB architecture question with numbers instead of a prior.
 //
 // LB's AA machinery (kinds 3/8/9/10/11 + dilation/clips/spans/caps/rings/healCracks) exists only
-// because we want analytic coverage under single-pass OVER compositing. Two alternatives were
-// tried and lost before: INVERSION (LB paints the interior, Slug's exact walker paints the band)
-// and a COMPOSITE PASS (accumulate distance, convert once). Both were rejected on cost.
+// because we want analytic coverage under single-pass OVER compositing. Two alternatives lose
+// on cost: INVERSION (LB paints the interior, Slug's exact walker paints the band) and a
+// COMPOSITE PASS (accumulate distance, convert once).
 //
 // Since then Slug's kernel became exactBoxCov (band fragments got MORE expensive → hurts
 // inversion) and LB grew rings/strips (its own band fragments got more expensive → helps it).
@@ -21,7 +24,7 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -34,12 +37,19 @@ const flowers = (n, count, r) => {
   const cols = Math.ceil(Math.sqrt(count));
   const cell = n / cols;
   for (let i = 0; i < count; i++) {
-    const cx = (i % cols) * cell + cell / 2, cy = Math.floor(i / cols) * cell + cell / 2, K = 8;
-    const P = (j) => [cx + r * Math.cos(2 * Math.PI * j / K), cy + r * Math.sin(2 * Math.PI * j / K)];
+    const cx = (i % cols) * cell + cell / 2,
+      cy = Math.floor(i / cols) * cell + cell / 2,
+      K = 8;
+    const P = (j) => [
+      cx + r * Math.cos((2 * Math.PI * j) / K),
+      cy + r * Math.sin((2 * Math.PI * j) / K),
+    ];
     let d = `M ${P(0)[0].toFixed(3)} ${P(0)[1].toFixed(3)} `;
     for (let j = 0; j < K; j++) {
-      const A = P(j), B = P(j + 1);
-      const mx = (A[0] + B[0]) / 2 + (B[1] - A[1]) * 0.35, my = (A[1] + B[1]) / 2 - (B[0] - A[0]) * 0.35;
+      const A = P(j),
+        B = P(j + 1);
+      const mx = (A[0] + B[0]) / 2 + (B[1] - A[1]) * 0.35,
+        my = (A[1] + B[1]) / 2 - (B[0] - A[0]) * 0.35;
       d += `Q ${mx.toFixed(3)} ${my.toFixed(3)} ${B[0].toFixed(3)} ${B[1].toFixed(3)} `;
     }
     parts.push(`<path fill="#204080" d="${d}Z"/>`);
@@ -47,13 +57,22 @@ const flowers = (n, count, r) => {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n} ${n}" width="${n}" height="${n}">${parts.join('')}</svg>`;
 };
 const disc = (n) => {
-  const c = n / 2, r = n * 0.45, k = 0.5523 * r;
-  const P = [[c - r, c], [c, c - r], [c + r, c], [c, c + r]];
+  const c = n / 2,
+    r = n * 0.45,
+    k = 0.5523 * r;
+  const P = [
+    [c - r, c],
+    [c, c - r],
+    [c + r, c],
+    [c, c + r],
+  ];
   let d = `M ${P[0][0]} ${P[0][1]} `;
   for (let i = 0; i < 4; i++) {
-    const A = P[i], B = P[(i + 1) % 4];
-    const ta = [-(A[1] - c), (A[0] - c)], tb = [-(B[1] - c), (B[0] - c)];
-    d += `C ${(A[0] + ta[0] / r * k).toFixed(3)} ${(A[1] + ta[1] / r * k).toFixed(3)} ${(B[0] - tb[0] / r * k).toFixed(3)} ${(B[1] - tb[1] / r * k).toFixed(3)} ${B[0]} ${B[1]} `;
+    const A = P[i],
+      B = P[(i + 1) % 4];
+    const ta = [-(A[1] - c), A[0] - c],
+      tb = [-(B[1] - c), B[0] - c];
+    d += `C ${(A[0] + (ta[0] / r) * k).toFixed(3)} ${(A[1] + (ta[1] / r) * k).toFixed(3)} ${(B[0] - (tb[0] / r) * k).toFixed(3)} ${(B[1] - (tb[1] / r) * k).toFixed(3)} ${B[0]} ${B[1]} `;
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n} ${n}" width="${n}" height="${n}"><path fill="#204080" d="${d}Z"/></svg>`;
 };
@@ -97,9 +116,9 @@ const census=(sec,n)=>{
   let ink=0, band=0;
   for(let i=0;i<n*n;i++){ const lum=p[i*4];
     if(lum<253){ ink++; } }
-  // band: a pixel whose neighbourhood straddles the boundary. Partial coverage against white
-  // shows as lum strictly between the shape's solid value and 255 — but shapes have many colours,
-  // so detect the boundary GEOMETRICALLY: a touched pixel with an untouched 4-neighbour, dilated
+  // band: a pixel whose neighborhood straddles the boundary. Partial coverage against white
+  // shows as lum strictly between the shape's solid value and 255 — but shapes have many colors,
+  // so detect the boundary GEOMETRICALLY: a touched pixel with an untouched 4-neighbor, dilated
   // by 1px (the AA ramp is ~1px either side).
   const touched=new Uint8Array(n*n);
   for(let i=0;i<n*n;i++) touched[i] = p[i*4]<253 ? 1 : 0;
@@ -125,45 +144,66 @@ window.__ready=true;
 
 const server = http.createServer((q, res) => {
   try {
-    if (q.url === '/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(HTML); return; }
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
     const pp = decodeURIComponent(q.url.split('?')[0]);
     res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
     res.end(readFileSync(path.join(ROOT, pp)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const br = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
 const pg = await br.newPage();
 pg.on('pageerror', (e) => console.error(' [err]', e.message));
 await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
 await pg.waitForFunction(() => window.__ready === true, { timeout: 120000, polling: 50 });
-const N1 = 256, N2 = 512;
+const N1 = 256,
+  N2 = 512;
 const o = await pg.evaluate((c, a, b) => window.__run(c, a, b), CASES, N1, N2);
-await br.close(); server.close();
+await br.close();
+server.close();
 
 console.log(`\nms = FIXED + SLOPE*fragments.  Solved from N=${N1} and N=${N2} (4x fragments).`);
 console.log('band/ink measured at N=' + N1 + '. slope in ns per fragment.\n');
-console.log('case                          band/ink |  Slug fixed  slope |   LB fixed  slope | LB/Slug');
+console.log(
+  'case                          band/ink |  Slug fixed  slope |   LB fixed  slope | LB/Slug',
+);
 for (const r of o) {
   // ms(N) = F + S*f ; ms(2N) = F + S*4f  =>  S = (ms2-ms1)/(3f), F = ms1 - S*f
-  const f = r.ink;                       // fragments ~ ink px at N1 (both engines rasterise ~the shape)
-  const sS = (r.slug[1] - r.slug[0]) / (3 * f), sF = r.slug[0] - sS * f;
-  const lS = (r.lb[1] - r.lb[0]) / (3 * f), lF = r.lb[0] - lS * f;
+  const f = r.ink; // fragments ~ ink px at N1 (both engines rasterize ~the shape)
+  const sS = (r.slug[1] - r.slug[0]) / (3 * f),
+    sF = r.slug[0] - sS * f;
+  const lS = (r.lb[1] - r.lb[0]) / (3 * f),
+    lF = r.lb[0] - lS * f;
   const bf = r.band / Math.max(1, r.ink);
   const ns = (ms) => (ms * 1e6).toFixed(1);
-  console.log(`${r.name.padEnd(28)} ${(bf * 100).toFixed(1).padStart(6)}% | ${sF.toFixed(3).padStart(9)}ms ${ns(sS).padStart(6)} | ${lF.toFixed(3).padStart(8)}ms ${ns(lS).padStart(6)} | ${(r.lb[0] / r.slug[0]).toFixed(2)}x`);
+  console.log(
+    `${r.name.padEnd(28)} ${(bf * 100).toFixed(1).padStart(6)}% | ${sF.toFixed(3).padStart(9)}ms ${ns(sS).padStart(6)} | ${lF.toFixed(3).padStart(8)}ms ${ns(lS).padStart(6)} | ${(r.lb[0] / r.slug[0]).toFixed(2)}x`,
+  );
 }
 console.log('\n--- predicted INVERSION (LB interior + Slug band) at N=' + N1 + ' ---');
 console.log('case                          LB now   inversion   verdict');
 for (const r of o) {
   const f = r.ink;
-  const sS = (r.slug[1] - r.slug[0]) / (3 * f), sF = r.slug[0] - sS * f;
-  const lS = (r.lb[1] - r.lb[0]) / (3 * f), lF = r.lb[0] - lS * f;
+  const sS = (r.slug[1] - r.slug[0]) / (3 * f),
+    sF = r.slug[0] - sS * f;
+  const lS = (r.lb[1] - r.lb[0]) / (3 * f),
+    lF = r.lb[0] - lS * f;
   // inversion still pays LB's fixed cost (same mesh, same draw) + Slug's fixed cost (band pass
   // needs the band/curve buffers bound) + LB slope on interior + Slug slope on band.
   const inv = lF + sF + lS * (r.ink - r.band) + sS * r.band;
   const win = inv < r.lb[0];
-  console.log(`${r.name.padEnd(28)} ${r.lb[0].toFixed(3)}ms ${inv.toFixed(3)}ms   ${win ? 'INVERSION WINS' : 'lb wins by ' + ((inv / r.lb[0] - 1) * 100).toFixed(0) + '%'}`);
+  console.log(
+    `${r.name.padEnd(28)} ${r.lb[0].toFixed(3)}ms ${inv.toFixed(3)}ms   ${win ? 'INVERSION WINS' : 'lb wins by ' + ((inv / r.lb[0] - 1) * 100).toFixed(0) + '%'}`,
+  );
 }
-console.log('\n(LB fixed cost is per-DRAW; a negative fixed cost means the fragment model does not');
+console.log(
+  '\n(LB fixed cost is per-DRAW; a negative fixed cost means the fragment model does not',
+);
 console.log(' fit — that engine is not fragment-bound at this size, which is itself the answer.)');

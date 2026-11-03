@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // arcArc — exact intersection of two arcs (each a portion of a rotated
 // ellipse), up to 4 points.
 //
@@ -10,34 +13,44 @@
 // Weierstrass misses θ = π (u → ∞), so that case is tested explicitly.
 
 import { solveQuartic } from '../polyRoots.js';
+import { sameEllipseHits } from './coincident.js';
 
 const EPS = 1e-9;
 const TWO_PI = Math.PI * 2;
 
 export function intersectArcArc(arcA, arcB) {
-  const cxA = arcA.cx, cyA = arcA.cy, rxA = arcA.rx, ryA = arcA.ry, phiA = arcA.phi;
-  const cxB = arcB.cx, cyB = arcB.cy, rxB = arcB.rx, ryB = arcB.ry, phiB = arcB.phi;
+  const cxA = arcA.cx,
+    cyA = arcA.cy,
+    rxA = arcA.rx,
+    ryA = arcA.ry,
+    phiA = arcA.phi;
+  const cxB = arcB.cx,
+    cyB = arcB.cy,
+    rxB = arcB.rx,
+    ryB = arcB.ry,
+    phiB = arcB.phi;
   if (rxA < EPS || ryA < EPS || rxB < EPS || ryB < EPS) return [];
+  // On one ellipse the substitution below vanishes identically and its roots are rounding noise, no
+  // answer for two arcs sharing a stretch. Decided on points of B, so an
+  // ellipse written with other radii order, frame angle or theta offset is still the same curve.
+  const same = sameEllipseHits(arcA, arcB);
+  if (same) return same;
 
-  // Implicit form of A: ryA²·X'² + rxA²·Y'² = rxA²·ryA²
-  // where X' = (x - cxA)·cosA + (y - cyA)·sinA
-  //       Y' = -(x - cxA)·sinA + (y - cyA)·cosA
-  // Expand in terms of (x, y):
-  //   X' = cosA·(x - cxA) + sinA·(y - cyA)
-  //   Y' = -sinA·(x - cxA) + cosA·(y - cyA)
-  // Implicit equation: ryA²·X'² + rxA²·Y'² - rxA²·ryA² = 0.
-  // We'll plug in B's parametric (x(θ), y(θ)) and reduce.
-
-  const cpA = Math.cos(phiA), spA = Math.sin(phiA);
-  const cpB = Math.cos(phiB), spB = Math.sin(phiB);
-  const rxA2 = rxA * rxA, ryA2 = ryA * ryA;
+  const cpA = Math.cos(phiA),
+    spA = Math.sin(phiA);
+  const cpB = Math.cos(phiB),
+    spB = Math.sin(phiB);
+  const rxA2 = rxA * rxA,
+    ryA2 = ryA * ryA;
 
   // B parametric in terms of cos θ and sin θ:
   //   x(θ) = cxB + (cpB·rxB)·cos θ + (-spB·ryB)·sin θ
   //   y(θ) = cyB + (spB·rxB)·cos θ + ( cpB·ryB)·sin θ
   // Let:
-  const Ax = cpB * rxB, Bx = -spB * ryB;
-  const Ay = spB * rxB, By =  cpB * ryB;
+  const Ax = cpB * rxB,
+    Bx = -spB * ryB;
+  const Ay = spB * rxB,
+    By = cpB * ryB;
   // So (x - cxA) = (cxB - cxA) + Ax·cos + Bx·sin
   //    (y - cyA) = (cyB - cyA) + Ay·cos + By·sin
   const dCx = cxB - cxA;
@@ -65,14 +78,7 @@ export function intersectArcArc(arcA, arcB) {
   //   Xp² = Xp0² + XpC²·c² + XpS²·s² + 2·Xp0·XpC·c + 2·Xp0·XpS·s + 2·XpC·XpS·c·s
   // Multiplying by ryA² and summing with rxA²·Yp² gives a polynomial in
   // {1, c, s, c², s², c·s}.
-  //
-  // Using c² + s² = 1, we can replace s² = 1 - c². So the polynomial
-  // depends on {1, c, s, c², c·s}. Substituting Weierstrass:
-  //   c = (1 - u²) / (1 + u²)
-  //   s = 2u / (1 + u²)
-  // Clearing the (1 + u²)² denominator gives a polynomial of degree 4
-  // in u.
-  //
+
   // Easier: collect F(θ) as A·c² + B·c·s + C·s² + D·c + E·s + F (using
   // s² = 1 - c² to combine the c²/s²/1 terms):
   //   F = A·c² + B·c·s + C·(1 - c²) + D·c + E·s + F_const
@@ -90,12 +96,12 @@ export function intersectArcArc(arcA, arcB) {
   // Step 1: Compute the trig-form coefficients of F:
   //   F(θ) = α·c² + β·c·s + γ·s² + δ·c + ε·s + ζ
   // where (raw from expansion):
-  const alpha_raw = ryA2 * XpC*XpC + rxA2 * YpC*YpC;
-  const beta_raw  = ryA2 * 2*XpC*XpS + rxA2 * 2*YpC*YpS;
-  const gamma_raw = ryA2 * XpS*XpS + rxA2 * YpS*YpS;
-  const delta_raw = ryA2 * 2*Xp0*XpC + rxA2 * 2*Yp0*YpC;
-  const eps_raw   = ryA2 * 2*Xp0*XpS + rxA2 * 2*Yp0*YpS;
-  const zeta_raw  = ryA2 * Xp0*Xp0 + rxA2 * Yp0*Yp0 - rxA2*ryA2;
+  const alpha_raw = ryA2 * XpC * XpC + rxA2 * YpC * YpC;
+  const beta_raw = ryA2 * 2 * XpC * XpS + rxA2 * 2 * YpC * YpS;
+  const gamma_raw = ryA2 * XpS * XpS + rxA2 * YpS * YpS;
+  const delta_raw = ryA2 * 2 * Xp0 * XpC + rxA2 * 2 * Yp0 * YpC;
+  const eps_raw = ryA2 * 2 * Xp0 * XpS + rxA2 * 2 * Yp0 * YpS;
+  const zeta_raw = ryA2 * Xp0 * Xp0 + rxA2 * Yp0 * Yp0 - rxA2 * ryA2;
 
   // Step 2: Apply s² = 1 - c² to fold gamma into alpha and zeta:
   //   gamma·s² = gamma·(1 - c²) = -gamma·c² + gamma
@@ -122,9 +128,9 @@ export function intersectArcArc(arcA, arcB) {
   //
   // Collect coefficients of u^0..u^4:
   const c0 = A + D + F;
-  const c1 = 2*B + 2*E;
-  const c2 = -2*A + 2*F;
-  const c3 = -2*B + 2*E;
+  const c1 = 2 * B + 2 * E;
+  const c2 = -2 * A + 2 * F;
+  const c3 = -2 * B + 2 * E;
   const c4 = A - D + F;
 
   // Solve the quartic c4·u⁴ + c3·u³ + c2·u² + c1·u + c0 = 0.
@@ -141,47 +147,51 @@ export function intersectArcArc(arcA, arcB) {
 
   const tryAddTheta = (theta) => {
     // Compute (x, y) on B at θ.
-    const c = Math.cos(theta), s = Math.sin(theta);
-    const x = cxB + Ax*c + Bx*s;
-    const y = cyB + Ay*c + By*s;
+    const c = Math.cos(theta),
+      s = Math.sin(theta);
+    const x = cxB + Ax * c + Bx * s;
+    const y = cyB + Ay * c + By * s;
 
-    // Sanity-check that the point actually lies on A's ellipse. The
-    // Weierstrass-substituted polynomial can produce spurious roots
-    // when (1+u²) blows up (we cleared the denominator) or when
-    // we tried θ=π explicitly without checking it satisfies the equation.
-    const Xp = cpA*(x - cxA) + spA*(y - cyA);
-    const Yp = -spA*(x - cxA) + cpA*(y - cyA);
-    const onA = ryA2 * Xp*Xp + rxA2 * Yp*Yp - rxA2*ryA2;
-    if (Math.abs(onA) > 1e-6 * Math.max(rxA2*ryA2, 1)) return;
+    const Xp = cpA * (x - cxA) + spA * (y - cyA);
+    const Yp = -spA * (x - cxA) + cpA * (y - cyA);
+    const onA = ryA2 * Xp * Xp + rxA2 * Yp * Yp - rxA2 * ryA2;
+
+    const gradHalf = Math.hypot(ryA2 * Xp, rxA2 * Yp);
+    const minR = Math.min(Math.max(rxA, ryA), Math.max(rxB, ryB));
+    if (!(Math.abs(onA) <= 2 * gradHalf * 5e-7 * minR)) return;
 
     // Filter B's sweep range.
     let thetaB = theta;
-    while (thetaB < tLoB) thetaB += TWO_PI;
-    while (thetaB > tHiB) thetaB -= TWO_PI;
+    while (thetaB < tLoB - EPS) thetaB += TWO_PI;
+    while (thetaB > tHiB + EPS) thetaB -= TWO_PI;
     if (thetaB < tLoB - EPS || thetaB > tHiB + EPS) return;
-    const tB = (sweepB === 0) ? 0 : (thetaB - arcB.theta_start) / sweepB;
+    const tB = sweepB === 0 ? 0 : (thetaB - arcB.theta_start) / sweepB;
     if (tB < -EPS || tB > 1 + EPS) return;
 
     // Compute A's theta for this point and filter. Xp/Yp were
     // computed above for the on-ellipse check; reuse them.
     const thetaAraw = Math.atan2(Yp / ryA, Xp / rxA);
     let thetaA = thetaAraw;
-    while (thetaA < tLoA) thetaA += TWO_PI;
-    while (thetaA > tHiA) thetaA -= TWO_PI;
+    while (thetaA < tLoA - EPS) thetaA += TWO_PI;
+    while (thetaA > tHiA + EPS) thetaA -= TWO_PI;
     if (thetaA < tLoA - EPS || thetaA > tHiA + EPS) return;
-    const tA = (sweepA === 0) ? 0 : (thetaA - arcA.theta_start) / sweepA;
+    const tA = sweepA === 0 ? 0 : (thetaA - arcA.theta_start) / sweepA;
     if (tA < -EPS || tA > 1 + EPS) return;
     const tAC = Math.max(0, Math.min(1, tA));
     const tBC = Math.max(0, Math.min(1, tB));
     let dup = false;
     for (const prev of out) {
       if (Math.abs(prev.tA - tAC) < 1e-5 && Math.abs(prev.tB - tBC) < 1e-5) {
-        dup = true; break;
+        dup = true;
+        break;
       }
     }
     if (dup) return;
     out.push({
-      tA: tAC, tB: tBC, x, y,
+      tA: tAC,
+      tB: tBC,
+      x,
+      y,
       endpointA: tAC < EPS || tAC > 1 - EPS,
       endpointB: tBC < EPS || tBC > 1 - EPS,
     });

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Free-end guard: a SHORT free-ended tail after a miter join, where the ungated rule already drops. The butt end must still keep the join disc off the far side of the tail cap. -->
+  <rect width="200" height="200" fill="#ffffff"/>
+  <path d="M 30 60 Q 90 80 150 100 Q 146 106 142 112" fill="none" stroke="#000000" stroke-width="32" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4"/>
+</svg>

@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><defs><filter id="k" color-interpolation-filters="sRGB"><feConvolveMatrix order="3 2" kernelMatrix="1 2 3 4 5 6" divisor="21" bias="0.1" targetX="1" targetY="0" preserveAlpha="true"/></filter></defs><circle cx="32" cy="32" r="20" fill="red" filter="url(#k)"/></svg>

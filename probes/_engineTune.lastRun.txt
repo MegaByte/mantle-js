@@ -1,0 +1,40 @@
+  corpus: plain fill=4735  fill+stroke=1093  image=35  clip=474  mask=327  stroke-only=318  text=82  gradient=21
+  sampled 120 across 8 classes; scales 0.4/1x @ 768px
+  slug: 120/120     slug: 120 ok, 0 failed        
+  aac: 120/120     aac: 120 ok, 0 failed        
+  lb: 120/120     lb: 120 ok, 0 failed        
+  auto: 120/120     auto: 120 ok, 0 failed        
+
+  raw rows -> probes/_engineTune.rows.json
+
+  usable rows: 212 (asset x scale)
+
+  scale   0.4x  n= 107   best: lb 75%  slug 13%  aac 12%   |  auto vs best: p50 1.08x  p90 2.59x  within10% 53%
+  scale     1x  n= 105   best: lb 61%  slug 27%  aac 12%   |  auto vs best: p50 0.58x  p90 1.04x  within10% 90%
+
+  Auto's wrong choices (>10% off best), all scales pooled:
+    aac -> lb        n=  32   median 1.36x   p90 2.98x
+    slug -> lb       n=  12   median 1.53x   p90 2.08x
+    inert -> lb      n=   6   median 1.91x   p90 7.20x
+    aac -> aac       n=   4   median 1.20x   p90 8.79x
+    aac -> slug      n=   2   median 1.52x   p90 1.52x
+    inert -> slug    n=   2   median 1.67x   p90 1.67x
+    noaa-band -> lb  n=   1   median 1.23x   p90 1.23x
+    slug -> aac      n=   1   median 2.33x   p90 2.33x
+
+  By stroke character (best engine share):
+    no stroke    n= 111   best: lb 59%  slug 23%  aac 19%   auto p50 1.00x
+    mixed        n=  68   best: lb 78%  slug 16%  aac 6%   auto p50 1.04x
+    stroke only  n=  33   best: lb 79%  slug 18%  aac 3%   auto p50 1.00x
+
+  AAC vs SLUG — where does each actually win?
+    AAC wins  n=79:  segs p25 5.0  med 17.0  p75 69.0   shapes p25 1.0  med 3.0  p75 6.0
+    SLUG wins n=133:  segs p25 14.0  med 77.0  p75 168.0   shapes p25 3.0  med 8.0  p75 16.0
+    slug/aac ratio: p10 0.52  p50 0.94  p90 1.29
+
+  LB (routed on 212 rows): best on 144 (68%)
+    speedup vs best non-LB: p10 0.74  p50 1.30  p90 4.77
+    where LB wins: segs p25 9.0  med 50.0  p75 141.0   shapes p25 2.0  med 6.0  p75 13.0
+    by scale: 1x:64  0.4x:80
+
+  Raw rows are on disk; re-analysis needs no re-measurement.

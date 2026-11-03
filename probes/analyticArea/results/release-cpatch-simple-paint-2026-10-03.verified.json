@@ -1,0 +1,215 @@
+{
+  "scope": "Private static simple polynomial whole-paint CPatch proof; no runtime promotion/general release readiness. Exact source, complete GPU images, independent references, randomized A/A timing, prep and retained negative controls.",
+  "archiveSha256": "e38282265d5a81e9b2583bf896686916235bc5ca48066d3428ac47b6510c292d",
+  "members": 3461,
+  "qualifiedReports": [
+    {
+      "file": "evidence/controls0-gpu.json",
+      "cases": 8,
+      "browser": "Chrome/147.0.7727.57",
+      "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)"
+    },
+    {
+      "file": "evidence/controls1-gpu.json",
+      "cases": 8,
+      "browser": "Chrome/147.0.7727.57",
+      "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)"
+    },
+    {
+      "file": "evidence/controls2-gpu.json",
+      "cases": 8,
+      "browser": "Chrome/147.0.7727.57",
+      "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)"
+    },
+    {
+      "file": "evidence/isolated-v2-gpu.json",
+      "cases": 12,
+      "browser": "Chrome/147.0.7727.57",
+      "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)"
+    },
+    {
+      "file": "evidence/text-perf-gpu.json",
+      "cases": 2,
+      "browser": "Chrome/147.0.7727.57",
+      "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)"
+    },
+    {
+      "file": "evidence/text-v2-gpu.json",
+      "cases": 2,
+      "browser": "Chrome/147.0.7727.57",
+      "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)"
+    },
+    {
+      "file": "evidence/winding0-gpu.json",
+      "cases": 8,
+      "browser": "Chrome/147.0.7727.57",
+      "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)"
+    },
+    {
+      "file": "evidence/winding1-retry-gpu.json",
+      "cases": 8,
+      "browser": "Chrome/147.0.7727.57",
+      "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)"
+    }
+  ],
+  "qualifiedGpuCases": 56,
+  "sourceChecks": 6696,
+  "completeRenderedPixels": 12420096,
+  "firstReadyComparedPixels": 9373696,
+  "independentTextPixels": 46181,
+  "independentPolygonPixels": 139264,
+  "independentMapPixels": 18467,
+  "textAccuracy": [
+    {
+      "size": 32,
+      "checked": 1024,
+      "fullImage": true,
+      "svgHash": "f8d5edbee87932889dba58cc53cc2e1b277655e82aba8c7efda171c629126bf0",
+      "maxRefinementDrift": 1.974288788009204e-14,
+      "stats": [
+        {
+          "arm": "baseline",
+          "worst": {
+            "x": 9,
+            "y": 11,
+            "actual": [17, 17, 17, 255],
+            "reference": [2, 2, 2, 26],
+            "error": 229
+          },
+          "overOne": 319,
+          "sumMaxErrors": 36911
+        },
+        {
+          "arm": "candidate",
+          "worst": {
+            "x": 0,
+            "y": 18,
+            "actual": [2, 2, 2, 42],
+            "reference": [2, 2, 2, 43],
+            "error": 1
+          },
+          "overOne": 0,
+          "sumMaxErrors": 27
+        },
+        {
+          "arm": "AAC",
+          "worst": {
+            "x": 18,
+            "y": 11,
+            "actual": [2, 2, 2, 32],
+            "reference": [2, 2, 2, 34],
+            "error": 2
+          },
+          "overOne": 1,
+          "sumMaxErrors": 48
+        }
+      ]
+    },
+    {
+      "size": 512,
+      "checked": 45157,
+      "fullImage": false,
+      "svgHash": "f8d5edbee87932889dba58cc53cc2e1b277655e82aba8c7efda171c629126bf0",
+      "maxRefinementDrift": 9.81207476380419e-11,
+      "stats": [
+        {
+          "arm": "baseline",
+          "worst": {
+            "x": 491,
+            "y": 251,
+            "actual": [0, 0, 0, 0],
+            "reference": [15, 15, 15, 219],
+            "error": 219
+          },
+          "overOne": 13137,
+          "sumMaxErrors": 216446
+        },
+        {
+          "arm": "candidate",
+          "worst": {
+            "x": 0,
+            "y": 228,
+            "actual": [1, 1, 1, 19],
+            "reference": [1, 1, 1, 18],
+            "error": 1
+          },
+          "overOne": 0,
+          "sumMaxErrors": 4550
+        },
+        {
+          "arm": "AAC",
+          "worst": {
+            "x": 0,
+            "y": 202,
+            "actual": [5, 5, 5, 82],
+            "reference": [5, 5, 5, 81],
+            "error": 1
+          },
+          "overOne": 0,
+          "sumMaxErrors": 4550
+        }
+      ]
+    }
+  ],
+  "gpuTiming": [
+    {
+      "file": "text-perf-gpu.json",
+      "case": "text_tt_12",
+      "size": 32,
+      "names": ["candidate", "candidateAA", "baseline", "baselineAA"],
+      "rounds": 24,
+      "batch": 4,
+      "positionBalanced": true,
+      "directedAdjacentBalanced": false,
+      "mediansMs": {
+        "candidate": 4.506911125,
+        "candidateAA": 4.801702875,
+        "baseline": 15.67324975,
+        "baselineAA": 15.59139575
+      },
+      "ratio": 0.30990683249401446,
+      "ratioCI95": [0.28754614056325123, 0.3245006194435627],
+      "aaRatios": [0.9204686713936083, 1.000132791377858],
+      "aaCI95": [
+        [0.816220818449819, 0.9519948619700618],
+        [0.9911452235223464, 1.036802098830235]
+      ],
+      "conservativeAAFloor": 0.225158654859132,
+      "verdict": "faster"
+    },
+    {
+      "file": "text-perf-gpu.json",
+      "case": "text_tt_12",
+      "size": 512,
+      "names": ["candidate", "candidateAA", "baseline", "baselineAA"],
+      "rounds": 24,
+      "batch": 4,
+      "positionBalanced": true,
+      "directedAdjacentBalanced": false,
+      "mediansMs": {
+        "candidate": 0.932609125,
+        "candidateAA": 0.992530875,
+        "baseline": 5.8408175,
+        "baselineAA": 5.919484
+      },
+      "ratio": 0.16680808642630207,
+      "ratioCI95": [0.1471978948724759, 0.20787507166796376],
+      "aaRatios": [0.9744685086344228, 0.9867715091368723],
+      "aaCI95": [
+        [0.8572750427854959, 1.0862474673875824],
+        [0.933885328367478, 1.0578163484252465]
+      ],
+      "conservativeAAFloor": 0.16648677506201026,
+      "verdict": "faster"
+    }
+  ],
+  "cpuPrepCounts": [16, 64, 256, 760],
+  "remaining": [
+    "raw AAC fill-rule/affine reach",
+    "wider artwork and combined/instance/override qualification",
+    "projective/frame eligibility",
+    "continuum morph preparation",
+    "general cubic/native-conic arrangement ownership",
+    "complete release gates/scene-state warming"
+  ]
+}

@@ -1,17 +1,9 @@
-// _fixtures.mjs — a smoke that BUILDS its SVG at runtime emits it as a file.
-//
-// Most smoke SVGs are static, so they live in examples/smoke/ and the smoke reads them.
-// A few are generated — a path swept round a circle, a grid of shapes, a stroke laid down
-// point by point — and freezing those into a file would be a lie: the fixture is the
-// generator, and the next person to tune it would silently be testing something the file no
-// longer contains.
-//
-// So the generator stays, and the smoke WRITES what it generated. The file on disk is the
-// exact string the test rendered, by construction — there is no version of this that can
-// drift. It also means a fixture change shows up as a diff in examples/smoke/, which is
-// what you want to see.
-//
-// The demo's picker reads index.json, so these appear there alongside the static ones.
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// Save dynamically generated SVG fixtures in examples/smoke/ and update the demo
+// index. Each file contains the exact SVG rendered by its test. Static fixtures
+// are stored directly in examples/smoke/.
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -33,14 +25,27 @@ export function emitFixture(name, svg, smoke) {
     if (!existsSync(full) || readFileSync(full, 'utf8') !== out) writeFileSync(full, out);
 
     const [base, konst] = name.split('__');
-    const entry = { file, smoke: smoke || `${base}Smoke.mjs`, const: konst || name, generated: true };
+    const entry = {
+      file,
+      smoke: smoke || `${base}Smoke.mjs`,
+      const: konst || name,
+      generated: true,
+    };
     let list = [];
-    try { list = JSON.parse(readFileSync(MANIFEST, 'utf8')); } catch { list = []; }
-    const i = list.findIndex(e => e.file === file);
-    if (i >= 0) { if (JSON.stringify(list[i]) === JSON.stringify(entry)) return svg; list[i] = entry; }
-    else list.push(entry);
+    try {
+      list = JSON.parse(readFileSync(MANIFEST, 'utf8'));
+    } catch {
+      list = [];
+    }
+    const i = list.findIndex((e) => e.file === file);
+    if (i >= 0) {
+      if (JSON.stringify(list[i]) === JSON.stringify(entry)) return svg;
+      list[i] = entry;
+    } else list.push(entry);
     list.sort((a, b) => a.file.localeCompare(b.file));
     writeFileSync(MANIFEST, JSON.stringify(list, null, 1) + '\n');
-  } catch { /* emitting a fixture is a convenience; never fail a smoke over it */ }
+  } catch {
+    /* emitting a fixture is a convenience; never fail a smoke over it */
+  }
   return svg;
 }

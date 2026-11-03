@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // metaBin.js — gl-free meta-section parsing.
 //
 // Kept separate from the GL pipeline so the no-WebGL fallback (which needs
@@ -7,7 +10,7 @@
 //
 // renderer/bundle.js re-exports parseMetaBin from here.
 
-export const META_STRIDE_V2 = 24;   // v2 meta record stride (floats/shape)
+export const META_STRIDE_V2 = 24; // v2 meta record stride (floats/shape)
 
 /**
  * Parse a meta-section ArrayBuffer into { numShapes, globalBBox,
@@ -34,8 +37,12 @@ export function parseMetaBin(buf, floatsPerShape) {
   const dv = new DataView(buf);
   if (buf.byteLength < 32) throw new Error('meta.bin too small');
   const n = dv.getUint32(0, true);
-  const gbb = [dv.getFloat32(4, true), dv.getFloat32(8, true),
-               dv.getFloat32(12, true), dv.getFloat32(16, true)];
+  const gbb = [
+    dv.getFloat32(4, true),
+    dv.getFloat32(8, true),
+    dv.getFloat32(12, true),
+    dv.getFloat32(16, true),
+  ];
   // Auto-derive floats-per-shape from the actual section size when
   // possible. Bundle authors may extend the meta record (e.g. v3+1 with
   // 48 floats); self-description via section size avoids needing a new

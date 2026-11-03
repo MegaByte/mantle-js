@@ -1,5 +1,8 @@
-import { toUpper, toLower } from "./unicode/case.js";
-// Inline-tag markup parser. Recognised tags use stack semantics with
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+import { toUpper, toLower } from './unicode/case.js';
+// Inline-tag markup parser. Recognized tags use stack semantics with
 // value pre-validation. Supported tags: <color>, <size>, <voffset>,
 // <u>, <s>, <mark>, <cspace>, <mspace>, <space>, <width>, <lowercase>,
 // <uppercase>, <allcaps>, <nobr>, <align>, <indent>, <sub>, <sup>,
@@ -9,35 +12,52 @@ import { toUpper, toLower } from "./unicode/case.js";
 // downstream hit-test code can map a hit position back to a link).
 
 const NAMED_COLORS = {
-  black:   [0, 0, 0, 1],
-  white:   [1, 1, 1, 1],
-  red:     [1, 0, 0, 1],
-  green:   [0, 1, 0, 1],
-  blue:    [0, 0, 1, 1],
-  yellow:  [1, 235/255, 4/255, 1],
-  cyan:    [0, 1, 1, 1],
+  black: [0, 0, 0, 1],
+  white: [1, 1, 1, 1],
+  red: [1, 0, 0, 1],
+  green: [0, 1, 0, 1],
+  blue: [0, 0, 1, 1],
+  yellow: [1, 235 / 255, 4 / 255, 1],
+  cyan: [0, 1, 1, 1],
   magenta: [1, 0, 1, 1],
-  grey:    [0.5, 0.5, 0.5, 1],
-  gray:    [0.5, 0.5, 0.5, 1],
-  orange:  [1, 0.5, 0, 1],
-  purple:  [0.5, 0, 0.5, 1],
-  pink:    [1, 0.4, 0.7, 1],
+  grey: [0.5, 0.5, 0.5, 1],
+  gray: [0.5, 0.5, 0.5, 1],
+  orange: [1, 0.5, 0, 1],
+  purple: [0.5, 0, 0.5, 1],
+  pink: [1, 0.4, 0.7, 1],
 };
 
 /**
  * @typedef {[number,number,number,number]} Color
+ * The authority for this shape is `defaultStyle()` below — keep the two in
+ * step. (They had drifted: half the fields it emits were undeclared here, so
+ * every caller that passed a real style looked ill-typed.)
+ * @typedef {'solid'|'dashed'|'dotted'|'double'|'wavy'} DecorationStyle
  * @typedef {object} Style
  * @property {Color} color
  * @property {number} sizeScale
  * @property {number} voffsetEm
  * @property {number} widthScale
- * @property {number} cspaceEm
+ * @property {number} cspaceEm   extra advance after every glyph (em)
+ * @property {number} wspaceEm   extra advance on word separators (em)
  * @property {number} mspaceEm
  * @property {boolean} underline
  * @property {boolean} strikethrough
+ * @property {Color|null} underlineColor      null = use the text color
+ * @property {DecorationStyle} underlineStyle
+ * @property {number} underlineThicknessEm    0 = use font.underlineThickness
+ * @property {Color|null} strikeColor         null = use the text color
+ * @property {DecorationStyle} strikeStyle
+ * @property {number} strikeThicknessEm       0 = use font.underlineThickness
  * @property {boolean} mark
  * @property {Color} markColor
  * @property {boolean} nobr
+ * @property {boolean} smallCaps
+ * @property {boolean} bold
+ * @property {boolean} italic
+ * @property {number} rotateDeg
+ * @property {number} glyphScale
+ * @property {string|null} linkId
  *
  * @typedef {object} Directive
  * @property {boolean} hasAlign
@@ -51,12 +71,14 @@ const NAMED_COLORS = {
  * @property {Directive} [directive]
  */
 
+/** @returns {Style} */
 export const defaultStyle = () => ({
   color: [0, 0, 0, 1],
   sizeScale: 1,
   voffsetEm: 0,
   widthScale: 1,
   cspaceEm: 0,
+  wspaceEm: 0,
   mspaceEm: 0,
   underline: false,
   strikethrough: false,
@@ -80,7 +102,9 @@ export const defaultStyle = () => ({
   linkId: null,
 });
 
-const CASE_NONE = 0, CASE_LOWER = 1, CASE_UPPER = 2;
+const CASE_NONE = 0,
+  CASE_LOWER = 1,
+  CASE_UPPER = 2;
 
 /**
  * @param {string} markup
@@ -88,40 +112,41 @@ const CASE_NONE = 0, CASE_LOWER = 1, CASE_UPPER = 2;
  * @returns {Span[]}
  */
 export function parseMarkup(markup, base = defaultStyle()) {
+  /** @type {Span[]} */
   const output = [];
   if (!markup) return output;
 
   // Bottom of each stack is the default (so close-tag against the
   // outermost layer is a no-op).
-  const colorStack    = [base.color.slice()];
-  const sizeStack     = [base.sizeScale];
-  const voffsetStack  = [base.voffsetEm];
-  const widthStack    = [base.widthScale];
-  const cspaceStack   = [base.cspaceEm];
-  const mspaceStack   = [base.mspaceEm];
-  const ulStack       = [base.underline];
-  const ulColorStack  = [base.underlineColor ? base.underlineColor.slice() : null];
-  const ulStyleStack  = [base.underlineStyle || 'solid'];
-  const ulThickStack  = [base.underlineThicknessEm || 0];
-  const sStack        = [base.strikethrough];
-  const sColorStack   = [base.strikeColor ? base.strikeColor.slice() : null];
-  const sStyleStack   = [base.strikeStyle || 'solid'];
-  const sThickStack   = [base.strikeThicknessEm || 0];
-  const boldStack     = [!!base.bold];
-  const italicStack   = [!!base.italic];
-  const markStack     = [base.mark];
+  const colorStack = [base.color.slice()];
+  const sizeStack = [base.sizeScale];
+  const voffsetStack = [base.voffsetEm];
+  const widthStack = [base.widthScale];
+  const cspaceStack = [base.cspaceEm];
+  const mspaceStack = [base.mspaceEm];
+  const ulStack = [base.underline];
+  const ulColorStack = [base.underlineColor ? base.underlineColor.slice() : null];
+  const ulStyleStack = [base.underlineStyle || 'solid'];
+  const ulThickStack = [base.underlineThicknessEm || 0];
+  const sStack = [base.strikethrough];
+  const sColorStack = [base.strikeColor ? base.strikeColor.slice() : null];
+  const sStyleStack = [base.strikeStyle || 'solid'];
+  const sThickStack = [base.strikeThicknessEm || 0];
+  const boldStack = [!!base.bold];
+  const italicStack = [!!base.italic];
+  const markStack = [base.mark];
   const markColorStack = [base.markColor.slice()];
-  const nobrStack     = [base.nobr];
+  const nobrStack = [base.nobr];
   const smallCapsStack = [!!base.smallCaps];
-  const caseStack     = [CASE_NONE];
-  const rotateStack   = [base.rotateDeg || 0];
+  const caseStack = [CASE_NONE];
+  const rotateStack = [base.rotateDeg || 0];
   const glyphScaleStack = [base.glyphScale || 1];
-  const alignStack    = [null];     // null = no override
-  const indentStack   = [0];
+  const alignStack = [null]; // null = no override
+  const indentStack = [0];
   const lineHeightStack = [0];
-  const marginLeftStack  = [0];
+  const marginLeftStack = [0];
   const marginRightStack = [0];
-  const linkIdStack   = [base.linkId || null];
+  const linkIdStack = [base.linkId || null];
   // <noparse>: while >0, only </noparse> is honored.
   let noparseDepth = 0;
 
@@ -133,6 +158,13 @@ export function parseMarkup(markup, base = defaultStyle()) {
     voffsetEm: top(voffsetStack),
     widthScale: top(widthStack),
     cspaceEm: top(cspaceStack),
+    // Carried from the base style rather than a stack: there is no <wspace>
+    // tag to push one (unlike <cspace>/<mspace>). Omitting it would make
+    // markup text silently LOSE any word spacing the caller had set — the
+    // field is read by textLayout's word-separator advance and set by
+    // buildSvgTextGlyphs' styleOpts.wordSpacingEm, so it would survive on
+    // the SVG <text> path and vanish on the markup one.
+    wspaceEm: base.wspaceEm || 0,
     mspaceEm: top(mspaceStack),
     underline: top(ulStack),
     underlineColor: top(ulColorStack) ? top(ulColorStack).slice() : null,
@@ -170,15 +202,27 @@ export function parseMarkup(markup, base = defaultStyle()) {
 
   while (i < n) {
     const c = markup[i];
-    if (c !== '<') { buf += c; i++; continue; }
+    if (c !== '<') {
+      buf += c;
+      i++;
+      continue;
+    }
     const end = markup.indexOf('>', i + 1);
-    if (end < 0) { buf += c; i++; continue; }
+    if (end < 0) {
+      buf += c;
+      i++;
+      continue;
+    }
     const inner = markup.slice(i + 1, end);
 
     // <noparse>: while active, only </noparse> is honored.
     if (noparseDepth > 0) {
       const t = inner.trim().toLowerCase();
-      if (t === '/noparse') { noparseDepth--; i = end + 1; continue; }
+      if (t === '/noparse') {
+        noparseDepth--;
+        i = end + 1;
+        continue;
+      }
       buf += markup.slice(i, end + 1);
       i = end + 1;
       continue;
@@ -197,20 +241,42 @@ export function parseMarkup(markup, base = defaultStyle()) {
       continue;
     }
 
-    const parsed = parseTag(inner,
-      colorStack, sizeStack, voffsetStack,
-      widthStack, cspaceStack, mspaceStack,
-      ulStack, sStack, markStack, markColorStack,
-      nobrStack, caseStack, alignStack, indentStack,
-      rotateStack, lineHeightStack,
-      glyphScaleStack, marginLeftStack, marginRightStack,
-      smallCapsStack, boldStack, italicStack, linkIdStack,
-      ulColorStack, ulStyleStack, ulThickStack,
-      sColorStack, sStyleStack, sThickStack);
+    const parsed = parseTag(
+      inner,
+      colorStack,
+      sizeStack,
+      voffsetStack,
+      widthStack,
+      cspaceStack,
+      mspaceStack,
+      ulStack,
+      sStack,
+      markStack,
+      markColorStack,
+      nobrStack,
+      caseStack,
+      alignStack,
+      indentStack,
+      rotateStack,
+      lineHeightStack,
+      glyphScaleStack,
+      marginLeftStack,
+      marginRightStack,
+      smallCapsStack,
+      boldStack,
+      italicStack,
+      linkIdStack,
+      ulColorStack,
+      ulStyleStack,
+      ulThickStack,
+      sColorStack,
+      sStyleStack,
+      sThickStack,
+    );
     if (parsed) {
       flush();
       parsed.apply();
-      if (parsed.inject) output.push(parsed.inject);
+      if (parsed.inject) output.push(/** @type {Span} */ (parsed.inject));
       i = end + 1;
     } else {
       buf += markup.slice(i, end + 1);
@@ -221,50 +287,112 @@ export function parseMarkup(markup, base = defaultStyle()) {
   return output;
 }
 
-function parseTag(inner,
-  colorStack, sizeStack, voffsetStack,
-  widthStack, cspaceStack, mspaceStack,
-  ulStack, sStack, markStack, markColorStack,
-  nobrStack, caseStack, alignStack, indentStack,
-  rotateStack, lineHeightStack,
-  glyphScaleStack, marginLeftStack, marginRightStack,
-  smallCapsStack, boldStack, italicStack, linkIdStack,
-  ulColorStack, ulStyleStack, ulThickStack,
-  sColorStack, sStyleStack, sThickStack)
-{
+function parseTag(
+  inner,
+  colorStack,
+  sizeStack,
+  voffsetStack,
+  widthStack,
+  cspaceStack,
+  mspaceStack,
+  ulStack,
+  sStack,
+  markStack,
+  markColorStack,
+  nobrStack,
+  caseStack,
+  alignStack,
+  indentStack,
+  rotateStack,
+  lineHeightStack,
+  glyphScaleStack,
+  marginLeftStack,
+  marginRightStack,
+  smallCapsStack,
+  boldStack,
+  italicStack,
+  linkIdStack,
+  ulColorStack,
+  ulStyleStack,
+  ulThickStack,
+  sColorStack,
+  sStyleStack,
+  sThickStack,
+) {
   if (!inner) return null;
 
   // Closing tag.
   if (inner[0] === '/') {
     const name = inner.slice(1).trim().toLowerCase();
     switch (name) {
-      case 'color':   return colorStack.length   > 1 ? { apply: () => colorStack.pop(),   inject: null } : null;
-      case 'size':    return sizeStack.length    > 1 ? { apply: () => sizeStack.pop(),    inject: null } : null;
-      case 'voffset': return voffsetStack.length > 1 ? { apply: () => voffsetStack.pop(), inject: null } : null;
-      case 'width':   return widthStack.length   > 1 ? { apply: () => widthStack.pop(),   inject: null } : null;
-      case 'cspace':  return cspaceStack.length  > 1 ? { apply: () => cspaceStack.pop(),  inject: null } : null;
-      case 'mspace':  return mspaceStack.length  > 1 ? { apply: () => mspaceStack.pop(),  inject: null } : null;
-      case 'u':       return ulStack.length      > 1 ? { apply: () => {
-        ulStack.pop(); ulColorStack.pop(); ulStyleStack.pop(); ulThickStack.pop();
-      }, inject: null } : null;
-      case 's':       return sStack.length       > 1 ? { apply: () => {
-        sStack.pop(); sColorStack.pop(); sStyleStack.pop(); sThickStack.pop();
-      }, inject: null } : null;
+      case 'color':
+        return colorStack.length > 1 ? { apply: () => colorStack.pop(), inject: null } : null;
+      case 'size':
+        return sizeStack.length > 1 ? { apply: () => sizeStack.pop(), inject: null } : null;
+      case 'voffset':
+        return voffsetStack.length > 1 ? { apply: () => voffsetStack.pop(), inject: null } : null;
+      case 'width':
+        return widthStack.length > 1 ? { apply: () => widthStack.pop(), inject: null } : null;
+      case 'cspace':
+        return cspaceStack.length > 1 ? { apply: () => cspaceStack.pop(), inject: null } : null;
+      case 'mspace':
+        return mspaceStack.length > 1 ? { apply: () => mspaceStack.pop(), inject: null } : null;
+      case 'u':
+        return ulStack.length > 1
+          ? {
+              apply: () => {
+                ulStack.pop();
+                ulColorStack.pop();
+                ulStyleStack.pop();
+                ulThickStack.pop();
+              },
+              inject: null,
+            }
+          : null;
+      case 's':
+        return sStack.length > 1
+          ? {
+              apply: () => {
+                sStack.pop();
+                sColorStack.pop();
+                sStyleStack.pop();
+                sThickStack.pop();
+              },
+              inject: null,
+            }
+          : null;
       case 'b':
-      case 'strong':  return boldStack.length    > 1 ? { apply: () => boldStack.pop(),    inject: null } : null;
+      case 'strong':
+        return boldStack.length > 1 ? { apply: () => boldStack.pop(), inject: null } : null;
       case 'i':
-      case 'em':      return italicStack.length  > 1 ? { apply: () => italicStack.pop(),  inject: null } : null;
-      case 'mark':    return markStack.length    > 1 ? { apply: () => { markStack.pop(); markColorStack.pop(); }, inject: null } : null;
-      case 'nobr':    return nobrStack.length    > 1 ? { apply: () => nobrStack.pop(),    inject: null } : null;
+      case 'em':
+        return italicStack.length > 1 ? { apply: () => italicStack.pop(), inject: null } : null;
+      case 'mark':
+        return markStack.length > 1
+          ? {
+              apply: () => {
+                markStack.pop();
+                markColorStack.pop();
+              },
+              inject: null,
+            }
+          : null;
+      case 'nobr':
+        return nobrStack.length > 1 ? { apply: () => nobrStack.pop(), inject: null } : null;
       case 'lowercase':
       case 'uppercase':
-      case 'allcaps': return caseStack.length    > 1 ? { apply: () => caseStack.pop(),    inject: null } : null;
+      case 'allcaps':
+        return caseStack.length > 1 ? { apply: () => caseStack.pop(), inject: null } : null;
       case 'align': {
         if (alignStack.length <= 1) return null;
         const restored = alignStack[alignStack.length - 2];
         return {
           apply: () => alignStack.pop(),
-          inject: { text: '', style: defaultStyle(), directive: { hasAlign: true, align: restored || 'left', hasIndent: false, indentEm: 0 } },
+          inject: {
+            text: '',
+            style: defaultStyle(),
+            directive: { hasAlign: true, align: restored || 'left', hasIndent: false, indentEm: 0 },
+          },
         };
       }
       case 'indent': {
@@ -272,13 +400,23 @@ function parseTag(inner,
         const restored = indentStack[indentStack.length - 2];
         return {
           apply: () => indentStack.pop(),
-          inject: { text: '', style: defaultStyle(), directive: { hasAlign: false, hasIndent: true, indentEm: restored } },
+          inject: {
+            text: '',
+            style: defaultStyle(),
+            directive: { hasAlign: false, hasIndent: true, indentEm: restored },
+          },
         };
       }
       case 'sub':
       case 'sup':
         if (sizeStack.length > 1 && voffsetStack.length > 1) {
-          return { apply: () => { sizeStack.pop(); voffsetStack.pop(); }, inject: null };
+          return {
+            apply: () => {
+              sizeStack.pop();
+              voffsetStack.pop();
+            },
+            inject: null,
+          };
         }
         return null;
       case 'rotate':
@@ -289,7 +427,11 @@ function parseTag(inner,
         const restored = lineHeightStack[lineHeightStack.length - 2];
         return {
           apply: () => lineHeightStack.pop(),
-          inject: { text: '', style: defaultStyle(), directive: { hasLineHeight: true, lineHeightEm: restored } },
+          inject: {
+            text: '',
+            style: defaultStyle(),
+            directive: { hasLineHeight: true, lineHeightEm: restored },
+          },
         };
       }
       case 'scale':
@@ -301,11 +443,20 @@ function parseTag(inner,
         const restoredL = marginLeftStack[marginLeftStack.length - 2];
         const restoredR = marginRightStack[marginRightStack.length - 2];
         return {
-          apply: () => { marginLeftStack.pop(); marginRightStack.pop(); },
-          inject: { text: '', style: defaultStyle(), directive: {
-            hasMarginLeft: true,  marginLeftEm:  restoredL,
-            hasMarginRight: true, marginRightEm: restoredR,
-          } },
+          apply: () => {
+            marginLeftStack.pop();
+            marginRightStack.pop();
+          },
+          inject: {
+            text: '',
+            style: defaultStyle(),
+            directive: {
+              hasMarginLeft: true,
+              marginLeftEm: restoredL,
+              hasMarginRight: true,
+              marginRightEm: restoredR,
+            },
+          },
         };
       }
       case 'margin-left':
@@ -314,7 +465,11 @@ function parseTag(inner,
         const restoredL = marginLeftStack[marginLeftStack.length - 2];
         return {
           apply: () => marginLeftStack.pop(),
-          inject: { text: '', style: defaultStyle(), directive: { hasMarginLeft: true, marginLeftEm: restoredL } },
+          inject: {
+            text: '',
+            style: defaultStyle(),
+            directive: { hasMarginLeft: true, marginLeftEm: restoredL },
+          },
         };
       }
       case 'margin-right':
@@ -323,7 +478,11 @@ function parseTag(inner,
         const restoredR = marginRightStack[marginRightStack.length - 2];
         return {
           apply: () => marginRightStack.pop(),
-          inject: { text: '', style: defaultStyle(), directive: { hasMarginRight: true, marginRightEm: restoredR } },
+          inject: {
+            text: '',
+            style: defaultStyle(),
+            directive: { hasMarginRight: true, marginRightEm: restoredR },
+          },
         };
       }
       case 'smallcaps':
@@ -331,15 +490,14 @@ function parseTag(inner,
           ? { apply: () => smallCapsStack.pop(), inject: null }
           : null;
       case 'link':
-        return linkIdStack.length > 1
-          ? { apply: () => linkIdStack.pop(), inject: null }
-          : null;
-      default: return null;
+        return linkIdStack.length > 1 ? { apply: () => linkIdStack.pop(), inject: null } : null;
+      default:
+        return null;
     }
   }
 
   const eq = inner.indexOf('=');
-  const name  = (eq < 0 ? inner : inner.slice(0, eq)).trim().toLowerCase();
+  const name = (eq < 0 ? inner : inner.slice(0, eq)).trim().toLowerCase();
   const value = eq < 0 ? null : inner.slice(eq + 1).trim();
 
   switch (name) {
@@ -387,7 +545,7 @@ function parseTag(inner,
       };
       return {
         apply: () => {},
-        inject: { text: ' ', style: injStyle },   // NBSP (no soft-wrap)
+        inject: { text: ' ', style: injStyle }, // NBSP (no soft-wrap)
       };
     }
     case 'u': {
@@ -396,40 +554,61 @@ function parseTag(inner,
       // dotted / double / wavy), a thickness with 'em'/'px' suffix
       // (em assumed if no suffix). Unrecognized tokens are ignored.
       const a = parseDecorationShorthand(value, ulColorStack, ulStyleStack, ulThickStack);
-      return { apply: () => {
-        ulStack.push(true);
-        ulColorStack.push(a.color);
-        ulStyleStack.push(a.style);
-        ulThickStack.push(a.thick);
-      }, inject: null };
+      return {
+        apply: () => {
+          ulStack.push(true);
+          ulColorStack.push(a.color);
+          ulStyleStack.push(a.style);
+          ulThickStack.push(a.thick);
+        },
+        inject: null,
+      };
     }
     case 's': {
       const a = parseDecorationShorthand(value, sColorStack, sStyleStack, sThickStack);
-      return { apply: () => {
-        sStack.push(true);
-        sColorStack.push(a.color);
-        sStyleStack.push(a.style);
-        sThickStack.push(a.thick);
-      }, inject: null };
+      return {
+        apply: () => {
+          sStack.push(true);
+          sColorStack.push(a.color);
+          sStyleStack.push(a.style);
+          sThickStack.push(a.thick);
+        },
+        inject: null,
+      };
     }
     case 'b':
-    case 'strong': return { apply: () => boldStack.push(true),   inject: null };
+    case 'strong':
+      return { apply: () => boldStack.push(true), inject: null };
     case 'i':
-    case 'em':     return { apply: () => italicStack.push(true), inject: null };
+    case 'em':
+      return { apply: () => italicStack.push(true), inject: null };
     case 'mark': {
       const mc = (value && parseColor(value)) || markColorStack[markColorStack.length - 1].slice();
-      return { apply: () => { markStack.push(true); markColorStack.push(mc); }, inject: null };
+      return {
+        apply: () => {
+          markStack.push(true);
+          markColorStack.push(mc);
+        },
+        inject: null,
+      };
     }
-    case 'nobr':      return { apply: () => nobrStack.push(true), inject: null };
-    case 'lowercase': return { apply: () => caseStack.push(CASE_LOWER), inject: null };
+    case 'nobr':
+      return { apply: () => nobrStack.push(true), inject: null };
+    case 'lowercase':
+      return { apply: () => caseStack.push(CASE_LOWER), inject: null };
     case 'uppercase':
-    case 'allcaps':   return { apply: () => caseStack.push(CASE_UPPER), inject: null };
+    case 'allcaps':
+      return { apply: () => caseStack.push(CASE_UPPER), inject: null };
     case 'align': {
       const al = parseAlign(value);
       if (al == null) return null;
       return {
         apply: () => alignStack.push(al),
-        inject: { text: '', style: defaultStyle(), directive: { hasAlign: true, align: al, hasIndent: false, indentEm: 0 } },
+        inject: {
+          text: '',
+          style: defaultStyle(),
+          directive: { hasAlign: true, align: al, hasIndent: false, indentEm: 0 },
+        },
       };
     }
     case 'indent': {
@@ -437,7 +616,11 @@ function parseTag(inner,
       if (v == null) return null;
       return {
         apply: () => indentStack.push(v),
-        inject: { text: '', style: defaultStyle(), directive: { hasAlign: false, hasIndent: true, indentEm: v } },
+        inject: {
+          text: '',
+          style: defaultStyle(),
+          directive: { hasAlign: false, hasIndent: true, indentEm: v },
+        },
       };
     }
 
@@ -479,7 +662,11 @@ function parseTag(inner,
       if (v == null) return null;
       return {
         apply: () => lineHeightStack.push(v),
-        inject: { text: '', style: defaultStyle(), directive: { hasLineHeight: true, lineHeightEm: v } },
+        inject: {
+          text: '',
+          style: defaultStyle(),
+          directive: { hasLineHeight: true, lineHeightEm: v },
+        },
       };
     }
 
@@ -495,18 +682,31 @@ function parseTag(inner,
       // Single-shot directive — no stack push, no </line-indent>.
       return {
         apply: () => {},
-        inject: { text: '', style: defaultStyle(), directive: { hasLineIndent: true, lineIndentEm: v } },
+        inject: {
+          text: '',
+          style: defaultStyle(),
+          directive: { hasLineIndent: true, lineIndentEm: v },
+        },
       };
     }
     case 'margin': {
       const v = parseEm(value);
       if (v == null) return null;
       return {
-        apply: () => { marginLeftStack.push(v); marginRightStack.push(v); },
-        inject: { text: '', style: defaultStyle(), directive: {
-          hasMarginLeft: true, marginLeftEm: v,
-          hasMarginRight: true, marginRightEm: v,
-        } },
+        apply: () => {
+          marginLeftStack.push(v);
+          marginRightStack.push(v);
+        },
+        inject: {
+          text: '',
+          style: defaultStyle(),
+          directive: {
+            hasMarginLeft: true,
+            marginLeftEm: v,
+            hasMarginRight: true,
+            marginRightEm: v,
+          },
+        },
       };
     }
     case 'margin-left':
@@ -515,7 +715,11 @@ function parseTag(inner,
       if (v == null) return null;
       return {
         apply: () => marginLeftStack.push(v),
-        inject: { text: '', style: defaultStyle(), directive: { hasMarginLeft: true, marginLeftEm: v } },
+        inject: {
+          text: '',
+          style: defaultStyle(),
+          directive: { hasMarginLeft: true, marginLeftEm: v },
+        },
       };
     }
     case 'margin-right':
@@ -524,7 +728,11 @@ function parseTag(inner,
       if (v == null) return null;
       return {
         apply: () => marginRightStack.push(v),
-        inject: { text: '', style: defaultStyle(), directive: { hasMarginRight: true, marginRightEm: v } },
+        inject: {
+          text: '',
+          style: defaultStyle(),
+          directive: { hasMarginRight: true, marginRightEm: v },
+        },
       };
     }
     case 'smallcaps':
@@ -543,7 +751,8 @@ function parseTag(inner,
       return { apply: () => linkIdStack.push(id), inject: null };
     }
 
-    default: return null;
+    default:
+      return null;
   }
 }
 
@@ -558,7 +767,10 @@ function parseColor(s) {
 
 function parseHexColor(hex) {
   if (!hex) return null;
-  let r, g, b, a = 255;
+  let r,
+    g,
+    b,
+    a = 255;
   const nib = (c) => {
     if (c >= '0' && c <= '9') return c.charCodeAt(0) - 48;
     if (c >= 'a' && c <= 'f') return c.charCodeAt(0) - 97 + 10;
@@ -566,18 +778,32 @@ function parseHexColor(hex) {
     return -1;
   };
   const byteAt = (i) => {
-    const h = nib(hex[i]); const l = nib(hex[i+1]);
-    return (h < 0 || l < 0) ? -1 : (h << 4) | l;
+    const h = nib(hex[i]);
+    const l = nib(hex[i + 1]);
+    return h < 0 || l < 0 ? -1 : (h << 4) | l;
   };
   if (hex.length === 3 || hex.length === 4) {
-    const rn = nib(hex[0]), gn = nib(hex[1]), bn = nib(hex[2]);
+    const rn = nib(hex[0]),
+      gn = nib(hex[1]),
+      bn = nib(hex[2]);
     if (rn < 0 || gn < 0 || bn < 0) return null;
-    r = (rn << 4) | rn; g = (gn << 4) | gn; b = (bn << 4) | bn;
-    if (hex.length === 4) { const an = nib(hex[3]); if (an < 0) return null; a = (an << 4) | an; }
+    r = (rn << 4) | rn;
+    g = (gn << 4) | gn;
+    b = (bn << 4) | bn;
+    if (hex.length === 4) {
+      const an = nib(hex[3]);
+      if (an < 0) return null;
+      a = (an << 4) | an;
+    }
   } else if (hex.length === 6 || hex.length === 8) {
-    r = byteAt(0); g = byteAt(2); b = byteAt(4);
+    r = byteAt(0);
+    g = byteAt(2);
+    b = byteAt(4);
     if (r < 0 || g < 0 || b < 0) return null;
-    if (hex.length === 8) { a = byteAt(6); if (a < 0) return null; }
+    if (hex.length === 8) {
+      a = byteAt(6);
+      if (a < 0) return null;
+    }
   } else return null;
   const k = 1 / 255;
   return [r * k, g * k, b * k, a * k];
@@ -611,11 +837,16 @@ function parseEm(s) {
 function parseAlign(s) {
   if (!s) return null;
   switch (s.trim().toLowerCase()) {
-    case 'left':    return 'left';
-    case 'center':  return 'center';
-    case 'right':   return 'right';
-    case 'justify': return 'justify';
-    default: return null;
+    case 'left':
+      return 'left';
+    case 'center':
+      return 'center';
+    case 'right':
+      return 'right';
+    case 'justify':
+      return 'justify';
+    default:
+      return null;
   }
 }
 
@@ -639,7 +870,7 @@ const _DECORATION_STYLES = new Set(['solid', 'dashed', 'dotted', 'double', 'wavy
 /// `<u>` preserves whatever the outer scope set).
 function parseDecorationShorthand(value, colorStack, styleStack, thickStack) {
   const top = (a) => a[a.length - 1];
-  let color = top(colorStack);  // null = inherit text color
+  let color = top(colorStack); // null = inherit text color
   let style = top(styleStack);
   let thick = top(thickStack);
   if (!value) return { color, style, thick };
@@ -651,19 +882,25 @@ function parseDecorationShorthand(value, colorStack, styleStack, thickStack) {
   const toks = v.split(/\s+/);
   for (const tok of toks) {
     const lo = tok.toLowerCase();
-    if (_DECORATION_STYLES.has(lo)) { style = lo; continue; }
+    if (_DECORATION_STYLES.has(lo)) {
+      style = lo;
+      continue;
+    }
     // Thickness with unit.
     if (/^[+-]?\d*\.?\d+(em|px)?$/i.test(tok)) {
       const isPx = /px$/i.test(tok);
       const raw = parseFloat(tok);
       if (Number.isFinite(raw)) {
-        thick = isPx ? raw * 0.0625 : raw;  // 1px ≈ 0.0625em (16px em)
+        thick = isPx ? raw * 0.0625 : raw; // 1px ≈ 0.0625em (16px em)
         continue;
       }
     }
     // Otherwise: try as color.
     const col = parseColor(tok);
-    if (col) { color = col; continue; }
+    if (col) {
+      color = col;
+      continue;
+    }
   }
   return { color, style, thick };
 }

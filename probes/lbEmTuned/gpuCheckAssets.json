@@ -1,0 +1,156 @@
+[
+  {
+    "file": "examples/_arcs_circle.svg",
+    "shapes": [1],
+    "span": 2,
+    "devOldPx": 0.050485102635566034,
+    "devNewPx": 0.01262148016236796,
+    "hulls": 1,
+    "moved": 1,
+    "capOld": 0,
+    "capNew": 1
+  },
+  {
+    "file": "examples/smoke/glslEmuFidelity__SVG.svg",
+    "shapes": [1, 4],
+    "span": 256,
+    "devOldPx": 0.01708575633822773,
+    "devNewPx": 0.01708575633822773,
+    "hulls": 34,
+    "moved": 26,
+    "capOld": 34,
+    "capNew": 8
+  },
+  {
+    "file": "examples/smoke/shapeAnimationMultiCurveDiag__DST_SVG.svg",
+    "shapes": [0],
+    "span": 256,
+    "devOldPx": 0.015520236643410063,
+    "devNewPx": 0.015520236643410063,
+    "hulls": 28,
+    "moved": 23,
+    "capOld": 13,
+    "capNew": 5
+  },
+  {
+    "file": "examples/smoke/shapeAnimationMultiCurveRepro__DST_SVG.svg",
+    "shapes": [0],
+    "span": 256,
+    "devOldPx": 0.015520236643410063,
+    "devNewPx": 0.015520236643410063,
+    "hulls": 28,
+    "moved": 23,
+    "capOld": 13,
+    "capNew": 5
+  },
+  {
+    "file": "examples/smoke/aacBandLevels__SVG.svg",
+    "shapes": [2],
+    "span": 128,
+    "devOldPx": 0.013284335273639817,
+    "devNewPx": 0.013284335273639817,
+    "hulls": 26,
+    "moved": 22,
+    "capOld": 11,
+    "capNew": 4
+  },
+  {
+    "file": "examples/smoke/aacPointsRoute__SVG_FILL.svg",
+    "shapes": [12, 15, 18, 6, 9, 3, 0, 2, 5, 8, 11, 14, 17],
+    "span": 4,
+    "devOldPx": 0.017182328029000528,
+    "devNewPx": 0.00859325354209869,
+    "hulls": 104,
+    "moved": 52,
+    "capOld": 52,
+    "capNew": 104
+  },
+  {
+    "file": "examples/smoke/entryPointRoute__GLYPHS.svg",
+    "shapes": [12, 15, 18, 6, 9, 3, 0, 2, 5, 8, 11, 14, 17],
+    "span": 4,
+    "devOldPx": 0.017182328029000528,
+    "devNewPx": 0.00859325354209869,
+    "hulls": 104,
+    "moved": 52,
+    "capOld": 52,
+    "capNew": 104
+  },
+  {
+    "file": "examples/smoke/aacPointsRoute__SVG_STROKE.svg",
+    "shapes": [3, 0, 2, 5],
+    "span": 4,
+    "devOldPx": 0.01718232750183639,
+    "devNewPx": 0.008593253481786965,
+    "hulls": 32,
+    "moved": 16,
+    "capOld": 16,
+    "capNew": 32
+  },
+  {
+    "file": "examples/_miter_circle.svg",
+    "shapes": [1],
+    "span": 8,
+    "devOldPx": 0.012621286591921186,
+    "devNewPx": 0.0031553728135676026,
+    "hulls": 8,
+    "moved": 8,
+    "capOld": 0,
+    "capNew": 8
+  },
+  {
+    "file": "examples/smoke/gwnKernelScale__SVG.svg",
+    "shapes": [5],
+    "span": 128,
+    "devOldPx": 0.007380606870124174,
+    "devNewPx": 0.007380606870124174,
+    "hulls": 6,
+    "moved": 2,
+    "capOld": 6,
+    "capNew": 4
+  },
+  {
+    "file": "examples/_miter_overshoot.svg",
+    "shapes": [1],
+    "span": 64,
+    "devOldPx": 0.001863149164983127,
+    "devNewPx": 0.007442900110009891,
+    "hulls": 2,
+    "moved": 2,
+    "capOld": 2,
+    "capNew": 0
+  },
+  {
+    "file": "examples/smoke/lbTranslucentStripBlend__SVG.svg",
+    "shapes": [1],
+    "span": 1024,
+    "devOldPx": 0.00010072214619804007,
+    "devNewPx": 0.006446203200560663,
+    "hulls": 17,
+    "moved": 17,
+    "capOld": 0,
+    "capNew": 0
+  },
+  {
+    "file": "examples/smoke/noAaStrokeCover__grid_N_8_0.svg",
+    "shapes": [13, 15, 19, 27, 3, 9, 5, 7, 17, 25, 1, 11, 21, 23, 29, 31],
+    "span": 128,
+    "devOldPx": 0.0008220041854544084,
+    "devNewPx": 0.003287955463126813,
+    "hulls": 384,
+    "moved": 384,
+    "capOld": 384,
+    "capNew": 0
+  },
+  {
+    "file": "examples/smoke/noAaStrokeCover__grid_N_8_20_8.svg",
+    "shapes": [13, 15, 19, 27, 3, 9, 5, 7, 17, 25, 1, 11, 21, 23, 29, 31],
+    "span": 128,
+    "devOldPx": 0.0008220041854544084,
+    "devNewPx": 0.003287955463126813,
+    "hulls": 384,
+    "moved": 384,
+    "capOld": 384,
+    "capNew": 0
+  }
+]

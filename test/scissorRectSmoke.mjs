@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // scissorRectSmoke.mjs — scissor-rect API.
 //
 // renderer.setScissorRect(x, y, w, h) restricts subsequent
@@ -26,7 +29,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -165,67 +168,97 @@ const server = http.createServer((req, res) => {
     return;
   }
   let p = decodeURIComponent(u.pathname);
-  const mime = p.endsWith('.js') || p.endsWith('.mjs') ? 'text/javascript'
-             : p.endsWith('.glsl') ? 'text/plain' : 'application/octet-stream';
+  const mime =
+    p.endsWith('.js') || p.endsWith('.mjs')
+      ? 'text/javascript'
+      : p.endsWith('.glsl')
+        ? 'text/plain'
+        : 'application/octet-stream';
   try {
     res.writeHead(200, { 'content-type': mime + '; charset=utf-8' });
     res.end(readFileSync(path.join(ROOT, p)));
   } catch {
-    try { res.writeHead(404); res.end(); } catch {}
+    try {
+      res.writeHead(404);
+      res.end();
+    } catch {}
   }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${server.address().port}/`;
 
-const browser = await puppeteer.launch({
+const browser = await launchBrowser({
   headless: 'new',
-  args: ['--enable-unsafe-swiftshader', '--no-sandbox'],
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
 });
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', msg => {
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+page.on('console', (msg) => {
   if (msg.type() === 'error') console.error('  [console-err]', msg.text());
 });
 await page.setViewport({ width: 200, height: 200 });
 await page.goto(url, { waitUntil: 'load', timeout: 10000 });
-await page.waitForFunction(() => window.__done === true, { timeout: 30000 });
+await page.waitForFunction(() => window.__done === true, { timeout: 30000, polling: 100 });
 const r = await page.evaluate(() => window.__result);
 await browser.close();
 server.close();
 
 let failures = 0;
-const ok = m => console.log('ok', m);
-const fail = m => { failures++; console.error('FAIL', m); };
+const ok = (m) => console.log('ok', m);
+const fail = (m) => {
+  failures++;
+  console.error('FAIL', m);
+};
 
 function dumpPng(name, dataUrl) {
   if (!dataUrl) return;
-  writeFileSync(path.join(OUT, name + '.png'),
-    Buffer.from(dataUrl.slice('data:image/png;base64,'.length), 'base64'));
+  writeFileSync(
+    path.join(OUT, name + '.png'),
+    Buffer.from(dataUrl.slice('data:image/png;base64,'.length), 'base64'),
+  );
 }
 dumpPng('T1-basic', r.T1?.pngDataUrl);
 dumpPng('T2-replace', r.T2?.pngDataUrl);
 dumpPng('T3-endframe', r.T3?.pngDataUrl);
 
 // T1 thresholds — exact channel inequalities (no AA on the scissor edges).
-function isRed(px)  { return px[0] > 240 && px[1] < 16  && px[2] < 16; }
-function isBlue(px) { return px[0] < 16  && px[1] < 16  && px[2] > 240; }
+function isRed(px) {
+  return px[0] > 240 && px[1] < 16 && px[2] < 16;
+}
+function isBlue(px) {
+  return px[0] < 16 && px[1] < 16 && px[2] > 240;
+}
 
 // T1.
 {
   const t = r.T1;
   if (!t) fail('T1 result missing');
   else {
-    if (isRed(t.insideCenter)) ok('T1 inside center is red'); else fail(`T1 inside center expected red, got ${JSON.stringify(t.insideCenter)}`);
-    if (isRed(t.insideLL))     ok('T1 inside bottom-left corner is red'); else fail(`T1 inside LL expected red, got ${JSON.stringify(t.insideLL)}`);
-    if (isRed(t.insideUR))     ok('T1 inside top-right corner is red'); else fail(`T1 inside UR expected red, got ${JSON.stringify(t.insideUR)}`);
-    if (isBlue(t.outsideLeft)) ok('T1 outside-left is backdrop'); else fail(`T1 outside-left expected blue, got ${JSON.stringify(t.outsideLeft)}`);
-    if (isBlue(t.outsideRight))ok('T1 outside-right is backdrop'); else fail(`T1 outside-right expected blue, got ${JSON.stringify(t.outsideRight)}`);
-    if (isBlue(t.outsideTop))  ok('T1 outside-top is backdrop'); else fail(`T1 outside-top expected blue, got ${JSON.stringify(t.outsideTop)}`);
-    if (isBlue(t.outsideBot))  ok('T1 outside-bottom is backdrop'); else fail(`T1 outside-bottom expected blue, got ${JSON.stringify(t.outsideBot)}`);
-    if (isBlue(t.justOutsideLeft))  ok('T1 just-outside-left is backdrop'); else fail(`T1 just-outside-left got ${JSON.stringify(t.justOutsideLeft)}`);
-    if (isBlue(t.justOutsideBot))   ok('T1 just-outside-bottom is backdrop'); else fail(`T1 just-outside-bottom got ${JSON.stringify(t.justOutsideBot)}`);
-    if (isBlue(t.justOutsideRight)) ok('T1 just-outside-right is backdrop'); else fail(`T1 just-outside-right got ${JSON.stringify(t.justOutsideRight)}`);
-    if (isBlue(t.justOutsideTop))   ok('T1 just-outside-top is backdrop'); else fail(`T1 just-outside-top got ${JSON.stringify(t.justOutsideTop)}`);
+    if (isRed(t.insideCenter)) ok('T1 inside center is red');
+    else fail(`T1 inside center expected red, got ${JSON.stringify(t.insideCenter)}`);
+    if (isRed(t.insideLL)) ok('T1 inside bottom-left corner is red');
+    else fail(`T1 inside LL expected red, got ${JSON.stringify(t.insideLL)}`);
+    if (isRed(t.insideUR)) ok('T1 inside top-right corner is red');
+    else fail(`T1 inside UR expected red, got ${JSON.stringify(t.insideUR)}`);
+    if (isBlue(t.outsideLeft)) ok('T1 outside-left is backdrop');
+    else fail(`T1 outside-left expected blue, got ${JSON.stringify(t.outsideLeft)}`);
+    if (isBlue(t.outsideRight)) ok('T1 outside-right is backdrop');
+    else fail(`T1 outside-right expected blue, got ${JSON.stringify(t.outsideRight)}`);
+    if (isBlue(t.outsideTop)) ok('T1 outside-top is backdrop');
+    else fail(`T1 outside-top expected blue, got ${JSON.stringify(t.outsideTop)}`);
+    if (isBlue(t.outsideBot)) ok('T1 outside-bottom is backdrop');
+    else fail(`T1 outside-bottom expected blue, got ${JSON.stringify(t.outsideBot)}`);
+    if (isBlue(t.justOutsideLeft)) ok('T1 just-outside-left is backdrop');
+    else fail(`T1 just-outside-left got ${JSON.stringify(t.justOutsideLeft)}`);
+    if (isBlue(t.justOutsideBot)) ok('T1 just-outside-bottom is backdrop');
+    else fail(`T1 just-outside-bottom got ${JSON.stringify(t.justOutsideBot)}`);
+    if (isBlue(t.justOutsideRight)) ok('T1 just-outside-right is backdrop');
+    else fail(`T1 just-outside-right got ${JSON.stringify(t.justOutsideRight)}`);
+    if (isBlue(t.justOutsideTop)) ok('T1 just-outside-top is backdrop');
+    else fail(`T1 just-outside-top got ${JSON.stringify(t.justOutsideTop)}`);
   }
 }
 
@@ -234,8 +267,13 @@ function isBlue(px) { return px[0] < 16  && px[1] < 16  && px[2] > 240; }
   const t = r.T2;
   if (!t) fail('T2 result missing');
   else {
-    if (isRed(t.inSecond))  ok('T2 inside second rect is red (latest setScissorRect wins)'); else fail(`T2 inSecond expected red, got ${JSON.stringify(t.inSecond)}`);
-    if (isBlue(t.inFirst))  ok('T2 inside first-rect-only region is backdrop (intersect semantic would also be blue, but the test asserts the bottom-right is red — see inSecond)'); else fail(`T2 inFirst expected blue, got ${JSON.stringify(t.inFirst)}`);
+    if (isRed(t.inSecond)) ok('T2 inside second rect is red (latest setScissorRect wins)');
+    else fail(`T2 inSecond expected red, got ${JSON.stringify(t.inSecond)}`);
+    if (isBlue(t.inFirst))
+      ok(
+        'T2 inside first-rect-only region is backdrop (intersect semantic would also be blue, but the test asserts the bottom-right is red — see inSecond)',
+      );
+    else fail(`T2 inFirst expected blue, got ${JSON.stringify(t.inFirst)}`);
   }
 }
 
@@ -244,9 +282,12 @@ function isBlue(px) { return px[0] < 16  && px[1] < 16  && px[2] > 240; }
   const t = r.T3;
   if (!t) fail('T3 result missing');
   else {
-    if (t.scissorEnabledAfterEnd === false) ok('T3 SCISSOR_TEST disabled after endFrame'); else fail(`T3 SCISSOR_TEST still enabled after endFrame`);
-    if (isRed(t.oldOutside1))  ok('T3 next frame fills (10,10) with red (no scissor leak)'); else fail(`T3 oldOutside1 expected red, got ${JSON.stringify(t.oldOutside1)}`);
-    if (isRed(t.oldOutside2))  ok('T3 next frame fills (90,90) with red (no scissor leak)'); else fail(`T3 oldOutside2 expected red, got ${JSON.stringify(t.oldOutside2)}`);
+    if (t.scissorEnabledAfterEnd === false) ok('T3 SCISSOR_TEST disabled after endFrame');
+    else fail(`T3 SCISSOR_TEST still enabled after endFrame`);
+    if (isRed(t.oldOutside1)) ok('T3 next frame fills (10,10) with red (no scissor leak)');
+    else fail(`T3 oldOutside1 expected red, got ${JSON.stringify(t.oldOutside1)}`);
+    if (isRed(t.oldOutside2)) ok('T3 next frame fills (90,90) with red (no scissor leak)');
+    else fail(`T3 oldOutside2 expected red, got ${JSON.stringify(t.oldOutside2)}`);
   }
 }
 

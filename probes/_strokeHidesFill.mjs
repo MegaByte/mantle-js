@@ -1,10 +1,13 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // _strokeHidesFill — can a stroked shape skip its FILL's anti-aliasing?
 //
 // Hypothesis: an OPAQUE, UNDASHED stroke of half-width >= ~1px covers the fill's entire AA band,
 // so the fill underneath may render hard-edged (no exterior strips, corner caps or cubic rings)
 // and the composite is indistinguishable. If true, every stroked shape drops the band apparatus.
 //
-// TWO THINGS THIS PROBE HAD TO WORK AROUND, both of which silently produced "delta = 0.000":
+// TWO THINGS this PROBE HAD TO WORK AROUND, both of which silently produced "delta = 0.000":
 //  1. LB does NOT route a stroked shape (measured: routed=0, zero LB meshes — stroked shapes take
 //     the per-shape composed route with a Slug fill). So the band cannot be exercised through a
 //     stroked bundle at all. Render fill and stroke separately and composite here.
@@ -17,37 +20,62 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
-const N = 192, SS = 8;
+const N = 192,
+  SS = 8;
 
 const discD = (n) => {
-  const c = n / 2, r = n * 0.30, k = 0.5523 * r;
-  const P = [[c - r, c], [c, c - r], [c + r, c], [c, c + r]];
+  const c = n / 2,
+    r = n * 0.3,
+    k = 0.5523 * r;
+  const P = [
+    [c - r, c],
+    [c, c - r],
+    [c + r, c],
+    [c, c + r],
+  ];
   let d = `M ${P[0][0]} ${P[0][1]} `;
   for (let i = 0; i < 4; i++) {
-    const A = P[i], B = P[(i + 1) % 4];
-    const ta = [-(A[1] - c), (A[0] - c)], tb = [-(B[1] - c), (B[0] - c)];
-    d += `C ${(A[0] + ta[0] / r * k).toFixed(4)} ${(A[1] + ta[1] / r * k).toFixed(4)} ${(B[0] - tb[0] / r * k).toFixed(4)} ${(B[1] - tb[1] / r * k).toFixed(4)} ${B[0]} ${B[1]} `;
+    const A = P[i],
+      B = P[(i + 1) % 4];
+    const ta = [-(A[1] - c), A[0] - c],
+      tb = [-(B[1] - c), B[0] - c];
+    d += `C ${(A[0] + (ta[0] / r) * k).toFixed(4)} ${(A[1] + (ta[1] / r) * k).toFixed(4)} ${(B[0] - (tb[0] / r) * k).toFixed(4)} ${(B[1] - (tb[1] / r) * k).toFixed(4)} ${B[0]} ${B[1]} `;
   }
   return d + 'Z';
 };
-const triD = (n) => `M ${0.20 * n} ${0.22 * n} L ${0.80 * n} ${0.40 * n} L ${0.34 * n} ${0.82 * n} Z`;
-const svg = (n, body) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n} ${n}" width="${n}" height="${n}">${body}</svg>`;
+const triD = (n) => `M ${0.2 * n} ${0.22 * n} L ${0.8 * n} ${0.4 * n} L ${0.34 * n} ${0.82 * n} Z`;
+const svg = (n, body) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n} ${n}" width="${n}" height="${n}">${body}</svg>`;
 const path_ = (d, fill, w, op, dash) =>
-  `<path d="${d}" fill="${fill}"` + (w ? ` stroke="#000000" stroke-width="${w}" stroke-opacity="${op}"` + (dash ? ` stroke-dasharray="${dash}"` : '') : '') + '/>';
+  `<path d="${d}" fill="${fill}"` +
+  (w
+    ? ` stroke="#000000" stroke-width="${w}" stroke-opacity="${op}"` +
+      (dash ? ` stroke-dasharray="${dash}"` : '')
+    : '') +
+  '/>';
 
 // each case: fill-only svg, stroke-only svg, both svg (at 1x and 8x), expectation
 const mkCase = (name, dOf, w, op, dashUnit, expect) => ({
-  name, expect,
+  name,
+  expect,
   fill: (n) => svg(n, path_(dOf(n), '#000000', 0, 1, null)),
-  stroke: (n, s) => svg(n, path_(dOf(n), 'none', w * s, op, dashUnit ? `${dashUnit * s} ${dashUnit * s}` : null)),
-  both: (n, s) => svg(n, path_(dOf(n), '#000000', w * s, op, dashUnit ? `${dashUnit * s} ${dashUnit * s}` : null)),
+  stroke: (n, s) =>
+    svg(n, path_(dOf(n), 'none', w * s, op, dashUnit ? `${dashUnit * s} ${dashUnit * s}` : null)),
+  both: (n, s) =>
+    svg(
+      n,
+      path_(dOf(n), '#000000', w * s, op, dashUnit ? `${dashUnit * s} ${dashUnit * s}` : null),
+    ),
 });
 const CASES = [];
-for (const [sh, dOf] of [['disc', discD], ['tri', triD]]) {
+for (const [sh, dOf] of [
+  ['disc', discD],
+  ['tri', triD],
+]) {
   for (const w of [1, 2, 4]) CASES.push(mkCase(`${sh} opaque w=${w}`, dOf, w, 1, 0, w >= 2));
   CASES.push(mkCase(`${sh} translucent w=4`, dOf, 4, 0.45, 0, false));
   CASES.push(mkCase(`${sh} dashed w=4`, dOf, 4, 1, 6, false));
@@ -98,20 +126,35 @@ window.__ready=true;
 
 const server = http.createServer((q, res) => {
   try {
-    if (q.url === '/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(HTML); return; }
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
     const pp = decodeURIComponent(q.url.split('?')[0]);
     res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
     res.end(readFileSync(path.join(ROOT, pp)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const br = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
-const payload = CASES.map((c) => ({ name: c.name, fillLo: c.fill(N), strokeLo: c.stroke(N, 1), bothHi: c.both(N * SS, SS) }));
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
+const payload = CASES.map((c) => ({
+  name: c.name,
+  fillLo: c.fill(N),
+  strokeLo: c.stroke(N, 1),
+  bothHi: c.both(N * SS, SS),
+}));
 
 const once = async (noBand) => {
   const pg = await br.newPage();
   pg.on('pageerror', (e) => console.error(' [err]', e.message));
-  await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
+  await pg.goto(`http://127.0.0.1:${server.address().port}/`, {
+    waitUntil: 'load',
+    timeout: 90000,
+  });
   await pg.waitForFunction(() => window.__ready === true, { timeout: 120000, polling: 50 });
   const r = await pg.evaluate((c, nb) => window.__run(c, nb), payload, noBand);
   await pg.close();
@@ -119,18 +162,33 @@ const once = async (noBand) => {
 };
 const withBand = await once(false);
 const noBand = await once(true);
-await br.close(); server.close();
+await br.close();
+server.close();
 
 console.log('\n  mean |composite - 8x ref| on edge pixels, /255\n');
 console.log('  case                     | band | no band | delta | verdict');
 let bad = 0;
 for (let i = 0; i < CASES.length; i++) {
-  const a = withBand[i], b = noBand[i], d = b.mean - a.mean, expect = CASES[i].expect;
+  const a = withBand[i],
+    b = noBand[i],
+    d = b.mean - a.mean,
+    expect = CASES[i].expect;
   const droppable = d < 0.5;
-  const v = expect ? (droppable ? 'YES — band droppable' : '*** PREDICTION FAILED')
-                   : (droppable ? '*** CONTROL FAILED (should差)' : 'no — band needed (control ok)');
+  const v = expect
+    ? droppable
+      ? 'YES — band droppable'
+      : '*** PREDICTION FAILED'
+    : droppable
+      ? '*** CONTROL FAILED (should差)'
+      : 'no — band needed (control ok)';
   if (expect !== droppable) bad++;
-  console.log(`  ${a.name.padEnd(24)} | ${a.mean.toFixed(2).padStart(4)} | ${b.mean.toFixed(2).padStart(7)} | ${(d >= 0 ? '+' : '') + d.toFixed(2)} | ${v}`);
+  console.log(
+    `  ${a.name.padEnd(24)} | ${a.mean.toFixed(2).padStart(4)} | ${b.mean.toFixed(2).padStart(7)} | ${(d >= 0 ? '+' : '') + d.toFixed(2)} | ${v}`,
+  );
 }
-console.log(`\n  LB routed on the fill: ${withBand[0].routed} (must be >0)   verts band=${withBand[0].verts} noBand=${noBand[0].verts}`);
-console.log(bad ? `\n  ${bad} case(s) contradict the hypothesis` : '\n  all cases behave as predicted');
+console.log(
+  `\n  LB routed on the fill: ${withBand[0].routed} (must be >0)   verts band=${withBand[0].verts} noBand=${noBand[0].verts}`,
+);
+console.log(
+  bad ? `\n  ${bad} case(s) contradict the hypothesis` : '\n  all cases behave as predicted',
+);

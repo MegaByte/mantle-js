@@ -1,17 +1,8 @@
 #version 300 es
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
 // PaintTransform — affine UV warp of an input texture.
 //
-// The forward transform maps input pixels to output pixels:
-//   q_out = M · q_in + t
-// where M = [[xx, xy], [yx, yy]] and t = (dx, dy).
-//
-// For the fragment shader we walk the *output* RT and need to compute
-// the input sample location q_in for each output pixel q_out:
-//   q_in = M⁻¹ · (q_out - t)
-//
-// The output RT covers uBboxOutOrigin .. +uBboxOutSize in canvas pixels.
-// The input RT covers uBboxInOrigin .. +uBboxInSize. We convert vUV to
-// canvas, invert the affine, convert back to the input's UV, sample.
 //
 // Out-of-bounds → transparent (clamp-to-edge would smear the silhouette).
 

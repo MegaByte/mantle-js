@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // segmentSet.js — collect all pairwise intersections among a set of
 // segments, then split each segment at its intersection points.
 // Output: an array of "elementary" segments that don't cross each
@@ -26,11 +29,21 @@ const EPS = 1e-7;
  *  so the downstream DCEL construction can rebuild the original
  *  topology + fill semantics.
  *
- *  @param {Array<{seg: object, shapeIdx: number, subpathIdx: number, origDirection: number, fillRule: 'nonzero'|'evenodd'}>} inputs
- *  @returns {Array<typeof inputs[0]>}
+ *  @typedef {Object} SplitSegment
+ *  @property {object} seg
+ *  @property {number} shapeIdx
+ *  @property {number} subpathIdx
+ *  @property {number} origDirection
+ *  @property {'nonzero'|'evenodd'} fillRule
  */
-export function intersectAndSplit(inputs) {
+
+/**
+ *  @param {SplitSegment[]} inputs
+ *  @returns {SplitSegment[]}
+ */
+export function intersectAndSplit(inputs, intersect) {
   const N = inputs.length;
+  const isect = intersect || intersectSegments;
   // Per-input list of interior parameters where this segment is
   // intersected. Endpoints (param 0 or 1) are excluded because they
   // were already vertices in the original geometry.
@@ -39,7 +52,7 @@ export function intersectAndSplit(inputs) {
 
   for (let i = 0; i < N; i++) {
     for (let j = i + 1; j < N; j++) {
-      const hits = intersectSegments(inputs[i].seg, inputs[j].seg);
+      const hits = isect(inputs[i].seg, inputs[j].seg);
       for (const h of hits) {
         if (h.tA > EPS && h.tA < 1 - EPS) splitParams[i].push(h.tA);
         if (h.tB > EPS && h.tB < 1 - EPS) splitParams[j].push(h.tB);

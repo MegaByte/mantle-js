@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Codepoint -> uint8 property trie with block dedup + RLE blob serialization.
 //
 // Compression (UAX-table packing):
@@ -105,7 +108,7 @@ export function buildTrie(values, def = 0) {
 
 function blockKey(blk) {
   // Latin1 string key is fast and collision-free for byte blocks.
-  let s = "";
+  let s = '';
   for (let i = 0; i < blk.length; i++) s += String.fromCharCode(blk[i]);
   return s;
 }
@@ -122,8 +125,8 @@ export function serializeTrie(trie) {
   const chunkPool = []; // each = CHUNK block indices
   const top = new Uint8Array(NUM_CHUNKS_RAW);
   for (let c = 0; c < NUM_CHUNKS_RAW; c++) {
-    let key = "";
-    for (let k = 0; k < CHUNK; k++) key += stage1[c * CHUNK + k] + ",";
+    let key = '';
+    for (let k = 0; k < CHUNK; k++) key += stage1[c * CHUNK + k] + ',';
     let idx = seen.get(key);
     if (idx === undefined) {
       idx = chunkPool.length;
@@ -162,8 +165,10 @@ export function serializeTrie(trie) {
   const out = new Uint8Array(32 + rTop.length + rChunk.length + rBlock.length);
   out.set(header, 0);
   let o = 32;
-  out.set(rTop, o); o += rTop.length;
-  out.set(rChunk, o); o += rChunk.length;
+  out.set(rTop, o);
+  o += rTop.length;
+  out.set(rChunk, o);
+  o += rChunk.length;
   out.set(rBlock, o);
   return out;
 }
@@ -171,7 +176,7 @@ export function serializeTrie(trie) {
 // Reference decoder (the spec the C#/JS runtime loaders mirror).
 export function decodeTrie(blob) {
   const dv = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
-  if (dv.getUint32(0, true) !== MAGIC) throw new Error("bad trie magic");
+  if (dv.getUint32(0, true) !== MAGIC) throw new Error('bad trie magic');
   const def = dv.getUint8(5);
   const stage1Bytes = dv.getUint8(6);
   const numChunks = dv.getUint16(8, true);
@@ -182,12 +187,17 @@ export function decodeTrie(blob) {
   let off = 32;
   const top = rleDecode(blob.subarray(off, off + rTopLen), NUM_CHUNKS_RAW);
   off += rTopLen;
-  const chunkBytes = rleDecode(blob.subarray(off, off + rChunkLen), numChunks * CHUNK * stage1Bytes);
+  const chunkBytes = rleDecode(
+    blob.subarray(off, off + rChunkLen),
+    numChunks * CHUNK * stage1Bytes,
+  );
   off += rChunkLen;
   const blocks = rleDecode(blob.subarray(off, off + rBlockLen), poolLen);
   const chunkPool = new Uint16Array(numChunks * CHUNK);
   if (stage1Bytes === 1) for (let i = 0; i < chunkPool.length; i++) chunkPool[i] = chunkBytes[i];
-  else for (let i = 0; i < chunkPool.length; i++) chunkPool[i] = chunkBytes[i * 2] | (chunkBytes[i * 2 + 1] << 8);
+  else
+    for (let i = 0; i < chunkPool.length; i++)
+      chunkPool[i] = chunkBytes[i * 2] | (chunkBytes[i * 2 + 1] << 8);
   return {
     def,
     lookup(cp) {
@@ -207,7 +217,10 @@ export function encodeVarintArray(arr, delta) {
   for (let i = 0; i < arr.length; i++) {
     let v = delta ? arr[i] - prev : arr[i];
     prev = arr[i];
-    while (v >= 0x80) { out.push((v & 0x7f) | 0x80); v >>>= 7; }
+    while (v >= 0x80) {
+      out.push((v & 0x7f) | 0x80);
+      v >>>= 7;
+    }
     out.push(v);
   }
   return Uint8Array.from(out);

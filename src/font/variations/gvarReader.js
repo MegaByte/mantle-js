@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // gvarReader.js — OpenType 'gvar' table reader.
 //
 // Decodes per-glyph point deltas across variation axes. For a normalized
@@ -9,20 +12,20 @@
 const FLAG_LONG_GLYPH_OFFSETS = 0x0001;
 
 // TupleVariationHeader tupleIndex bits:
-const EMBEDDED_PEAK_TUPLE     = 0x8000;
-const INTERMEDIATE_REGION     = 0x4000;
-const PRIVATE_POINT_NUMBERS   = 0x2000;
-const TUPLE_INDEX_MASK        = 0x0FFF;
+const EMBEDDED_PEAK_TUPLE = 0x8000;
+const INTERMEDIATE_REGION = 0x4000;
+const PRIVATE_POINT_NUMBERS = 0x2000;
+const TUPLE_INDEX_MASK = 0x0fff;
 // TupleVariationCount header bits:
-const SHARED_POINT_NUMBERS    = 0x8000;
-const COUNT_MASK              = 0x0FFF;
+const SHARED_POINT_NUMBERS = 0x8000;
+const COUNT_MASK = 0x0fff;
 
 // Point/delta-run flag bits:
-const POINTS_ARE_WORDS        = 0x80;
-const POINTS_RUN_COUNT_MASK   = 0x7F;
-const DELTAS_ARE_ZERO         = 0x80;
-const DELTAS_ARE_WORDS        = 0x40;
-const DELTA_RUN_COUNT_MASK    = 0x3F;
+const POINTS_ARE_WORDS = 0x80;
+const POINTS_RUN_COUNT_MASK = 0x7f;
+const DELTAS_ARE_ZERO = 0x80;
+const DELTAS_ARE_WORDS = 0x40;
+const DELTA_RUN_COUNT_MASK = 0x3f;
 
 function readF2dot14(view, off) {
   const i = view.getInt16(off, false);
@@ -61,29 +64,37 @@ export class GvarTable {
     const major = v.getUint16(off + 0, false);
     if (major !== 1) return;
     this._tableOff = off;
-    this._axisCount       = v.getUint16(off + 4, false);
+    this._axisCount = v.getUint16(off + 4, false);
     this._sharedTupleCount = v.getUint16(off + 6, false);
     this._sharedTuplesOff = off + v.getUint32(off + 8, false);
-    this._glyphCount      = v.getUint16(off + 12, false);
-    this._flags           = v.getUint16(off + 14, false);
+    this._glyphCount = v.getUint16(off + 12, false);
+    this._flags = v.getUint16(off + 14, false);
     this._glyphVarDataArrayOff = off + v.getUint32(off + 16, false);
     this._glyphOffsets = new Array(this._glyphCount + 1);
     const isLong = (this._flags & FLAG_LONG_GLYPH_OFFSETS) !== 0;
     let p = off + 20;
     for (let i = 0; i <= this._glyphCount; i++) {
       if (isLong) {
-        this._glyphOffsets[i] = v.getUint32(p, false); p += 4;
+        this._glyphOffsets[i] = v.getUint32(p, false);
+        p += 4;
       } else {
         // Per spec, short offsets are DIVIDED BY 2 in storage.
-        this._glyphOffsets[i] = v.getUint16(p, false) * 2; p += 2;
+        this._glyphOffsets[i] = v.getUint16(p, false) * 2;
+        p += 2;
       }
     }
     this._present = true;
   }
 
-  get hasGvar() { return this._present; }
-  get axisCount() { return this._axisCount; }
-  get glyphCount() { return this._glyphCount; }
+  get hasGvar() {
+    return this._present;
+  }
+  get axisCount() {
+    return this._axisCount;
+  }
+  get glyphCount() {
+    return this._glyphCount;
+  }
 
   /// Apply gvar deltas to `pointsXY` (Float64Array [x0,y0, x1,y1, ...])
   /// for glyph `gid` at normalized coords `nCoords` (F2DOT14 ∈ [-1, +1],
@@ -95,21 +106,25 @@ export class GvarTable {
   applyDeltas(gid, pointsXY, nPoints, nCoords, contourEnds = null) {
     if (!this._present || gid < 0 || gid >= this._glyphCount) return;
     const dataStart = this._glyphVarDataArrayOff + this._glyphOffsets[gid];
-    const dataEnd   = this._glyphVarDataArrayOff + this._glyphOffsets[gid + 1];
-    if (dataEnd <= dataStart) return;  // no deltas for this glyph
+    const dataEnd = this._glyphVarDataArrayOff + this._glyphOffsets[gid + 1];
+    if (dataEnd <= dataStart) return; // no deltas for this glyph
 
     const v = this._tables.view;
     const bytes = this._tables.bytes;
-    const totalPoints = nPoints + 4;  // 4 phantom points
+    const totalPoints = nPoints + 4; // 4 phantom points
 
     // Original (default-master) coords for IUP inference of un-referenced
     // points — captured before any tuple mutates pointsXY. Only simple glyphs
     // (contourEnds supplied) do IUP; composites apply listed points only.
-    let origX = null, origY = null;
+    let origX = null,
+      origY = null;
     if (contourEnds) {
       origX = new Float64Array(totalPoints);
       origY = new Float64Array(totalPoints);
-      for (let i = 0; i < totalPoints; i++) { origX[i] = pointsXY[i * 2]; origY[i] = pointsXY[i * 2 + 1]; }
+      for (let i = 0; i < totalPoints; i++) {
+        origX[i] = pointsXY[i * 2];
+        origY[i] = pointsXY[i * 2 + 1];
+      }
     }
 
     const tvCountAndFlags = v.getUint16(dataStart + 0, false);
@@ -131,13 +146,13 @@ export class GvarTable {
     // For each tuple variation header.
     for (let ti = 0; ti < tupleCount; ti++) {
       const variationDataSize = v.getUint16(headersOff + 0, false);
-      const tupleIndex        = v.getUint16(headersOff + 2, false);
+      const tupleIndex = v.getUint16(headersOff + 2, false);
       headersOff += 4;
 
-      const embeddedPeak       = (tupleIndex & EMBEDDED_PEAK_TUPLE) !== 0;
+      const embeddedPeak = (tupleIndex & EMBEDDED_PEAK_TUPLE) !== 0;
       const intermediateRegion = (tupleIndex & INTERMEDIATE_REGION) !== 0;
-      const privatePoints      = (tupleIndex & PRIVATE_POINT_NUMBERS) !== 0;
-      const sharedTupleIdx     =  tupleIndex & TUPLE_INDEX_MASK;
+      const privatePoints = (tupleIndex & PRIVATE_POINT_NUMBERS) !== 0;
+      const sharedTupleIdx = tupleIndex & TUPLE_INDEX_MASK;
 
       // Peak tuple.
       const peak = new Array(this._axisCount);
@@ -152,22 +167,24 @@ export class GvarTable {
           serializedDataOff += variationDataSize;
           continue;
         }
-        const sharedOff = this._sharedTuplesOff
-          + sharedTupleIdx * this._axisCount * 2;
+        const sharedOff = this._sharedTuplesOff + sharedTupleIdx * this._axisCount * 2;
         for (let a = 0; a < this._axisCount; a++) {
           peak[a] = readF2dot14(v, sharedOff + a * 2);
         }
       }
       // Intermediate region tuples (optional).
-      let interStart = null, interEnd = null;
+      let interStart = null,
+        interEnd = null;
       if (intermediateRegion) {
         interStart = new Array(this._axisCount);
-        interEnd   = new Array(this._axisCount);
+        interEnd = new Array(this._axisCount);
         for (let a = 0; a < this._axisCount; a++) {
-          interStart[a] = readF2dot14(v, headersOff); headersOff += 2;
+          interStart[a] = readF2dot14(v, headersOff);
+          headersOff += 2;
         }
         for (let a = 0; a < this._axisCount; a++) {
-          interEnd[a] = readF2dot14(v, headersOff); headersOff += 2;
+          interEnd[a] = readF2dot14(v, headersOff);
+          headersOff += 2;
         }
       }
 
@@ -190,7 +207,7 @@ export class GvarTable {
         pointNums = r.points;
         cursor = r.cursor;
       } else {
-        pointNums = sharedPoints;  // may be null = "all points"
+        pointNums = sharedPoints; // may be null = "all points"
       }
       const targetCount = pointNums == null ? totalPoints : pointNums.length;
       // Deltas X then Y — reused scratch (this runs per tuple per glyph,
@@ -205,7 +222,7 @@ export class GvarTable {
       if (pointNums == null) {
         // Apply to every point (real + phantom).
         for (let i = 0; i < totalPoints; i++) {
-          pointsXY[i * 2]     += scalar * dx[i];
+          pointsXY[i * 2] += scalar * dx[i];
           pointsXY[i * 2 + 1] += scalar * dy[i];
         }
       } else if (contourEnds) {
@@ -218,11 +235,13 @@ export class GvarTable {
         for (let k = 0; k < pointNums.length; k++) {
           const pn = pointNums[k];
           if (pn < 0 || pn >= totalPoints) continue;
-          rdx[pn] = dx[k]; rdy[pn] = dy[k]; touched[pn] = 1;
+          rdx[pn] = dx[k];
+          rdy[pn] = dy[k];
+          touched[pn] = 1;
         }
         inferIupDeltas(rdx, rdy, touched, origX, origY, contourEnds, nPoints);
         for (let i = 0; i < totalPoints; i++) {
-          pointsXY[i * 2]     += scalar * rdx[i];
+          pointsXY[i * 2] += scalar * rdx[i];
           pointsXY[i * 2 + 1] += scalar * rdy[i];
         }
       } else {
@@ -230,7 +249,7 @@ export class GvarTable {
         for (let k = 0; k < pointNums.length; k++) {
           const pn = pointNums[k];
           if (pn < 0 || pn >= totalPoints) continue;
-          pointsXY[pn * 2]     += scalar * dx[k];
+          pointsXY[pn * 2] += scalar * dx[k];
           pointsXY[pn * 2 + 1] += scalar * dy[k];
         }
       }
@@ -239,8 +258,8 @@ export class GvarTable {
 }
 
 /// IUP (Interpolation of Untouched Points). A gvar tuple may list only some
-/// points; the rest are inferred. For each contour (and the 4 phantom points as
-/// their own group), un-referenced points between two referenced points are
+/// outline points; the rest are inferred within each real contour. Phantom
+/// points retain only their explicit deltas. Unreferenced contour points are
 /// interpolated from the ORIGINAL coordinates, X and Y independently. Mutates
 /// dx/dy (full-length raw-delta arrays) in place. `touched[i]` marks referenced
 /// points; `contourEnds` are the real-contour end indices; phantoms occupy
@@ -251,14 +270,14 @@ export function inferIupDeltas(dx, dy, touched, origX, origY, contourEnds, nPoin
     iupContour(dx, dy, touched, origX, origY, start, contourEnds[c]);
     start = contourEnds[c] + 1;
   }
-  iupContour(dx, dy, touched, origX, origY, nPoints, nPoints + 3); // phantom group
+  // Metric phantom points do not form an outline contour.
 }
 
 function iupContour(dx, dy, touched, ox, oy, start, end) {
   if (end < start) return;
   const t = [];
   for (let i = start; i <= end; i++) if (touched[i]) t.push(i);
-  if (t.length === 0) return;                     // whole contour untouched → 0
+  if (t.length === 0) return; // whole contour untouched → 0
   for (let k = 0; k < t.length; k++) {
     const a = t[k];
     const b = t[(k + 1) % t.length];
@@ -276,10 +295,17 @@ function iupContour(dx, dy, touched, ox, oy, start, end) {
 /// bracket; linearly interpolate inside; equal coords → shared delta or 0.
 function iupInterp(gp, g1, d1, g2, d2) {
   if (g1 === g2) return d1 === d2 ? d1 : 0;
-  if (g1 > g2) { const tg = g1; g1 = g2; g2 = tg; const td = d1; d1 = d2; d2 = td; }
+  if (g1 > g2) {
+    const tg = g1;
+    g1 = g2;
+    g2 = tg;
+    const td = d1;
+    d1 = d2;
+    d2 = td;
+  }
   if (gp <= g1) return d1;
   if (gp >= g2) return d2;
-  return d1 + (d2 - d1) * (gp - g1) / (g2 - g1);
+  return d1 + ((d2 - d1) * (gp - g1)) / (g2 - g1);
 }
 
 /// Per-tuple scalar contribution at nCoords. Returns 0 when the
@@ -288,14 +314,14 @@ function iupInterp(gp, g1, d1, g2, d2) {
 function tupleScalar(axisCount, n, peak, interStart, interEnd) {
   let s = 1.0;
   for (let a = 0; a < axisCount; a++) {
-    const c  = n[a];
-    const p  = peak[a];
-    if (p === 0) continue;  // axis irrelevant to this tuple
+    const c = n[a];
+    const p = peak[a];
+    if (p === 0) continue; // axis irrelevant to this tuple
     if (interStart == null) {
       // Simple form: tent function peak at `p`.
       if (c === 0) return 0;
       if (c < Math.min(0, p) || c > Math.max(0, p)) return 0;
-      if (c === p) continue;  // s *= 1
+      if (c === p) continue; // s *= 1
       // Linear ramp between 0 and p.
       s *= c / p;
     } else {
@@ -307,10 +333,10 @@ function tupleScalar(axisCount, n, peak, interStart, interEnd) {
       // sits on the region edge (peak == start or peak == end).
       if (lo > p || p > hi) continue;
       if (lo < 0 && hi > 0) continue;
-      if (c === p) continue;  // s *= 1
+      if (c === p) continue; // s *= 1
       if (c <= lo || c >= hi) return 0;
-      if (c < p)      s *= (c - lo) / (p - lo);
-      else            s *= (hi - c) / (hi - p);
+      if (c < p) s *= (c - lo) / (p - lo);
+      else s *= (hi - c) / (hi - p);
     }
   }
   return s;
@@ -326,7 +352,7 @@ function decodePackedPointNumbers(bytes, off) {
   if (firstByte === 0) return { points: null, cursor };
   let count;
   if ((firstByte & 0x80) !== 0) {
-    count = ((firstByte & 0x7F) << 8) | bytes[cursor++];
+    count = ((firstByte & 0x7f) << 8) | bytes[cursor++];
   } else {
     count = firstByte;
   }
@@ -336,7 +362,7 @@ function decodePackedPointNumbers(bytes, off) {
   while (written < count) {
     const ctrl = bytes[cursor++];
     const isWords = (ctrl & POINTS_ARE_WORDS) !== 0;
-    const runLen  = (ctrl & POINTS_RUN_COUNT_MASK) + 1;
+    const runLen = (ctrl & POINTS_RUN_COUNT_MASK) + 1;
     for (let i = 0; i < runLen && written < count; i++) {
       let delta;
       if (isWords) {

@@ -1,9 +1,18 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Dump per-glyph (bandsX, bandsY, bbox).
 import { readFileSync } from 'fs';
 import { MantleFontAsset } from '../../src/font/fontAsset.js';
-import { pathBbox, segBbox, makeTexelBuffer, texelAppend, buildTexturesShape } from '../../src/svg/importer.js';
+// The bundle-wire plumbing comes from the modules that own it. It is not on the public surface:
+// importer.js re-exported it for sibling subsystems, but importer.js IS the @kontek/mantle/svg
+// subpath, so that re-export made the texel format and the meta packer public by accident.
+import { pathBbox, segBbox } from '../../src/svg/importer.js';
+import { makeTexelBuffer, texelAppend, buildTexturesShape } from '../../src/svg/textures.js';
 
-const font = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')));
+const font = new MantleFontAsset(
+  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')),
+);
 font.getMetrics(0x20);
 const invUpem = 1 / font.unitsPerEm;
 
@@ -13,10 +22,15 @@ function pickBandsAxis(n) {
 function pickBandsXY(segs, bbox) {
   const w = Math.max(1e-6, bbox[2] - bbox[0]);
   const h = Math.max(1e-6, bbox[3] - bbox[1]);
-  let nx = 0, ny = 0;
+  let nx = 0,
+    ny = 0;
   for (const s of segs) {
     const sb = segBbox(s);
-    if (!sb) { nx++; ny++; continue; }
+    if (!sb) {
+      nx++;
+      ny++;
+      continue;
+    }
     if (sb[3] - sb[1] > h * 0.005) nx++;
     if (sb[2] - sb[0] > w * 0.005) ny++;
   }
@@ -26,7 +40,7 @@ function pickBandsXY(segs, bbox) {
 }
 
 const curveBuf = makeTexelBuffer();
-const bandBuf  = makeTexelBuffer();
+const bandBuf = makeTexelBuffer();
 texelAppend(curveBuf, 0, 0, 0, 0);
 
 let penX = 0;
@@ -35,7 +49,7 @@ for (const ch of 'Hello, World!') {
   const m = font.getMetrics(cp);
   const src = font.getGlyphSegs(cp);
   if (src && src.length > 0) {
-    const segs = src.map(s => ({
+    const segs = src.map((s) => ({
       ...s,
       p1: [penX + s.p1[0] * invUpem, -s.p1[1] * invUpem],
       p2: [penX + s.p2[0] * invUpem, -s.p2[1] * invUpem],
@@ -44,10 +58,14 @@ for (const ch of 'Hello, World!') {
     }));
     const bb = pathBbox(segs);
     const { bandsX, bandsY } = pickBandsXY(segs, bb);
-    const cb = curveBuf.count, bb0 = bandBuf.count;
+    const cb = curveBuf.count,
+      bb0 = bandBuf.count;
     buildTexturesShape(segs, bandsX, bandsY, bb, curveBuf, bandBuf);
-    const dC = curveBuf.count - cb, dB = bandBuf.count - bb0;
-    console.log(`${ch}\tbX=${bandsX} bY=${bandsY}\tΔcurve=${dC} Δband=${dB}\tbbox=(${bb.map(v => v.toFixed(4)).join(', ')})`);
+    const dC = curveBuf.count - cb,
+      dB = bandBuf.count - bb0;
+    console.log(
+      `${ch}\tbX=${bandsX} bY=${bandsY}\tΔcurve=${dC} Δband=${dB}\tbbox=(${bb.map((v) => v.toFixed(4)).join(', ')})`,
+    );
   } else {
     console.log(`${ch === ' ' ? '(sp)' : ch}\tempty`);
   }

@@ -1,5 +1,8 @@
-import { shaperIsc as shaperIscTrie } from "../unicode/tables/shaperIsc.js";
-import { shaperIpc as shaperIpcTrie } from "../unicode/tables/shaperIpc.js";
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+import { shaperIsc as shaperIscTrie } from '../unicode/tables/shaperIsc.js';
+import { shaperIpc as shaperIpcTrie } from '../unicode/tables/shaperIpc.js';
 // indicShaper.js — Indic shaper.
 //
 // Implements Devanagari and Bengali shaping per the OpenType Indic2
@@ -13,8 +16,9 @@ import { shaperIpc as shaperIpcTrie } from "../unicode/tables/shaperIpc.js";
 //   3. Pick a "base" consonant inside each syllable (per per-script rules).
 //   4. Reorder marks/matras/reph around the base.
 //   5. Apply GSUB features in canonical order (nukt → akhn → rphf →
-//      rkrf → pref → blwf → half → vatu → cjct → init → pres →
-//      abvs → blws → psts → haln → calt).
+//      rkrf → pref → blwf → abvf → half → pstf → vatu → cjct, then,
+//      after the reorder, init → pres → abvs → blws → psts → haln →
+//      calt).
 //
 // References:
 //   https://learn.microsoft.com/en-us/typography/script-development/devanagari
@@ -27,51 +31,51 @@ import { shaperIpc as shaperIpcTrie } from "../unicode/tables/shaperIpc.js";
 /// Indic Syllable Category — per-codepoint classification for cluster
 /// formation. Encoded as a single byte for table compactness.
 export const Isc = Object.freeze({
-  Other:               0,   // anything outside the Indic block
-  Consonant:           1,
-  ConsonantDead:       2,   // consonant that always carries inherent virama (rare)
-  ConsonantPlaceholder:3,   // U+25CC dotted circle (placeholder)
-  Nukta:               4,
-  Halant:              5,   // virama
-  ZWJ:                 6,
-  ZWNJ:                7,
-  VowelIndependent:    8,
-  VowelDependent:      9,   // matra
-  Anudatta:           10,
-  Bindu:              11,   // anusvara/candrabindu/visarga
-  Modifier:           12,   // miscellaneous (avagraha, danda, etc.)
-  Ra:                 13,   // Devanagari/Bengali RA — special because it forms reph
-  RegisteredShifter:  14,   // Bengali only; ignored for Devanagari
-  Number:             15,
+  Other: 0, // anything outside the Indic block
+  Consonant: 1,
+  ConsonantDead: 2, // consonant that always carries inherent virama (rare)
+  ConsonantPlaceholder: 3, // U+25CC dotted circle (placeholder)
+  Nukta: 4,
+  Halant: 5, // virama
+  ZWJ: 6,
+  ZWNJ: 7,
+  VowelIndependent: 8,
+  VowelDependent: 9, // matra
+  Anudatta: 10,
+  Bindu: 11, // anusvara/candrabindu/visarga
+  Modifier: 12, // miscellaneous (avagraha, danda, etc.)
+  Ra: 13, // Devanagari/Bengali RA — special because it forms reph
+  RegisteredShifter: 14, // Bengali only; ignored for Devanagari
+  Number: 15,
 });
 
 /// Indic Positional Category — where this glyph renders relative to
 /// the syllable base. Drives reordering.
 export const Ipc = Object.freeze({
-  Right:           0,   // default; glyph follows base
-  Left:            1,   // pre-base matra (e.g. Devanagari I-sign)
-  Top:             2,   // above base (e.g. Devanagari E/AI matra, candrabindu)
-  Bottom:          3,   // below base (e.g. Devanagari U-sign matras)
-  LeftRight:       4,   // wraps around base (e.g. Devanagari O matra: top+right)
-  TopRight:        5,
-  BottomRight:     6,
-  TopBottomRight:  7,
+  Right: 0, // default; glyph follows base
+  Left: 1, // pre-base matra (e.g. Devanagari I-sign)
+  Top: 2, // above base (e.g. Devanagari E/AI matra, candrabindu)
+  Bottom: 3, // below base (e.g. Devanagari U-sign matras)
+  LeftRight: 4, // wraps around base (e.g. Devanagari O matra: top+right)
+  TopRight: 5,
+  BottomRight: 6,
+  TopBottomRight: 7,
 });
 
 // -- Codepoint → Indic script -----------------------------------------
 
 /// The script bucket for a codepoint, or null if not Indic.
 export function indicScriptOf(codepoint) {
-  if (codepoint >= 0x0900 && codepoint <= 0x097F) return 'deva';
-  if (codepoint >= 0x0980 && codepoint <= 0x09FF) return 'beng';
-  if (codepoint >= 0x0A00 && codepoint <= 0x0A7F) return 'guru';
-  if (codepoint >= 0x0A80 && codepoint <= 0x0AFF) return 'gujr';
-  if (codepoint >= 0x0B00 && codepoint <= 0x0B7F) return 'orya';
-  if (codepoint >= 0x0B80 && codepoint <= 0x0BFF) return 'taml';
-  if (codepoint >= 0x0C00 && codepoint <= 0x0C7F) return 'telu';
-  if (codepoint >= 0x0C80 && codepoint <= 0x0CFF) return 'knda';
-  if (codepoint >= 0x0D00 && codepoint <= 0x0D7F) return 'mlym';
-  if (codepoint >= 0x0D80 && codepoint <= 0x0DFF) return 'sinh';
+  if (codepoint >= 0x0900 && codepoint <= 0x097f) return 'deva';
+  if (codepoint >= 0x0980 && codepoint <= 0x09ff) return 'beng';
+  if (codepoint >= 0x0a00 && codepoint <= 0x0a7f) return 'guru';
+  if (codepoint >= 0x0a80 && codepoint <= 0x0aff) return 'gujr';
+  if (codepoint >= 0x0b00 && codepoint <= 0x0b7f) return 'orya';
+  if (codepoint >= 0x0b80 && codepoint <= 0x0bff) return 'taml';
+  if (codepoint >= 0x0c00 && codepoint <= 0x0c7f) return 'telu';
+  if (codepoint >= 0x0c80 && codepoint <= 0x0cff) return 'knda';
+  if (codepoint >= 0x0d00 && codepoint <= 0x0d7f) return 'mlym';
+  if (codepoint >= 0x0d80 && codepoint <= 0x0dff) return 'sinh';
   return null;
 }
 
@@ -100,25 +104,29 @@ export function classifyIpc(codepoint) {
 /// consonant, independent vowel, or non-Indic character that breaks
 /// the cluster).
 function _isSyllableStart(c) {
-  return c === Isc.Consonant ||
-         c === Isc.ConsonantDead ||
-         c === Isc.Ra ||
-         c === Isc.VowelIndependent ||
-         c === Isc.ConsonantPlaceholder ||
-         c === Isc.Other ||
-         c === Isc.Number;
+  return (
+    c === Isc.Consonant ||
+    c === Isc.ConsonantDead ||
+    c === Isc.Ra ||
+    c === Isc.VowelIndependent ||
+    c === Isc.ConsonantPlaceholder ||
+    c === Isc.Other ||
+    c === Isc.Number
+  );
 }
 
 /// True iff `iscCat` can extend an existing syllable (it's a continuation
 /// glyph that attaches to the previous cluster).
 function _isSyllableExtender(c) {
-  return c === Isc.Nukta ||
-         c === Isc.Halant ||
-         c === Isc.VowelDependent ||
-         c === Isc.Bindu ||
-         c === Isc.Anudatta ||
-         c === Isc.ZWJ ||
-         c === Isc.ZWNJ;
+  return (
+    c === Isc.Nukta ||
+    c === Isc.Halant ||
+    c === Isc.VowelDependent ||
+    c === Isc.Bindu ||
+    c === Isc.Anudatta ||
+    c === Isc.ZWJ ||
+    c === Isc.ZWNJ
+  );
 }
 
 /// Find syllable boundaries in `cps`. Returns an array of { start,
@@ -142,14 +150,29 @@ export function findIndicSyllables(cps) {
       if (_isSyllableStart(c) && c !== Isc.Other) {
         // Allow consonant-after-halant inside a cluster — halant+C is
         // a stacked / conjunct consonant, still part of the syllable.
-        const prev = classifyIsc(cps[j - 1]);
-        if (prev === Isc.Halant && (c === Isc.Consonant || c === Isc.Ra || c === Isc.ConsonantDead)) {
+        // The joiners a writer puts between the halant and the
+        // consonant to ask for an explicit half or subjoined form are
+        // part of that cluster too: cutting the syllable at them splits
+        // `ka + halant + ZWJ + ra` into two, and neither half can then
+        // reach the lookup that spells the pair as one glyph.
+        let k = j - 1;
+        while (k > i && _isJoinerCat(classifyIsc(cps[k]))) k--;
+        const prev = classifyIsc(cps[k]);
+        if (
+          prev === Isc.Halant &&
+          (c === Isc.Consonant || c === Isc.Ra || c === Isc.ConsonantDead)
+        ) {
           j++;
           continue;
         }
         break;
       }
-      if (!_isSyllableExtender(c) && c !== Isc.Consonant && c !== Isc.Ra && c !== Isc.ConsonantDead) {
+      if (
+        !_isSyllableExtender(c) &&
+        c !== Isc.Consonant &&
+        c !== Isc.Ra &&
+        c !== Isc.ConsonantDead
+      ) {
         break;
       }
       j++;
@@ -160,58 +183,261 @@ export function findIndicSyllables(cps) {
   return out;
 }
 
+// ---------------------------------------------------------------------
+// Base consonant.
+//
+// The base is the consonant the rest of the syllable is arranged around:
+// half forms sit before it, below-base and post-base forms after it, and
+// a pre-base matra reorders to just before it. Everything downstream —
+// which glyph gets `half`, which gets `blwf`/`pstf`, where the matra
+// lands — is decided by this one index.
+//
+// The rule is NOT "the last consonant". Per the OpenType Indic model it
+// walks BACKWARD from the syllable end to the first consonant that has
+// neither a below-base nor a post-base form, and two things make that
+// walk more than a scan of the codepoints:
+//
+//   * it is FONT-DEPENDENT. Whether a consonant "has a below-base form"
+//     is a question only the font can answer, and it is asked with the
+//     `wouldSubstitute` probe, not by looking the codepoint up in a
+//     table. Bengali `da + halant + X + aa` shapes three structurally
+//     different ways depending on whether X carries a `pstf` form: with
+//     one, the base is `da` and X takes its post-base form; without one,
+//     X is the base and `da` takes its half form.
+
+// Sinhala does not use this algorithm at all: its base is found by a
+// FORWARD walk that needs no font query, and its ZWJ rule is its own
+// (see `_baseSearchSinhala`).
+// ---------------------------------------------------------------------
+
+/// Where the font places a consonant relative to the base. The values a
+/// `blwf` / `pstf` / `pref` probe can report.
+export const ConsPos = Object.freeze({
+  Base: 0, // no below-base or post-base form — a base candidate
+  Below: 1, // has a below-base form ('blwf')
+  Post: 2, // has a post-base form ('pstf' or 'pref')
+});
+
+/// How a script spells a reph. Drives how many glyphs the `rphf` probe
+/// is handed and whether a joiner is required.
+export const RephMode = Object.freeze({
+  Implicit: 0, // Ra + Halant, and the glyph after must NOT be a joiner
+  Explicit: 1, // Ra + Halant + ZWJ; the probe takes all three
+  LogRepha: 2, // the script encodes the repha as its own codepoint
+});
+
+/// Reph spelling per Indic script. Telugu and Sinhala want the ZWJ
+/// spelled out; Malayalam encodes its repha (U+0D4E) as a codepoint of
+/// its own, so no Ra + Halant pair forms one.
+const REPH_MODE_BY_SCRIPT = {
+  deva: RephMode.Implicit,
+  beng: RephMode.Implicit,
+  guru: RephMode.Implicit,
+  gujr: RephMode.Implicit,
+  orya: RephMode.Implicit,
+  taml: RephMode.Implicit,
+  telu: RephMode.Explicit,
+  knda: RephMode.Implicit,
+  mlym: RephMode.LogRepha,
+  sinh: RephMode.Explicit,
+};
+
+/// The virama codepoint for each script. The font-dependent position
+/// probe asks about the pair (virama, consonant), so the syllable's own
+/// halant is not enough — a syllable with no halant still has
+/// consonants whose position has to be resolved.
+const VIRAMA_BY_SCRIPT = {
+  deva: 0x094d,
+  beng: 0x09cd,
+  guru: 0x0a4d,
+  gujr: 0x0acd,
+  orya: 0x0b4d,
+  taml: 0x0bcd,
+  telu: 0x0c4d,
+  knda: 0x0ccd,
+  mlym: 0x0d4d,
+  sinh: 0x0dca,
+};
+
+export function rephModeForScript(script) {
+  const m = REPH_MODE_BY_SCRIPT[script];
+  return m === undefined ? RephMode.Implicit : m;
+}
+
+export function viramaForScript(script) {
+  const v = VIRAMA_BY_SCRIPT[script];
+  return v === undefined ? 0 : v;
+}
+
+/// True iff `cat` is one of the categories that can BE a base. An
+/// independent vowel and a placeholder count: a syllable made of one is
+/// arranged around it exactly as one made of a consonant is.
+export function isIndicBaseCandidate(c) {
+  return (
+    c === Isc.Consonant ||
+    c === Isc.Ra ||
+    c === Isc.ConsonantDead ||
+    c === Isc.VowelIndependent ||
+    c === Isc.ConsonantPlaceholder
+  );
+}
+
+function _isJoinerCat(c) {
+  return c === Isc.ZWJ || c === Isc.ZWNJ;
+}
+
+/*
+* Ask the font where a consonant sits relative to the base.
+ *
+ *
+ * `pref` reports Post rather than a category of its own: a pre-base
+ * reordering Ra is not a base candidate either, and the reorder that
+ * moves it is driven by the feature, not by this index.
+
+ */
+export function consonantPositionFromFont(probe, consonantGid, viramaGid) {
+  if (!probe || !viramaGid) return ConsPos.Base;
+  const newSpec = [viramaGid, consonantGid];
+  const oldSpec = [consonantGid, viramaGid];
+  if (probe('blwf', newSpec) || probe('blwf', oldSpec)) return ConsPos.Below;
+  if (probe('pstf', newSpec) || probe('pstf', oldSpec)) return ConsPos.Post;
+  if (probe('pref', newSpec) || probe('pref', oldSpec)) return ConsPos.Post;
+  return ConsPos.Base;
+}
+
+/// The backward walk, for every Indic script but Sinhala. `positionAt`
+/// reports a consonant's font-resolved position; with no font every
+/// consonant reads Base and the walk degenerates to the last consonant,
+/// which is what the codepoint-only entry point wants.
+function _baseSearchLast(cps, start, end, limit, positionAt) {
+  if (end <= start) return -1;
+  let base = end;
+  let seenBelow = false;
+  let i = end;
+  do {
+    i--;
+    const cat = classifyIsc(cps[i]);
+    if (isIndicBaseCandidate(cat)) {
+      const pos = positionAt(i);
+      // A consonant with neither a below-base nor a post-base form ends
+      // the walk. A post-base form only ends it once a below-base form
+      // has already been seen, because post-base forms have to follow
+      // below-base ones — a post-base consonant sitting above a
+      // below-base one is out of order and cannot be the base.
+      if (pos !== ConsPos.Below && (pos !== ConsPos.Post || seenBelow)) {
+        base = i;
+        break;
+      }
+      if (pos === ConsPos.Below) seenBelow = true;
+      // Not a candidate, but remember it: if the walk reaches the first
+      // consonant without finding one, that consonant is the base.
+      base = i;
+    } else if (start < i && cat === Isc.ZWJ && classifyIsc(cps[i - 1]) === Isc.Halant) {
+      break;
+    }
+  } while (i > limit);
+  return base === end ? -1 : base;
+}
+
+function _baseSearchSinhala(cps, start, end, limit, hasReph) {
+  if (end <= start) return -1;
+  let base = hasReph ? start : limit;
+  for (let i = limit; i < end; i++) {
+    if (!isIndicBaseCandidate(classifyIsc(cps[i]))) continue;
+    if (limit < i && classifyIsc(cps[i - 1]) === Isc.ZWJ) break;
+    base = i;
+  }
+  return base >= end ? -1 : base;
+}
+
+/**
+ * Resolve a syllable's base consonant and its reph.
+ *
+ * Returns `{ base, hasReph, rephLimit }`. `base` is an absolute index in
+ * `cps` (-1 when the syllable holds no consonant); `rephLimit` is the
+ * first index the base search is allowed to reach, which is past the
+ * reph and any joiners following it.
+ *
+ * `ctx` carries the font: `positionAt(i)` (a `ConsPos`), `gidAt(i)`,
+ * `rphfProbe(gids)` and `hasRphf`. Pass none and the answer is the
+ * codepoint-only one — the last consonant, with a leading Ra + Halant
+ * read as a reph.
+ */
+export function analyzeIndicSyllable(cps, start, end, ctx = null) {
+  const script = indicScriptOf(cps[start]);
+  const sinhala = script === 'sinh';
+  const rephMode = ctx && ctx.rephMode !== undefined ? ctx.rephMode : rephModeForScript(script);
+  const positionAt = (ctx && ctx.positionAt) || (() => ConsPos.Base);
+  const hasRphf = ctx ? !!ctx.hasRphf : true;
+
+  let limit = start;
+  let hasReph = false;
+  // A reph needs a consonant to sit on, so the syllable has to hold at
+  // least three codepoints: Ra, Halant and something to carry it.
+  if (
+    hasRphf &&
+    start + 3 <= end &&
+    classifyIsc(cps[start]) === Isc.Ra &&
+    classifyIsc(cps[start + 1]) === Isc.Halant &&
+    rephMode !== RephMode.LogRepha
+  ) {
+    const thirdCat = classifyIsc(cps[start + 2]);
+    const spellingOk =
+      rephMode === RephMode.Explicit ? thirdCat === Isc.ZWJ : !_isJoinerCat(thirdCat);
+    // The font decides, not the codepoints: a font with an `rphf` whose
+    // lookups do not cover this pair never wanted the reorder, and a
+    // pair the font does not glyph as a reph must keep its order.
+    let fontSaysReph = true;
+    if (spellingOk && ctx && ctx.rphfProbe && ctx.gidAt) {
+      const g0 = ctx.gidAt(start),
+        g1 = ctx.gidAt(start + 1);
+      fontSaysReph =
+        rephMode === RephMode.Explicit
+          ? ctx.rphfProbe([g0, g1, ctx.gidAt(start + 2)])
+          : ctx.rphfProbe([g0, g1]);
+    }
+    if (spellingOk && fontSaysReph) {
+      hasReph = true;
+      limit = start + 2;
+      while (limit < end && _isJoinerCat(classifyIsc(cps[limit]))) limit++;
+    }
+  }
+
+  let base = sinhala
+    ? _baseSearchSinhala(cps, start, end, limit, hasReph)
+    : _baseSearchLast(cps, start, end, limit, positionAt);
+  if (hasReph && !sinhala && base < 0) base = start;
+
+  // An unforced reph with no other consonant to sit on is not a reph:
+  // the Ra is the syllable's only base and keeps its place.
+  if (hasReph && base === start && limit - base <= 2) hasReph = false;
+
+  return { base, hasReph, rephLimit: limit };
+}
+
 /// Pick the "base" consonant index inside [start, end). Returns -1
 /// when the syllable has no consonant (vowel-only or pure modifier).
 ///
-/// Default rule (most Indic scripts): the LAST consonant of the
-/// syllable. Reph (Ra + Halant at start) doesn't count as the
-/// base — it'll be moved out as the reph mark.
+/// The codepoint-only entry point: no font, so every consonant reads as
+/// a base candidate and the backward walk stops at the last one. Callers
+/// that hold the font should use `analyzeIndicSyllable` instead — see
+/// the note above on why the answer depends on it.
 export function pickBaseConsonant(cps, start, end) {
-  // Detect reph: initial Ra + Halant.
-  let scan = start;
-  let hasReph = false;
-  if (scan + 1 < end &&
-      classifyIsc(cps[scan]) === Isc.Ra &&
-      classifyIsc(cps[scan + 1]) === Isc.Halant) {
-    hasReph = true;
-    scan += 2;  // skip the reph
-  }
-  // Find the LAST consonant in scan..end (in a C + halant + C chain
-  // the final consonant IS the base).
-  let last = -1;
-  for (let k = scan; k < end; k++) {
-    const c = classifyIsc(cps[k]);
-    if (c === Isc.Consonant || c === Isc.Ra || c === Isc.ConsonantDead) {
-      last = k;
-    }
-  }
-  return last;
+  return analyzeIndicSyllable(cps, start, end, null).base;
 }
 
 /// Detect whether a syllable starts with reph (Ra + Halant).
 export function hasInitialReph(cps, start, end) {
-  return start + 1 < end &&
-         classifyIsc(cps[start]) === Isc.Ra &&
-         classifyIsc(cps[start + 1]) === Isc.Halant;
+  return (
+    start + 1 < end &&
+    classifyIsc(cps[start]) === Isc.Ra &&
+    classifyIsc(cps[start + 1]) === Isc.Halant
+  );
 }
 
 // ---------------------------------------------------------------------
 // Per-syllable reordering.
-//
-// Indic scripts written in OpenType need two reorders done by the
-// shaper before GSUB runs:
-//   1. Reph: when the syllable starts with `Ra + Halant`, those two
-//      glyphs become a "reph" mark that visually sits at the end of
-//      the syllable (or right after a final matra in some scripts).
-//   2. Pre-base matra: a vowel sign whose IPC = Left visually renders
-//      BEFORE the base consonant even though it appears AFTER in
-//      memory. We move it to the position immediately before the base.
-// ---------------------------------------------------------------------
 
-/// Reorder a single Indic syllable into the visual order the GSUB
-/// pipeline expects. Returns the new logical order as an array of
-/// indices into the original [start, end) range.
-///
 /// `cps` is the codepoint array; the indices in the return array are
 /// absolute (between start and end), suitable for use as a permutation
 /// over the gid stream.
@@ -220,8 +446,6 @@ export function reorderSyllable(cps, start, end) {
   for (let i = start; i < end; i++) order.push(i);
   if (end - start <= 1) return order;
 
-  // Step 1: pre-base matra reorder. Find any pre-base vowel sign
-  // (IPC = Left) and move it to JUST BEFORE the base consonant.
   const baseIdx = pickBaseConsonant(cps, start, end);
   if (baseIdx >= 0) {
     // Walk `order` finding the first pre-base-matra after the base
@@ -250,9 +474,6 @@ export function reorderSyllable(cps, start, end) {
   // Step 2: reph. If the syllable starts with Ra + Halant, those two
   // indices move to the end of the order (after the final matra).
   if (hasInitialReph(cps, start, end)) {
-    // The reph occupies the first TWO positions of `order` (since
-    // they were leading the original cluster and pre-matra reorder
-    // only affects indices AFTER the base).
     if (order.length >= 2 && order[0] === start && order[1] === start + 1) {
       const reph = order.splice(0, 2);
       order.push(...reph);
@@ -276,26 +497,26 @@ export function reorderIndicStream(cps) {
   return order;
 }
 
-/// Variant of reorderSyllable that takes an explicit "had initial
-/// reph" flag and the number of glyphs that constitute the reph.
-/// Used AFTER pre-reorder GSUB features (rphf) have run — they may
-/// have collapsed (ra, halant) → (reph) into a single glyph, in
-/// which case the original `hasInitialReph` detector (based on the
-/// post-rphf cp stream) wouldn't fire.
-///
-/// `cps`/`start`/`end` describe the CURRENT (post-feature) state of
-/// the syllable. `hadReph` is the snapshot from BEFORE feature
-/// application. `rephLen` is the number of leading glyphs that
-/// represent the reph: 2 when rphf didn't fire (ra+halant intact),
-/// 1 when rphf fired (single collapsed glyph). Callers compute
-/// rephLen by tracking how many glyphs were consumed.
-export function reorderSyllableExplicitReph(cps, start, end, hadReph, rephLen) {
+/// `explicitBase`, when >= 0, is the base the caller already resolved
+/// against the font. Recomputing it here from the post-feature
+/// codepoints cannot reach the same answer: the substitutions have
+/// already collapsed the consonants the base search reads, and a
+/// multiple substitution's tail carries no codepoint at all.
+export function reorderSyllableExplicitReph(
+  cps,
+  start,
+  end,
+  hadReph,
+  rephLen,
+  explicitBase = -1,
+  matraBeforeBase = false,
+) {
   const order = [];
   for (let i = start; i < end; i++) order.push(i);
   if (end - start <= 1) return order;
 
   // Pre-base matra step (same as reorderSyllable).
-  const baseIdx = pickBaseConsonant(cps, start, end);
+  const baseIdx = explicitBase >= 0 ? explicitBase : pickBaseConsonant(cps, start, end);
   if (baseIdx >= 0) {
     let preMatraOrderIdx = -1;
     for (let k = 0; k < order.length; k++) {
@@ -312,19 +533,32 @@ export function reorderSyllableExplicitReph(cps, start, end, hadReph, rephLen) {
       const preMatraAbsIdx = order[preMatraOrderIdx];
       order.splice(preMatraOrderIdx, 1);
       const baseOrderIdx = order.indexOf(baseIdx);
-      order.splice(baseOrderIdx, 0, preMatraAbsIdx);
+      // OpenType final reordering: the matra stands "after last standalone halant glyph, after initial matra position and before
+      // the main consonant", and its initial position is the start of the syllable, behind a reph. A half form is no standalone
+      // halant, so it leaves the matra in front of the whole conjunct. Malayalam and Tamil have no half forms (those glyphs are
+      // chillus and explicit viramas): their matra goes right before the base. (HarfBuzz final_reordering_syllable_indic.)
+      let at = baseOrderIdx;
+      if (!matraBeforeBase) {
+        at = Math.min(rephLen, baseOrderIdx);
+        for (let k = baseOrderIdx - 1; k >= rephLen; k--) {
+          if (classifyIsc(cps[order[k]]) === Isc.Halant) {
+            at = k + 1;
+            break;
+          }
+        }
+      }
+      order.splice(at, 0, preMatraAbsIdx);
     }
   }
 
   // Move the leading `rephLen` glyphs to the end if hadReph.
   if (hadReph && order.length >= rephLen) {
-    // The reph glyphs occupy the FIRST `rephLen` indices in original
-    // syllable order. After pre-matra reorder, they should still be at
-    // positions 0..rephLen-1 since pre-matra only moves indices AFTER
-    // the base (and reph sits before the base).
     let prefixOk = true;
     for (let k = 0; k < rephLen; k++) {
-      if (order[k] !== start + k) { prefixOk = false; break; }
+      if (order[k] !== start + k) {
+        prefixOk = false;
+        break;
+      }
     }
     if (prefixOk) {
       const reph = order.splice(0, rephLen);

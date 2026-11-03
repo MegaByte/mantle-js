@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // maskTypeSmoke.mjs — verifies SVG <mask mask-type="alpha"> vs
 // the default mask-type="luminance" produces distinct bundle flags.
 //
@@ -12,15 +15,18 @@ globalThis.DOMParser = DP;
 import { importSvg } from '../../src/svg/importer.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL', msg); failures++; };
-const ok   = (msg) => console.log('ok', msg);
+const fail = (msg) => {
+  console.error('FAIL', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok', msg);
 
-const META_STRIDE  = 48;    // floats per shape
-const META_FLAGS   = 27;    // float offset of flagsShape (texel 6.w)
-const META_ISOLATE = 34;    // float offset of isolation  (texel 8.z)
+const META_STRIDE = 48; // floats per shape
+const META_FLAGS = 27; // float offset of flagsShape (texel 6.w)
+const META_ISOLATE = 34; // float offset of isolation  (texel 8.z)
 
 const FLAG_MASK_BEGIN = 1 << 8;
-const FLAG_MASK_END   = 1 << 9;
+const FLAG_MASK_END = 1 << 9;
 
 function metaFloatsOf(bundle) {
   // bundle.meta is a 32-byte header + per-shape 48-float records.
@@ -102,15 +108,36 @@ function findMaskBeginRow(bundle) {
 {
   const bA = await importSvg(buildSvg('alpha'), {});
   const bL = await importSvg(buildSvg('luminance'), {});
-  const fA = metaFloatsOf(bA), fL = metaFloatsOf(bL);
+  const fA = metaFloatsOf(bA),
+    fL = metaFloatsOf(bL);
   let differs = false;
   for (let i = 0; i < Math.min(bA.numShapes, bL.numShapes); i++) {
     const ia = fA[i * META_STRIDE + META_ISOLATE];
     const il = fL[i * META_STRIDE + META_ISOLATE];
-    if (ia !== il) { differs = true; break; }
+    if (ia !== il) {
+      differs = true;
+      break;
+    }
   }
   if (!differs) fail('T5 alpha vs luminance bundles do NOT differ on isolation byte');
   else ok('T5 alpha vs luminance produce distinct bundle flags');
+}
+
+for (const [style, attr, expected] of [
+  ['', 'style="mask-type:alpha"', 0],
+  ['<style>#m1 {mask-type:alpha!important}</style>', 'mask-type="luminance"', 0],
+  ['<style>#m1 {mask-type:luminance!important}</style>', 'style="mask-type:alpha!important"', 0],
+  ['', 'style="--k:alpha!important;mask-type:var(--k)"', 0],
+  ['', 'style="mask-type:initial"', 1],
+]) {
+  const text = buildSvg(null)
+    .replace('<defs>', style + '<defs>')
+    .replace('<mask id="m1"', '<mask id="m1" ' + attr);
+  const b = await importSvg(text),
+    row = findMaskBeginRow(b);
+  if (row >= 0 && metaFloatsOf(b)[row * META_STRIDE + META_ISOLATE] === expected)
+    ok('computed mask-type cascade');
+  else fail(`computed mask-type ${attr}`);
 }
 
 if (failures > 0) {

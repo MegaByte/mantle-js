@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // font/scripts/hangul.js — opt-in registration for Hangul jamo
 // positional-form substitution (ljmo / vjmo / tjmo).
 //
@@ -11,12 +14,14 @@
 
 import { isHangulJamo, classifyHangulJamo } from './hangulJamo.js';
 import { registerHangulShaping as _register } from '../shaperRegistry.js';
+import { registerOtScriptTags } from '../otScriptTags.js';
 
 let _registered = false;
 
 export function registerHangulShaping() {
   if (_registered) return;
   _registered = true;
+  registerOtScriptTags();
   _register({ isHangulJamo, classifyHangulJamo });
 }
 

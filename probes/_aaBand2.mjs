@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // _aaBand2 — LB unified curve band (kind 12) scored against an 8x box-downsampled
 // Slug/AAC reference (the _aaAccuracy method).
 //
@@ -8,29 +11,63 @@
 //   quad star        — quads with alternating sharp convex/reflex quad-quad corners
 //                      (bisector partition + chained union/intersection)
 import { readFileSync } from 'fs';
-import http from 'http'; import path from 'path'; import { fileURLToPath } from 'url'; import puppeteer from 'puppeteer';
+import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { launchBrowser } from '../test/_launch.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const N = 192, SS = 8;
-const wrap = (d, n) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n} ${n}" width="${n}" height="${n}"><path fill="#000000" d="${d}"/></svg>`;
-function quadRing(n) { const c = n / 2, r = n * 0.36, K = 8;
-  const P = (i) => { const a = (i / K) * 2 * Math.PI; return [c + r * Math.cos(a), c + r * Math.sin(a)]; };
+const N = 192,
+  SS = 8;
+const wrap = (d, n) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n} ${n}" width="${n}" height="${n}"><path fill="#000000" d="${d}"/></svg>`;
+function quadRing(n) {
+  const c = n / 2,
+    r = n * 0.36,
+    K = 8;
+  const P = (i) => {
+    const a = (i / K) * 2 * Math.PI;
+    return [c + r * Math.cos(a), c + r * Math.sin(a)];
+  };
   let d = `M ${P(0)[0].toFixed(4)} ${P(0)[1].toFixed(4)} `;
-  for (let i = 0; i < K; i++) { const A = P(i), B = P(i + 1);
-    const mx = (A[0] + B[0]) / 2 + (B[1] - A[1]) * 0.35, my = (A[1] + B[1]) / 2 - (B[0] - A[0]) * 0.35;
-    d += `Q ${mx.toFixed(4)} ${my.toFixed(4)} ${B[0].toFixed(4)} ${B[1].toFixed(4)} `; }
-  return d + 'Z'; }
+  for (let i = 0; i < K; i++) {
+    const A = P(i),
+      B = P(i + 1);
+    const mx = (A[0] + B[0]) / 2 + (B[1] - A[1]) * 0.35,
+      my = (A[1] + B[1]) / 2 - (B[0] - A[0]) * 0.35;
+    d += `Q ${mx.toFixed(4)} ${my.toFixed(4)} ${B[0].toFixed(4)} ${B[1].toFixed(4)} `;
+  }
+  return d + 'Z';
+}
 // Bulged square: quads on top/bottom, straight lines on the sides → four quad-line corners.
-function quadLineBox(n) { const a = 0.18 * n, b = 0.82 * n, bulge = 0.14 * n, m = n / 2;
-  return `M ${a} ${a} Q ${m} ${a - bulge} ${b} ${a} L ${b} ${b} Q ${m} ${b + bulge} ${a} ${b} Z`; }
+function quadLineBox(n) {
+  const a = 0.18 * n,
+    b = 0.82 * n,
+    bulge = 0.14 * n,
+    m = n / 2;
+  return `M ${a} ${a} Q ${m} ${a - bulge} ${b} ${a} L ${b} ${b} Q ${m} ${b + bulge} ${a} ${b} Z`;
+}
 // Star of quads: sharp convex tips and reflex valleys, every joint quad-quad.
-function quadStar(n) { const c = n / 2, R = n * 0.42, r = n * 0.19, K = 5; let pts = [];
-  for (let i = 0; i < 2 * K; i++) { const a = -Math.PI / 2 + i * Math.PI / K, rad = (i % 2 ? r : R);
-    pts.push([c + rad * Math.cos(a), c + rad * Math.sin(a)]); }
+function quadStar(n) {
+  const c = n / 2,
+    R = n * 0.42,
+    r = n * 0.19,
+    K = 5;
+  let pts = [];
+  for (let i = 0; i < 2 * K; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI) / K,
+      rad = i % 2 ? r : R;
+    pts.push([c + rad * Math.cos(a), c + rad * Math.sin(a)]);
+  }
   let d = `M ${pts[0][0].toFixed(4)} ${pts[0][1].toFixed(4)} `;
-  for (let i = 0; i < 2 * K; i++) { const A = pts[i], B = pts[(i + 1) % (2 * K)];
-    const mx = (A[0] + B[0]) / 2 + (B[1] - A[1]) * 0.12, my = (A[1] + B[1]) / 2 - (B[0] - A[0]) * 0.12;
-    d += `Q ${mx.toFixed(4)} ${my.toFixed(4)} ${B[0].toFixed(4)} ${B[1].toFixed(4)} `; }
-  return d + 'Z'; }
+  for (let i = 0; i < 2 * K; i++) {
+    const A = pts[i],
+      B = pts[(i + 1) % (2 * K)];
+    const mx = (A[0] + B[0]) / 2 + (B[1] - A[1]) * 0.12,
+      my = (A[1] + B[1]) / 2 - (B[0] - A[0]) * 0.12;
+    d += `Q ${mx.toFixed(4)} ${my.toFixed(4)} ${B[0].toFixed(4)} ${B[1].toFixed(4)} `;
+  }
+  return d + 'Z';
+}
 const SHAPES = { 'ring (quad)': quadRing, 'quad-line box': quadLineBox, 'quad star': quadStar };
 const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="${N * SS}" height="${N * SS}"></canvas><script type="module">
 window.__MANTLE_DEBUG__=true;
@@ -75,16 +112,35 @@ window.__run = async (shapes) => {
 };
 window.__ready=true;</script></body></html>`;
 const shapes = Object.entries(SHAPES).map(([k, f]) => [k, wrap(f(N), N), wrap(f(N * SS), N * SS)]);
-const server = http.createServer((q, res) => { try { if (q.url === '/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(HTML); return; } const pp = decodeURIComponent(q.url.split('?')[0]); res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' }); res.end(readFileSync(path.join(ROOT, pp))); } catch { if (!res.headersSent) res.writeHead(404); res.end(); } });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
-const br = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
-const pg = await br.newPage(); pg.on('pageerror', e => console.error(' [err]', e.message));
+const server = http.createServer((q, res) => {
+  try {
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
+    const pp = decodeURIComponent(q.url.split('?')[0]);
+    res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, pp)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
+const pg = await br.newPage();
+pg.on('pageerror', (e) => console.error(' [err]', e.message));
 await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
 await pg.waitForFunction(() => window.__ready === true, { timeout: 120000 });
 const rows = await pg.evaluate((s) => window.__run(s), shapes);
-await br.close(); server.close();
+await br.close();
+server.close();
 console.log('shape           | slug self-chk | LB: mean/max/bad | routed');
 for (const R of rows) {
-  console.log(`${R.name.padEnd(15)} | ${R.slug.mean.toFixed(3).padStart(6)} bad ${String(R.slug.nBad).padStart(4)} | ${R.lb.mean.toFixed(3).padStart(6)} max ${String(R.lb.max).padStart(3)} bad ${String(R.lb.nBad).padStart(4)} | ${R.lbRouted}`);
-  if (R.lb.worst && R.lb.worst.length) console.log(`   worst (x,y,d,got,ref): ${R.lb.worst.map(w=>w.join(',')).join('  ')}`);
+  console.log(
+    `${R.name.padEnd(15)} | ${R.slug.mean.toFixed(3).padStart(6)} bad ${String(R.slug.nBad).padStart(4)} | ${R.lb.mean.toFixed(3).padStart(6)} max ${String(R.lb.max).padStart(3)} bad ${String(R.lb.nBad).padStart(4)} | ${R.lbRouted}`,
+  );
+  if (R.lb.worst && R.lb.worst.length)
+    console.log(`   worst (x,y,d,got,ref): ${R.lb.worst.map((w) => w.join(',')).join('  ')}`);
 }

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Font fallback chains. Verifies:
 //   - Codepoints missing from primary get resolved via fallback.
 //   - Each slot retains the FONT that supplied its glyph.
@@ -10,13 +13,21 @@ import { MantleFontAsset } from '../../src/font/fontAsset.js';
 import { buildStyled } from '../../src/font/textRun.js';
 import { defaultStyle } from '../../src/font/markupParser.js';
 
-const arial  = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')));
-const gothic = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/AppleGothic.ttf')));
-arial.getMetrics(0x41); gothic.getMetrics(0x41);
+const arial = new MantleFontAsset(
+  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')),
+);
+const gothic = new MantleFontAsset(
+  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/AppleGothic.ttf')),
+);
+arial.getMetrics(0x41);
+gothic.getMetrics(0x41);
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 const build = async (text, primary, layout) =>
   await buildStyled([{ text, style: defaultStyle() }], primary, layout || {});
@@ -33,7 +44,7 @@ const build = async (text, primary, layout) =>
   else {
     // Width = 3 × Arial's .notdef advance — should be UNIFORM.
     // Save for comparison with T2.
-    ok(`T1 no fallback → 3 .notdef boxes (w=${(b.globalBBox[2]).toFixed(3)})`);
+    ok(`T1 no fallback → 3 .notdef boxes (w=${b.globalBBox[2].toFixed(3)})`);
   }
 }
 
@@ -49,8 +60,10 @@ const build = async (text, primary, layout) =>
     // Arial's .notdef is taller-than-wide.
     const wA = noFb.globalBBox[2];
     const wG = wFb.globalBBox[2];
-    if (Math.abs(wA - wG) < 1e-3) fail(`T2 fallback didn't change geometry (w=${wA.toFixed(3)} both)`);
-    else ok(`T2 fallback resolves Hangul: w ${wA.toFixed(3)} (.notdef) → ${wG.toFixed(3)} (Gothic)`);
+    if (Math.abs(wA - wG) < 1e-3)
+      fail(`T2 fallback didn't change geometry (w=${wA.toFixed(3)} both)`);
+    else
+      ok(`T2 fallback resolves Hangul: w ${wA.toFixed(3)} (.notdef) → ${wG.toFixed(3)} (Gothic)`);
   }
 }
 
@@ -72,7 +85,8 @@ const build = async (text, primary, layout) =>
   const b = await build('a', arial, { fallbacks: [gothic] });
   const wA = a.globalBBox[2];
   const wB = b.globalBBox[2];
-  if (Math.abs(wA - wB) > 1e-4) fail(`T4 'a' width differs with fallback: ${wA.toFixed(4)} vs ${wB.toFixed(4)}`);
+  if (Math.abs(wA - wB) > 1e-4)
+    fail(`T4 'a' width differs with fallback: ${wA.toFixed(4)} vs ${wB.toFixed(4)}`);
   else ok(`T4 fallback untouched when primary has glyph (w=${wA.toFixed(4)})`);
 }
 
@@ -91,7 +105,8 @@ const build = async (text, primary, layout) =>
   const a = await build('가', arial, { fallbacks: [] });
   const b = await build('가', arial, { fallbacks: null });
   // Both fall back to Arial's .notdef → 1 shape each.
-  if (a.numShapes !== 1 || b.numShapes !== 1) fail(`T6 expected 1 .notdef shape, got ${a.numShapes}/${b.numShapes}`);
+  if (a.numShapes !== 1 || b.numShapes !== 1)
+    fail(`T6 expected 1 .notdef shape, got ${a.numShapes}/${b.numShapes}`);
   else ok(`T6 empty/null fallbacks behave like no fallback (.notdef shown)`);
 }
 

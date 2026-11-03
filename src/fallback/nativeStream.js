@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // nativeStream.js — streaming geometry updates for the no-WebGL native scene.
 //
 // The WebGL streaming fast path (updateBundleGeometry) rewrites GPU buffers,
@@ -15,7 +18,7 @@ import { segsToPathD } from '../svg/segment.js';
 
 function clamp01(v, fallback = 0) {
   const n = Number(v);
-  return Number.isFinite(n) ? (n < 0 ? 0 : (n > 1 ? 1 : n)) : fallback;
+  return Number.isFinite(n) ? (n < 0 ? 0 : n > 1 ? 1 : n) : fallback;
 }
 
 function rgbaCss(c) {
@@ -43,19 +46,35 @@ export function updateNativeBundleGeometry(bundle, perShapeSegs, opts = {}) {
   const n = bundle.numShapes | 0;
   if (!Array.isArray(perShapeSegs) || perShapeSegs.length !== n)
     return { ok: false, reason: 'perShapeSegs length must equal bundle.numShapes' };
+  for (let i = 0; i < n; i++) {
+    if (!Array.isArray(perShapeSegs[i]))
+      return { ok: false, reason: 'perShapeSegs[' + i + '] is not a segment array' };
+  }
 
   // Reused per-bundle arrays — no per-frame array allocation.
   let ds = bundle.__streamPathD;
-  if (!ds || ds.length !== n) { ds = new Array(n); defineHidden(bundle, '__streamPathD', ds); }
+  if (!ds || ds.length !== n) {
+    ds = new Array(n);
+    defineHidden(bundle, '__streamPathD', ds);
+  }
   for (let i = 0; i < n; i++) {
     const segs = perShapeSegs[i];
     let d = '';
-    if (Array.isArray(segs)) { try { d = segsToPathD(segs) || ''; } catch { d = ''; } }
+    if (Array.isArray(segs)) {
+      try {
+        d = segsToPathD(segs) || '';
+      } catch {
+        d = '';
+      }
+    }
     ds[i] = d;
   }
   if (opts.fills) {
     let fs = bundle.__streamFills;
-    if (!fs || fs.length !== n) { fs = new Array(n); defineHidden(bundle, '__streamFills', fs); }
+    if (!fs || fs.length !== n) {
+      fs = new Array(n);
+      defineHidden(bundle, '__streamFills', fs);
+    }
     for (let i = 0; i < n; i++) fs[i] = rgbaCss(opts.fills[i]);
   }
   // Generation bump — the native scene skips re-applying a slot whose stream
@@ -65,6 +84,18 @@ export function updateNativeBundleGeometry(bundle, perShapeSegs, opts = {}) {
 }
 
 function defineHidden(obj, key, value) {
-  try { Object.defineProperty(obj, key, { value, configurable: true, enumerable: false, writable: true }); }
-  catch { try { obj[key] = value; } catch { /* frozen bundle — ignore */ } }
+  try {
+    Object.defineProperty(obj, key, {
+      value,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+    });
+  } catch {
+    try {
+      obj[key] = value;
+    } catch {
+      /* frozen bundle — ignore */
+    }
+  }
 }

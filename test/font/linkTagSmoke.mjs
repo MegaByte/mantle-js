@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // linkTagSmoke.mjs — <link=id> tag.
 //
 // <link> propagates an opaque id through Style.linkId on every span
@@ -8,8 +11,11 @@
 import { parseMarkup, defaultStyle } from '../../src/font/markupParser.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // ---- T1: <link=id> sets linkId on inner span ----
 {
@@ -24,7 +30,7 @@ const ok   = (msg) => console.log('ok ' + msg);
   const spans = parseMarkup('a<link=foo>b</link>c', defaultStyle());
   if (spans.length !== 3) fail(`T2 span count ${spans.length}`);
   if (spans[0].style.linkId !== null) fail(`T2 outer-left linkId ${spans[0].style.linkId}`);
-  if (spans[1].style.linkId !== 'foo')  fail(`T2 inner linkId ${spans[1].style.linkId}`);
+  if (spans[1].style.linkId !== 'foo') fail(`T2 inner linkId ${spans[1].style.linkId}`);
   if (spans[2].style.linkId !== null) fail(`T2 outer-right linkId ${spans[2].style.linkId}`);
   ok(`T2 link scope contains only inner span`);
 }
@@ -51,7 +57,7 @@ const ok   = (msg) => console.log('ok ' + msg);
 {
   const spans = parseMarkup('<link=x><b><color=red>X</color></b></link>', defaultStyle());
   if (spans[0].style.linkId !== 'x') fail(`T5 linkId ${spans[0].style.linkId}`);
-  if (!spans[0].style.bold)          fail('T5 bold');
+  if (!spans[0].style.bold) fail('T5 bold');
   if (spans[0].style.color[0] !== 1) fail('T5 color.r');
   ok(`T5 link composes with bold + color`);
 }

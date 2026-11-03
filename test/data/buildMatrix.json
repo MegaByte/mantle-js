@@ -1,0 +1,766 @@
+{
+ "note": "min+gzip -9 bytes from scripts/measureBuildMatrix.mjs (esbuild, browser, ESM, single file). held = modules kept alive only by sideEffects/registration; regenerate with --write. Thresholds are in test/buildMatrixSmoke.mjs.",
+ "esbuild": "0.28.2",
+ "rows": {
+  "svg": {
+   "gz": 153477,
+   "ideal": 153477,
+   "modules": 84,
+   "held": 0,
+   "heldModules": []
+  },
+  "renderer": {
+   "gz": 274343,
+   "ideal": 274343,
+   "modules": 128,
+   "held": 0,
+   "heldModules": []
+  },
+  "svg+renderer": {
+   "gz": 398399,
+   "ideal": 398399,
+   "modules": 175,
+   "held": 0,
+   "heldModules": []
+  },
+  "hitTest": {
+   "gz": 23289,
+   "ideal": 23289,
+   "modules": 21,
+   "held": 0,
+   "heldModules": []
+  },
+  "bundle (introspection)": {
+   "gz": 1098,
+   "ideal": 1098,
+   "modules": 4,
+   "held": 0,
+   "heldModules": []
+  },
+  "native": {
+   "gz": 66696,
+   "ideal": 66696,
+   "modules": 42,
+   "held": 0,
+   "heldModules": []
+  },
+  "native+svg": {
+   "gz": 201108,
+   "ideal": 201108,
+   "modules": 109,
+   "held": 0,
+   "heldModules": []
+  },
+  "native+svg+text": {
+   "gz": 266646,
+   "ideal": 257873,
+   "modules": 156,
+   "held": 10,
+   "heldModules": [
+    "src/fallback/nativeTextHook.js",
+    "src/font/textRun.js",
+    "src/font/unicode/trie.js",
+    "src/font/unicode/tables/caseData.js",
+    "src/font/unicode/case.js",
+    "src/font/markupParser.js",
+    "src/font/textSvgInOt.js",
+    "src/font/textSections.js",
+    "src/fallback/nativeTextBundle.js",
+    "src/fallback/nativeText.js"
+   ]
+  },
+  "text (latin)": {
+   "gz": 88852,
+   "ideal": 88852,
+   "modules": 66,
+   "held": 0,
+   "heldModules": []
+  },
+  "svg+renderer+text": {
+   "gz": 455082,
+   "ideal": 455082,
+   "modules": 217,
+   "held": 0,
+   "heldModules": []
+  },
+  "text+arabic": {
+   "gz": 97595,
+   "ideal": 97595,
+   "modules": 72,
+   "held": 0,
+   "heldModules": []
+  },
+  "text+indic": {
+   "gz": 100167,
+   "ideal": 100167,
+   "modules": 73,
+   "held": 0,
+   "heldModules": []
+  },
+  "text+all scripts": {
+   "gz": 104186,
+   "ideal": 104186,
+   "modules": 85,
+   "held": 0,
+   "heldModules": []
+  },
+  "text+bidi": {
+   "gz": 94416,
+   "ideal": 94416,
+   "modules": 69,
+   "held": 0,
+   "heldModules": []
+  },
+  "text+color (COLR/bitmap)": {
+   "gz": 94855,
+   "ideal": 94855,
+   "modules": 74,
+   "held": 0,
+   "heldModules": []
+  },
+  "text+color+svgInOt": {
+   "gz": 217705,
+   "ideal": 217705,
+   "modules": 136,
+   "held": 0,
+   "heldModules": []
+  },
+  "text+variations": {
+   "gz": 92324,
+   "ideal": 92324,
+   "modules": 75,
+   "held": 0,
+   "heldModules": []
+  },
+  "text+woff2": {
+   "gz": 93252,
+   "ideal": 93252,
+   "modules": 69,
+   "held": 0,
+   "heldModules": []
+  },
+  "text+unicode tables": {
+   "gz": 101263,
+   "ideal": 101263,
+   "modules": 75,
+   "held": 0,
+   "heldModules": []
+  },
+  "renderer+frameExport": {
+   "gz": 329199,
+   "ideal": 329199,
+   "modules": 149,
+   "held": 0,
+   "heldModules": []
+  },
+  "renderer+cpatch": {
+   "gz": 331218,
+   "ideal": 331218,
+   "modules": 131,
+   "held": 0,
+   "heldModules": []
+  },
+  "renderer+filterGraph": {
+   "gz": 259619,
+   "ideal": 259619,
+   "modules": 118,
+   "held": 1,
+   "heldModules": [
+    "src/filterGraph/index.js"
+   ]
+  },
+  "renderer+colr paints": {
+   "gz": 262862,
+   "ideal": 259611,
+   "modules": 121,
+   "held": 7,
+   "heldModules": [
+    "src/bundle/layout.js",
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/core/gradientStops.js",
+    "src/filterGraph/colr/colrPaintShared.js",
+    "src/filterGraph/porterDuff.js",
+    "src/filterGraph/colr/paints.js"
+   ]
+  },
+  "animation": {
+   "gz": 54551,
+   "ideal": 54551,
+   "modules": 45,
+   "held": 0,
+   "heldModules": []
+  },
+  "scene": {
+   "gz": 156258,
+   "ideal": 156258,
+   "modules": 86,
+   "held": 1,
+   "heldModules": [
+    "src/scene/index.js"
+   ]
+  },
+  "fallback (auto chooser)": {
+   "gz": 541031,
+   "ideal": 541031,
+   "modules": 215,
+   "held": 0,
+   "heldModules": []
+  },
+  "root importSvg": {
+   "gz": 353300,
+   "ideal": 153936,
+   "modules": 234,
+   "held": 162,
+   "heldModules": [
+    "src/core/diagnostics.js",
+    "src/primitives/seg.js",
+    "src/bundle/layout.js",
+    "src/geom/lbCubicMath.js",
+    "src/geom/shapeRecognize.js",
+    "src/geom/lbContour.js",
+    "src/geom/cpatchImplicit.js",
+    "src/svg/textures.js",
+    "src/core/decompress.js",
+    "src/core/nodeBuiltin.js",
+    "src/core/gzip.js",
+    "src/bundle/strokeReach.js",
+    "src/geom/cpatchGraph.js",
+    "src/renderer/contextResources.js",
+    "src/renderer/workerConfig.js",
+    "src/core/metaBin.js",
+    "src/renderer/cpatchTrace.js",
+    "src/renderer/tableLayout.js",
+    "src/renderer/lbPack.js",
+    "src/renderer/shapeResolve.js",
+    "src/core/glEpoch.js",
+    "src/filterGraph/colorSpace.js",
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/affine2d.js",
+    "src/renderer/engineLedger.js",
+    "src/renderer/featureRegistry.js",
+    "src/core/argCheck.js",
+    "src/renderer/fillMeshOwner.js",
+    "src/renderer/workerFlags.js",
+    "src/core/spriteRange.js",
+    "src/core/morphImageFrames.js",
+    "src/core/morphFilters.js",
+    "src/core/morphDrawOrder.js",
+    "src/core/morphGroups.js",
+    "src/core/morphBindings.js",
+    "src/core/morphPaintResources.js",
+    "src/core/morphGradients.js",
+    "src/core/morphCore.js",
+    "src/filterGraph/blurKernel.js",
+    "src/filterGraph/convolveKernel.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/geom/dstRect.js",
+    "src/fallback/curveToPathD.js",
+    "src/fallback/recolorColor.js",
+    "src/fallback/scopeCss.js",
+    "src/fallback/numFormat.js",
+    "src/fallback/nativeSvgFallback.js",
+    "src/animation/overrideKeys.js",
+    "src/fallback/nativeOverrideTable.js",
+    "src/fallback/nativeGradientPaint.js",
+    "src/fallback/nativeMorph.js",
+    "src/font/svgInOtHook.js",
+    "src/font/textSvgInOt.js",
+    "src/font/unicode/trie.js",
+    "src/font/bidiConst.js",
+    "src/font/bidiRegistry.js",
+    "src/font/shaperRegistry.js",
+    "src/fallback/nativeTextBundle.js",
+    "src/svg/bundleFinalize.js",
+    "src/svg/importWalk.js",
+    "src/svg/importText.js",
+    "src/svg/importWalkShapes.js",
+    "src/filterGraph/primitives/blur.js",
+    "src/filterGraph/primitives/morphology.js",
+    "src/filterGraph/primitives/offset.js",
+    "src/filterGraph/primitives/colorMatrix.js",
+    "src/filterGraph/primitives/lighting.js",
+    "src/filterGraph/primitives/displacementMap.js",
+    "src/filterGraph/primitives/turbulence.js",
+    "src/filterGraph/turbulenceLattice.js",
+    "src/filterGraph/primitives/tile.js",
+    "src/filterGraph/primitives/blend.js",
+    "src/filterGraph/primitives/composite.js",
+    "src/filterGraph/porterDuff.js",
+    "src/filterGraph/primitives/merge.js",
+    "src/filterGraph/primitives/componentTransfer.js",
+    "src/filterGraph/primitives/flood.js",
+    "src/filterGraph/primitives/convolve.js",
+    "src/filterGraph/primitives/image.js",
+    "src/fallback/frameExport.js",
+    "src/renderer/features/frameExport.js",
+    "src/renderer/cpatchBuild.js",
+    "src/renderer/cpatchSimpleArea.js",
+    "src/renderer/cpatchConvert.js",
+    "src/renderer/cpatchPack.js",
+    "src/renderer/cpatchCov.js",
+    "src/renderer/cpatchWorkerPool.js",
+    "src/core/polynomialMorph.js",
+    "src/renderer/cpatchMorphBuild.js",
+    "src/renderer/cpatchMorphCert.js",
+    "src/renderer/cpatchMorphBlend.js",
+    "src/renderer/features/cpatch.js",
+    "src/filterGraph/colr/paints.js",
+    "src/filterGraph/colr/colrPaintShared.js",
+    "src/font/unicode/tables/joiningType.js",
+    "src/font/scripts/arabicJoining.js",
+    "src/font/scripts/arabic.js",
+    "src/font/unicode/tables/script.js",
+    "src/font/unicode/scripts.js",
+    "src/font/otScriptTags.js",
+    "src/font/scripts/hangulJamo.js",
+    "src/font/scripts/hangul.js",
+    "src/font/unicode/tables/shaperIsc.js",
+    "src/font/unicode/tables/shaperIpc.js",
+    "src/font/scripts/indicShaper.js",
+    "src/font/scripts/indic.js",
+    "src/font/math/mathStretchy.js",
+    "src/font/scripts/math.js",
+    "src/font/scripts/thaiShaper.js",
+    "src/font/scripts/thai.js",
+    "src/font/scripts/useShaper.js",
+    "src/font/scripts/use.js",
+    "src/font/scripts/index.js",
+    "src/font/itemVariationStore.js",
+    "src/font/deltaSetIndexMap.js",
+    "src/font/color/colrReader.js",
+    "src/font/color/colrPaintToGraph.js",
+    "src/font/color/sbixReader.js",
+    "src/font/color/cbdtReader.js",
+    "src/font/color/ebdtReader.js",
+    "src/font/color/svgInOtReader.js",
+    "src/font/readerRegistry.js",
+    "src/font/color/index.js",
+    "src/font/color/svgInOtImport.js",
+    "src/font/nameReader.js",
+    "src/font/variations/avarReader.js",
+    "src/font/variations/fvarReader.js",
+    "src/font/variations/gvarReader.js",
+    "src/font/variations/hvarReader.js",
+    "src/font/variations/vvarReader.js",
+    "src/font/variations/mvarReader.js",
+    "src/font/variations/statReader.js",
+    "src/font/variations/index.js",
+    "src/font/otCommon.js",
+    "src/font/math/mathReader.js",
+    "src/font/math/index.js",
+    "src/font/formats/charStringInterp.js",
+    "src/font/glyphReader.js",
+    "src/font/formats/cffReader.js",
+    "src/font/formats/cff.js",
+    "src/font/formats/woff2Reader.js",
+    "src/font/formats/woff2GlyfTransform.js",
+    "src/font/formats/woff2.js",
+    "src/font/typography/legacyKernReader.js",
+    "src/font/typography/legacyKern.js",
+    "src/font/typography/vorgReader.js",
+    "src/font/typography/vertical.js",
+    "src/font/typography/baseReader.js",
+    "src/font/typography/baseline.js",
+    "src/font/typography/jstfReader.js",
+    "src/font/typography/justification.js",
+    "src/font/typography/aatInsertion.js",
+    "src/font/typography/aatLookup.js",
+    "src/font/typography/aatMorx.js",
+    "src/font/typography/aatMort.js",
+    "src/font/typography/aatKerx.js",
+    "src/font/typography/featReader.js",
+    "src/font/typography/aat.js",
+    "src/font/bidi.js",
+    "src/font/unicode/tables/bidiClass.js",
+    "src/font/typography/bidi.js",
+    "src/font/index.js"
+   ]
+  },
+  "root (everything)": {
+   "gz": 801599,
+   "ideal": 720545,
+   "modules": 355,
+   "held": 120,
+   "heldModules": [
+    "src/geom/cpatchImplicit.js",
+    "src/svg/textures.js",
+    "src/geom/cpatchGraph.js",
+    "src/renderer/morphCull.js",
+    "src/renderer/occlusionWorkerPool.js",
+    "src/renderer/occupancyWorkerPool.js",
+    "src/renderer/cpatchTrace.js",
+    "src/renderer/tableLayout.js",
+    "src/renderer/bundle.js",
+    "src/renderer/lbFastResolve.js",
+    "src/renderer/lbFastMesh.js",
+    "src/renderer/cdt.js",
+    "src/filterGraph/colorSpace.js",
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/filterGraph.js",
+    "src/filterGraph/bbox.js",
+    "src/renderer/staticCache.js",
+    "src/renderer/glState.js",
+    "src/renderer/engineLedger.js",
+    "src/renderer/featureRegistry.js",
+    "src/renderer/aacCubicPreparation.js",
+    "src/renderer/shapeStats.js",
+    "src/renderer/lbShapePolicy.js",
+    "src/renderer/coverKernelPolicy.js",
+    "src/renderer/primBuild.js",
+    "src/renderer/lbBuildCore.js",
+    "src/renderer/loopBlinnMorph.js",
+    "src/renderer/lbMorphCore.js",
+    "src/renderer/workerFlags.js",
+    "src/renderer/lbWorkerPool.js",
+    "src/bundle/featureSet.js",
+    "src/filterGraph/feImagePlace.js",
+    "src/core/morphFilters.js",
+    "src/core/morphGroups.js",
+    "src/core/morphCore.js",
+    "src/core/morphArcBounds.js",
+    "src/filterGraph/blurKernel.js",
+    "src/renderer/filterFrame.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/renderer/fillOmit.js",
+    "src/renderer/sceneUnion.js",
+    "src/renderer/unifiedFillVerts.js",
+    "src/renderer/viewCull.js",
+    "src/renderer/opaquePrepass.js",
+    "src/renderer/frameLoop.js",
+    "src/geom/dstRect.js",
+    "src/renderer/incrementalStroke.js",
+    "src/renderer/renderer.js",
+    "src/renderer/streamGeometry.js",
+    "src/fallback/curveToPathD.js",
+    "src/fallback/scopeCss.js",
+    "src/fallback/numFormat.js",
+    "src/fallback/nativeSvgFallback.js",
+    "src/animation/overrideKeys.js",
+    "src/fallback/nativeMorph.js",
+    "src/font/unicode/tables/caseData.js",
+    "src/font/unicode/case.js",
+    "src/font/markupParser.js",
+    "src/font/bidiRegistry.js",
+    "src/font/scriptNeeds.js",
+    "src/font/unicodeRegistry.js",
+    "src/font/unicode/tables/bidiMaps.js",
+    "src/font/unicode/mirror.js",
+    "src/font/unicode/tables/emojiProps.js",
+    "src/font/unicode/emoji.js",
+    "src/font/unicode/tables/verticalOrientation.js",
+    "src/font/unicode/tables/lineBreak.js",
+    "src/font/unicode/tables/eastAsianWidth.js",
+    "src/font/unicode/tables/extPict.js",
+    "src/font/unicode/lineBreak.js",
+    "src/font/textLayout.js",
+    "src/font/textColrEmit.js",
+    "src/font/textRun.js",
+    "src/font/textSections.js",
+    "src/fallback/nativeTextBundle.js",
+    "src/animation/overrides.js",
+    "src/animation/colorPalette.js",
+    "src/textBundle.js",
+    "src/animation/shapeMorph.js",
+    "src/svg/bundleFinalize.js",
+    "src/svg/importWalk.js",
+    "src/svg/importText.js",
+    "src/svg/strokeStrip.js",
+    "src/filterGraph/primitives/blur.js",
+    "src/filterGraph/primitives/morphology.js",
+    "src/filterGraph/primitives/offset.js",
+    "src/filterGraph/primitives/colorMatrix.js",
+    "src/filterGraph/primitives/lighting.js",
+    "src/filterGraph/primitives/displacementMap.js",
+    "src/filterGraph/primitives/turbulence.js",
+    "src/filterGraph/turbulenceLattice.js",
+    "src/filterGraph/primitives/tile.js",
+    "src/filterGraph/primitives/blend.js",
+    "src/filterGraph/primitives/composite.js",
+    "src/filterGraph/porterDuff.js",
+    "src/filterGraph/primitives/merge.js",
+    "src/filterGraph/primitives/componentTransfer.js",
+    "src/filterGraph/primitives/flood.js",
+    "src/filterGraph/primitives/convolve.js",
+    "src/filterGraph/primitives/image.js",
+    "src/fallback/frameExport.js",
+    "src/renderer/features/frameExport.js",
+    "src/renderer/cpatchBuild.js",
+    "src/renderer/cpatchSimpleArea.js",
+    "src/renderer/cpatchConvert.js",
+    "src/renderer/cpatchPack.js",
+    "src/renderer/cpatchCov.js",
+    "src/renderer/cpatchWorkerPool.js",
+    "src/core/polynomialMorph.js",
+    "src/renderer/cpatchMorphBuild.js",
+    "src/renderer/cpatchMorphCert.js",
+    "src/renderer/cpatchMorphBlend.js",
+    "src/renderer/features/cpatch.js",
+    "src/filterGraph/colr/paints.js",
+    "src/filterGraph/colr/colrPaintShared.js",
+    "src/animation/colorMatrix.js",
+    "src/animation/filterParams.js",
+    "src/scene/scene.js",
+    "src/hitTest/paintSample.js",
+    "src/font/formats/woff2GlyfTransform.js"
+   ]
+  },
+  "svg+renderer+filter blur": {
+   "gz": 387319,
+   "ideal": 385139,
+   "modules": 166,
+   "held": 4,
+   "heldModules": [
+    "src/filterGraph/colorSpace.js",
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/filterGraph/primitives/blur.js"
+   ]
+  },
+  "svg+renderer+filter colorMatrix": {
+   "gz": 386930,
+   "ideal": 385139,
+   "modules": 166,
+   "held": 4,
+   "heldModules": [
+    "src/filterGraph/colorSpace.js",
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/filterGraph/primitives/colorMatrix.js"
+   ]
+  },
+  "svg+renderer+filter blend": {
+   "gz": 386825,
+   "ideal": 385139,
+   "modules": 166,
+   "held": 4,
+   "heldModules": [
+    "src/filterGraph/colorSpace.js",
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/filterGraph/primitives/blend.js"
+   ]
+  },
+  "svg+renderer+filter convolve": {
+   "gz": 387040,
+   "ideal": 385139,
+   "modules": 166,
+   "held": 4,
+   "heldModules": [
+    "src/filterGraph/colorSpace.js",
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/filterGraph/primitives/convolve.js"
+   ]
+  },
+  "svg+renderer+filter displacementMap": {
+   "gz": 386842,
+   "ideal": 385139,
+   "modules": 166,
+   "held": 4,
+   "heldModules": [
+    "src/filterGraph/colorSpace.js",
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/filterGraph/primitives/displacementMap.js"
+   ]
+  },
+  "svg+renderer+filter componentTransfer": {
+   "gz": 386800,
+   "ideal": 385139,
+   "modules": 166,
+   "held": 4,
+   "heldModules": [
+    "src/filterGraph/colorSpace.js",
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/filterGraph/primitives/componentTransfer.js"
+   ]
+  },
+  "svg+renderer+filter composite": {
+   "gz": 386985,
+   "ideal": 385139,
+   "modules": 167,
+   "held": 5,
+   "heldModules": [
+    "src/filterGraph/colorSpace.js",
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/filterGraph/porterDuff.js",
+    "src/filterGraph/primitives/composite.js"
+   ]
+  },
+  "svg+renderer+filter merge": {
+   "gz": 387099,
+   "ideal": 385139,
+   "modules": 167,
+   "held": 5,
+   "heldModules": [
+    "src/filterGraph/colorSpace.js",
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/filterGraph/porterDuff.js",
+    "src/filterGraph/primitives/merge.js"
+   ]
+  },
+  "svg+renderer+filter lighting": {
+   "gz": 387072,
+   "ideal": 385139,
+   "modules": 166,
+   "held": 4,
+   "heldModules": [
+    "src/filterGraph/colorSpace.js",
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/filterGraph/primitives/lighting.js"
+   ]
+  },
+  "svg+renderer+filter image": {
+   "gz": 385853,
+   "ideal": 385139,
+   "modules": 166,
+   "held": 3,
+   "heldModules": [
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/filterGraph/primitives/image.js"
+   ]
+  },
+  "svg+renderer+filter flood": {
+   "gz": 385252,
+   "ideal": 385139,
+   "modules": 166,
+   "held": 2,
+   "heldModules": [
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/primitives/flood.js"
+   ]
+  },
+  "svg+renderer+filter tile": {
+   "gz": 386540,
+   "ideal": 385139,
+   "modules": 166,
+   "held": 3,
+   "heldModules": [
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/filterGraph/primitives/tile.js"
+   ]
+  },
+  "svg+renderer+filter morphology": {
+   "gz": 387165,
+   "ideal": 385139,
+   "modules": 166,
+   "held": 4,
+   "heldModules": [
+    "src/filterGraph/colorSpace.js",
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/filterGraph/primitives/morphology.js"
+   ]
+  },
+  "svg+renderer+filter turbulence": {
+   "gz": 386740,
+   "ideal": 385139,
+   "modules": 167,
+   "held": 4,
+   "heldModules": [
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/filterGraph/turbulenceLattice.js",
+    "src/filterGraph/primitives/turbulence.js"
+   ]
+  },
+  "svg+renderer+filter offset": {
+   "gz": 386712,
+   "ideal": 385139,
+   "modules": 166,
+   "held": 3,
+   "heldModules": [
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/filterGraph/primitives/offset.js"
+   ]
+  },
+  "svg+renderer+all filters": {
+   "gz": 392145,
+   "ideal": 385139,
+   "modules": 182,
+   "held": 20,
+   "heldModules": [
+    "src/filterGraph/colorSpace.js",
+    "src/filterGraph/dispatchRegistry.js",
+    "src/filterGraph/svgFilterShared.js",
+    "src/filterGraph/primitives/blur.js",
+    "src/filterGraph/primitives/morphology.js",
+    "src/filterGraph/primitives/offset.js",
+    "src/filterGraph/primitives/colorMatrix.js",
+    "src/filterGraph/primitives/lighting.js",
+    "src/filterGraph/primitives/displacementMap.js",
+    "src/filterGraph/turbulenceLattice.js",
+    "src/filterGraph/primitives/turbulence.js",
+    "src/filterGraph/primitives/tile.js",
+    "src/filterGraph/primitives/blend.js",
+    "src/filterGraph/porterDuff.js",
+    "src/filterGraph/primitives/composite.js",
+    "src/filterGraph/primitives/merge.js",
+    "src/filterGraph/primitives/componentTransfer.js",
+    "src/filterGraph/primitives/flood.js",
+    "src/filterGraph/primitives/convolve.js",
+    "src/filterGraph/primitives/image.js"
+   ]
+  }
+ },
+ "bundlers": {
+  "svg": {
+   "rollup": 154216,
+   "webpack": 142251,
+   "vite": 176382
+  },
+  "renderer": {
+   "rollup": 273899,
+   "webpack": 253689,
+   "vite": 311899
+  },
+  "svg+renderer": {
+   "rollup": 398444,
+   "webpack": 370129,
+   "vite": 453585
+  },
+  "hitTest": {
+   "rollup": 23514,
+   "webpack": 22075,
+   "vite": 26670
+  },
+  "bundle (introspection)": {
+   "rollup": 1189,
+   "webpack": 1051,
+   "vite": 1167
+  },
+  "native": {
+   "rollup": 67128,
+   "webpack": 63585,
+   "vite": 75624
+  },
+  "native+svg": {
+   "rollup": 202282,
+   "webpack": 186578,
+   "vite": 230307
+  },
+  "native+svg+text": {
+   "rollup": 268298,
+   "webpack": 248326,
+   "vite": 304024
+  },
+  "text (latin)": {
+   "rollup": 89374,
+   "webpack": 82576,
+   "vite": 100241
+  },
+  "svg+renderer+text": {
+   "rollup": 455654,
+   "webpack": 423732,
+   "vite": 517604
+  }
+ }
+}

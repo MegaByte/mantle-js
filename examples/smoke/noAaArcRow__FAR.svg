@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Arc fills through the BAND-HARD kernel: the noAaStrokeCover grids carry no arcs at all, so this
+     asset is what draws the hard-band arc branch on a GPU. Six closed shapes built from elliptical arc
+     segments only, under an opaque stroke thick enough that preferNoAa takes the fill. Pin the kernel and
+     disable primitive recognition, or these are recognized as circles and never reach the band walk:
+       SVG=examples/smoke/noAaArcRow__FAR.svg N=512 ARMS=bandhard NOSDF=1 node probes/_zzEnginePaint.mjs
+
+     A ZERO HERE IS NOT A PASS. The art sits at y about 1e5 on purpose: a hardCrossArc window of
+     1e-5 * (|cy| + |rx| + |ry|), a width in EM, would span about 2.5 device pixels out here and catch
+     whole rows. The curve buffer does carry those coordinates (max 100040). Measured on the render grid
+     against the exact fill oracle (test/noAaArcRenderReachSmoke.mjs), such an em-width window gets 29
+     pixel centers of this asset wrong at 512 and the kernel's pixel-width window gets 0, but every one of
+     the 29 lies within 0.71 em of the outline, under a 1.5 em opaque stroke half width, so the stroke that
+     legalizes band-hard paints the whole defect over. The cause is the SHAPES: six closed ellipses, each
+     two half turn arcs sharing BOTH endpoints, so a miscounted crossing's run ends at the same shape's
+     other side a few pixels away (longest run 5 px at 512, 12 at 1024) and never leaves the stroke.
+
+     For an asset where the same defect lands in open canvas, see noAaArcRow__GAP.svg. This one
+     stays as the small, regular case: arc fills drawn through band-hard at all. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 99920 200 160">
+  <g fill="#3a6ea5" stroke="#101418" stroke-width="3">
+    <path d="M20 100000 A 30 30 0 1 1 80 100000 A 30 30 0 1 1 20 100000 Z"/>
+    <path d="M100 99980 A 40 24 0 0 1 180 99980 A 40 24 0 0 1 100 99980 Z"/>
+    <path d="M30 100040 A 18 18 0 1 0 66 100040 A 18 18 0 1 0 30 100040 Z"/>
+    <path d="M110 100030 A 26 16 30 1 1 162 100030 A 26 16 30 1 1 110 100030 Z"/>
+    <path d="M35 99950 A 22 12 0 1 1 79 99950 A 22 12 0 1 1 35 99950 Z"/>
+    <path d="M120 99940 A 14 28 60 1 0 148 99940 A 14 28 60 1 0 120 99940 Z"/>
+  </g>
+</svg>

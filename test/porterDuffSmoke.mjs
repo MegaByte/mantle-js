@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Verify the 13-mode Porter-Duff lookup table matches the published
 // Porter & Duff 1984 equations and the OpenType COLRv1 PaintCompositeMode
 // encoding. Re-implements the helper in JS (pure math, 4 lines per mode) and
@@ -11,42 +14,88 @@ import fs from 'node:fs';
 
 // === mirror of the helper in _porterDuffHelpers.glsl ============
 function porterDuff(mode, src, dst) {
-  const as = src[3], ad = dst[3];
+  const as = src[3],
+    ad = dst[3];
   let Fa, Fb;
   switch (mode) {
-    case 0:  Fa = 0;        Fb = 0;        break;  // clear
-    case 1:  Fa = 1;        Fb = 0;        break;  // src
-    case 2:  Fa = 0;        Fb = 1;        break;  // dst
-    case 3:  Fa = 1;        Fb = 1 - as;   break;  // src over
-    case 4:  Fa = 1 - ad;   Fb = 1;        break;  // dst over
-    case 5:  Fa = ad;       Fb = 0;        break;  // src in
-    case 6:  Fa = 0;        Fb = as;       break;  // dst in
-    case 7:  Fa = 1 - ad;   Fb = 0;        break;  // src out
-    case 8:  Fa = 0;        Fb = 1 - as;   break;  // dst out
-    case 9:  Fa = ad;       Fb = 1 - as;   break;  // src atop
-    case 10: Fa = 1 - ad;   Fb = as;       break;  // dst atop
-    case 11: Fa = 1 - ad;   Fb = 1 - as;   break;  // xor
-    default: Fa = 1;        Fb = 1;        break;  // plus (12)
+    case 0:
+      Fa = 0;
+      Fb = 0;
+      break; // clear
+    case 1:
+      Fa = 1;
+      Fb = 0;
+      break; // src
+    case 2:
+      Fa = 0;
+      Fb = 1;
+      break; // dst
+    case 3:
+      Fa = 1;
+      Fb = 1 - as;
+      break; // src over
+    case 4:
+      Fa = 1 - ad;
+      Fb = 1;
+      break; // dst over
+    case 5:
+      Fa = ad;
+      Fb = 0;
+      break; // src in
+    case 6:
+      Fa = 0;
+      Fb = as;
+      break; // dst in
+    case 7:
+      Fa = 1 - ad;
+      Fb = 0;
+      break; // src out
+    case 8:
+      Fa = 0;
+      Fb = 1 - as;
+      break; // dst out
+    case 9:
+      Fa = ad;
+      Fb = 1 - as;
+      break; // src atop
+    case 10:
+      Fa = 1 - ad;
+      Fb = as;
+      break; // dst atop
+    case 11:
+      Fa = 1 - ad;
+      Fb = 1 - as;
+      break; // xor
+    default:
+      Fa = 1;
+      Fb = 1;
+      break; // plus (12)
   }
-  let out = [Fa * src[0] + Fb * dst[0],
-             Fa * src[1] + Fb * dst[1],
-             Fa * src[2] + Fb * dst[2],
-             Fa * src[3] + Fb * dst[3]];
-  if (mode === 12) out = out.map(v => Math.min(1, Math.max(0, v)));
+  let out = [
+    Fa * src[0] + Fb * dst[0],
+    Fa * src[1] + Fb * dst[1],
+    Fa * src[2] + Fb * dst[2],
+    Fa * src[3] + Fb * dst[3],
+  ];
+  if (mode === 12) out = out.map((v) => Math.min(1, Math.max(0, v)));
   return out;
 }
 
 let failures = 0;
 function eq(a, b, label, eps = 1e-6) {
   const ok = a.every((v, i) => Math.abs(v - b[i]) < eps);
-  if (!ok) { console.error('FAIL:', label, 'expected', b, 'got', a); failures++; }
-  else     { console.log('ok:', label); }
+  if (!ok) {
+    console.error('FAIL:', label, 'expected', b, 'got', a);
+    failures++;
+  } else {
+    console.log('ok:', label);
+  }
 }
 
 // Test colors are PREMULTIPLIED (filter-graph invariant).
-const R    = [1, 0, 0, 1];   // opaque red
-const B    = [0, 0, 1, 1];   // opaque blue
-const RHALf= [0.5, 0, 0, 0.5];  // half-alpha red, premultiplied
+const R = [1, 0, 0, 1]; // opaque red
+const B = [0, 0, 1, 1]; // opaque blue
+const RHALf = [0.5, 0, 0, 0.5]; // half-alpha red, premultiplied
 const ZERO = [0, 0, 0, 0];
 
 // Mode 0 (Clear): always transparent black, regardless of inputs.
@@ -91,12 +140,16 @@ eq(porterDuff(8, ZERO, B), B, 'DstOut: 0, B → B');
 // Mode 9 (SrcAtop): src·ad + dst·(1-as). Opaque src ⇒ all src.
 eq(porterDuff(9, R, B), R, 'SrcAtop: R, B(α=1) → R');
 // Half-α src atop opaque dst → mixed.
-eq(porterDuff(9, RHALf, B),
-   [0.5 + 0 * 0.5,   // r: 0.5·1 + 0·0.5
-    0,                // g
-    0 + 1 * 0.5,      // b: 0·1 + 1·0.5
-    0.5 + 1 * 0.5],   // a: 0.5·1 + 1·0.5 = 1.0
-   'SrcAtop: R(α=0.5), B(α=1) → (0.5, 0, 0.5, 1)');
+eq(
+  porterDuff(9, RHALf, B),
+  [
+    0.5 + 0 * 0.5, // r: 0.5·1 + 0·0.5
+    0, // g
+    0 + 1 * 0.5, // b: 0·1 + 1·0.5
+    0.5 + 1 * 0.5,
+  ], // a: 0.5·1 + 1·0.5 = 1.0
+  'SrcAtop: R(α=0.5), B(α=1) → (0.5, 0, 0.5, 1)',
+);
 
 // Mode 10 (DstAtop): src·(1-ad) + dst·as. Symmetric to SrcAtop.
 eq(porterDuff(10, R, B), B, 'DstAtop: R(α=1), B → B');
@@ -134,8 +187,21 @@ function colrModeToBlend(m) {
   return 0;
 }
 const colrTable = {
-  13: 2,  14: 3,  15: 4,  16: 5,  17: 6,  18: 7,  19: 8,  20: 9,
-  21: 10, 22: 11, 23: 1,  24: 12, 25: 13, 26: 14, 27: 15,
+  13: 2,
+  14: 3,
+  15: 4,
+  16: 5,
+  17: 6,
+  18: 7,
+  19: 8,
+  20: 9,
+  21: 10,
+  22: 11,
+  23: 1,
+  24: 12,
+  25: 13,
+  26: 14,
+  27: 15,
 };
 for (const [colr, blend] of Object.entries(colrTable)) {
   const got = colrModeToBlend(+colr);
@@ -146,35 +212,78 @@ for (const [colr, blend] of Object.entries(colrTable)) {
 }
 if (!failures) console.log('ok: COLR blend-mode table (13..27 → 1..15)');
 
+// === the SHIPPED weights: src/filterGraph/porterDuff.js sends each mode's Fa, Fb to the shaders as
+// coefficients (Fa = k0 + k1*ad, Fb = k2 + k3*as;). Every mode, over a spread of alphas,
+// must composite exactly as the mirror above.
+{
+  const { porterDuffCoefficients, feCompositeMode } =
+    await import('../src/filterGraph/porterDuff.js');
+  const viaK = (mode, src, dst) => {
+    const k = porterDuffCoefficients(mode);
+    const Fa = k[0] + k[1] * dst[3],
+      Fb = k[2] + k[3] * src[3];
+    let o = [0, 1, 2, 3].map((i) => Fa * src[i] + Fb * dst[i]);
+    if (mode === 12) o = o.map((v) => Math.min(1, Math.max(0, v)));
+    return o;
+  };
+  let bad = 0;
+  for (let mode = 0; mode <= 12; mode++) {
+    for (const sa of [0, 0.25, 0.5, 1])
+      for (const da of [0, 0.4, 1]) {
+        const src = [0.1 * sa, 0.2 * sa, 0.9 * sa, sa],
+          dst = [0.7 * da, 0.3 * da, 0.05 * da, da];
+        const a = porterDuff(mode, src, dst),
+          b = viaK(mode, src, dst);
+        if (a.some((v, i) => v !== b[i])) {
+          bad++;
+          if (bad < 4) console.error(`FAIL: mode ${mode} src ${src} dst ${dst}: ${b} vs ${a}`);
+        }
+      }
+  }
+  if (bad) failures += bad;
+  else console.log('ok: the shipped coefficient weights reproduce all 13 modes exactly');
+  if ([0, 1, 2, 3, 4].map(feCompositeMode).join() !== '3,5,7,9,11') {
+    failures++;
+    console.error('FAIL: feCompositeMode');
+  } else console.log('ok: feCompositeMode maps operators 0..4 to 3,5,7,9,11');
+}
+
 // Spot-check: ensure the shader source actually contains the markers
 // (a typo'd marker would silently un-include the helper).
 function readShader(name) {
-  return fs.readFileSync(
-    new URL(`../src/shaders/${name}`, import.meta.url), 'utf8');
+  return fs.readFileSync(new URL(`../src/shaders/${name}`, import.meta.url), 'utf8');
 }
 const pcSrc = readShader('paintComposite.frag.glsl');
 if (!pcSrc.includes('@@PORTER_DUFF_HELPERS@@')) {
   console.error('FAIL: paintComposite missing @@PORTER_DUFF_HELPERS@@ marker');
   failures++;
-} else { console.log('ok: paintComposite has PD-helpers marker'); }
+} else {
+  console.log('ok: paintComposite has PD-helpers marker');
+}
 if (!pcSrc.includes('@@BLEND_HELPERS@@')) {
   console.error('FAIL: paintComposite missing @@BLEND_HELPERS@@ marker');
   failures++;
-} else { console.log('ok: paintComposite has blend-helpers marker'); }
+} else {
+  console.log('ok: paintComposite has blend-helpers marker');
+}
 
 const feCSrc = readShader('feComposite.frag.glsl');
 if (!feCSrc.includes('@@PORTER_DUFF_HELPERS@@')) {
   console.error('FAIL: feComposite missing @@PORTER_DUFF_HELPERS@@ marker');
   failures++;
-} else { console.log('ok: feComposite has PD-helpers marker'); }
+} else {
+  console.log('ok: feComposite has PD-helpers marker');
+}
 
 const feBSrc = readShader('feBlend.frag.glsl');
 if (!feBSrc.includes('@@BLEND_HELPERS@@')) {
   console.error('FAIL: feBlend missing @@BLEND_HELPERS@@ marker');
   failures++;
-} else { console.log('ok: feBlend has blend-helpers marker'); }
+} else {
+  console.log('ok: feBlend has blend-helpers marker');
+}
 
 console.log('---');
 if (failures) console.error(`PORTER-DUFF FAIL (${failures})`);
-else          console.log('PORTER-DUFF PASS');
+else console.log('PORTER-DUFF PASS');
 process.exit(failures ? 1 : 0);

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // font/typography/legacyKern — opt-in registration for the pre-GPOS
 // 'kern' table (used by some older Latin fonts that lack GPOS pair
 // adjustments). Falls back to GPOS when both are present.

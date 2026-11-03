@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Verifies the single-kind filter path honors world scale: filter σ
 // folds the per-draw worldMatrix scale into pxPerEm, so a 50%-scaled
 // draw produces a 50%-sized blur (rather than keeping its full
@@ -6,12 +9,23 @@
 // Renders a bundle with a feGaussianBlur and a known σ at scale 1.0 vs
 // 0.5 vs 0.25. The blur extent (distance from silhouette to where alpha
 // drops below a threshold) should scale with the world matrix.
+//
+// The composable filter-GRAPH path (multi-primitive filters) must do the
+// same: ctx.worldScale (the worldMatrix column norms) folds into each
+// scale-sensitive graph primitive (blur σ, offset, morphology radius,
+// displacement texel step, lighting gradient; a feConvolveMatrix steps
+// its kernel taps in canvas pixels and does not scale). Identity
+// worldMatrix → [1,1] → unchanged. The second fixture's filter is
+// multi-primitive (feGaussianBlur + feMerge) so it routes through the
+// graph path, and its blur extent is measured the same way. Each fixture
+// gets a fresh demo page.
 
 import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { pageTimeoutFor } from './_laneBudget.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -26,16 +40,23 @@ function mime(p) {
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost');
   const p = decodeURIComponent(u.pathname === '/' ? '/mantleDemo.html' : u.pathname);
-  try { res.writeHead(200, { 'content-type': mime(p) }); res.end(readFileSync(path.join(ROOT, p))); }
-  catch { try { res.writeHead(404); res.end(); } catch {} }
+  try {
+    res.writeHead(200, { 'content-type': mime(p) });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    try {
+      res.writeHead(404);
+      res.end();
+    } catch {}
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
-const url  = `http://127.0.0.1:${port}/mantleDemo.html`;
+const url = `http://127.0.0.1:${port}/mantleDemo.html`;
 
-// A small filled square in the centre with a large blur, plus a
+// A small filled square in the center with a large blur, plus a
 // white "background" rect filling the whole viewBox. The background
-// pins the bundle's globalBBox to the viewBox extent so the centre
+// pins the bundle's globalBBox to the viewBox extent so the center
 // rect renders at a known sub-canvas position. Without it, Mantle's
 // globalBBox would be the rect's tight bbox (40,40,20,20) → the rect
 // would end up fitted to fill the entire canvas, defeating the
@@ -45,96 +66,126 @@ const url  = `http://127.0.0.1:${port}/mantleDemo.html`;
 // effect is the same as if there were no background.
 //
 // With the background in place, the bundle bbox is (0,0,100,100) and
-// the small centre rect renders at canvas pixels ~80..120 on a
+// the small center rect renders at canvas pixels ~80..120 on a
 // 200×200 canvas (2× scale). σ=4 viewBox → 8 px → ~24 px halo extent
 // at scale 1.0.
-const SVG = readFileSync(new URL('../examples/smoke/filterWorldScale__SVG.svg', import.meta.url), 'utf8');
+const SVG = readFileSync(
+  new URL('../examples/smoke/filterWorldScale__SVG.svg', import.meta.url),
+  'utf8',
+);
+// Same geometry, but the filter ends in an feMerge, which the single-kind
+// heuristic does NOT reduce, so the filter routes through the composable
+// graph path. A one-node merge passes the blurred silhouette through
+// unchanged.
+const GRAPH_SVG = readFileSync(
+  new URL('../examples/smoke/filterGraphWorldScale__SVG.svg', import.meta.url),
+  'utf8',
+);
 
 let failures = 0;
-const fail = (m) => { failures++; console.error('FAIL', m); };
-const ok   = (m) => console.log('ok', m);
+const fail = (m) => {
+  failures++;
+  console.error('FAIL', m);
+};
+const ok = (m) => console.log('ok', m);
 
-const browser = await puppeteer.launch({
-  headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'],
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
 });
-const page = await browser.newPage();
-await page.setViewport({ width: 200, height: 200 });
-page.on('pageerror', e => console.error('  [page-err]', e.message));
-page.on('console', m => {
-  const t = m.text();
-  if (/error|fail|warn/i.test(t)) console.log('  [console]', t);
-});
-await page.goto(url, { waitUntil: 'load', timeout: 10000 });
-await page.waitForFunction(() => window.__mantleRenderer && window.__mantleGl, { timeout: 10000 });
+// One fixture on a fresh demo page: the blur extent at worldMatrix scale 1, 0.5 and 0.25.
+async function extents(svg) {
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 200, height: 200 });
+    page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+    page.on('console', (m) => {
+      const t = m.text();
+      if (/error|fail|warn/i.test(t)) console.log('  [console]', t);
+    });
+    await page.goto(url, { waitUntil: 'load', timeout: pageTimeoutFor() });
+    await page.waitForFunction(() => window.__mantleRenderer && window.__mantleGl, {
+      timeout: pageTimeoutFor(),
+      polling: 100,
+    });
 
-const results = await page.evaluate(async (svg) => {
-  const { importSvg, createBundle } =
-    await import('/src/index.js');
-  const gl = window.__mantleGl;
-  const renderer = window.__mantleRenderer;
-  const cnv = document.getElementById('glcanvas');
+    return await page.evaluate(async (svg) => {
+      const { importSvg, createBundle } = await import('/src/index.js');
+      const gl = window.__mantleGl;
+      const renderer = window.__mantleRenderer;
+      const cnv = document.getElementById('glcanvas');
 
-  // Resize the demo canvas to a small known size. mantleDemo.html
-  // ships an 800×800 default; we want a small canvas so our extent
-  // measurements have meaningful precision per pixel.
-  cnv.width = 200;
-  cnv.height = 200;
-  renderer.setViewport(200, 200);
+      // Resize the demo canvas to a small known size. mantleDemo.html
+      // ships an 800×800 default; we want a small canvas so our extent
+      // measurements have meaningful precision per pixel.
+      cnv.width = 200;
+      cnv.height = 200;
+      renderer.setViewport(200, 200);
 
-  const bundle = createBundle(gl, await importSvg(svg));
+      const bundle = createBundle(gl, await importSvg(svg));
 
-
-  function readPixels() {
-    const w = cnv.width, h = cnv.height;
-    const px = new Uint8Array(w * h * 4);
-    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
-    return { w, h, px };
-  }
-
-  // Blur extent = how far from the centre the row sample stays
-  // "noticeably dark" (i.e. alpha contribution from the blurred fill).
-  // We walk the centre row from x=cw/2 outward and stop at the first
-  // pixel whose RGB is brighter than 240 (close-to-white background).
-  function blurExtentX(snap) {
-    const { w, h, px } = snap;
-    const cy = h >> 1;
-    const cx = w >> 1;
-    let r = 0;
-    for (let dx = 0; dx < cx; dx++) {
-      const i = ((cy * w) + (cx + dx)) * 4;
-      if (px[i] > 240 && px[i+1] > 240 && px[i+2] > 240) {
-        r = dx;
-        break;
+      function readPixels() {
+        const w = cnv.width,
+          h = cnv.height;
+        const px = new Uint8Array(w * h * 4);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        return { w, h, px };
       }
-    }
-    return r;
+
+      // Blur extent = how far from the center the row sample stays
+      // "noticeably dark" (i.e. alpha contribution from the blurred fill).
+      // We walk the center row from x=cw/2 outward and stop at the first
+      // pixel whose RGB is brighter than 240 (close-to-white background).
+      function blurExtentX(snap) {
+        const { w, h, px } = snap;
+        const cy = h >> 1;
+        const cx = w >> 1;
+        let r = 0;
+        for (let dx = 0; dx < cx; dx++) {
+          const i = (cy * w + (cx + dx)) * 4;
+          if (px[i] > 240 && px[i + 1] > 240 && px[i + 2] > 240) {
+            r = dx;
+            break;
+          }
+        }
+        return r;
+      }
+
+      // Native scale: render bundle as drawBundle (worldMatrix=identity).
+      renderer.beginFrame([1, 1, 1, 1]);
+      renderer.drawBundle(bundle);
+      renderer.endFrame();
+      const extent1x = blurExtentX(readPixels());
+
+      // Half-scale: render via handle.draw with worldMatrix = scale 0.5.
+      // Column-major mat3: [sx 0 0 ; 0 sy 0 ; tx ty 1] flat-array means
+      // [sx, 0, 0,  0, sy, 0,  tx, ty, 1].
+      const h = renderer.createBundleHandle(bundle);
+      renderer.beginFrame([1, 1, 1, 1]);
+      h.draw({ worldMatrix: new Float32Array([0.5, 0, 0, 0, 0.5, 0, 0, 0, 1]) });
+      renderer.endFrame();
+      const extentHalf = blurExtentX(readPixels());
+
+      // Quarter-scale: extra sanity that smaller scale → smaller extent.
+      renderer.beginFrame([1, 1, 1, 1]);
+      h.draw({ worldMatrix: new Float32Array([0.25, 0, 0, 0, 0.25, 0, 0, 0, 1]) });
+      renderer.endFrame();
+      const extentQuarter = blurExtentX(readPixels());
+
+      h.dispose();
+      bundle.dispose();
+      return { extent1x, extentHalf, extentQuarter };
+    }, svg);
+  } finally {
+    await page.close();
   }
+}
 
-  // Native scale: render bundle as drawBundle (worldMatrix=identity).
-  renderer.beginFrame([1, 1, 1, 1]);
-  renderer.drawBundle(bundle);
-  renderer.endFrame();
-  const extent1x = blurExtentX(readPixels());
-
-  // Half-scale: render via handle.draw with worldMatrix = scale 0.5.
-  // Column-major mat3: [sx 0 0 ; 0 sy 0 ; tx ty 1] flat-array means
-  // [sx, 0, 0,  0, sy, 0,  tx, ty, 1].
-  const h = renderer.createBundleHandle(bundle);
-  renderer.beginFrame([1, 1, 1, 1]);
-  h.draw({ worldMatrix: new Float32Array([0.5, 0, 0,  0, 0.5, 0,  0, 0, 1]) });
-  renderer.endFrame();
-  const extentHalf = blurExtentX(readPixels());
-
-  // Quarter-scale: extra sanity that smaller scale → smaller extent.
-  renderer.beginFrame([1, 1, 1, 1]);
-  h.draw({ worldMatrix: new Float32Array([0.25, 0, 0,  0, 0.25, 0,  0, 0, 1]) });
-  renderer.endFrame();
-  const extentQuarter = blurExtentX(readPixels());
-
-  h.dispose();
-  bundle.dispose();
-  return { extent1x, extentHalf, extentQuarter };
-}, SVG);
+const results = await extents(SVG);
+const graph = await extents(GRAPH_SVG);
 
 await browser.close();
 server.close();
@@ -146,7 +197,9 @@ console.log(`blur extent at scale 0.5:  ${results.extentHalf} px`);
 console.log(`blur extent at scale 0.25: ${results.extentQuarter} px`);
 
 if (results.extent1x < 5) {
-  fail(`baseline blur extent at scale 1.0 should be >= ~5 px (got ${results.extent1x}); test fixture not exercising blur`);
+  fail(
+    `baseline blur extent at scale 1.0 should be >= ~5 px (got ${results.extent1x}); test fixture not exercising blur`,
+  );
 }
 
 // Half-scale should halve the extent (within a couple pixels of
@@ -154,10 +207,14 @@ if (results.extent1x < 5) {
 // stayed canvas-relative would give ~22/33 = ~0.67. Tolerance band
 // 0.40-0.60 distinguishes.
 const ratioHalf = results.extentHalf / results.extent1x;
-if (ratioHalf > 0.60) {
-  fail(`half-scale extent ratio is ${ratioHalf.toFixed(2)} — expected ~0.5 (bug repros: σ didn't shrink with worldMatrix)`);
-} else if (ratioHalf < 0.40) {
-  fail(`half-scale extent ratio is ${ratioHalf.toFixed(2)} — too aggressive shrink (over-correcting)`);
+if (ratioHalf > 0.6) {
+  fail(
+    `half-scale extent ratio is ${ratioHalf.toFixed(2)} — expected ~0.5 (bug repros: σ didn't shrink with worldMatrix)`,
+  );
+} else if (ratioHalf < 0.4) {
+  fail(
+    `half-scale extent ratio is ${ratioHalf.toFixed(2)} — too aggressive shrink (over-correcting)`,
+  );
 } else {
   ok(`half-scale extent ratio ${ratioHalf.toFixed(2)} ≈ 0.5 (blur scales with worldMatrix)`);
 }
@@ -175,13 +232,60 @@ if (ratioQuarter > 0.35) {
 
 // And the monotonic check.
 if (results.extentQuarter > results.extentHalf || results.extentHalf > results.extent1x) {
-  fail(`blur extent should be monotonic with scale: 1x ${results.extent1x} >= half ${results.extentHalf} >= quarter ${results.extentQuarter}`);
+  fail(
+    `blur extent should be monotonic with scale: 1x ${results.extent1x} >= half ${results.extentHalf} >= quarter ${results.extentQuarter}`,
+  );
 } else {
   ok('blur extent monotonic with scale');
+}
+
+// ---- The graph path ----
+
+console.log(`graph blur extent at scale 1.0:  ${graph.extent1x} px`);
+console.log(`graph blur extent at scale 0.5:  ${graph.extentHalf} px`);
+console.log(`graph blur extent at scale 0.25: ${graph.extentQuarter} px`);
+
+if (graph.extent1x < 5) {
+  fail(
+    `baseline graph-path blur extent at scale 1.0 should be >= ~5 px (got ${graph.extent1x}); fixture not exercising the graph blur`,
+  );
+}
+const graphRatioHalf = graph.extentHalf / (graph.extent1x || 1);
+if (graphRatioHalf > 0.6) {
+  fail(
+    `half-scale extent ratio is ${graphRatioHalf.toFixed(2)} — expected ~0.5 (graph blur σ didn't fold worldMatrix)`,
+  );
+} else if (graphRatioHalf < 0.4) {
+  fail(
+    `half-scale extent ratio is ${graphRatioHalf.toFixed(2)} — too aggressive shrink (over-correcting)`,
+  );
+} else {
+  ok(
+    `half-scale extent ratio ${graphRatioHalf.toFixed(2)} ≈ 0.5 (graph blur scales with worldMatrix)`,
+  );
+}
+const graphRatioQuarter = graph.extentQuarter / (graph.extent1x || 1);
+if (graphRatioQuarter > 0.35) {
+  fail(
+    `quarter-scale extent ratio is ${graphRatioQuarter.toFixed(2)} — expected ~0.25 (graph blur ignored worldMatrix)`,
+  );
+} else if (graphRatioQuarter < 0.15) {
+  fail(`quarter-scale extent ratio is ${graphRatioQuarter.toFixed(2)} — too aggressive shrink`);
+} else {
+  ok(
+    `quarter-scale extent ratio ${graphRatioQuarter.toFixed(2)} ≈ 0.25 (graph blur scales with worldMatrix)`,
+  );
+}
+if (graph.extentQuarter > graph.extentHalf || graph.extentHalf > graph.extent1x) {
+  fail(
+    `graph blur extent should be monotonic with scale: 1x ${graph.extent1x} >= half ${graph.extentHalf} >= quarter ${graph.extentQuarter}`,
+  );
+} else {
+  ok('graph blur extent monotonic with scale');
 }
 
 if (failures) {
   console.error(`\n${failures} assertions failed`);
   process.exit(1);
 }
-console.log('\nfilterWorldScaleSmoke: PASS');
+console.log('\nfilterWorldScaleSmoke: PASS (single-kind and graph paths)');

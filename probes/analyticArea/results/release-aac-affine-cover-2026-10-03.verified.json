@@ -1,0 +1,272 @@
+{
+  "scope": "Private raw AAC affine cover diagnosis; narrow geometry repair passes, wider tiger/train numerical regressions prevent runtime promotion. Integrity-qualified GPU reports include retained numerical negatives; not release readiness.",
+  "archiveSha256": "f9f085791f81d45330aef3b958f81fbe794cbcd851fca7ca31ed5a471336843a",
+  "members": 5231,
+  "reports": [
+    {
+      "file": "evidence/bound-gpu.json.gz",
+      "source": "bound",
+      "cases": 10
+    },
+    {
+      "file": "evidence/exact-fan-artwork0-gpu.json.gz",
+      "source": "exact-fan",
+      "cases": 2
+    },
+    {
+      "file": "evidence/exact-fan-artwork1-gpu.json.gz",
+      "source": "exact-fan",
+      "cases": 2
+    },
+    {
+      "file": "evidence/exact-fan-artwork2-gpu.json.gz",
+      "source": "exact-fan",
+      "cases": 2
+    },
+    {
+      "file": "evidence/exact-fan-artwork3-gpu.json.gz",
+      "source": "exact-fan",
+      "cases": 2
+    },
+    {
+      "file": "evidence/fan-instanced-map-shear-32-gpu.json",
+      "source": "fan",
+      "cases": 1
+    },
+    {
+      "file": "evidence/fan-instanced-map-shear-512-gpu.json.gz",
+      "source": "fan",
+      "cases": 1
+    },
+    {
+      "file": "evidence/fan-instanced-map-thin-32-gpu.json",
+      "source": "fan",
+      "cases": 1
+    },
+    {
+      "file": "evidence/fan-instanced-map-thin-512-gpu.json.gz",
+      "source": "fan",
+      "cases": 1
+    },
+    {
+      "file": "evidence/fan-instanced0-gpu.json.gz",
+      "source": "fan",
+      "cases": 1
+    },
+    {
+      "file": "evidence/fan-instanced1-gpu.json.gz",
+      "source": "fan",
+      "cases": 1
+    },
+    {
+      "file": "evidence/fan-instanced2-gpu.json",
+      "source": "fan",
+      "cases": 1
+    },
+    {
+      "file": "evidence/fan-instanced3-gpu.json.gz",
+      "source": "fan",
+      "cases": 1
+    },
+    {
+      "file": "evidence/fan-selective-map-part0-gpu.json.gz",
+      "source": "fan",
+      "cases": 4
+    },
+    {
+      "file": "evidence/fan-selective-map-part1-gpu.json.gz",
+      "source": "fan",
+      "cases": 4
+    },
+    {
+      "file": "evidence/fan-selective-map-part2-gpu.json.gz",
+      "source": "fan",
+      "cases": 2
+    },
+    {
+      "file": "evidence/fan-selective-perf-gpu.json.gz",
+      "source": "fan",
+      "cases": 4
+    },
+    {
+      "file": "evidence/fan-selective-wide-part0-gpu.json.gz",
+      "source": "fan",
+      "cases": 4
+    },
+    {
+      "file": "evidence/fan-selective-wide-part1-gpu.json.gz",
+      "source": "fan",
+      "cases": 4
+    },
+    {
+      "file": "evidence/fan-selective-wide-part2-gpu.json.gz",
+      "source": "fan",
+      "cases": 4
+    },
+    {
+      "file": "evidence/fan-selective-wide-part3-gpu.json.gz",
+      "source": "fan",
+      "cases": 4
+    },
+    {
+      "file": "evidence/gate-gpu/09834466d1e4d9d90288.json",
+      "source": "integration",
+      "cases": 1
+    },
+    {
+      "file": "evidence/gate-gpu/230517b979613f872697.json",
+      "source": "integration",
+      "cases": 1
+    },
+    {
+      "file": "evidence/gate-gpu/731e9002e6732c9da489.json",
+      "source": "integration",
+      "cases": 1
+    },
+    {
+      "file": "evidence/gate-gpu/7d6cb36d35242c1d6da8.json",
+      "source": "integration",
+      "cases": 1
+    },
+    {
+      "file": "evidence/gate-gpu/7db17247a9f95d527a29.json",
+      "source": "integration",
+      "cases": 1
+    },
+    {
+      "file": "evidence/gate-gpu/98c1614bc7206428dcd1.json",
+      "source": "integration",
+      "cases": 1
+    },
+    {
+      "file": "evidence/gate-gpu/9b684ab4ad6316ae5648.json",
+      "source": "integration",
+      "cases": 1
+    },
+    {
+      "file": "evidence/gate-gpu/9fb95ab88474fe020c73.json",
+      "source": "integration",
+      "cases": 1
+    },
+    {
+      "file": "evidence/gate-gpu/b85ddda92d8e76197185.json",
+      "source": "integration",
+      "cases": 1
+    },
+    {
+      "file": "evidence/gate-gpu/c900c99d236004a4a773.json",
+      "source": "integration",
+      "cases": 1
+    },
+    {
+      "file": "evidence/gate-gpu/e7aad653eb2d940cfd4e.json",
+      "source": "integration",
+      "cases": 1
+    },
+    {
+      "file": "evidence/gate-gpu/e7bada5a69a2bd24a131.json",
+      "source": "integration",
+      "cases": 1
+    },
+    {
+      "file": "evidence/held-final-part0-gpu.json.gz",
+      "source": "held-final",
+      "cases": 3
+    },
+    {
+      "file": "evidence/held-final-part1-gpu.json.gz",
+      "source": "held-final",
+      "cases": 3
+    },
+    {
+      "file": "evidence/held-final-part2-retry-gpu.json.gz",
+      "source": "held-final",
+      "cases": 3
+    },
+    {
+      "file": "evidence/held-final-part3-retry-gpu.json.gz",
+      "source": "held-final",
+      "cases": 3
+    },
+    {
+      "file": "evidence/held-wide0-gpu.json.gz",
+      "source": "held-final",
+      "cases": 2
+    },
+    {
+      "file": "evidence/held-wide1-gpu.json.gz",
+      "source": "held-final",
+      "cases": 2
+    },
+    {
+      "file": "evidence/held-wide2-gpu.json.gz",
+      "source": "held-final",
+      "cases": 2
+    },
+    {
+      "file": "evidence/held-wide3-gpu.json.gz",
+      "source": "held-final",
+      "cases": 2
+    },
+    {
+      "file": "evidence/integration-artwork0-gpu.json.gz",
+      "source": "integration",
+      "cases": 4
+    },
+    {
+      "file": "evidence/integration-artwork1-gpu.json.gz",
+      "source": "integration",
+      "cases": 4
+    },
+    {
+      "file": "evidence/integration-artwork2-gpu.json.gz",
+      "source": "integration",
+      "cases": 4
+    },
+    {
+      "file": "evidence/integration-artwork3-gpu.json.gz",
+      "source": "integration",
+      "cases": 4
+    },
+    {
+      "file": "evidence/integration-artwork4-gpu.json.gz",
+      "source": "integration",
+      "cases": 4
+    },
+    {
+      "file": "evidence/integration-artwork5-gpu.json.gz",
+      "source": "integration",
+      "cases": 4
+    },
+    {
+      "file": "evidence/integration-artwork6-gpu.json.gz",
+      "source": "integration",
+      "cases": 4
+    },
+    {
+      "file": "evidence/integration-artwork7-gpu.json.gz",
+      "source": "integration",
+      "cases": 4
+    }
+  ],
+  "sourceChecks": 35112,
+  "gpuCases": 120,
+  "completeRenderedPixels": 49514496,
+  "independentMapPixels": 25411,
+  "independentWidePixels": 49861,
+  "actualInstancedCases": 8,
+  "scopedGpuGateCases": 12,
+  "nativeSvgChangedPixels": 133,
+  "nativeSvgWorsening": {
+    "prim_sheet:32": 0,
+    "prim_sheet:512": 0,
+    "tiger:32": 4,
+    "tiger:512": 9,
+    "train_b018:32": 7,
+    "train_b018:512": 8,
+    "treasure:32": 0,
+    "treasure:512": 0
+  },
+  "widerSlowerCells": ["text_cff_12:32", "tiger:32", "train_b018:32"],
+  "runtimePromoted": false
+}

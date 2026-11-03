@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // defaultIgnorableSmoke.mjs — Unicode Default_Ignorable_Code_Point glyphs
 // must render as zero-advance, zero-ink (HarfBuzz parity), never as a
 // `.notdef` tofu box.
@@ -13,19 +16,26 @@ import { MantleFontAsset, buildTextRun } from '../../src/font/index.js';
 import { isDefaultIgnorable } from '../../src/font/defaultIgnorable.js';
 
 const fontPath = ['/System/Library/Fonts/Supplemental/Arial.ttf', process.env.MANTLE_FONT]
-  .filter(Boolean).find((p) => existsSync(p));
-if (!fontPath) { console.log('Skip defaultIgnorable: no Arial'); process.exit(0); }
+  .filter(Boolean)
+  .find((p) => existsSync(p));
+if (!fontPath) {
+  console.log('Skip defaultIgnorable: no Arial');
+  process.exit(0);
+}
 const font = new MantleFontAsset(new Uint8Array(readFileSync(fontPath)));
 
 let failures = 0;
-const fail = (m) => { console.error('FAIL', m); failures++; };
+const fail = (m) => {
+  console.error('FAIL', m);
+  failures++;
+};
 const ok = (m) => console.log('ok', m);
 
 // ---- T1: predicate covers the canonical members + rejects normal text ----
-for (const cp of [0x00AD, 0x200B, 0x200C, 0x200D, 0x2060, 0xFE0F, 0xFEFF, 0xE0100, 0x180B]) {
+for (const cp of [0x00ad, 0x200b, 0x200c, 0x200d, 0x2060, 0xfe0f, 0xfeff, 0xe0100, 0x180b]) {
   if (!isDefaultIgnorable(cp)) fail(`T1 U+${cp.toString(16)} should be default-ignorable`);
 }
-for (const cp of [0x41, 0x20, 0x2E, 0xFE10, 0x1F300]) {
+for (const cp of [0x41, 0x20, 0x2e, 0xfe10, 0x1f300]) {
   if (isDefaultIgnorable(cp)) fail(`T1 U+${cp.toString(16)} should NOT be default-ignorable`);
 }
 if (!failures) ok('T1 default-ignorable predicate membership');

@@ -1,0 +1,663 @@
+--- src/renderer/cpatchBuild.js
++++ src/renderer/cpatchBuild.js
+@@ -36,7 +36,7 @@
+ // asynchronous, so the bundle needs a PENDING state and another engine to draw with until the
+ // conversion lands. That pattern is already here twice: the CPatch morph route waits on
+ // _cpatchMorphPlan === 'pending', and the LB build has awaitLbReady. This wants the same shape.
+-import { curveRangeToContours } from './lbContour.js';
++import { curveRangeToContours, cardinalConicStamp, cardinalConicRegionStamp } from './lbContour.js';
+ import { SEG_LINE, SEG_QUAD, SEG_CUBIC, SEG_RQUAD } from '../primitives/seg.js';
+ import { encodeTraceBake } from './cpatchTrace.js';
+ import { parseMetaBin } from '../core/metaBin.js';
+@@ -497,7 +497,7 @@
+     bundle._cpatchRules = (bundle._cpatchRules || []);
+     bundle._cpatchRules.push((evenOdd ? 'eo' : 'nz') + ':' + cs.length);
+     let m = null;
+-    try { m = packCPatchShape(cs, blockCursor, { ...opts, evenOdd, convCache, traces, cycleCache }); }
++    try { m = packCPatchShape(cs, blockCursor, { ...opts, evenOdd, convCache, traces, cycleCache, wholeEllipse:contours.length===1 && !!cardinalConicStamp(contours[0]), conicRegion:contours.length===1 && !!cardinalConicRegionStamp(contours[0]) }); }
+     catch (e) { m = null; bundle._cpatchBail = 'pack threw: ' + ((e && e.message) || e); }
+     if (!m) {
+       if (!bundle._cpatchBail) {
+@@ -512,6 +512,7 @@
+                   // selector read, so a mesh that forgets to say it is CPatch is reported as LB —
+                   // which is the same misattribution, just in the other direction.
+                   cpatch: true, slug: false, kindMask: m.kindMask,
++                  hasRquad: m.hasRquad, hasConicArea:m.hasConicArea, hasConicClip:m.hasConicClip,
+                   // NO LOOP-BLINN CHAIN FACE, and whether a seam packed its companion: the presence questions the
+                   // variant selector asks (fillPass). A CPatch vertex never reaches an LB chain kernel, and an
+                   // unanswered question keeps the kernel -- which compiled both chain kernels into every CPatch
+--- src/renderer/cpatchMorphBuild.js
++++ src/renderer/cpatchMorphBuild.js
+@@ -30,7 +30,7 @@
+ import { buildCPatchBlend, runCPatchBlend, updateCPatchBlend, disposeCPatchBlend } from './cpatchMorphBlend.js';
+ import { noteExternalGlWrite } from '../core/glEpoch.js';
+ import { convertContour, framePatch } from './cpatchConvert.js';
+-import { curveRangeToContours } from './lbContour.js';
++import { curveRangeToContours, cardinalConicStamp, cardinalConicRegionStamp } from './lbContour.js';
+ import { SEG_LINE, SEG_QUAD, SEG_CUBIC, SEG_RQUAD } from '../primitives/seg.js';
+ 
+ /// Importer segs to the converter's {t, P} form, for BOTH POSES AT ONCE.
+@@ -107,7 +107,11 @@
+     A.push(da.t === 'rquad' ? { t: da.t, P: da.P, w: da.w } : { t: da.t, P: da.P });
+     B.push(db.t === 'rquad' ? { t: db.t, P: db.P, w: db.w } : { t: db.t, P: db.P });
+   }
+-  return A.length >= 2 ? { A, B } : null;
++  const sa=cardinalConicStamp(contourA),sb=cardinalConicStamp(contourB);
++  const wholeEllipse=!!sa && !!sb && sa.quarter===sb.quarter && sa.direction===sb.direction;
++  const ra=cardinalConicRegionStamp(contourA),rb=cardinalConicRegionStamp(contourB);
++  const conicRegion=!!ra && !!rb && ra.quarter===rb.quarter && ra.direction===rb.direction && ra.arcs===rb.arcs && ra.lines===rb.lines;
++  return A.length >= 2 ? { A, B, wholeEllipse, conicRegion } : null;
+ }
+ 
+ const lerpPose = (A, B, t) => A.map((c, i) => ({ t: c.t, cut: c.cut, w: c.w, _bez: c._bez,
+@@ -135,7 +139,7 @@
+     if (!ca || !cb || ca.length !== 1 || cb.length !== 1) continue;
+     const pair = toCurvesPair(ca[0], cb[0]);
+     if (!pair) continue;                               // lengths cannot diverge: dropped in lockstep
+-    out.push({ key: s, A: pair.A, B: pair.B });
++    out.push({ key: s, A: pair.A, B: pair.B, wholeEllipse:pair.wholeEllipse, conicRegion:pair.conicRegion });
+   }
+   return out;
+ }
+@@ -171,7 +175,7 @@
+       for (let k = 0; k < pairs.length; k++) {
+         const r = res[k];
+         if (!r || !r.plan) { why.push(pairs[k].key + ':' + ((r && r.err) || 'no plan')); continue; }
+-        shapes[pairs[k].key] = { A: r.A, B: r.B, plan: r.plan, seg: -1, pack: null, first: 0, plan2: null, planBase: -1 };
++        shapes[pairs[k].key] = { A: r.A, B: r.B, wholeEllipse:pairs[k].wholeEllipse, conicRegion:pairs[k].conicRegion, plan: r.plan, seg: -1, pack: null, first: 0, plan2: null, planBase: -1 };
+         planned++;
+       }
+       if (!planned) {
+@@ -261,7 +265,7 @@
+       };
+       const O = loops0 && loops1 ? morphKernelFrame(loops0, loops1) : [0, 0];
+       const fLo = loops0 && framesOf(moveLoops(loops0, O)), fHi = loops1 && framesOf(moveLoops(loops1, O));
+-      sh.plan2 = (fLo && fHi) ? planCPatchMorphSegment(fLo, fHi, block, { ...opts, frame: O }) : null;
++      sh.plan2 = (fLo && fHi) ? planCPatchMorphSegment(fLo, fHi, block, { ...opts, frame: O, wholeEllipse:sh.wholeEllipse, conicRegion:sh.conicRegion }) : null;
+       sh.planBase = block;
+       restructured.push(s);
+     }
+@@ -462,7 +466,7 @@
+       const sh = morph.shapes[s];
+       if (!sh || !sh.pack) continue;
+       meshes[s] = { verts: sh.pack.verts, vertexCount: sh.pack.vertexCount,
+-                    cpatch: true, fallback: false, slug: false, kindMask: sh.pack.kindMask,
++                    cpatch: true, fallback: false, slug: false, kindMask: sh.pack.kindMask, hasConicArea:sh.pack.hasConicArea, hasConicClip:sh.pack.hasConicClip,
+                     hasConicChain: false, hasCubicChain: false };   // no LB chain face (fillPass, ledger CP33)
+       chunks.push({ at: (sh.first - baseBlock) * CP_BLOCK_FLOATS, data: sh.pack.texels });
+       total = Math.max(total, (sh.first - baseBlock) * CP_BLOCK_FLOATS + sh.pack.texels.length);
+--- src/renderer/cpatchPack.js
++++ src/renderer/cpatchPack.js
+@@ -1438,6 +1438,10 @@
+         if (part.box) { v[7] = part.box[0]; v[8] = part.box[1]; v[9] = part.box[2]; v[10] = part.box[3]; }
+         // aC3 → cCen = (first, blocks).
+         v[19] = first; v[20] = hullRows + part.idx.length;
++        if(opts.wholeEllipse && patches.length===1 && p.curves.length===4 && p.curves.every(c=>c.t==='rquad' && !c.cut) && part.idx.length===4){v[21]=1;v[22]=hullRows;}
++        else if(opts.conicRegion && patches.length===1 && p.curves.length<=8 && p.curves.every(c=>!c.cut && (c.t==='line'||c.t==='rquad')) && part.idx.length===p.curves.length){
++          const ci=p.curves.findIndex(c=>c.t==='rquad');if(ci>=0){v[21]=-(ci+1);v[22]=hullRows;}
++        }
+         verts.push(...v);
+       }
+     }
+@@ -1450,6 +1454,8 @@
+     vertexCount: verts.length / LB_STRIDE,
+     cpatch: true, kindMask: 1 << CPATCH_STREAM_TAG,
+     patches: patches.length, dropped, cells, kinds,
++    hasConicArea:!!(opts.wholeEllipse||opts.conicRegion) && verts.some((v,i)=>i%LB_STRIDE===21 && v!==0),
++    hasConicClip:!!opts.conicRegion && verts.some((v,i)=>i%LB_STRIDE===21 && v<0),
+     // Patches the converter could not validate. Surfaced because a row carrying
+     // these still passes a 15% ink gate while painting a visible wedge of
+     // over-fill — which is what the cubic N=3 case did until AA caught it.
+@@ -1815,13 +1821,16 @@
+   }
+   const texels = new Float32Array(nTex), verts = new Float32Array(nVert);
+   let to = 0, vo = 0, unresolved = 0, cells = 0, dropped = 0, allSeam = 0, comp = 0;
++  let hasRquad = false, hasConicArea = false, hasConicClip = false;
+   for (const m of parts) {
+     texels.set(m.texels, to); to += m.texels.length;
+     verts.set(m.verts, vo);   vo += m.verts.length;
+     unresolved += m.unresolved; cells += m.cells; dropped += m.dropped; allSeam += m.allSeam | 0; comp += m.comp | 0;
++    hasRquad ||= !!(m.kinds && m.kinds[5] > 0);
++    hasConicArea ||= !!m.hasConicArea;hasConicClip ||= !!m.hasConicClip;
+   }
+   return { texels, verts, vertexCount: verts.length / LB_STRIDE,
+-           cpatch: true, kindMask: 1 << CPATCH_STREAM_TAG, unresolved, cells, dropped, allSeam, comp };
++           cpatch: true, kindMask: 1 << CPATCH_STREAM_TAG, unresolved, cells, dropped, allSeam, comp, hasRquad, hasConicArea, hasConicClip };
+ }
+ 
+ /// PLAN one segment of a morph: the cells, and the vertex stream, ONCE for the whole span.
+@@ -1910,6 +1919,10 @@
+           // the cell's own box — see the static emit above for why it exists
+           if (part.box) { v[7] = part.box[0]; v[8] = part.box[1]; v[9] = part.box[2]; v[10] = part.box[3]; }
+           v[19] = first; v[20] = part.idx.length;
++        if(opts.wholeEllipse && patchesLo.length===1 && lo.curves.length===4 && hi.curves.length===4 && lo.curves.every(c=>c.t==='rquad' && !c.cut) && hi.curves.every(c=>c.t==='rquad' && !c.cut) && part.idx.length===4)v[21]=1;
++        else if(opts.conicRegion && patchesLo.length===1 && lo.curves.length<=8 && lo.curves.length===hi.curves.length && lo.curves.every((c,i)=>!c.cut && !hi.curves[i].cut && c.t===hi.curves[i].t && (c.t==='line'||c.t==='rquad')) && part.idx.length===lo.curves.length){
++          const ci=lo.curves.findIndex(c=>c.t==='rquad');if(ci>=0)v[21]=-(ci+1);
++        }
+           verts.push(...v);
+         }
+       }
+@@ -1920,7 +1933,9 @@
+   // draw, which this cover -- the span's dilated hull -- does not (see CPK_END).
+   const endFlags = patchesLo.map((p) => { markSeamCorners([p]); return arcFlagsOf(p); });
+   return { cells, bounds, endFlags, verts: new Float32Array(verts), vertexCount: verts.length / LB_STRIDE, frame: O,
+-           cpatch: true, kindMask: 1 << CPATCH_STREAM_TAG, curveBlocks: block, patches: patchesLo.length };
++           cpatch: true, kindMask: 1 << CPATCH_STREAM_TAG, curveBlocks: block, patches: patchesLo.length,
++           hasConicArea:!!(opts.wholeEllipse||opts.conicRegion) && verts.some((v,i)=>i%LB_STRIDE===21 && v!==0),
++    hasConicClip:!!opts.conicRegion && verts.some((v,i)=>i%LB_STRIDE===21 && v<0) };
+ }
+ 
+ /// WHAT AN ARC'S BOUNDS ARE UNDER A MORPH, for the span between two poses of it (ledger CP15).
+@@ -2077,7 +2092,7 @@
+     }
+   }
+   return { texels, verts: plan.verts, vertexCount: plan.vertexCount,
+-           kindMask: plan.kindMask, curveBlocks: plan.curveBlocks, patches: plan.patches };
++           kindMask: plan.kindMask, curveBlocks: plan.curveBlocks, patches: plan.patches, hasConicArea:plan.hasConicArea, hasConicClip:plan.hasConicClip };
+ }
+ 
+ /// Scalars the C plane carries per block: the u and u^2 terms of the w of texels 2 and 3 (c0 and c1,
+--- src/renderer/fillPass.js
++++ src/renderer/fillPass.js
+@@ -330,6 +330,8 @@
+   // registers under its own key so full-feature bundles reuse it (no recompile).
+   const variantCache = new Map();
+   const defaultKey = (R.opts.fillDefines || []).slice().sort().join('|');
++  const defaultHasAac = defaultKey.split('|').includes('MANTLE_AAC');
++  const defaultHasRotatedMap = defaultKey.split('|').includes('MANTLE_ROTATED_MAP');
+   // THIS renderer's share of the context's newly-created bundles. Seeded with the bundles the
+   // context already holds, so a renderer created after its content still warms it.
+   const _prewarmQ = addFillPrewarmConsumer(gl);
+@@ -951,6 +953,21 @@
+     // now the kernel's only composition -- the patch whose side the pixel's centre is on paints what the shape covers there,
+     // exact under OVER and under the claim alike -- so there is no variant to pick here any more (owner's call, 2026-09-28).
+     if (defines.includes('MANTLE_CPATCH')) {
++      // Private candidate: compile its conic area only where a pack contains one.
++      const eg = bundle._geomGen | 0, ea = bundle._lbAdoptKey | 0;
++      const em = bundle._lbMeshes || bundle._morphMeshes;
++      if (bundle._cpEllipseGen !== eg || bundle._cpEllipseAdopt !== ea || bundle._cpEllipseMeshes !== em) {
++        bundle._cpHasEllipse = !em || em.some(m => m && m.cpatch && m.hasRquad !== false);
++        bundle._cpHasConicArea = !!em && em.some(m => m && m.cpatch && m.hasConicArea===true);
++        bundle._cpHasConicClip = !!em && em.some(m => m && m.cpatch && m.hasConicClip===true);
++        bundle._cpEllipseGen = eg; bundle._cpEllipseAdopt = ea; bundle._cpEllipseMeshes = em;
++      }
++      if (bundle._cpHasEllipse) defines.push('MANTLE_CPATCH_HAS_RQUAD');
++      if(bundle._cpHasConicClip)defines.push('MANTLE_CPATCH_CONIC_CLIP');
++      // The unit-square model requires an affine map throughout the pixel.
++      if(bundle._cpHasConicArea && !(R.draw && R.draw.worldM && (R.draw.worldM[2] || R.draw.worldM[5]))
++          && !bundle._nineSliceActive && !defines.includes('MANTLE_CPATCH_EXACT_ELLIPSE'))defines.push('MANTLE_CPATCH_EXACT_ELLIPSE');
++
+       // AND THE SEAM COMPANION'S CODE ONLY WHERE A SEAM PACKED ONE (ledger CP33): see R._cpatchHasComp.
+       if (R._cpatchHasComp && R._cpatchHasComp(bundle) && !defines.includes('MANTLE_CPATCH_COMP'))
+         defines.push('MANTLE_CPATCH_COMP');
+@@ -1024,8 +1041,8 @@
+     // footprint (renderFillAACM and its wall counts) and Slug's em -> pixel map (mantle.frag's derivation, renderFillM's
+     // map arithmetic) into a program for a draw whose map is not axis-aligned. Present in every program they cost an
+     // axis-aligned draw 1.99x (AAC, tiger), 2.31x (AAC, text) and 1.16-1.19x (Slug, text) on the GPU, and such a draw
+-    // never runs them. Per DRAW, from the world matrix, like the rest of this list; until the variant links, the base
+-    // draws a rotated draw with the upright fwidth box (the pre-SR13c / pre-AAC5 answer, not a wrong one).
++    // never runs them. Per DRAW, from the world matrix, like the rest of this list.
++    // A cold AAC draw must retain this footprint while specialization warms.
+     // A row an override rotates or skews is such a draw too (IM46: the row is sampled in its own frame).
+     if ((!worldMapAxisAligned(R.draw && R.draw.worldM) || !overridesAxisAligned(R.draw && R.draw.overrides))
+         && !defines.includes('MANTLE_ROTATED_MAP'))
+@@ -1066,11 +1083,18 @@
+     // answer is richer (it distinguishes 'inert', a stroke-only bundle where no fill kernel runs
+     // at all) and must not be overwritten with a guess.
+     else if (R.opts.aacFill !== 'auto') R._autoEngine = useAac ? ENGINES.AAC : ENGINES.SLUG;
+-    const defines = variantDefinesFor(bundle, useAac, useNoAa, useMixed);
++    let defines = variantDefinesFor(bundle, useAac, useNoAa, useMixed);
+     // A key with NO cover fill kernel serves only the unified stream it was keyed for. The classic pass
+     // (a warm-up fallback, a declined or bailed unified draw) shades every row as a cover quad and would
+     // draw every fill EMPTY with it, so it takes the base program, which holds every kernel.
+-    if (!uni && defines.includes('MANTLE_NO_COVER_FILL')) return baseVariant(useAac);
++    if (!uni && defines.includes('MANTLE_NO_COVER_FILL')) {
++      if (!useAac) return baseVariant(false);
++      // A classic AAC fallback uses cover attributes, not the unified stream.
++      // Keep this draw's feature/type omissions and its required footprint.
++      defines = defines.filter(d => d !== 'MANTLE_NO_COVER_FILL'
++        && !d.startsWith('MANTLE_LB_') && !d.startsWith('MANTLE_CPATCH'));
++      if (!defines.includes('MANTLE_AAC')) defines.push('MANTLE_AAC');
++    }
+     const key = definesKey(defines);
+     let v = variantCache.get(key);
+     if (!v) {
+@@ -1081,6 +1105,20 @@
+         R.program(R.withDefines(R.shaderSources.fillVert, defines),
+           R.withDefines(R.shaderSources.fillFrag, defines), 'fill:' + (key || 'full')));
+       v = putVariant(key, { prog, u: null, pending: true, psoReady: false });
++    }
++    const baseAac = useAac && !defaultHasAac ? variantCache.get(aacBaseKey) : null;
++    const needsAacKernel = useAac && !defaultHasAac && !(baseAac && !baseAac.pending);
++    const needsAacMap = useAac && defines.includes('MANTLE_ROTATED_MAP')
++      && !(defaultHasAac && defaultHasRotatedMap);
++    if (needsAacKernel || needsAacMap) {
++      const superset = warmSuperset(key);
++      if (superset) return superset;
++      // Kernel and pixel footprint affect the answer. When the warm base lacks
++      // either, finish this draw's lean program instead of drawing a wrong frame.
++      // Its first pipeline may compile here; subsequent draws reuse it.
++      if (v.pending && !promote(key, v)) throw new Error('Required AAC fill shader failed to link');
++      v.psoReady = true;
++      return v;
+     }
+     if (v.pending) {
+       const khr = R._khrParallel;
+--- src/renderer/lbContour.js
++++ src/renderer/lbContour.js
+@@ -684,8 +684,23 @@
+         cur.push(seg); penX = ex; penY = ey; penMag = 0;
+         continue;
+       }
+-      const rqs = arcToRationalQuads(cx, cy, rx, ry, th0, th1, phi);
++      let beginAngle=th0, endAngle=th1, nativeCardinal=false;
++      // PRIVATE DIAGNOSTIC: exact cardinal endpoints on an axis-aligned ellipse.
++      // Stored vertices are already authoritative; derive controls consistently.
++      const cardinal=(x,y)=>{const u=(x-cx)/rx,v=(y-cy)/ry;
++        return (u===0 && Math.abs(v)===1)||(v===0 && Math.abs(u)===1) ? Math.atan2(v,u) : null;};
++      const aa=phi===0 && rx>0 && ry>0 ? cardinal(sx,sy) : null;
++      const bb=phi===0 && rx>0 && ry>0 ? cardinal(ex,ey) : null;
++      if(aa!==null && bb!==null){
++        const tau=2*Math.PI,raw=bb-aa,delta=th1>th0 ? (raw<=0 ? raw+tau : raw) : (raw>=0 ? raw-tau : raw);
++        if(Math.abs(delta-(th1-th0))<1e-6){beginAngle=aa;endAngle=aa+delta;nativeCardinal=true;}
++      }
++      const rqs = arcToRationalQuads(cx, cy, rx, ry, beginAngle, endAngle, phi);
+       if (!rqs.length) continue;
++      if(nativeCardinal && rqs.length<=4){
++        const q0=((Math.round(beginAngle/(Math.PI/2))%4)+4)%4,dir=endAngle>beginAngle?1:-1;
++        rqs.forEach((rq,i)=>{rq._nativeConic=[cx,cy,rx,ry];rq._nativeQuarter=(q0+dir*i+4)%4;rq._nativeDirection=dir;});
++      }
+       const last = rqs[rqs.length - 1];
+       rqs[0].p1 = [sx, sy]; last.p3 = [ex, ey];
+       const startMag = 0, endMag = 0;
+@@ -1111,3 +1126,34 @@
+   return Math.abs((cx - ax) * (by - ay) - (cy - ay) * (bx - ax)) >= 0.02 * ((bx - ax) * (bx - ax) + (by - ay) * (by - ay));
+ }
+ 
++
++// Private candidate: one native ellipse revolution, with four matching cardinal quarters.
++// Partial arcs, other segments, holes and repeated revolutions have no stamp.
++export function cardinalConicStamp(contour) {
++  const cs=(contour||[]).filter(s=>!(s.type===SEG_LINE && s.p1[0]===s.p2[0] && s.p1[1]===s.p2[1]));
++  if(cs.length!==4 || cs.some(s=>!s._nativeConic))return null;
++  const first=cs[0],key=first._nativeConic,dir=first._nativeDirection,q=first._nativeQuarter;
++  if(cs.some((s,i)=>s.type!==SEG_RQUAD || s._nativeDirection!==dir || s._nativeQuarter!==(q+dir*i+8)%4 || s._nativeConic.some((v,j)=>v!==key[j])))return null;
++  return {quarter:q,direction:dir};
++}
++
++// Convex native ellipse caps and sectors. The contiguous cardinal arc shares
++// one ellipse; its closing edges are either one chord, or two exact radii.
++export function cardinalConicRegionStamp(contour) {
++  const cs=(contour||[]).filter(s=>!(s.type===SEG_LINE && s.p1[0]===s.p2[0] && s.p1[1]===s.p2[1]));
++  const start=cs.findIndex(s=>!!s._nativeConic);
++  if(start<0)return null;
++  const ordered=cs.slice(start).concat(cs.slice(0,start));
++  const n=ordered.findIndex(s=>!s._nativeConic);
++  if(n<1 || n>3)return null;
++  const arcs=ordered.slice(0,n),lines=ordered.slice(n),first=arcs[0],key=first._nativeConic;
++  if(lines.length<1 || lines.length>2 || lines.some(s=>s.type!==SEG_LINE) || (lines.length===2 && n>2))return null;
++  if(arcs.some((s,i)=>s.type!==SEG_RQUAD || s._nativeDirection!==first._nativeDirection
++      || s._nativeQuarter!==(first._nativeQuarter+first._nativeDirection*i+8)%4
++      || s._nativeConic.some((v,j)=>v!==key[j])))return null;
++  const same=(a,b)=>a[0]===b[0] && a[1]===b[1];
++  const end=s=>s.p3||s.p2;
++  if(ordered.some((s,i)=>!same(end(s),ordered[(i+1)%ordered.length].p1)))return null;
++  if(lines.length===2 && (!same(lines[0].p2,key) || !same(lines[1].p1,key)))return null;
++  return {quarter:first._nativeQuarter,direction:first._nativeDirection,arcs:n,lines:lines.length};
++}
+--- src/shaders/_cpatchCoverage.glsl
++++ src/shaders/_cpatchCoverage.glsl
+@@ -521,6 +521,95 @@
+ }
+ #endif
+ 
++#if defined(MANTLE_CPATCH_EXACT_ELLIPSE) && defined(MANTLE_CPATCH_HAS_RQUAD)
++// Private accuracy candidate: the exact area of an ellipse constraint in a box.
++// Transform the pixel rectangle to the unit disk; split each edge at disk roots.
++// Inside pieces contribute their triangle, outside pieces their circular sector.
++float cpDiskEdge(vec2 a, vec2 b) {
++  vec2 d = b - a;
++  // Lagrange identity avoids cancellation between two squared dot products.
++  float crossAD=a.x*d.y-a.y*d.x;
++  float A = dot(d,d), B = dot(a,d), D = A-crossAD*crossAD;
++  vec2 ts = vec2(0.0, 0.0);
++  if (D > 0.0 && A > 0.0) ts = clamp(vec2(-B-sqrt(D),-B+sqrt(D))/A,0.0,1.0);
++  float lo=0.0, sum=0.0;
++  for (int j=0;j<3;j++) {
++    float hi = j==0 ? ts.x : (j==1 ? ts.y : 1.0);
++    if (hi > lo) {
++      vec2 u=a+lo*d, v=a+hi*d, mid=a+0.5*(lo+hi)*d;
++      float cr=u.x*v.y-u.y*v.x;
++      sum += dot(mid,mid) < 1.0 ? cr : atan(cr,dot(u,v));
++    }
++    lo=hi;
++  }
++  return 0.5*sum;
++}
++// The fragment's complete inverse pixel map. Compute before constraint/cell branches,
++// then project the conic into screen coordinates, where the filter is a unit square.
++mat2 cpAreaPixelJ;
++float cpEllipseBox(vec3 Q, float f0, vec2 g0, vec2 p, int lineFirst, int lineEnd, bool clipped) {
++  float qs=max(abs(Q.x),max(abs(Q.y),abs(Q.z)));
++  if (!(qs > 0.0)) return -1.0;
++  Q/=qs;f0/=qs;g0/=qs;
++  float detQ=Q.x*Q.z-Q.y*Q.y;
++  if (!(Q.x > 0.0 && detQ > 0.0)) return -1.0;
++  // Recover the centre and constant at the kernel origin, not at a potentially
++  // distant fragment, to avoid subtracting two large squared distances.
++  vec2 centre=0.5*vec2(Q.z*g0.x-Q.y*g0.y,Q.x*g0.y-Q.y*g0.x)/detQ;
++  float k=f0+0.5*dot(g0,centre);
++  if (!(k > 0.0)) return -1.0;
++  float a=sqrt(Q.x/k), b=Q.y/sqrt(Q.x*k), c=sqrt(detQ/(Q.x*k));
++  mat2 T=mat2(a,0.0,b,c), B=T*cpAreaPixelJ;
++  float detJ=cpAreaPixelJ[0].x*cpAreaPixelJ[1].y-cpAreaPixelJ[0].y*cpAreaPixelJ[1].x;
++  float signedDetB=a*c*detJ, pixelArea=abs(signedDetB);
++  if (!(pixelArea > 0.0)) return -1.0;
++  // Transform the pixel into the unit disk. Computing J^T Q J instead squares
++  // the map's condition number and can erase a thin rotated ellipse entirely.
++  mat2 invB=mat2(B[1].y,-B[0].y,-B[1].x,B[0].x)/signedDetB;
++  vec2 off=T*(centre-p), screenCentre=invB*off;
++  vec2 ext=vec2(length(vec2(invB[0].x,invB[1].x)),length(vec2(invB[0].y,invB[1].y)));
++  if (abs(screenCentre.x)-ext.x > 0.5 || abs(screenCentre.y)-ext.y > 0.5) return 0.0;
++  if (!clipped && abs(screenCentre.x)+ext.x <= 0.5 && abs(screenCentre.y)+ext.y <= 0.5)
++    return clamp(3.141592653589793/pixelArea,0.0,1.0);
++#ifdef MANTLE_CPATCH_CONIC_CLIP
++  if(clipped){
++    // Clip the square against the authored straight edges, then integrate the
++    // disk over that convex polygon. Minima of separate areas cannot do this.
++    vec2 poly[12], nextPoly[12];
++    poly[0]=vec2(-0.5,-0.5);poly[1]=vec2(0.5,-0.5);poly[2]=vec2(0.5,0.5);poly[3]=vec2(-0.5,0.5);
++    int count=4;
++    for(int i=0;i<8;i++){
++      if(lineFirst+i>=lineEnd)break;
++      vec4 h=texFetch(ivec2((lineFirst+i)*7,0));
++      if(abs(mod(h.w,32.0))>0.1)continue;
++      vec2 n=transpose(cpAreaPixelJ)*h.xy;float d=dot(h.xy,p)+h.z;
++      int outCount=0;
++      for(int j=0;j<12;j++){
++        if(j>=count)break;
++        vec2 u=poly[(j+count-1)%count],v=poly[j];
++        float fu=dot(n,u)+d,fv=dot(n,v)+d;
++        if((fu>=0.0)!=(fv>=0.0) && fu!=0.0 && fv!=0.0){
++          if(outCount>=12)return -1.0;
++          nextPoly[outCount++]=mix(u,v,fu/(fu-fv));
++        }
++        if(fv>=0.0){if(outCount>=12)return -1.0;nextPoly[outCount++]=v;}
++      }
++      count=outCount;if(count<3)return 0.0;
++      for(int j=0;j<12;j++){if(j>=count)break;poly[j]=nextPoly[j];}
++    }
++    float sum=0.0;
++    for(int j=0;j<12;j++){if(j>=count)break;sum+=cpDiskEdge(B*poly[j]-off,B*poly[(j+1)%count]-off);}
++    return clamp(sum/signedDetB,0.0,1.0);
++  }
++#endif
++  vec2 dx=0.5*B[0],dy=0.5*B[1];
++  vec2 p0=-dx-dy-off,p1=dx-dy-off,p2=dx+dy-off,p3=-dx+dy-off;
++  if (dot(p0,p0)<=1.0 && dot(p1,p1)<=1.0 && dot(p2,p2)<=1.0 && dot(p3,p3)<=1.0) return 1.0;
++  float area=cpDiskEdge(p0,p1)+cpDiskEdge(p1,p2)+cpDiskEdge(p2,p3)+cpDiskEdge(p3,p0);
++  return clamp(area/signedDetB,0.0,1.0);
++}
++#endif
++
+ float cpatchCurveCov(int idx, vec2 p, float emPerPx, out bool cutOut, out float softOut, out bool nearOut,
+                      out bool hullOut, out float sdOut, out vec2 nOut, out float outlOut) {
+   softOut = 1.0; nearOut = false;
+@@ -808,6 +897,8 @@
+   float f; vec2 gf;
+   CP_EVAL(p, f, gf)
+   f *= sg; gf *= sg;
++
++
+   // A SEAM DECIDES ALONG ITS OWN SPAN AND NO FURTHER (ledger CP25). Its step is an implicit's sign, and the zero set runs
+   // on past the seam's ends -- often as the very outline the seam meets, where a curve was split into a seam piece and an
+   // outline piece -- so a fragment in this patch's skirt, beside that outline pixels further on, read the seam's extension as
+@@ -1360,6 +1451,9 @@
+ }
+ 
+ float cpatchCoverage() {
++#if defined(MANTLE_CPATCH_EXACT_ELLIPSE) && defined(MANTLE_CPATCH_HAS_RQUAD)
++    cpAreaPixelJ=mat2(dFdx(vEm),dFdy(vEm));
++#endif
+ #ifdef MANTLE_CPATCH_DEBUG
+     return 1.0;     // full cover-box coverage: separates "do these fragments run" from "is the
+                     // coverage right". Made unconditional across every kind during the blank
+@@ -1381,6 +1475,22 @@
+     if (cell.z > cell.x && cell.w > cell.y
+         && (vEm.x < cell.x || vEm.x >= cell.z || vEm.y < cell.y || vEm.y >= cell.w)) return 0.0;
+     int first = int(cCen.x + 0.5), n = int(cCen.y + 0.5);
++#if defined(MANTLE_CPATCH_EXACT_ELLIPSE) && defined(MANTLE_CPATCH_HAS_RQUAD)
++    // Only a stamped single native ellipse patch can use the whole-conic area.
++    // The spare vertex header carries eligibility and its first outline block.
++    if(abs(vLB3.z)>0.5){
++      int t=(first+int(vLB3.w+0.5)+int(abs(vLB3.z)-0.5))*7;
++      vec4 e0=CPFETCH(t),e1=CPFETCH(t+1),e2=CPFETCH(t+2);
++      if(abs(mod(e0.w,32.0)-5.0)<0.1){
++        float A0=e0.z,A1=e1.z,A2=e2.z;
++        float f=e1.w*(A0*A0-A1*A2);
++        vec2 g=e1.w*(2.0*A0*e0.xy-A2*e1.xy-A1*e2.xy);
++        vec3 Q=e1.w*vec3(e1.x*e2.x-e0.x*e0.x,0.5*(e1.x*e2.y+e1.y*e2.x)-e0.x*e0.y,e1.y*e2.y-e0.y*e0.y);
++        float area=cpEllipseBox(Q,f,g,vEm,first+int(vLB3.w+0.5),first+n,vLB3.z<0.0);
++        if(area>=0.0)return area;
++      }
++    }
++#endif
+     int lineBlocks = 0;
+ #ifdef MANTLE_CPATCH_ONLYN5
+     // MEASUREMENT ONLY — paint ONLY the patch that carries five curves, ignoring its constraints.
+--- src/shaders/mantle.frag.glsl
++++ src/shaders/mantle.frag.glsl
+@@ -1464,6 +1464,12 @@
+   // on a tile-based deferred GPU, killing zero-coverage fragments outright is
+   // what lets hidden-surface removal drop them, and it avoids the blend and
+   // bandwidth they would otherwise cost. Re-measure before touching it.
+-  if (color.a < 1.0/255.0) discard;
++  float alphaCutoff = 1.0/255.0;
++#if defined(MANTLE_CPATCH_EXACT_ELLIPSE) && defined(MANTLE_CPATCH_HAS_RQUAD)
++  // Only stamped conic-area pieces own this representable translucent fringe.
++  if (vKind > CP_STREAM_TAG-0.5 && vKind < CP_STREAM_TAG+0.5 && abs(vLB3.z)>0.5)
++    alphaCutoff = 0.5/255.0;
++#endif
++  if (color.a < alphaCutoff) discard;
+   fragColor = color;
+ }
+--- test/cpatchMorphCertificationSmoke.mjs
++++ test/cpatchMorphCertificationSmoke.mjs
+@@ -1,5 +1,6 @@
+ // A planning floor cannot turn a rejected continuum certificate into a plan.
+ import assert from 'node:assert/strict';
++import {readFileSync} from 'node:fs';
+ import {DOMParser,XMLSerializer} from '@xmldom/xmldom';
+ import importSvg from '../src/svg/importer.js';
+ import {headlessCPatchBundle} from '../src/renderer/cpatchBuild.js';
+@@ -20,24 +21,28 @@
+ }
+ // The old acceptance returned one forced:false span here although its leak
+ // certificate rejected it. Interior samples were valid; they were not a proof.
+-const floor=plan(A,B,{minStep:1});
++const unsafe=JSON.parse(readFileSync(new URL('./fixtures/cpatch-uncertified-rounded-conic.json',import.meta.url)));
++const floor=plan(unsafe.A,unsafe.B,{minStep:1});
+ assert.equal(floor.p,null);assert.equal(floor.report.uncertified,true);
+ assert.equal(floor.report.converts,1);
+-// Default planning must refuse the same unsupported imported family promptly,
++// Default planning must refuse the frozen inconsistent controls promptly,
+ // rather than walking 512 unproved spans until the time or segment cap.
+-const ordinary=plan(A,B);
++const ordinary=plan(unsafe.A,unsafe.B);
+ assert.equal(ordinary.p,null);assert.equal(ordinary.report.uncertified,true);
+ assert(ordinary.report.certCalls<64);assert(ordinary.report.converts<8);
+ // A genuine continuum proof still produces a usable plan. Re-certify every
+ // interval independently in both directions, rather than checking only poses.
++const imported=plan(A,B);assert(imported.p?.length);
+ const circle=rad=>arcToRQuads({cx:0,cy:0,rx:rad,ry:rad,phi:0,theta_start:0,theta_end:2*Math.PI});
+ const C=circle(.125),D=circle(.375),good=plan(C,D);assert(good.p?.length);
+-const at=t=>C.map((c,i)=>({...c,P:c.P.map((p,j)=>p.map((v,k)=>v+(D[i].P[j][k]-v)*t))}));
+-for(const s of good.p){
+- assert.equal(s.forced,false);const lo=applyLayout(s.layout,at(s.t0)),hi=applyLayout(s.layout,at(s.t1));
++for(const [U,V,result] of [[A,B,imported],[C,D,good]]){
++ const pose=t=>U.map((c,i)=>({...c,P:c.P.map((p,j)=>p.map((v,k)=>v+(V[i].P[j][k]-v)*t))}));
++ for(const s of result.p){
++ assert.equal(s.forced,false);const lo=applyLayout(s.layout,pose(s.t0)),hi=applyLayout(s.layout,pose(s.t1));
+  for(let i=0;i<lo.length;i++){
+-  const clip=certifyMorphClip(lo[i],hi[i],{tolPx:good.tolPx}),leak=certifyMorphLeak(lo[i],hi[i],{tolPx:good.tolPx});
++  const clip=certifyMorphClip(lo[i],hi[i],{tolPx:result.tolPx}),leak=certifyMorphLeak(lo[i],hi[i],{tolPx:result.tolPx});
+   assert.equal(clip.failures.length,0);assert.equal(clip.inconclusive,0);assert.equal(leak.failures.length,0);
+  }
+ }
+-console.log('cpatchMorphCertificationSmoke PASS '+JSON.stringify({floor:floor.report,ordinary:ordinary.report,certified:good.p.length}));
++}
++console.log('cpatchMorphCertificationSmoke PASS '+JSON.stringify({floor:floor.report,ordinary:ordinary.report,certified:good.p.length,imported:imported.p.length}));
+--- /dev/null
++++ test/fixtures/cpatch-uncertified-rounded-conic.json
+@@ -0,0 +1,151 @@
++{
++  "provenance": "rel-int3 d0ceec27: native circle endpoints with controls derived from rounded angles; preserve the uncertified rejection independently of the repaired decoder",
++  "A": [
++    {
++      "t": "rquad",
++      "P": [
++        [
++          5.625,
++          12.5
++        ],
++        [
++          5.625,
++          12.625000005463924
++        ],
++        [
++          5.4999999945360765,
++          12.625
++        ]
++      ],
++      "w": 0.7071067657322372
++    },
++    {
++      "t": "rquad",
++      "P": [
++        [
++          5.4999999945360765,
++          12.625
++        ],
++        [
++          5.374999989072153,
++          12.624999994536076
++        ],
++        [
++          5.375,
++          12.5
++        ]
++      ],
++      "w": 0.7071067657322372
++    },
++    {
++      "t": "rquad",
++      "P": [
++        [
++          5.375,
++          12.5
++        ],
++        [
++          5.375000010927849,
++          12.374999983608229
++        ],
++        [
++          5.5000000163917715,
++          12.375000000000002
++        ]
++      ],
++      "w": 0.7071067657322372
++    },
++    {
++      "t": "rquad",
++      "P": [
++        [
++          5.5000000163917715,
++          12.375000000000002
++        ],
++        [
++          5.625000021855694,
++          12.375000016391773
++        ],
++        [
++          5.625,
++          12.5
++        ]
++      ],
++      "w": 0.7071067657322372
++    }
++  ],
++  "B": [
++    {
++      "t": "rquad",
++      "P": [
++        [
++          5.875,
++          12.5
++        ],
++        [
++          5.875,
++          12.875000016391771
++        ],
++        [
++          5.4999999836082285,
++          12.875
++        ]
++      ],
++      "w": 0.7071067657322372
++    },
++    {
++      "t": "rquad",
++      "P": [
++        [
++          5.4999999836082285,
++          12.875
++        ],
++        [
++          5.124999967216458,
++          12.874999983608227
++        ],
++        [
++          5.125,
++          12.5
++        ]
++      ],
++      "w": 0.7071067657322372
++    },
++    {
++      "t": "rquad",
++      "P": [
++        [
++          5.125,
++          12.5
++        ],
++        [
++          5.125000032783546,
++          12.124999950824687
++        ],
++        [
++          5.500000049175314,
++          12.125000000000004
++        ]
++      ],
++      "w": 0.7071067657322372
++    },
++    {
++      "t": "rquad",
++      "P": [
++        [
++          5.500000049175314,
++          12.125000000000004
++        ],
++        [
++          5.875000065567082,
++          12.12500004917532
++        ],
++        [
++          5.875,
++          12.5
++        ]
++      ],
++      "w": 0.7071067657322372
++    }
++  ]
++}

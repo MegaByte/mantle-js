@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // lookupFlagSmoke.mjs — exercises GDEF-aware lookupFlag filtering.
 //
 // The key behavior we want to verify: when a lookup has IgnoreMarks
@@ -14,11 +17,19 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { MantleFontAsset } from '../../src/font/fontAsset.js';
-import { makeLookupFilter, nextNonSkippedForward, nextNonSkippedBackward, readLookupFlags } from '../../src/font/lookupFlag.js';
+import {
+  makeLookupFilter,
+  nextNonSkippedForward,
+  nextNonSkippedBackward,
+  readLookupFlags,
+} from '../../src/font/lookupFlag.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // ----- T1: makeLookupFilter unit ----------------------------------
 // Build a minimal GDEF stand-in (the reader-facing surface is
@@ -28,13 +39,13 @@ const ok   = (msg) => console.log('ok ' + msg);
   const fakeGdef = {
     hasTable: true,
     getGlyphClass: (gid) => {
-      if (gid === 10) return 1;  // Base
-      if (gid === 20) return 2;  // Ligature
-      if (gid === 30) return 3;  // Mark
-      return 0;                  // Unassigned
+      if (gid === 10) return 1; // Base
+      if (gid === 20) return 2; // Ligature
+      if (gid === 30) return 3; // Mark
+      return 0; // Unassigned
     },
     isInMarkGlyphSet: (gid, _set) => gid === 30,
-    getMarkAttachClass: (gid) => gid === 30 ? 5 : 0,
+    getMarkAttachClass: (gid) => (gid === 30 ? 5 : 0),
   };
 
   // No bits → predicate always returns false.
@@ -69,7 +80,7 @@ const ok   = (msg) => console.log('ok ' + msg);
   // Make it explicitly a mark NOT in the set.
   const fakeGdef2 = {
     ...fakeGdef,
-    getGlyphClass: (gid) => gid === 31 ? 3 : fakeGdef.getGlyphClass(gid),
+    getGlyphClass: (gid) => (gid === 31 ? 3 : fakeGdef.getGlyphClass(gid)),
     isInMarkGlyphSet: (gid, _set) => gid === 30, // 31 NOT in set
   };
   const fS2 = makeLookupFilter(0x0010, 0, fakeGdef2);
@@ -92,7 +103,7 @@ const ok   = (msg) => console.log('ok ' + msg);
 {
   const fakeGdef = {
     hasTable: true,
-    getGlyphClass: (g) => g === 30 ? 3 : 1,
+    getGlyphClass: (g) => (g === 30 ? 3 : 1),
     isInMarkGlyphSet: () => false,
     getMarkAttachClass: () => 0,
   };
@@ -137,14 +148,15 @@ if (existsSync(SFArabicPath)) {
   const gsub = font.gsub;
   if (!gsub._gdef) fail('T3a fontAsset.gsub.setGdef should have been called');
   else ok('T3a fontAsset auto-injects GDEF into GsubReader');
-  if (!font.gpos._gdef && font.gpos.setGdef) fail('T3b fontAsset.gpos.setGdef should have been called');
+  if (!font.gpos._gdef && font.gpos.setGdef)
+    fail('T3b fontAsset.gpos.setGdef should have been called');
   else ok('T3b fontAsset auto-injects GDEF into GposReader (or absent)');
 
   // GDEF reader should classify common Arabic gids correctly.
   const gdef = font.gdef;
   if (gdef && gdef.hasTable) {
     // Find harakat gid (FATHA = U+064E). Pure mark.
-    const fathaGid = font._tables.codepointToGlyphIndex(0x064E);
+    const fathaGid = font._tables.codepointToGlyphIndex(0x064e);
     const behGid = font._tables.codepointToGlyphIndex(0x0628);
     if (fathaGid > 0) {
       const fathaClass = gdef.getGlyphClass(fathaGid);
