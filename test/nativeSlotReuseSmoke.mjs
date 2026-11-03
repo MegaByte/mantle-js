@@ -6,8 +6,8 @@
 //
 // Given a raster drawn in place, the frame mutates nothing; moved, only its transform; faded, only its opacity, and the
 // fade's end removes only that. Given a raster or a bundle joining, leaving or swapping places in the middle of the draw
-// order (alone or between the other kind), the draws after it keep their nodes: only a raster or bundle the last frame
-// did not draw builds an <image> or a clone. Each sequence's last frame draws the same pixels as a fresh scene drawing
+// order (alone or between the other kind), the draws after it keep their nodes: only a bundle the last frame did not draw
+// builds a clone, and only a raster not drawn in the last 120 frames builds an <image>. Each sequence's last frame draws the same pixels as a fresh scene drawing
 // that frame, and every mounted <image> shows its own draw's source. A raw canvas redrawn shows its new pixels, and a
 // canvas createImage token's href is a data: URL, so the frame's own exportFrameSVG() still carries the raster.
 import { readFileSync } from 'fs';
@@ -21,7 +21,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HTML = `<!DOCTYPE html><html><body><script type="module">
 import { importSvg, createNativeScene } from '/src/index.js';
 const W = 80, H = 40;
-const FILLS = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff'];
+const FILLS = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff'];
 const svgOf = (fill) => '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><rect width="10" height="10" fill="' + fill + '"/></svg>';
 const pngOf = (fill) => {
   const c = document.createElement('canvas'); c.width = c.height = 10;
@@ -198,7 +198,8 @@ const SEQUENCES = [
       ['a raster leaves the middle', ['r0', 'r2', 'r3'], { images: 0, clones: 0 }],
       ['a raster joins the middle', ['r0', 'r4', 'r2', 'r3'], { images: 1, clones: 0 }],
       ['two rasters swap places', ['r0', 'r2', 'r4', 'r3'], { images: 0, clones: 0 }],
-      ['a raster changes source in place', ['r0', 'r1', 'r4', 'r3'], { images: 1, clones: 0 }],
+      ['a raster changes source in place', ['r0', 'r5', 'r4', 'r3'], { images: 1, clones: 0 }],
+      ['a raster that left frames ago comes back', ['r0', 'r1', 'r4', 'r3'], { images: 0, clones: 0 }],
     ],
   ],
   [
@@ -216,10 +217,10 @@ const SEQUENCES = [
       ['b0', 'r1', 'b2', 'r3'],
       ['a raster between bundles leaves', ['b0', 'b2', 'r3'], { images: 0, clones: 0 }],
       ['a bundle joins ahead of all', ['b4', 'b0', 'b2', 'r3'], { images: 0, clones: 1 }],
-      ['a raster joins between bundles', ['b4', 'r1', 'b0', 'b2', 'r3'], { images: 1, clones: 0 }],
+      ['a raster joins between bundles', ['b4', 'r5', 'b0', 'b2', 'r3'], { images: 1, clones: 0 }],
       [
         'a raster moves ahead of a bundle',
-        ['b4', 'r1', 'b0', 'r3', 'b2'],
+        ['b4', 'r5', 'b0', 'r3', 'b2'],
         { images: 0, clones: 0 },
       ],
     ],
