@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // colrReader.js — COLR v0 + v1 + CPAL v0/v1 readers.
 //
 // COLR v0: base glyph → ordered list of (layerGlyph, paletteIndex)
@@ -10,7 +13,7 @@
 // This reader exposes both:
 //   - `hasColor` / `getLayers(gid)`  (v0 surface, unchanged)
 //   - `hasColrV1` / `getPaint(gid)`  (v1 surface — returns paint tree)
-// Some fonts ship BOTH (v0 as fallback for renderers that don't
+// Some fonts ship both (v0 as fallback for renderers that don't
 // understand v1); a v1 reader checks hasColrV1 first and only falls
 // back to v0 when the glyph isn't present in BaseGlyphList.
 //
@@ -24,8 +27,9 @@
 //   https://learn.microsoft.com/en-us/typography/opentype/spec/cpal
 
 import { ItemVariationStore } from '../itemVariationStore.js';
-import { DeltaSetIndexMap }   from '../deltaSetIndexMap.js';
+import { DeltaSetIndexMap } from '../deltaSetIndexMap.js';
 import { mantleWarn } from '../../core/diagnostics.js';
+import { GlyphOutlineError } from '../glyphReader.js';
 
 const _warnedColrFormats = new Set();
 
@@ -43,6 +47,9 @@ export class ColrLayer {
   }
 }
 
+/// Paint nodes one glyph may read. The largest real color fonts stay in the low thousands per glyph.
+export const MAX_COLR_PAINT_NODES = 1 << 16;
+
 export class ColrReader {
   /** @param {object} tables result of parseTtfTables */
   constructor(tables) {
@@ -58,6 +65,7 @@ export class ColrReader {
     this._numBaseGlyphV1 = 0;
     this._layerListOff = 0;
     this._numLayerV1 = 0;
+    this._clipListOff = 0;
     // Cached palette 0 colors (RGBA 0..1) plus 0xFFFF foreground sentinel.
     this._palette0 = null;
     this._numPaletteEntries = 0;
@@ -70,11 +78,11 @@ export class ColrReader {
     this._version = v.getUint16(colrOff + 0, false);
     // v0 fields exist in both v0 and v1 headers (v1 keeps them for
     // backwards-compat fallback). Always read them when present.
-    this._numBase   = v.getUint16(colrOff + 2, false);
-    const baseRel   = v.getUint32(colrOff + 4, false);
-    const layerRel  = v.getUint32(colrOff + 8, false);
-    this._baseOff   = baseRel  ? colrOff + baseRel  : 0;
-    this._layerOff  = layerRel ? colrOff + layerRel : 0;
+    this._numBase = v.getUint16(colrOff + 2, false);
+    const baseRel = v.getUint32(colrOff + 4, false);
+    const layerRel = v.getUint32(colrOff + 8, false);
+    this._baseOff = baseRel ? colrOff + baseRel : 0;
+    this._layerOff = layerRel ? colrOff + layerRel : 0;
     this._numLayers = v.getUint16(colrOff + 12, false);
 
     // v1 header EXTENDS the v0 header by 20 bytes (5 × Offset32).
@@ -88,15 +96,17 @@ export class ColrReader {
       //   Offset32 varIndexMapOffset
       //   Offset32 itemVariationStoreOffset
       const bglRel = v.getUint32(colrOff + 14, false);
-      const llRel  = v.getUint32(colrOff + 18, false);
-      // clipList parsed when needed.
+      const llRel = v.getUint32(colrOff + 18, false);
+      // ClipList (read lazily by getClipBox).
+      const clipRel = v.getUint32(colrOff + 22, false);
+      this._clipListOff = clipRel ? colrOff + clipRel : 0;
       if (bglRel) {
         this._baseGlyphListOff = colrOff + bglRel;
-        this._numBaseGlyphV1   = v.getUint32(this._baseGlyphListOff, false);
+        this._numBaseGlyphV1 = v.getUint32(this._baseGlyphListOff, false);
       }
       if (llRel) {
         this._layerListOff = colrOff + llRel;
-        this._numLayerV1   = v.getUint32(this._layerListOff, false);
+        this._numLayerV1 = v.getUint32(this._layerListOff, false);
       }
       // varIndexMap + itemVariationStore live in the second half of the
       // v1 header. Parsed lazily by _ensureVarStore() the first time a
@@ -104,8 +114,8 @@ export class ColrReader {
       const vimRel = v.getUint32(colrOff + 26, false);
       const ivsRel = v.getUint32(colrOff + 30, false);
       this._varIndexMapAbs = vimRel ? colrOff + vimRel : 0;
-      this._ivsAbs         = ivsRel ? colrOff + ivsRel : 0;
-      this._tables         = tables;
+      this._ivsAbs = ivsRel ? colrOff + ivsRel : 0;
+      this._tables = tables;
     }
 
     this._loadPalette0(tables.cpal[0]);
@@ -114,13 +124,25 @@ export class ColrReader {
   /// True iff a usable v0 COLR table is present. v1 fonts often
   /// include v0 records as a fallback for renderers that don't grok
   /// v1; both can be true simultaneously.
-  get hasColor() { return this._version >= 0 && this._numBase > 0; }
+  get hasColor() {
+    return this._version >= 0 && this._numBase > 0;
+  }
   /// True iff a v1 BaseGlyphList exists with at least one paint record.
-  get hasColrV1() { return this._version >= 1 && this._numBaseGlyphV1 > 0; }
-  get version() { return this._version; }
-  get numBaseGlyphs() { return this._numBase; }
-  get numBaseGlyphsV1() { return this._numBaseGlyphV1; }
-  get numPaletteEntries() { return this._numPaletteEntries; }
+  get hasColrV1() {
+    return this._version >= 1 && this._numBaseGlyphV1 > 0;
+  }
+  get version() {
+    return this._version;
+  }
+  get numBaseGlyphs() {
+    return this._numBase;
+  }
+  get numBaseGlyphsV1() {
+    return this._numBaseGlyphV1;
+  }
+  get numPaletteEntries() {
+    return this._numPaletteEntries;
+  }
 
   /// Returns an array of ColrLayer for the given base glyph id, or
   /// null if the glyph isn't a color glyph. Layers are in paint-order
@@ -128,7 +150,8 @@ export class ColrReader {
   getLayers(glyphId) {
     if (!this.hasColor) return null;
     // Base records are sorted by glyphID — binary search.
-    let lo = 0, hi = this._numBase - 1;
+    let lo = 0,
+      hi = this._numBase - 1;
     const v = this._view;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
@@ -136,17 +159,18 @@ export class ColrReader {
       const gid = v.getUint16(recOff, false);
       if (gid === glyphId) {
         const firstLayer = v.getUint16(recOff + 2, false);
-        const numLayer   = v.getUint16(recOff + 4, false);
+        const numLayer = v.getUint16(recOff + 4, false);
         const out = new Array(numLayer);
         for (let i = 0; i < numLayer; i++) {
           const lrOff = this._layerOff + (firstLayer + i) * 4;
-          const lGid  = v.getUint16(lrOff,     false);
-          const lPal  = v.getUint16(lrOff + 2, false);
+          const lGid = v.getUint16(lrOff, false);
+          const lPal = v.getUint16(lrOff + 2, false);
           out[i] = new ColrLayer(lGid, lPal, this._resolveColor(lPal));
         }
         return out;
       }
-      if (gid < glyphId) lo = mid + 1; else hi = mid - 1;
+      if (gid < glyphId) lo = mid + 1;
+      else hi = mid - 1;
     }
     return null;
   }
@@ -208,7 +232,8 @@ export class ColrReader {
     const listOff = this._baseGlyphListOff;
     const recsOff = listOff + 4;
     const recSize = 6;
-    let lo = 0, hi = this._numBaseGlyphV1 - 1;
+    let lo = 0,
+      hi = this._numBaseGlyphV1 - 1;
     let paintAbsOff = 0;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
@@ -219,20 +244,67 @@ export class ColrReader {
         paintAbsOff = listOff + paintRel;
         break;
       }
-      if (gid < glyphId) lo = mid + 1; else hi = mid - 1;
+      if (gid < glyphId) lo = mid + 1;
+      else hi = mid - 1;
     }
     if (!paintAbsOff) return null;
     if (coords && this._ivsAbs) this._ensureVarStore();
+    this._paintBudget = MAX_COLR_PAINT_NODES;
     return this._readPaint(paintAbsOff, coords);
+  }
+
+  /// The ClipList clip box of a base glyph, [xMin, yMin, xMax, yMax] in font units (ClipBox format 2 gets its
+  /// variation deltas at `coords`), or null when the font has no ClipList or no Clip record covers the glyph.
+  /// ClipList: u8 format = 1, u32 numClips, Clip[] { u16 startGlyphID, u16 endGlyphID, Offset24 clipBox (from the
+  /// ClipList) }, sorted by startGlyphID. ClipBox: u8 format (1, or 2 with a trailing u32 varIndexBase for the four
+  /// deltas, in field order), FWORD xMin, yMin, xMax, yMax. A malformed list is treated as absent (no clip).
+  getClipBox(glyphId, coords = null) {
+    const listOff = this._clipListOff;
+    if (!listOff) return null;
+    const v = this._view;
+    try {
+      if (v.getUint8(listOff) !== 1) return null;
+      const n = v.getUint32(listOff + 1, false);
+      let lo = 0,
+        hi = n - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const rec = listOff + 5 + mid * 7;
+        if (glyphId < v.getUint16(rec, false)) {
+          hi = mid - 1;
+          continue;
+        }
+        if (glyphId > v.getUint16(rec + 2, false)) {
+          lo = mid + 1;
+          continue;
+        }
+        const box = listOff + this._readOffset24(rec + 4);
+        const format = v.getUint8(box);
+        if (format !== 1 && format !== 2) return null;
+        const out = [
+          v.getInt16(box + 1, false),
+          v.getInt16(box + 3, false),
+          v.getInt16(box + 5, false),
+          v.getInt16(box + 7, false),
+        ];
+        if (format === 2 && coords) {
+          if (this._ivsAbs) this._ensureVarStore();
+          const varIndexBase = v.getUint32(box + 9, false);
+          for (let k = 0; k < 4; k++) out[k] += this._varDelta(varIndexBase, k, coords);
+        }
+        return out;
+      }
+    } catch (e) {
+      if (!(e instanceof RangeError)) throw e;
+    }
+    return null;
   }
 
   /// Lazily build the ItemVariationStore + DeltaSetIndexMap on first
   /// var-aware paint read. Idempotent.
   _ensureVarStore() {
     if (this._ivs !== undefined) return;
-    this._ivs = this._ivsAbs
-      ? new ItemVariationStore(this._tables, this._ivsAbs)
-      : null;
+    this._ivs = this._ivsAbs ? new ItemVariationStore(this._tables, this._ivsAbs) : null;
     this._varIndexMap = this._varIndexMapAbs
       ? new DeltaSetIndexMap(this._tables, this._varIndexMapAbs)
       : null;
@@ -246,17 +318,18 @@ export class ColrReader {
   ///   - the index is out of range.
   _varDelta(varIndexBase, fieldIdx, coords) {
     if (!coords || !this._ivs) return 0;
-    if (varIndexBase === 0xFFFFFFFF) return 0;
+    if (varIndexBase === 0xffffffff) return 0;
     const idx = (varIndexBase + fieldIdx) >>> 0;
     let outer, inner;
     if (this._varIndexMap) {
       const m = this._varIndexMap.lookup(idx);
-      outer = m.outer; inner = m.inner;
+      outer = m.outer;
+      inner = m.inner;
     } else {
       // Per spec: when no map, decompose 32-bit idx as outer/inner =
       // (idx >> 16, idx & 0xFFFF).
-      outer = (idx >>> 16) & 0xFFFF;
-      inner = idx & 0xFFFF;
+      outer = (idx >>> 16) & 0xffff;
+      inner = idx & 0xffff;
     }
     return this._ivs.getDelta(outer, inner, coords);
   }
@@ -265,12 +338,12 @@ export class ColrReader {
   /// paint-tree node (see getPaint) or null on malformed data.
   /// Recursive; format-specific cases handle their own sub-paints.
   ///
-  /// Paint tables store sub-paint references as 24-bit (3-byte)
-  /// Offset24 in COLR v1, except inside PaintColrLayers where the
-  /// shared LayerList uses 32-bit Offset32 entries. The spec calls
-  /// the 24-bit type "Offset24"; we treat it as big-endian
-  /// unsigned int with byte 0 as MSB.
   _readPaint(off, coords = null) {
+    // Paints can share a child, so a few bytes can name an exponential tree (HarfBuzz caps edges for the same reason).
+    if (--this._paintBudget < 0)
+      throw new GlyphOutlineError(
+        `COLR paint graph exceeds its budget (${MAX_COLR_PAINT_NODES} nodes)`,
+      );
     const v = this._view;
     const format = v.getUint8(off);
     if (format === 1) {
@@ -306,7 +379,7 @@ export class ColrReader {
         alpha += this._varDelta(varIndexBase, 0, coords) / 16384;
       }
       let rgba = null;
-      if (paletteIndex !== 0xFFFF) {
+      if (paletteIndex !== 0xffff) {
         const palCol = this._resolveColor(paletteIndex);
         rgba = [palCol[0], palCol[1], palCol[2], palCol[3] * alpha];
       }
@@ -319,13 +392,13 @@ export class ColrReader {
       //   FWORD x0, y0, x1, y1, x2, y2  (sint16, in font units)
       //   [PaintVarLinearGradient only] u32 varIndexBase
       const clRel = this._readOffset24(off + 1);
-      let x0 = v.getInt16(off + 4,  false);
-      let y0 = v.getInt16(off + 6,  false);
-      let x1 = v.getInt16(off + 8,  false);
+      let x0 = v.getInt16(off + 4, false);
+      let y0 = v.getInt16(off + 6, false);
+      let x1 = v.getInt16(off + 8, false);
       let y1 = v.getInt16(off + 10, false);
       let x2 = v.getInt16(off + 12, false);
       let y2 = v.getInt16(off + 14, false);
-      const isVar = (format === 5);
+      const isVar = format === 5;
       if (isVar && coords) {
         const varIndexBase = v.getUint32(off + 16, false);
         x0 += this._varDelta(varIndexBase, 0, coords);
@@ -336,8 +409,14 @@ export class ColrReader {
         y2 += this._varDelta(varIndexBase, 5, coords);
       }
       const cl = this._readColorLine(off + clRel, isVar, coords);
-      return { format: 4, p0: [x0, y0], p1: [x1, y1], p2: [x2, y2],
-               stops: cl.stops, extend: cl.extend };
+      return {
+        format: 4,
+        p0: [x0, y0],
+        p1: [x1, y1],
+        p2: [x2, y2],
+        stops: cl.stops,
+        extend: cl.extend,
+      };
     }
     if (format === 6 || format === 7) {
       // PaintRadialGradient / Var:
@@ -346,13 +425,13 @@ export class ColrReader {
       //   FWORD x0, y0; UFWORD r0; FWORD x1, y1; UFWORD r1
       //   [PaintVarRadialGradient only] u32 varIndexBase
       const clRel = this._readOffset24(off + 1);
-      let x0 = v.getInt16(off + 4,  false);
-      let y0 = v.getInt16(off + 6,  false);
+      let x0 = v.getInt16(off + 4, false);
+      let y0 = v.getInt16(off + 6, false);
       let r0 = v.getUint16(off + 8, false);
       let x1 = v.getInt16(off + 10, false);
       let y1 = v.getInt16(off + 12, false);
       let r1 = v.getUint16(off + 14, false);
-      const isVar = (format === 7);
+      const isVar = format === 7;
       if (isVar && coords) {
         const varIndexBase = v.getUint32(off + 16, false);
         x0 += this._varDelta(varIndexBase, 0, coords);
@@ -363,8 +442,7 @@ export class ColrReader {
         r1 += this._varDelta(varIndexBase, 5, coords);
       }
       const cl = this._readColorLine(off + clRel, isVar, coords);
-      return { format: 6, c0: [x0, y0], r0, c1: [x1, y1], r1,
-               stops: cl.stops, extend: cl.extend };
+      return { format: 6, c0: [x0, y0], r0, c1: [x1, y1], r1, stops: cl.stops, extend: cl.extend };
     }
     if (format === 8 || format === 9) {
       // PaintSweepGradient / Var:
@@ -376,23 +454,29 @@ export class ColrReader {
       const clRel = this._readOffset24(off + 1);
       let cx = v.getInt16(off + 4, false);
       let cy = v.getInt16(off + 6, false);
-      let startStored = v.getInt16(off + 8,  false);
-      let endStored   = v.getInt16(off + 10, false);
-      const isVar = (format === 9);
+      let startStored = v.getInt16(off + 8, false);
+      let endStored = v.getInt16(off + 10, false);
+      const isVar = format === 9;
       if (isVar && coords) {
         const varIndexBase = v.getUint32(off + 12, false);
-        cx          += this._varDelta(varIndexBase, 0, coords);
-        cy          += this._varDelta(varIndexBase, 1, coords);
+        cx += this._varDelta(varIndexBase, 0, coords);
+        cy += this._varDelta(varIndexBase, 1, coords);
         startStored += this._varDelta(varIndexBase, 2, coords);
-        endStored   += this._varDelta(varIndexBase, 3, coords);
+        endStored += this._varDelta(varIndexBase, 3, coords);
       }
       // COLR spec: sweep angles are F2DOT14 with a BIAS of 1.0 —
       // angle = (value + 1.0) × 180°. (Rotate/skew paints are unbiased.)
       const startAngle = (startStored / 16384 + 1) * 180;
-      const endAngle   = (endStored / 16384 + 1) * 180;
+      const endAngle = (endStored / 16384 + 1) * 180;
       const cl = this._readColorLine(off + clRel, isVar, coords);
-      return { format: 8, center: [cx, cy], startAngle, endAngle,
-               stops: cl.stops, extend: cl.extend };
+      return {
+        format: 8,
+        center: [cx, cy],
+        startAngle,
+        endAngle,
+        stops: cl.stops,
+        extend: cl.extend,
+      };
     }
     if (format === 10) {
       // PaintGlyph:
@@ -417,15 +501,16 @@ export class ColrReader {
     if (format === 12 || format === 13) {
       // PaintTransform / PaintVarTransform:
       //   u8 format
-      //   Offset24 paintOffset → sub-Paint
-      //   Affine2x3 affine (Fixed[6] = 16.16 each, 24 bytes), inline
-      //     immediately after the offset
-      //   [PaintVarTransform only] uint32 varIndexBase
+      //   Offset24 paintOffset      -> sub-Paint (from this paint's start)
+      //   Offset24 transformOffset  -> Affine2x3 / VarAffine2x3 (from this paint's start)
+      // Affine2x3 is Fixed[6] (16.16): xx, yx, xy, yy, dx, dy. VarAffine2x3 adds a uint32 varIndexBase after
+      // them. The affine is NOT inline in the paint (fontTools and every real font put it behind the second
+      // offset).
       const childRel = this._readOffset24(off + 1);
-      const affOff = off + 4;
-      let xx = v.getInt32(affOff +  0, false) / 65536;
-      let yx = v.getInt32(affOff +  4, false) / 65536;
-      let xy = v.getInt32(affOff +  8, false) / 65536;
+      const affOff = off + this._readOffset24(off + 4);
+      let xx = v.getInt32(affOff + 0, false) / 65536;
+      let yx = v.getInt32(affOff + 4, false) / 65536;
+      let xy = v.getInt32(affOff + 8, false) / 65536;
       let yy = v.getInt32(affOff + 12, false) / 65536;
       let dx = v.getInt32(affOff + 16, false) / 65536;
       let dy = v.getInt32(affOff + 20, false) / 65536;
@@ -515,7 +600,7 @@ export class ColrReader {
       let cy = v.getInt16(off + 8, false);
       if (format === 23 && coords) {
         const varIndexBase = v.getUint32(off + 10, false);
-        s  += this._varDelta(varIndexBase, 0, coords) / 16384;
+        s += this._varDelta(varIndexBase, 0, coords) / 16384;
         cx += this._varDelta(varIndexBase, 1, coords);
         cy += this._varDelta(varIndexBase, 2, coords);
       }
@@ -532,7 +617,7 @@ export class ColrReader {
         const varIndexBase = v.getUint32(off + 6, false);
         angleStored += this._varDelta(varIndexBase, 0, coords);
       }
-      const angleDeg = angleStored / 16384 * 180;
+      const angleDeg = (angleStored / 16384) * 180;
       const child = this._readPaint(off + childRel, coords);
       return { format: 24, child, angleDeg };
     }
@@ -547,10 +632,10 @@ export class ColrReader {
       if (format === 27 && coords) {
         const varIndexBase = v.getUint32(off + 10, false);
         angleStored += this._varDelta(varIndexBase, 0, coords);
-        cx          += this._varDelta(varIndexBase, 1, coords);
-        cy          += this._varDelta(varIndexBase, 2, coords);
+        cx += this._varDelta(varIndexBase, 1, coords);
+        cy += this._varDelta(varIndexBase, 2, coords);
       }
-      const angleDeg = angleStored / 16384 * 180;
+      const angleDeg = (angleStored / 16384) * 180;
       const child = this._readPaint(off + childRel, coords);
       return { format: 26, child, angleDeg, cx, cy };
     }
@@ -566,8 +651,8 @@ export class ColrReader {
         skewXStored += this._varDelta(varIndexBase, 0, coords);
         skewYStored += this._varDelta(varIndexBase, 1, coords);
       }
-      const skewXDeg = skewXStored / 16384 * 180;
-      const skewYDeg = skewYStored / 16384 * 180;
+      const skewXDeg = (skewXStored / 16384) * 180;
+      const skewYDeg = (skewYStored / 16384) * 180;
       const child = this._readPaint(off + childRel, coords);
       return { format: 28, child, skewXDeg, skewYDeg };
     }
@@ -584,11 +669,11 @@ export class ColrReader {
         const varIndexBase = v.getUint32(off + 12, false);
         skewXStored += this._varDelta(varIndexBase, 0, coords);
         skewYStored += this._varDelta(varIndexBase, 1, coords);
-        cx          += this._varDelta(varIndexBase, 2, coords);
-        cy          += this._varDelta(varIndexBase, 3, coords);
+        cx += this._varDelta(varIndexBase, 2, coords);
+        cy += this._varDelta(varIndexBase, 3, coords);
       }
-      const skewXDeg = skewXStored / 16384 * 180;
-      const skewYDeg = skewYStored / 16384 * 180;
+      const skewXDeg = (skewXStored / 16384) * 180;
+      const skewYDeg = (skewYStored / 16384) * 180;
       const child = this._readPaint(off + childRel, coords);
       return { format: 30, child, skewXDeg, skewYDeg, cx, cy };
     }
@@ -647,13 +732,13 @@ export class ColrReader {
       let alphaStored = v.getInt16(cur + 4, false);
       if (isVar && coords) {
         const varIndexBase = v.getUint32(cur + 6, false);
-        stopStored  += this._varDelta(varIndexBase, 0, coords);
+        stopStored += this._varDelta(varIndexBase, 0, coords);
         alphaStored += this._varDelta(varIndexBase, 1, coords);
       }
       const stopOffset = stopStored / 16384;
       const alpha = alphaStored / 16384;
       let rgba = null;
-      if (paletteIndex !== 0xFFFF) {
+      if (paletteIndex !== 0xffff) {
         const palCol = this._resolveColor(paletteIndex);
         rgba = [palCol[0], palCol[1], palCol[2], palCol[3] * alpha];
       }
@@ -672,7 +757,7 @@ export class ColrReader {
   }
 
   _resolveColor(paletteIndex) {
-    if (paletteIndex === 0xFFFF) return null;  // foreground sentinel
+    if (paletteIndex === 0xffff) return null; // foreground sentinel
     if (!this._palette0) return [0, 0, 0, 1];
     if (paletteIndex >= this._numPaletteEntries) return [0, 0, 0, 1];
     return this._palette0[paletteIndex];
@@ -681,12 +766,12 @@ export class ColrReader {
   _loadPalette0(cpalAbsOff) {
     const v = this._view;
     const cpalVersion = v.getUint16(cpalAbsOff + 0, false);
-    if (cpalVersion !== 0 && cpalVersion !== 1) return;  // unknown CPAL
+    if (cpalVersion !== 0 && cpalVersion !== 1) return; // unknown CPAL
     this._numPaletteEntries = v.getUint16(cpalAbsOff + 2, false);
-    const numPalettes  = v.getUint16(cpalAbsOff + 4, false);
+    const numPalettes = v.getUint16(cpalAbsOff + 4, false);
     if (numPalettes === 0) return;
-    const numColorRec  = v.getUint16(cpalAbsOff + 6, false);
-    const colorRecOff  = cpalAbsOff + v.getUint32(cpalAbsOff + 8, false);
+    const numColorRec = v.getUint16(cpalAbsOff + 6, false);
+    const colorRecOff = cpalAbsOff + v.getUint32(cpalAbsOff + 8, false);
     // colorRecordIndices: u16[numPalettes], starts at offset 12.
     // Palette 0's first record index:
     const pal0First = v.getUint16(cpalAbsOff + 12, false);
@@ -695,8 +780,7 @@ export class ColrReader {
     const colors = new Array(this._numPaletteEntries);
     for (let i = 0; i < this._numPaletteEntries; i++) {
       const recOff = colorRecOff + (pal0First + i) * 4;
-      // CPAL color records are STORED as BGRA — convert to RGBA for
-      // our consumers (matches Mantle's downstream color format).
+
       const b = v.getUint8(recOff + 0) / 255;
       const g = v.getUint8(recOff + 1) / 255;
       const r = v.getUint8(recOff + 2) / 255;

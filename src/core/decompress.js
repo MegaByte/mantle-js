@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // decompress.js — shared limits for gzip / brotli inflation.
 
 /** Max bytes accepted for a single decompress operation (untrusted input). */

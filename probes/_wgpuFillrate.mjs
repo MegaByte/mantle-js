@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // _wgpuFillrate — does WebGPU move fill rate, or only per-draw cost?
 //
 // The Slug fill kernel is already storage-buffer-shaped: _coverage.glsl fakes a 1D buffer on a
@@ -13,27 +16,33 @@
 // backend, same algorithm — so SLOPE is a test of whether the API layer costs fragment ALU
 // anything at all, and FIXED is a test of bind groups vs 52 loose gl.uniform* + 14 texture binds.
 //
-// The kernel is a faithful port of the real H-ray quadratic walk (calcRootCode2's 0x2E74 table +
+// The kernel is a faithful WGSL copy of the real H-ray quadratic walk (calcRootCode2's 0x2E74 table +
 // the stable root pair + a box-filter accumulate), NOT a synthetic ALU loop: it keeps the band
 // indirection and the dependent per-curve fetch that make the real shader memory-bound-ish.
 // GLSL and WGSL are validated pixel-identical before any timing is believed — otherwise the two
 // paths could simply be doing different amounts of work.
 import http from 'http';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 
 // ---- content: a many-segment quadratic ring, banded by row (mirrors the real encoder) ----
 const ROWS = 64;
-const SEGS = +(process.env.SEGS || 512);   // curve density sweep: is the storage win memory-bound-driven?
+const SEGS = +(process.env.SEGS || 512); // curve density sweep: is the storage win memory-bound-driven?
 function buildContent(extent) {
-  const cx = extent / 2, cy = extent / 2, R = extent * 0.46, r = extent * 0.30;
-  const curves = [];         // each: [x0,y0,x1,y1, x2,y2,0,0]
+  const cx = extent / 2,
+    cy = extent / 2,
+    R = extent * 0.46,
+    r = extent * 0.3;
+  const curves = []; // each: [x0,y0,x1,y1, x2,y2,0,0]
   for (let i = 0; i < SEGS; i++) {
-    const a0 = (i / SEGS) * 2 * Math.PI, a1 = ((i + 1) / SEGS) * 2 * Math.PI, am = (a0 + a1) / 2;
+    const a0 = (i / SEGS) * 2 * Math.PI,
+      a1 = ((i + 1) / SEGS) * 2 * Math.PI,
+      am = (a0 + a1) / 2;
     const rr = (j) => (j % 2 ? r : R);
     const P = (a, rad) => [cx + rad * Math.cos(a), cy + rad * Math.sin(a)];
-    const p0 = P(a0, rr(i)), p2 = P(a1, rr(i + 1));
+    const p0 = P(a0, rr(i)),
+      p2 = P(a1, rr(i + 1));
     // control point pushed off the chord so the segment is a genuine curve (real root work)
-    const mid = P(am, (rr(i) + rr(i + 1)) / 2 * 1.08);
+    const mid = P(am, ((rr(i) + rr(i + 1)) / 2) * 1.08);
     const p1 = [2 * mid[0] - (p0[0] + p2[0]) / 2, 2 * mid[1] - (p0[1] + p2[1]) / 2];
     curves.push([p0[0], p0[1], p1[0], p1[1], p2[0], p2[1], 0, 0]);
   }
@@ -42,17 +51,25 @@ function buildContent(extent) {
   const lists = Array.from({ length: ROWS }, () => []);
   curves.forEach((c, i) => {
     const ys = [c[1], c[3], c[5]];
-    let lo = Math.floor(Math.min(...ys) / bandH), hi = Math.floor(Math.max(...ys) / bandH);
-    lo = Math.max(0, lo); hi = Math.min(ROWS - 1, hi);
+    let lo = Math.floor(Math.min(...ys) / bandH),
+      hi = Math.floor(Math.max(...ys) / bandH);
+    lo = Math.max(0, lo);
+    hi = Math.min(ROWS - 1, hi);
     for (let rIdx = lo; rIdx <= hi; rIdx++) lists[rIdx].push(i);
   });
-  const flatList = [], table = [];
-  for (const L of lists) { table.push([flatList.length, L.length, 0, 0]); for (const i of L) flatList.push([i, 0, 0, 0]); }
+  const flatList = [],
+    table = [];
+  for (const L of lists) {
+    table.push([flatList.length, L.length, 0, 0]);
+    for (const i of L) flatList.push([i, 0, 0, 0]);
+  }
   return {
     curveData: Float32Array.from(curves.flatMap((c) => [c[0], c[1], c[2], c[3], c[4], c[5], 0, 0])),
     bandTable: Float32Array.from(table.flat()),
     bandList: Float32Array.from(flatList.flat()),
-    nCurves: curves.length, nList: flatList.length, bandH,
+    nCurves: curves.length,
+    nList: flatList.length,
+    bandH,
     avgPerBand: flatList.length / ROWS,
   };
 }
@@ -365,50 +382,100 @@ catch(e){ window.__err = e.message + '\\n' + (e.stack||''); window.__ready = tru
 
 // COOP/COEP make the page crossOriginIsolated, which lifts performance.now()'s 100µs clamp to
 // ~5µs. Without it the per-frame times quantize to multiples of 100µs/K and the fit wobbles.
-const server = http.createServer((q, s) => { s.writeHead(200, { 'content-type': 'text/html; charset=utf-8',
-  'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' }); s.end(HTML); });
+const server = http.createServer((q, s) => {
+  s.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Cross-Origin-Embedder-Policy': 'require-corp',
+  });
+  s.end(HTML);
+});
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
-const browser = await puppeteer.launch({ headless: false, args: ['--no-sandbox', '--use-angle=metal', '--enable-unsafe-webgpu'] });
+// HEADLESS EVEN ON THE GPU. Headless Chrome reaches the real GPU: ANGLE (Apple, ANGLE Metal
+// Renderer) reports and TIMES the same headless or headful.
+// A window is not free to the person running this: macOS CLAMPS --window-position (measured:
+// screenX/Y 83,65 whatever you pass), so a headful run cannot be put out of the way and lands
+// on whichever desktop is in front.
+const browser = await launchBrowser({
+  headless: 'new',
+  args: ['--no-sandbox', '--use-angle=metal', '--enable-unsafe-webgpu'],
+});
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.error('[page-err]', e.message));
-page.on('console', (m) => { if (m.type() === 'error') console.error('[console]', m.text()); });
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('[console]', m.text());
+});
 await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 60000 });
 await page.waitForFunction(() => window.__ready === true, { timeout: 120000 });
 const err = await page.evaluate(() => window.__err);
 const out = await page.evaluate(() => window.__out);
-await browser.close(); server.close();
+await browser.close();
+server.close();
 
-if (err) { console.error('FAILED:\n' + err); process.exit(1); }
+if (err) {
+  console.error('FAILED:\n' + err);
+  process.exit(1);
+}
 
 const frag = (n) => n * n;
 // Least-squares fit of ms(N) = FIXED + SLOPE*frag(N) over the whole sweep. Two-point
 // extrapolation amplified WebGL2's run-to-run noise into a meaningless ratio; a fit over
 // 5 resolutions with R² reported shows whether the linear model actually holds.
 function fit(r) {
-  const xs = out.RES.map(frag), ys = out.RES.map((N) => r[N]), n = xs.length;
-  const mx = xs.reduce((a, b) => a + b) / n, my = ys.reduce((a, b) => a + b) / n;
-  let sxy = 0, sxx = 0;
-  for (let i = 0; i < n; i++) { sxy += (xs[i] - mx) * (ys[i] - my); sxx += (xs[i] - mx) ** 2; }
-  const slope = sxy / sxx, fixed = my - slope * mx;
-  let ssr = 0, sst = 0;
-  for (let i = 0; i < n; i++) { ssr += (ys[i] - (fixed + slope * xs[i])) ** 2; sst += (ys[i] - my) ** 2; }
+  const xs = out.RES.map(frag),
+    ys = out.RES.map((N) => r[N]),
+    n = xs.length;
+  const mx = xs.reduce((a, b) => a + b) / n,
+    my = ys.reduce((a, b) => a + b) / n;
+  let sxy = 0,
+    sxx = 0;
+  for (let i = 0; i < n; i++) {
+    sxy += (xs[i] - mx) * (ys[i] - my);
+    sxx += (xs[i] - mx) ** 2;
+  }
+  const slope = sxy / sxx,
+    fixed = my - slope * mx;
+  let ssr = 0,
+    sst = 0;
+  for (let i = 0; i < n; i++) {
+    ssr += (ys[i] - (fixed + slope * xs[i])) ** 2;
+    sst += (ys[i] - my) ** 2;
+  }
   return { fixed, slope, r2: 1 - ssr / sst };
 }
-const g = fit(out.gl), ws = fit(out.wg.storage), wt = fit(out.wg.texture);
+const g = fit(out.gl),
+  ws = fit(out.wg.storage),
+  wt = fit(out.wg.texture);
 console.log(`GPU: ${out.gpu}   crossOriginIsolated(hi-res timer)=${out.iso}`);
-console.log(`content: ${out.content.nCurves} quadratic segs, ${out.content.avgPerBand} curves/band avg, ${out.K} draws amortized, min-of-11`);
+console.log(
+  `content: ${out.content.nCurves} quadratic segs, ${out.content.avgPerBand} curves/band avg, ${out.K} draws amortized, min-of-11`,
+);
 console.log(`pixel diff vs WebGL2 (must be ~0 or timings are meaningless):`);
-for (const m of ['storage','texture']) console.log(`  wgpu:${m.padEnd(8)} max=${out.diff[m].max}/255  mean=${out.diff[m].mean}`);
+for (const m of ['storage', 'texture'])
+  console.log(`  wgpu:${m.padEnd(8)} max=${out.diff[m].max}/255  mean=${out.diff[m].mean}`);
 console.log('');
 console.log('  ms/draw       |  WebGL2   wgpu:storage  wgpu:texture');
-for (const N of out.RES) console.log(`  ${String(N + '²').padEnd(13)} |  ${out.gl[N].toFixed(4)}   ${out.wg.storage[N].toFixed(4)}       ${out.wg.texture[N].toFixed(4)}`);
+for (const N of out.RES)
+  console.log(
+    `  ${String(N + '²').padEnd(13)} |  ${out.gl[N].toFixed(4)}   ${out.wg.storage[N].toFixed(4)}       ${out.wg.texture[N].toFixed(4)}`,
+  );
 console.log('');
 console.log('  term              |  WebGL2   wgpu:storage  wgpu:texture');
-console.log(`  FIXED (ms/draw)   |  ${g.fixed.toFixed(4)}   ${ws.fixed.toFixed(4)}       ${wt.fixed.toFixed(4)}`);
-console.log(`  SLOPE (ns/Mfrag)  |  ${(g.slope*1e6).toFixed(3)}    ${(ws.slope*1e6).toFixed(3)}        ${(wt.slope*1e6).toFixed(3)}`);
-console.log(`  fit R²            |  ${g.r2.toFixed(3)}    ${ws.r2.toFixed(3)}        ${wt.r2.toFixed(3)}`);
+console.log(
+  `  FIXED (ms/draw)   |  ${g.fixed.toFixed(4)}   ${ws.fixed.toFixed(4)}       ${wt.fixed.toFixed(4)}`,
+);
+console.log(
+  `  SLOPE (ns/Mfrag)  |  ${(g.slope * 1e6).toFixed(3)}    ${(ws.slope * 1e6).toFixed(3)}        ${(wt.slope * 1e6).toFixed(3)}`,
+);
+console.log(
+  `  fit R²            |  ${g.r2.toFixed(3)}    ${ws.r2.toFixed(3)}        ${wt.r2.toFixed(3)}`,
+);
 console.log('');
-console.log(`  SLOPE vs WebGL2   |   1.00×    ${(ws.slope/g.slope).toFixed(2)}×         ${(wt.slope/g.slope).toFixed(2)}×`);
-console.log(`  storage vs texture WITHIN WebGPU (no API confound): ${(wt.slope/ws.slope).toFixed(2)}× faster`);
+console.log(
+  `  SLOPE vs WebGL2   |   1.00×    ${(ws.slope / g.slope).toFixed(2)}×         ${(wt.slope / g.slope).toFixed(2)}×`,
+);
+console.log(
+  `  storage vs texture WITHIN WebGPU (no API confound): ${(wt.slope / ws.slope).toFixed(2)}× faster`,
+);

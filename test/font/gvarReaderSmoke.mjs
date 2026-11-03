@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // gvarReaderSmoke.mjs — variable-font outline morphing end-to-end.
 // Verifies that gvar deltas applied at different axis coordinates
 // produce different glyph outlines (proving the variation pipeline
@@ -9,8 +12,11 @@ import { registerVariableFontReaders } from '../../src/font/variations/index.js'
 registerVariableFontReaders();
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 function segsHash(segs) {
   if (!segs) return 'null';
@@ -29,7 +35,8 @@ function segsHash(segs) {
 const VF = '/System/Library/Fonts/NewYork.ttf';
 if (!existsSync(VF)) {
   ok('all tests skipped (NewYork.ttf not present)');
-  console.log(); console.log('GVAR-READER PASS (skipped)');
+  console.log();
+  console.log('GVAR-READER PASS (skipped)');
   process.exit(0);
 }
 
@@ -73,8 +80,9 @@ void font.name;
 {
   const gidA = font.codepointToGlyphId(0x41);
   const wghtAxis = font.fvar.findAxis('wght');
-  if (!wghtAxis) { ok('T3 skipped (no wght)'); }
-  else {
+  if (!wghtAxis) {
+    ok('T3 skipped (no wght)');
+  } else {
     const minCoords = font.fvar.defaultCoords();
     const maxCoords = font.fvar.defaultCoords();
     for (let i = 0; i < font.fvar.axes.length; i++) {
@@ -95,10 +103,14 @@ void font.name;
 {
   const gidA = font.codepointToGlyphId(0x41);
   const wghtAxis = font.fvar.findAxis('wght');
-  if (!wghtAxis) { ok('T4 skipped'); }
-  else {
+  if (!wghtAxis) {
+    ok('T4 skipped');
+  } else {
     function bbox(segs) {
-      let xmin = Infinity, ymin = Infinity, xmax = -Infinity, ymax = -Infinity;
+      let xmin = Infinity,
+        ymin = Infinity,
+        xmax = -Infinity,
+        ymax = -Infinity;
       for (const seg of segs) {
         for (const p of [seg.p1, seg.p2, seg.p3, seg.p4]) {
           if (!p) continue;
@@ -119,11 +131,18 @@ void font.name;
     // 'A' bbox: heavier weight should have similar X extent (the letter
     // doesn't get wider as much as it gets thicker — internal counter
     // shrinks). Width may stay similar; verify ANY dimension changed.
-    const wDef = bDef[2] - bDef[0], wMax = bMax[2] - bMax[0];
-    const hDef = bDef[3] - bDef[1], hMax = bMax[3] - bMax[1];
+    const wDef = bDef[2] - bDef[0],
+      wMax = bMax[2] - bMax[0];
+    const hDef = bDef[3] - bDef[1],
+      hMax = bMax[3] - bMax[1];
     if (Math.abs(wDef - wMax) < 0.5 && Math.abs(hDef - hMax) < 0.5)
-      fail(`T4 'A' bbox identical: wgt=400 (${wDef.toFixed(1)}×${hDef.toFixed(1)}) vs 1000 (${wMax.toFixed(1)}×${hMax.toFixed(1)})`);
-    else ok(`T4 'A' bbox changes: wgt=400→(${wDef.toFixed(1)}×${hDef.toFixed(1)}) wgt=1000→(${wMax.toFixed(1)}×${hMax.toFixed(1)})`);
+      fail(
+        `T4 'A' bbox identical: wgt=400 (${wDef.toFixed(1)}×${hDef.toFixed(1)}) vs 1000 (${wMax.toFixed(1)}×${hMax.toFixed(1)})`,
+      );
+    else
+      ok(
+        `T4 'A' bbox changes: wgt=400→(${wDef.toFixed(1)}×${hDef.toFixed(1)}) wgt=1000→(${wMax.toFixed(1)}×${hMax.toFixed(1)})`,
+      );
   }
 }
 

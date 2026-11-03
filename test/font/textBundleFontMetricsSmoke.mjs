@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Text font-metrics API.
 //
 // Verifies:
@@ -21,23 +24,56 @@ import { MantleFontAsset } from '../../src/font/fontAsset.js';
 import { createTextBundle } from '../../src/textBundle.js';
 
 let failures = 0;
-const ok   = (msg) => console.log('ok', msg);
-const fail = (msg) => { failures++; console.error('FAIL', msg); };
+const ok = (msg) => console.log('ok', msg);
+const fail = (msg) => {
+  failures++;
+  console.error('FAIL', msg);
+};
 const approxEq = (a, b, eps = 1e-4) => Math.abs(a - b) <= eps;
 
 // Stub GL — textBundle creates textures but doesn't render in this test.
 function makeFakeGL() {
   const fake = {
-    TEXTURE_2D: 1, RGBA: 2, FLOAT: 3, UNSIGNED_BYTE: 4, RGBA32F: 5, RGBA8: 6,
-    TEXTURE_MIN_FILTER: 6, TEXTURE_MAG_FILTER: 7, TEXTURE_WRAP_S: 8, TEXTURE_WRAP_T: 9,
-    NEAREST: 10, CLAMP_TO_EDGE: 11, LINEAR: 12,
-    bindTexture() {}, texImage2D() {}, texParameteri() {}, texSubImage2D() {},
-    createTexture() { return {}; }, deleteTexture() {}, pixelStorei() {},
-    activeTexture() {}, useProgram() {},
-    uniform1i() {}, uniform1f() {}, uniform2f() {}, uniform4f() {},
-    bindFramebuffer() {}, deleteFramebuffer() {}, createFramebuffer() { return {}; },
-    framebufferTexture2D() {}, checkFramebufferStatus() { return 0x8CD5; },
-    FRAMEBUFFER: 0, FRAMEBUFFER_COMPLETE: 0x8CD5, COLOR_ATTACHMENT0: 0,
+    TEXTURE_2D: 1,
+    RGBA: 2,
+    FLOAT: 3,
+    UNSIGNED_BYTE: 4,
+    RGBA32F: 5,
+    RGBA8: 6,
+    TEXTURE_MIN_FILTER: 6,
+    TEXTURE_MAG_FILTER: 7,
+    TEXTURE_WRAP_S: 8,
+    TEXTURE_WRAP_T: 9,
+    NEAREST: 10,
+    CLAMP_TO_EDGE: 11,
+    LINEAR: 12,
+    bindTexture() {},
+    texImage2D() {},
+    texParameteri() {},
+    texSubImage2D() {},
+    createTexture() {
+      return {};
+    },
+    deleteTexture() {},
+    pixelStorei() {},
+    activeTexture() {},
+    useProgram() {},
+    uniform1i() {},
+    uniform1f() {},
+    uniform2f() {},
+    uniform4f() {},
+    bindFramebuffer() {},
+    deleteFramebuffer() {},
+    createFramebuffer() {
+      return {};
+    },
+    framebufferTexture2D() {},
+    checkFramebufferStatus() {
+      return 0x8cd5;
+    },
+    FRAMEBUFFER: 0,
+    FRAMEBUFFER_COMPLETE: 0x8cd5,
+    COLOR_ATTACHMENT0: 0,
   };
   return fake;
 }
@@ -63,15 +99,20 @@ void font.name;
   if (!fm || !(fm.ascent > 0))
     fail(`T2 fontMetrics ascent should be positive: ${JSON.stringify(fm)}`);
   else if (!(fm.descent > 0))
-    fail(`T2 fontMetrics descent should be positive (positive distance below baseline): ${fm.descent}`);
+    fail(
+      `T2 fontMetrics descent should be positive (positive distance below baseline): ${fm.descent}`,
+    );
   else if (!approxEq(fm.emHeight, fm.ascent + fm.descent))
     fail(`T2 emHeight should equal ascent + descent: ${fm.emHeight} vs ${fm.ascent + fm.descent}`);
-  else ok(`T2 fontMetrics ascent=${fm.ascent.toFixed(4)} descent=${fm.descent.toFixed(4)} emHeight=${fm.emHeight.toFixed(4)}`);
+  else
+    ok(
+      `T2 fontMetrics ascent=${fm.ascent.toFixed(4)} descent=${fm.descent.toFixed(4)} emHeight=${fm.emHeight.toFixed(4)}`,
+    );
 }
 
 // T3: createTextBundle exposes fontMetrics + runMetrics.
 const gl = makeFakeGL();
-const tbBlack  = await createTextBundle(gl, { font, text: 'BLACK',  style: { fontSizePx: 1 } });
+const tbBlack = await createTextBundle(gl, { font, text: 'BLACK', style: { fontSizePx: 1 } });
 const tbYellow = await createTextBundle(gl, { font, text: 'YELLOW', style: { fontSizePx: 1 } });
 
 {
@@ -85,12 +126,14 @@ const tbYellow = await createTextBundle(gl, { font, text: 'YELLOW', style: { fon
 // T4: BLACK vs YELLOW — IDENTICAL emHeight + typoBBox.h, DIFFERENT
 // globalBBox.h (descender vs no descender).
 {
-  const fmB = tbBlack.fontMetrics, fmY = tbYellow.fontMetrics;
+  const fmB = tbBlack.fontMetrics,
+    fmY = tbYellow.fontMetrics;
   if (!approxEq(fmB.emHeight, fmY.emHeight))
     fail(`T4 emHeight diverges: BLACK=${fmB.emHeight} YELLOW=${fmY.emHeight}`);
   else ok(`T4 emHeight identical across strings: ${fmB.emHeight.toFixed(4)}`);
 
-  const rmB = tbBlack.runMetrics, rmY = tbYellow.runMetrics;
+  const rmB = tbBlack.runMetrics,
+    rmY = tbYellow.runMetrics;
   if (!approxEq(rmB.typoBBox[3], rmY.typoBBox[3]))
     fail(`T4 typoBBox.h diverges: BLACK=${rmB.typoBBox[3]} YELLOW=${rmY.typoBBox[3]}`);
   else ok(`T4 typoBBox.h identical across strings: ${rmB.typoBBox[3].toFixed(4)}`);
@@ -98,10 +141,15 @@ const tbYellow = await createTextBundle(gl, { font, text: 'YELLOW', style: { fon
   const inkB = tbBlack.bundle.globalBBox[3];
   const inkY = tbYellow.bundle.globalBBox[3];
   if (approxEq(inkB, inkY))
-    fail(`T4 globalBBox.h SHOULD differ (Y has descender, BLACK doesn't): BLACK=${inkB} YELLOW=${inkY}`);
+    fail(
+      `T4 globalBBox.h SHOULD differ (Y has descender, BLACK doesn't): BLACK=${inkB} YELLOW=${inkY}`,
+    );
   else if (!(inkY > inkB))
     fail(`T4 YELLOW ink should be TALLER than BLACK (Y descender): BLACK=${inkB} YELLOW=${inkY}`);
-  else ok(`T4 globalBBox.h differs as expected: BLACK=${inkB.toFixed(4)} (cap only) YELLOW=${inkY.toFixed(4)} (cap + descent)`);
+  else
+    ok(
+      `T4 globalBBox.h differs as expected: BLACK=${inkB.toFixed(4)} (cap only) YELLOW=${inkY.toFixed(4)} (cap + descent)`,
+    );
 }
 
 // T5: fontMetrics stable across setText.
@@ -110,21 +158,27 @@ const tbYellow = await createTextBundle(gl, { font, text: 'YELLOW', style: { fon
   await tbBlack.setText('Resume');
   const after = tbBlack.fontMetrics;
   if (!approxEq(before.emHeight, after.emHeight))
-    fail(`T5 fontMetrics drifted across setText: before=${before.emHeight} after=${after.emHeight}`);
+    fail(
+      `T5 fontMetrics drifted across setText: before=${before.emHeight} after=${after.emHeight}`,
+    );
   else ok(`T5 fontMetrics.emHeight stable across setText (${after.emHeight.toFixed(4)})`);
 }
 
 // T6: runMetrics refreshes on setText (lastLineAdvance changes, lineCount
 // tracks). 'Resume' has different advance than 'BLACK'.
 {
-  const rm1 = tbBlack.runMetrics;   // currently shows 'Resume'
+  const rm1 = tbBlack.runMetrics; // currently shows 'Resume'
   await tbBlack.setText('BLACK');
   const rm2 = tbBlack.runMetrics;
   if (approxEq(rm1.lastLineAdvance, rm2.lastLineAdvance))
-    fail(`T6 lastLineAdvance should differ between 'Resume' and 'BLACK': ${rm1.lastLineAdvance} vs ${rm2.lastLineAdvance}`);
-  else ok(`T6 runMetrics.lastLineAdvance refreshes: Resume=${rm1.lastLineAdvance.toFixed(4)} BLACK=${rm2.lastLineAdvance.toFixed(4)}`);
-  if (rm2.lineCount !== 1)
-    fail(`T6 single-line run should have lineCount=1, got ${rm2.lineCount}`);
+    fail(
+      `T6 lastLineAdvance should differ between 'Resume' and 'BLACK': ${rm1.lastLineAdvance} vs ${rm2.lastLineAdvance}`,
+    );
+  else
+    ok(
+      `T6 runMetrics.lastLineAdvance refreshes: Resume=${rm1.lastLineAdvance.toFixed(4)} BLACK=${rm2.lastLineAdvance.toFixed(4)}`,
+    );
+  if (rm2.lineCount !== 1) fail(`T6 single-line run should have lineCount=1, got ${rm2.lineCount}`);
   else ok(`T6 single-line lineCount = 1`);
 }
 
@@ -132,8 +186,7 @@ const tbYellow = await createTextBundle(gl, { font, text: 'YELLOW', style: { fon
 // fallback (so layout doesn't divide-by-zero).
 {
   const tbEmpty = await createTextBundle(gl, { font, text: '', style: { fontSizePx: 1 } });
-  if (!tbEmpty.fontMetrics)
-    fail('T7 empty bundle should still expose fontMetrics');
+  if (!tbEmpty.fontMetrics) fail('T7 empty bundle should still expose fontMetrics');
   else if (!tbEmpty.runMetrics)
     fail('T7 empty bundle should still expose runMetrics (1-line typoBBox fallback)');
   else if (tbEmpty.runMetrics.lineCount !== 1)
@@ -150,19 +203,25 @@ const tbYellow = await createTextBundle(gl, { font, text: 'YELLOW', style: { fon
 // inconsistently.
 {
   const tbFull = await createTextBundle(gl, { font, text: 'Hgpq', style: { fontSizePx: 1 } });
-  const fmA = tbBlack.fontMetrics, fmB = tbFull.fontMetrics;
+  const fmA = tbBlack.fontMetrics,
+    fmB = tbFull.fontMetrics;
   if (!approxEq(fmA.emHeight, fmB.emHeight))
     fail(`T8 emHeight diverges between 'BLACK' and 'Hgpq': ${fmA.emHeight} vs ${fmB.emHeight}`);
   else ok(`T8 emHeight identical: ${fmA.emHeight.toFixed(4)}`);
   const inkBlack = tbBlack.bundle.globalBBox[3];
-  const inkFull  = tbFull.bundle.globalBBox[3];
+  const inkFull = tbFull.bundle.globalBBox[3];
   // 'Hgpq' has 'H' to the cap-line + 'g'/'p'/'q' descenders below
   // the baseline. Expected ink ≈ capHeight + descent ≈ ~0.93 em on
   // Arial vs 'BLACK'-only ~0.72 em (cap only). Ratio ≈ 1.28.
   const ratio = inkFull / Math.max(inkBlack, 1e-9);
   if (!(ratio > 1.15))
-    fail(`T8 'Hgpq' ink should be ≥ 1.15× 'BLACK' ink (descender extends past baseline): BLACK=${inkBlack} Hgpq=${inkFull} ratio=${ratio.toFixed(3)}`);
-  else ok(`T8 'Hgpq' ink visibly taller: BLACK=${inkBlack.toFixed(4)} Hgpq=${inkFull.toFixed(4)} ratio=${ratio.toFixed(3)}`);
+    fail(
+      `T8 'Hgpq' ink should be ≥ 1.15× 'BLACK' ink (descender extends past baseline): BLACK=${inkBlack} Hgpq=${inkFull} ratio=${ratio.toFixed(3)}`,
+    );
+  else
+    ok(
+      `T8 'Hgpq' ink visibly taller: BLACK=${inkBlack.toFixed(4)} Hgpq=${inkFull.toFixed(4)} ratio=${ratio.toFixed(3)}`,
+    );
   tbFull.dispose();
 }
 
@@ -170,5 +229,7 @@ tbBlack.dispose();
 tbYellow.dispose();
 
 console.log();
-console.log(failures === 0 ? 'TEXT-BUNDLE FONT-METRICS PASS' : `TEXT-BUNDLE FONT-METRICS FAIL (${failures})`);
+console.log(
+  failures === 0 ? 'TEXT-BUNDLE FONT-METRICS PASS' : `TEXT-BUNDLE FONT-METRICS FAIL (${failures})`,
+);
 process.exit(failures === 0 ? 0 : 1);

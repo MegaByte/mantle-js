@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100"><defs>
+      <path id="a" d="M10 10 L60 10 L10 60 Z M20 20 L50 20 L20 50 Z" fill="#100001"/>
+      <path id="a2" d="M10 10 L60 10 L10 60 Z M20 20 L50 20 L20 50 Z"/>
+      <g fill-rule="evenodd"><path id="b" d="M10 10 L60 10 L10 60 Z M20 20 L50 20 L20 50 Z" fill="#100002"/></g>
+      <path id="c" d="M10 10 L60 10 L10 60 Z M20 20 L50 20 L20 50 Z" fill="#100003" fill-rule="nonzero"/>
+    </defs>
+    <use href="#a" fill-rule="evenodd"/>
+    <g fill-rule="evenodd"><use href="#a2" fill="#100004"/></g>
+    <use href="#b"/>
+    <use href="#c" fill-rule="evenodd"/>
+    <g fill-rule="evenodd"><path d="M10 10 L60 10 L10 60 Z M20 20 L50 20 L20 50 Z" fill="#100005"/></g></svg>

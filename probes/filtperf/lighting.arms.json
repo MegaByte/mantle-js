@@ -1,0 +1,6 @@
+[
+  {
+    "name": "baseline feLighting (with the unused center tap)",
+    "file": { "feLightingFrag": "probes/filtperf/pre-lighting.feLighting.frag.glsl" }
+  }
+]

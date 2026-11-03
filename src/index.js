@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Public API for @kontek/mantle.
 //
 //   import {
@@ -12,10 +15,11 @@
 //     createOverrideTable,    // per-shape runtime overrides
 //     createTextBundle,       // mutable text bundle
 //     createShapeMorph,       // name-based shape morph
-//     loadShaders,            // async fetch-based shader loader
+//     loadShaders,            // async shader loader (bundled module by default; opt-in URL fetch)
 //     HitMode,                // .Bbox/.Coverage/.Outline/.Auto
 //     fillHitShape,           // point-in-bundle query
 //     fillHits, fillHitId,    // ditto, multi-hit / id variants
+//     fillHitHref,            // ditto, the hit shape's <a href>
 //     Constants,              // META_STRIDE_V2, FULL_META_W, COVER_QUAD_STRIDE, …
 //     // Font subsystem (curated re-export from ./font/index.js)
 //     MantleFontAsset,        // class wrapping a .ttf/.otf/.woff2 byte blob
@@ -81,52 +85,51 @@
 
 export { default as importSvg } from './svg/importer.js';
 export {
-  makeTexelBuffer,
-  texelAppend,
-  texelSet,
-  buildTexturesShape,
-  packMetaBody,
   pathBbox,
   segBbox,
-  mkLine, mkQuad, mkCubic,
-  SEG_LINE, SEG_QUAD, SEG_CUBIC, SEG_ARC,
+  mkLine,
+  mkQuad,
+  mkCubic,
+  SEG_LINE,
+  SEG_QUAD,
+  SEG_CUBIC,
+  SEG_ARC,
   getCoverQuadMesh,
   COVER_QUAD_STRIDE,
 } from './svg/importer.js';
-export { setDiagnostics, clearDiagnosticTraces, diagnosticTraces, mantleWarn, mantleError, mantleDebugFlag } from './core/diagnostics.js';
-export { MAX_DECOMPRESS_BYTES } from './core/decompress.js';
 export {
-  loadShaders,       // async runtime fetch (browser, no bundler)
-  bundleShaders,     // sync bundler-time wrapper around `?raw` imports
-  preprocess,        // pure substitution helper (any consumer)
-  SHADER_FILENAMES,  // canonical [key, filename] list for bundler imports
-  HELPER_FILENAMES,  // canonical [marker, filename] list for helpers
-  shaderKeysFor,     // feature spec → set of shader keys
-  shaderFilesFor,    // feature spec → [key, generated/*.glsl subpath] (peer of featuresToModules)
+  setDiagnostics,
+  clearDiagnosticTraces,
+  diagnosticTraces,
+  mantleWarn,
+  mantleError,
+  mantleDebugFlag,
+} from './core/diagnostics.js';
+export {
+  loadShaders, // async: the bundled module by default, or an opt-in URL fetch
+  bundleShaders, // sync bundler-time wrapper around `?raw` imports
+  preprocess, // pure substitution helper (any consumer)
+  SHADER_FILENAMES, // canonical [key, filename] list for bundler imports
+  HELPER_FILENAMES, // canonical [marker, filename] list for helpers
+  shaderKeysFor, // feature spec → set of shader keys
+  shaderFilesFor, // feature spec → [key, generated/*.glsl subpath] (peer of featuresToModules)
 } from './shaders/index.js';
-export {
-  createBundle,
-  parseMetaBin,
-  parseCoverQuadChunks,
-  Constants,
-} from './renderer/bundle.js';
+export { createBundle, parseMetaBin, Constants } from './renderer/bundle.js';
 export { createRenderer } from './renderer/renderer.js';
+export { configureWorkers, terminateWorkers } from './renderer/workerConfig.js';
 // Nine-slice: bundle.applyNineSlice(opts) rewrites a bundle IN PLACE (one
 // nine-slice state per bundle); bundle.nineSliceInstance(opts) returns a
 // cheap per-DRAW view carrying its own rewritten mesh + globalBBox while
 // sharing the base's GL textures — draw ONE chrome asset at several sizes
 // simultaneously. buildNineSliceMesh is the underlying pure rewrite.
 export { buildNineSliceMesh } from './renderer/nineSlice.js';
-// Additive Loop-Blinn hybrid fill — resolution-independent solid-fill mesh
-// builder + packer. Pair with renderer.drawLoopBlinnMesh().
-export { buildLoopBlinnMesh, refreshLoopBlinnMesh, packLoopBlinnMesh } from './renderer/loopBlinn.js';
-// GPU-resident LB morph builder. Pair with renderer.drawLoopBlinnMorph(m, t, opts).
-export { buildMorphStroke } from './renderer/loopBlinnMorph.js';
+// Select Loop-Blinn through renderer.setFillEngine({ route: 'lb' }).
 // In-place fixed-topology geometry streaming (skips the SVG parse for a large
 // CPU win). Pair with renderer.markGeometryDirty(). Pass { lightweight:true }
 // to take the allocation-light GPU-resident fast path (rebuilds only the
 // analytic fill meshes, skips the per-frame CPU re-mesh + re-texture; the main
 // draw route renders such a bundle through the GPU fill automatically).
+//
 export { updateBundleGeometry, buildStreamableSections } from './renderer/streamGeometry.js';
 
 // One-shot convenience (root barrel only — the lean `/svg` and `/renderer`
@@ -137,16 +140,17 @@ export { updateBundleGeometry, buildStreamableSections } from './renderer/stream
 //   renderer.render(await importToBundle(gl, svgText));
 import _importSvgForBundle from './svg/importer.js';
 import { createBundle as _createBundleForImport } from './renderer/bundle.js';
+/**
+ * @param {any} gl  a WebGL2 context
+ * @param {string} svgText
+ * @param {Record<string, any>} [opts]  importSvg options
+ */
 export async function importToBundle(gl, svgText, opts) {
   return _createBundleForImport(gl, await _importSvgForBundle(svgText, opts));
 }
-// Root barrel = "everything works" (see docs/feature-splitting.md).
-// The renderer itself reads filter/COLR handlers from the empty-by-default registry,
-// so it pulls NONE on its own — the root is where we register them all,
-// keeping the `@kontek/mantle/renderer` subpath lean while preserving the
-// barrel's full-feature behavior. Subpath/feature-entry consumers import
-// only the primitives they need instead.
+
 import './filterGraph/primitives/all.js';
+import './renderer/features/all.js';
 import './filterGraph/colr/paints.js';
 // Static-scene cache. Strategy/Level/Reason
 // constants are needed by consumers driving the cache from code
@@ -156,8 +160,8 @@ import './filterGraph/colr/paints.js';
 export {
   createStaticCache,
   Strategy as CacheStrategy,
-  Level    as CacheLevel,
-  Reason   as CacheReason,
+  Level as CacheLevel,
+  Reason as CacheReason,
 } from './renderer/staticCache.js';
 export { createOverrideTable } from './animation/overrides.js';
 // Color-matrix recolor builders (dual-tint fill recolor).
@@ -166,40 +170,46 @@ export { createOverrideTable } from './animation/overrides.js';
 // monochrome, identity, compose). Callers can also hand-build the
 // matrix; these are convenience wrappers for the named patterns.
 export {
-  dualTint         as colorMatrixDualTint,
-  tripleTint       as colorMatrixTripleTint,
-  monochrome       as colorMatrixMonochrome,
-  identity         as colorMatrixIdentity,
-  combine          as colorMatrixCombine,
-  unityChannelLerp,  // unlit-vector recolor (channelLerp opt)
+  dualTint as colorMatrixDualTint,
+  tripleTint as colorMatrixTripleTint,
+  monochrome as colorMatrixMonochrome,
+  identity as colorMatrixIdentity,
+  combine as colorMatrixCombine,
+  channelLerpParams, // builds the parameter object for the channelLerp recolor
 } from './animation/colorMatrix.js';
 // Per-draw palette LUT. Companion to color matrix:
 // indexed discrete recolor table, mutable AT WILL between draws.
 export { createPalette } from './animation/colorPalette.js';
+// Mutable uniform-valued filter parameters. Baked lookup tables, kernel textures
+// and graph topology require re-importing; unsupported changes are reported per target.
+export { createFilterParams } from './animation/filterParams.js';
 export { createTextBundle } from './textBundle.js';
 export { createShapeMorph, createSpriteMorph } from './animation/shapeMorph.js';
 // Programmatic scene tree → bundle.
 export {
   createScene,
-  sceneToBundle,       // scene → sections dict (feeds createBundle)
-  sceneToSections,     // scene → sections DIRECTLY (no SVG round-trip; solid-fill fast path)
-  sceneToSvg,        // scene → SVG string (for chaining / inspection)
-  rectContour,       // helper: closed rectangle contour
-  ellipseContour,    // helper: closed ellipse / circle (2 native arcs)
-  polygonContour,    // helper: closed polygon contour
-  arcContour,        // helper: closed contour from arc segments
-  arcSeg,            // helper: one elliptical-arc segment
-  linearSeg,         // helper: degenerate-cubic line segment
+  sceneToBundle, // scene → sections dict (feeds createBundle)
+  sceneToSections, // scene → sections DIRECTLY (no SVG round-trip; solid-fill fast path)
+  sceneToSvg, // scene → SVG string (for chaining / inspection)
+  rectContour, // helper: closed rectangle contour
+  ellipseContour, // helper: closed ellipse / circle (2 native arcs)
+  polygonContour, // helper: closed polygon contour
+  polylineContour, // helper: open polyline contour (fill closes it; stroke leaves it open)
+  lineSeg, // helper: one native line segment
+  quadSeg, // helper: one native quadratic segment
+  arcContour, // helper: closed contour from arc segments
+  arcSeg, // helper: one elliptical-arc segment
+  linearSeg, // helper: degenerate-cubic line segment
 } from './scene/scene.js';
 export {
-  createShapeTimeline,       // N-key timeline + linear/hold/cubic-Bezier easing
-  createSpriteTimeline,      // N-key timeline over SPRITE refs (sheet poses)
-  createSpatialBezierMorph,  // per-vertex 2D Bezier path (Lottie)
-  createPathDeltaMorph,      // base pose + N delta channels (Lottie)
-  createSkinnedMorph,        // bone-weighted skinning of non-mesh paths (Rive)
-  createPoseStack,           // 3-pose blend stack for state-machine transitions
+  createShapeTimeline, // N-key timeline + linear/hold/cubic-Bezier easing
+  createSpriteTimeline, // N-key timeline over SPRITE refs (sheet poses)
+  createSpatialBezierMorph, // per-vertex 2D Bezier path (Lottie)
+  createPathDeltaMorph, // base pose + N delta channels (Lottie)
+  createSkinnedMorph, // bone-weighted skinning of non-mesh paths (Rive)
+  createPoseStack, // 3-pose blend stack for state-machine transitions
 } from './animation/shapeAnimation.js';
-export { HitMode, fillHitShape, fillHits, fillHitId } from './hitTest/hitTest.js';
+export { HitMode, fillHitShape, fillHits, fillHitId, fillHitHref } from './hitTest/hitTest.js';
 
 // No-WebGL fallback. When `canvas.getContext('webgl2')` returns null
 // (GPU blocklist, ancient browser, some headless setups), render the
@@ -214,7 +224,7 @@ export { HitMode, fillHitShape, fillHits, fillHitId } from './hitTest/hitTest.js
 //
 // NOTE on bundle size: re-exporting these here is a convenience, but the
 // package root ALSO statically exports the WebGL renderer, so a root
-// import can't tree-shake the GL pipeline away. For a NATIVE-ONLY build
+// import can't tree-shake the GL pipeline away. For a NATIVE-only build
 // (no WebGL renderer shipped), import from the `@kontek/mantle/fallback`
 // subpath instead — it reaches none of renderer.js, so the bundle is a
 // small fraction of the full package.
@@ -227,9 +237,8 @@ export { curveRangeToPathD, curvesToPathDMap } from './fallback/curveToPathD.js'
 // Auto-selecting factory (owns the gl-vs-native decision in one place).
 // ASYNC: it dynamic-import()s only the backend it selects, so neither the
 // WebGL pipeline nor the native fallback is loaded until chosen at
-// runtime. Force the native fallback for testing via opts.backend:
-// 'native', opts.forceNative, globalThis.__MANTLE_FORCE_NATIVE, or a
-// ?mantleNative URL param. chooseBackend exposes just the decision.
+// runtime. Force the native fallback via opts.backend: 'native' or
+// opts.forceNative. chooseBackend exposes just the decision.
 export { createMantleScene, chooseBackend } from './fallback/autoScene.js';
 
 // Font subsystem re-exports. Sourced from `font/index.js` (NOT the lean
@@ -242,9 +251,14 @@ export { createMantleScene, chooseBackend } from './fallback/autoScene.js';
 // into exactly the shapers/readers they need. Advanced consumers needing
 // reader internals (CFF, GSUB, GPOS, …) use `@kontek/mantle/font`.
 export {
-  MantleFontAsset, decodeIfWoff2, ttcFaceCount,
-  buildTextRun, buildStyled, buildFromMarkup,
-  measureText, measureFromMarkup,
+  MantleFontAsset,
+  decodeIfWoff2,
+  ttcFaceCount,
+  buildTextRun,
+  buildStyled,
+  buildFromMarkup,
+  measureText,
+  measureFromMarkup,
   buildSvgTextGlyphs,
   BaseDirection,
 } from './font/index.js';

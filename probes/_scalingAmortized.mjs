@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // _scalingAmortized.mjs — the number that decides everything: how LB / Slug / mesh-free
 // scale with SEGMENT COUNT. mesh-free (no banding) loops every seg per pixel = O(segs);
 // Slug bands = O(segs-in-band); LB = O(1)/fragment (one cached implicit). At 8 segs
@@ -8,16 +11,24 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
-const N = 256, cx = 128, cy = 128, Ro = 120, Ri = 70;
+const N = 256,
+  cx = 128,
+  cy = 128,
+  Ro = 120,
+  Ri = 70;
 
 // star/gear polygon with P points → 2P vertices → 2P straight edges (simple polygon).
 function star(P) {
   const V = [];
-  for (let i = 0; i < 2 * P; i++) { const r = i % 2 ? Ri : Ro, a = i / (2 * P) * 2 * Math.PI - Math.PI / 2; V.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); }
+  for (let i = 0; i < 2 * P; i++) {
+    const r = i % 2 ? Ri : Ro,
+      a = (i / (2 * P)) * 2 * Math.PI - Math.PI / 2;
+    V.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+  }
   return V;
 }
 function svgOf(V) {
@@ -26,20 +37,33 @@ function svgOf(V) {
   for (let i = 1; i < V.length; i++) d += `L ${V[i][0].toFixed(2)} ${V[i][1].toFixed(2)} `;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${N} ${N}" width="${N}" height="${N}"><path fill="#3366cc" d="${d}Z"/></svg>`;
 }
-const TW = 256;   // seg texture width (texels); 3 RGBA32F texels per seg
-function recsOf(V) {   // line segs (type 0) → 3 texels each: [ty,w,P0]/[P1,P2]/[P3,0,0]
-  const nseg = V.length, rows = Math.ceil(nseg * 3 / TW);
+const TW = 256; // seg texture width (texels); 3 RGBA32F texels per seg
+function recsOf(V) {
+  // line segs (type 0) → 3 texels each: [ty,w,P0]/[P1,P2]/[P3,0,0]
+  const nseg = V.length,
+    rows = Math.ceil((nseg * 3) / TW);
   const tex = new Float32Array(TW * rows * 4);
   for (let i = 0; i < nseg; i++) {
-    const a = V[i], b = V[(i + 1) % nseg], o = i * 3 * 4;
-    tex[o] = 0; tex[o + 1] = 1; tex[o + 2] = a[0]; tex[o + 3] = a[1];       // ty,w,P0
-    tex[o + 4] = b[0]; tex[o + 5] = b[1]; tex[o + 6] = 0; tex[o + 7] = 0;   // P1,P2
+    const a = V[i],
+      b = V[(i + 1) % nseg],
+      o = i * 3 * 4;
+    tex[o] = 0;
+    tex[o + 1] = 1;
+    tex[o + 2] = a[0];
+    tex[o + 3] = a[1]; // ty,w,P0
+    tex[o + 4] = b[0];
+    tex[o + 5] = b[1];
+    tex[o + 6] = 0;
+    tex[o + 7] = 0; // P1,P2
     // P3 texel stays 0
   }
   return { data: Array.from(tex), rows };
 }
-const POINTS = [4, 16, 48, 120];   // → 8, 32, 96, 240 edges
-const CASES = POINTS.map((P) => { const V = star(P); return { edges: 2 * P, svg: svgOf(V), ...recsOf(V) }; });
+const POINTS = [4, 16, 48, 120]; // → 8, 32, 96, 240 edges
+const CASES = POINTS.map((P) => {
+  const V = star(P);
+  return { edges: 2 * P, svg: svgOf(V), ...recsOf(V) };
+});
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="cr" width="${N}" height="${N}"></canvas><canvas id="cm" width="${N}" height="${N}"></canvas>
@@ -136,18 +160,55 @@ window.__out={ gpu: dbg?gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL):gl.getParam
 window.__ready=true;
 </script></body></html>`;
 
-const server = http.createServer((req,res)=>{ try{ if(req.url==='/'){res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(HTML);return;} const p=decodeURIComponent(req.url.split('?')[0]); res.writeHead(200,{'content-type':p.endsWith('.glsl')?'text/plain':'text/javascript'}); res.end(readFileSync(path.join(ROOT,p))); }catch{ if(!res.headersSent)res.writeHead(404); res.end(); } });
-await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const port=server.address().port;
-const browser=await puppeteer.launch({headless:false,args:['--no-sandbox','--use-angle=metal']});
+const server = http.createServer((req, res) => {
+  try {
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML);
+      return;
+    }
+    const p = decodeURIComponent(req.url.split('?')[0]);
+    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const port = server.address().port;
+// HEADLESS EVEN ON THE GPU. Headless Chrome reaches the real GPU: ANGLE (Apple, ANGLE Metal
+// Renderer) reports and TIMES the same headless or headful.
+// A window is not free to the person running this: macOS CLAMPS --window-position (measured:
+// screenX/Y 83,65 whatever you pass), so a headful run cannot be put out of the way and lands
+// on whichever desktop is in front.
+const browser = await launchBrowser({
+  headless: 'new',
+  args: ['--no-sandbox', '--use-angle=metal'],
+});
 let out;
-try{ const page=await browser.newPage(); page.on('pageerror',e=>console.error('  [page-err]',e.message)); page.on('console',m=>{if(m.type()==='error')console.error('  [console]',m.text());});
-  await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'load',timeout:30000}); await page.waitForFunction(()=>window.__ready===true,{timeout:40000}); out=await page.evaluate(()=>window.__out);
-}catch(e){ console.error('setup failed:',e.message); await browser.close(); server.close(); process.exit(1); }
-await browser.close(); server.close();
+try {
+  const page = await browser.newPage();
+  page.on('pageerror', (e) => console.error('  [page-err]', e.message));
+  page.on('console', (m) => {
+    if (m.type() === 'error') console.error('  [console]', m.text());
+  });
+  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 30000 });
+  await page.waitForFunction(() => window.__ready === true, { timeout: 40000 });
+  out = await page.evaluate(() => window.__out);
+} catch (e) {
+  console.error('setup failed:', e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
+await browser.close();
+server.close();
 
 console.log('GPU:', out.gpu, `@ ${N}×${N}, star polygons, ALL amortized (ms/draw)`);
 console.log('  edges |   LB    Slug    mesh-free  |  mf/LB   mf/Slug  | mf ink px');
-for(const r of out.rows){
-  console.log(`  ${String(r.edges).padStart(5)} | ${r.lb.toFixed(3)}  ${r.slug.toFixed(3)}   ${r.mf.toFixed(3)}     |  ${(r.mf/r.lb).toFixed(2)}×    ${(r.mf/r.slug).toFixed(2)}×  |  ${r.ink}`);
+for (const r of out.rows) {
+  console.log(
+    `  ${String(r.edges).padStart(5)} | ${r.lb.toFixed(3)}  ${r.slug.toFixed(3)}   ${r.mf.toFixed(3)}     |  ${(r.mf / r.lb).toFixed(2)}×    ${(r.mf / r.slug).toFixed(2)}×  |  ${r.ink}`,
+  );
 }

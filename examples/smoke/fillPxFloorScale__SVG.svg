@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 120">
+  <path d="M60 60 m -45.3 0 a 45.3 45.3 0 1 0 90.6 0 a 45.3 45.3 0 1 0 -90.6 0 Z"/>
+  <path d="M120 60 Q 150 -10 180 60 T 190 110 Q 150 120 120 60 Z"/>
+  <path fill-rule="evenodd" d="M200 20 C 290 0 300 100 240 110 C 190 115 180 40 200 20 Z M225 45 L 265 50 L 245 90 Z"/>
+</svg>

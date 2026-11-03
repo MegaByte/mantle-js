@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // font/text — text builder API without auto-registering all script
 // shapers. Latin / Cyrillic / Greek / pure-CJK consumers should
 // import from here:
@@ -22,8 +25,13 @@ import { getBidi } from './bidiRegistry.js';
 
 export { MantleFontAsset, decodeIfWoff2, ttcFaceCount } from './fontAsset.js';
 export {
-  buildTextRun, buildStyled, buildFromMarkup,
-  measureText, measureFromMarkup, measureGlyphs, measureGlyphsFromText,
+  buildTextRun,
+  buildStyled,
+  buildFromMarkup,
+  measureText,
+  measureFromMarkup,
+  measureGlyphs,
+  measureGlyphsFromText,
   buildSvgTextGlyphs,
 } from './textRun.js';
 
@@ -34,5 +42,5 @@ export {
 // the bidi tables out of the lean path until a consumer opts in.
 export { BaseDirection } from './bidiConst.js';
 export const resolveBaseDirection = (...a) => getBidi().resolveBaseDirection(...a);
-export const getBidiClass        = (...a) => getBidi().getBidiClass(...a);
-export const isRtlStrong         = (...a) => getBidi().isRtlStrong(...a);
+export const getBidiClass = (...a) => getBidi().getBidiClass(...a);
+export const isRtlStrong = (...a) => getBidi().isRtlStrong(...a);

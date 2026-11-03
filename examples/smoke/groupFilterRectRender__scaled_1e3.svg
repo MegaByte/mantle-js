@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400000 400000"><defs><filter id="f" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="20000"/><feOffset dx="-30000" dy="-30000"/></filter></defs><rect width="400000" height="400000" fill="none"/><g id="fg" filter="url(#f)" ><rect x="150000" y="150000" width="60000" height="60000" fill="#c33"/><rect x="190000" y="190000" width="60000" height="60000" fill="#3c3"/></g></svg>

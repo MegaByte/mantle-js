@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // lamAlefSmoke.mjs — verifies that 'rlig' / 'liga' ligature collapse
 // fires for the canonical Arabic lam-alef pair. After form
 // substitution promotes them to Init(lam) + Fina(alef), the ligature
@@ -11,13 +14,16 @@ import { registerArabicShaping } from '../../src/font/scripts/arabic.js';
 registerArabicShaping();
 
 const font = new MantleFontAsset(
-  new Uint8Array(readFileSync('/System/Library/Fonts/SFArabic.ttf'))
+  new Uint8Array(readFileSync('/System/Library/Fonts/SFArabic.ttf')),
 );
 font.getMetrics(0x41);
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // ----- T1: SFArabic exposes 'rlig' or 'liga' for Arabic ------------
 {
@@ -46,7 +52,9 @@ const ok   = (msg) => console.log('ok ' + msg);
   const { glyphs } = buildSvgTextGlyphs('لا', font, 0, 0, 100);
   if (glyphs.length === 1) ok(`T3 'لا' collapsed to 1 glyph (lam-alef ligature fired)`);
   else if (glyphs.length === 2) {
-    fail(`T3 'لا' NOT collapsed — got 2 glyphs (gid+cp: ${glyphs.map(g=>g.codepoint.toString(16)).join(',')}). Lam-alef ligature missing.`);
+    fail(
+      `T3 'لا' NOT collapsed — got 2 glyphs (gid+cp: ${glyphs.map((g) => g.codepoint.toString(16)).join(',')}). Lam-alef ligature missing.`,
+    );
   } else fail(`T3 'لا' produced ${glyphs.length} glyphs (expected 1)`);
 }
 

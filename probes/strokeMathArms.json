@@ -1,0 +1,72 @@
+[
+  {
+    "name": "rr",
+    "note": "quadClosestT: rr = (m/2)^3 from the sqrt m already takes (one sqrt fewer)",
+    "sources": ["fillFrag", "splitStrokeFrag", "maskBakeFrag"],
+    "replace": [
+      [
+        "      float rr = sqrt(max(-pp * pp * pp / 27.0, 0.0));\n      float phi = acos(clamp(-qq / (2.0 * max(rr, 1e-30)), -1.0, 1.0));\n      float m = 2.0 * sqrt(max(-pp / 3.0, 0.0));",
+        "      float mh = sqrt(max(-pp / 3.0, 0.0));\n      float rr = mh * mh * mh;\n      float phi = acos(clamp(-qq / (2.0 * max(rr, 1e-30)), -1.0, 1.0));\n      float m = 2.0 * mh;"
+      ]
+    ]
+  },
+  {
+    "name": "cbrt",
+    "note": "quadClosestT: the second cube root as -pp / (3 cbrt(w)), w the larger of u, v (one pow fewer)",
+    "sources": ["fillFrag", "splitStrokeFrag", "maskBakeFrag"],
+    "replace": [
+      [
+        "      float uc = sign(u) * pow(abs(u), 1.0 / 3.0);\n      float vc = sign(v) * pow(abs(v), 1.0 / 3.0);",
+        "      float w = abs(u) >= abs(v) ? u : v;\n      float uc = sign(w) * pow(abs(w), 1.0 / 3.0);\n      float vc = uc != 0.0 ? -pp / (3.0 * uc) : 0.0;"
+      ]
+    ]
+  },
+  {
+    "name": "miter",
+    "note": "miter length as halfW * inversesqrt((1 - c) / 2): one rsqrt for a sqrt and a divide (both walks, every copy)",
+    "sources": ["fillFrag", "splitStrokeFrag", "maskBakeFrag"],
+    "replace": [
+      [
+        "      float sinHalf = sqrt(max(0.5 * (1.0 - c), 1e-9));\n      float miterLen = halfW / max(sinHalf, 1e-6);",
+        "      float miterLen = halfW * inversesqrt(max(0.5 * (1.0 - c), 1e-9));"
+      ],
+      [
+        "          float sinHalf = sqrt(max(0.5 * (1.0 - cosBetween), 1e-9));\n          float miterLen = halfW / max(sinHalf, 1e-6);",
+        "          float miterLen = halfW * inversesqrt(max(0.5 * (1.0 - cosBetween), 1e-9));"
+      ]
+    ]
+  },
+  {
+    "name": "circle",
+    "note": "distToEllipse, a circle: the distance as abs(length(p) - r), not length(p - foot)",
+    "sources": ["fillFrag", "splitStrokeFrag", "maskBakeFrag"],
+    "replace": [
+      [
+        "    foot = sgn * fo;\n    return length(pIn - foot);\n  }\n  if (abs(ab.y - ab.x) < (1.0 / 64.0) * max(ab.x, ab.y)) {",
+        "    foot = sgn * fo;\n    return abs(length(pIn) - ab.x);\n  }\n  if (abs(ab.y - ab.x) < (1.0 / 64.0) * max(ab.x, ab.y)) {"
+      ]
+    ]
+  },
+  {
+    "name": "quartic",
+    "note": "slugCubicArcLen: the speed squared as one quartic Horner, its coefficients once per call",
+    "sources": ["fillFrag", "splitStrokeFrag", "maskBakeFrag"],
+    "replace": [
+      [
+        "float slugCubicArcLen(vec4 cx, vec4 cy, float t) {\n  float sum = 0.0;\n  for (int i = 0; i < 16; i++) {\n    float u = t * SLUG_GL16_N[i];\n    float dx = (3.0 * cx.x * u + 2.0 * cx.y) * u + cx.z;\n    float dy = (3.0 * cy.x * u + 2.0 * cy.y) * u + cy.z;\n    sum += SLUG_GL16_W[i] * sqrt(dx * dx + dy * dy);\n  }\n  return t * sum;\n}",
+        "float slugCubicArcLen(vec4 cx, vec4 cy, float t) {\n  // |P'(u)|^2 = |3a u^2 + 2b u + c|^2 = k4 u^4 + k3 u^3 + k2 u^2 + k1 u + k0 (a, b, c = the x and y coefficients)\n  float k4 = 9.0 * (cx.x * cx.x + cy.x * cy.x), k3 = 12.0 * (cx.x * cx.y + cy.x * cy.y);\n  float k2 = 4.0 * (cx.y * cx.y + cy.y * cy.y) + 6.0 * (cx.x * cx.z + cy.x * cy.z);\n  float k1 = 4.0 * (cx.y * cx.z + cy.y * cy.z), k0 = cx.z * cx.z + cy.z * cy.z;\n  float sum = 0.0;\n  for (int i = 0; i < 16; i++) {\n    float u = t * SLUG_GL16_N[i];\n    sum += SLUG_GL16_W[i] * sqrt(max((((k4 * u + k3) * u + k2) * u + k1) * u + k0, 0.0));\n  }\n  return t * sum;\n}"
+      ]
+    ]
+  },
+  {
+    "name": "rsqrt",
+    "note": "strokeUnit: d * inversesqrt(dot(d, d)) for d / length(d)",
+    "sources": ["fillFrag", "splitStrokeFrag", "maskBakeFrag"],
+    "replace": [
+      [
+        "vec2 strokeUnit(vec2 d) { float l = length(d); return l > 0.0 ? d / l : d; }",
+        "vec2 strokeUnit(vec2 d) { float l2 = dot(d, d); return l2 > 0.0 ? d * inversesqrt(l2) : d; }"
+      ]
+    ]
+  }
+]

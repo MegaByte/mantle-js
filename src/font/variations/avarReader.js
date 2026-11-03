@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // avarReader.js — OpenType 'avar' table reader (Axis Variations).
 //
 // Remaps normalized axis values via piecewise-linear segments, letting
@@ -25,7 +28,7 @@ export class AvarTable {
       const entries = new Array(positionMapCount);
       for (let i = 0; i < positionMapCount; i++) {
         const from = v.getInt16(p, false) / 16384;
-        const to   = v.getInt16(p + 2, false) / 16384;
+        const to = v.getInt16(p + 2, false) / 16384;
         entries[i] = [from, to];
         p += 4;
       }
@@ -34,7 +37,9 @@ export class AvarTable {
     this._present = true;
   }
 
-  get hasAvar() { return this._present; }
+  get hasAvar() {
+    return this._present;
+  }
 
   /// Remap one normalized axis coord (`c` in [-1, +1]) via piecewise-
   /// linear segments. Returns `c` unchanged when avar is absent or the
@@ -52,8 +57,9 @@ export class AvarTable {
       const [bFrom, bTo] = seg[i];
       if (c >= aFrom && c <= bFrom) {
         if (bFrom === aFrom) return aTo;
-        const t = (c - aFrom) / (bFrom - aFrom);
-        return aTo + t * (bTo - aTo);
+        // Retain the full product through division, then store a 16.16 result.
+        const mapped = aTo + ((c - aFrom) * (bTo - aTo)) / (bFrom - aFrom);
+        return Math.floor(mapped * 65536 + 0.5) / 65536;
       }
     }
     return c;

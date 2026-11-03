@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
 // probes/_slopeAaAccuracy.mjs — default Slug combiner vs MANTLE_SLOPE_AA vs
 // MANTLE_EXACT_EDGE, measured against an 8x supersampled reference, on straight
 // edges swept through angles (the default two-ray blend is exact at 0/90 deg and
@@ -8,28 +10,48 @@ import http from 'http';
 import path from 'path';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const N = 256, SS = 8;
+const N = 256,
+  SS = 8;
 
 const tri = (n, angDeg) => {
-  // Big wedge with one edge at angDeg through the centre.
-  const a = (angDeg * Math.PI) / 180, c = n / 2;
-  const dx = Math.cos(a), dy = Math.sin(a);
+  // Big wedge with one edge at angDeg through the center.
+  const a = (angDeg * Math.PI) / 180,
+    c = n / 2;
+  const dx = Math.cos(a),
+    dy = Math.sin(a);
   const L = n;
-  const x1 = c - dx * L, y1 = c - dy * L, x2 = c + dx * L, y2 = c + dy * L;
-  const nx = -dy, ny = dx;
+  const x1 = c - dx * L,
+    y1 = c - dy * L,
+    x2 = c + dx * L,
+    y2 = c + dy * L;
+  const nx = -dy,
+    ny = dx;
   return `M ${x1} ${y1} L ${x2} ${y2} L ${x2 + nx * L} ${y2 + ny * L} L ${x1 + nx * L} ${y1 + ny * L} Z`;
 };
-const circle = (n) => { const c = n / 2, r = 0.36 * n; return `M ${c - r} ${c} A ${r} ${r} 0 1 0 ${c + r} ${c} A ${r} ${r} 0 1 0 ${c - r} ${c} Z`; };
-const sliver = (n) => { const c = n / 2; return `M ${0.1 * n} ${c} L ${0.9 * n} ${c - 0.6} L ${0.9 * n} ${c + 0.6} Z`; };
+const circle = (n) => {
+  const c = n / 2,
+    r = 0.36 * n;
+  return `M ${c - r} ${c} A ${r} ${r} 0 1 0 ${c + r} ${c} A ${r} ${r} 0 1 0 ${c - r} ${c} Z`;
+};
+const sliver = (n) => {
+  const c = n / 2;
+  return `M ${0.1 * n} ${c} L ${0.9 * n} ${c - 0.6} L ${0.9 * n} ${c + 0.6} Z`;
+};
 
 const CASES = {
-  deg45: tri(N, 45), deg30: tri(N, 30), deg60: tri(N, 60), deg15: tri(N, 15),
-  deg0: tri(N, 0), circle: circle(N), sliver: sliver(N),
+  deg45: tri(N, 45),
+  deg30: tri(N, 30),
+  deg60: tri(N, 60),
+  deg15: tri(N, 15),
+  deg0: tri(N, 0),
+  circle: circle(N),
+  sliver: sliver(N),
 };
-const wrap = (d, n) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${N} ${N}" width="${n}" height="${n}"><path fill="#000" d="${d}"/></svg>`;
+const wrap = (d, n) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${N} ${N}" width="${n}" height="${n}"><path fill="#000" d="${d}"/></svg>`;
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="${N * SS}" height="${N * SS}"></canvas>
@@ -72,17 +94,34 @@ document.title = 'DONE ' + JSON.stringify(out);
 </${'script'}></body></html>`;
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.setHeader('content-type', 'text/html'); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.setHeader('content-type', 'text/html');
+    res.end(HTML);
+    return;
+  }
   try {
     const p = path.join(ROOT, decodeURIComponent(req.url.split('?')[0]));
     const ext = path.extname(p);
-    res.setHeader('content-type', ext === '.js' || ext === '.mjs' ? 'text/javascript' : ext === '.glsl' ? 'text/plain' : 'application/octet-stream');
+    res.setHeader(
+      'content-type',
+      ext === '.js' || ext === '.mjs'
+        ? 'text/javascript'
+        : ext === '.glsl'
+          ? 'text/plain'
+          : 'application/octet-stream',
+    );
     res.end(readFileSync(p));
-  } catch { res.statusCode = 404; res.end(); }
+  } catch {
+    res.statusCode = 404;
+    res.end();
+  }
 });
 await new Promise((r) => server.listen(0, r));
 const port = server.address().port;
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args: ['--enable-unsafe-swiftshader', '--no-sandbox'],
+});
 const page = await browser.newPage();
 page.on('console', (m) => console.log('[page]', m.text()));
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
@@ -90,6 +129,9 @@ await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load' });
 await page.waitForFunction(() => document.title.startsWith('DONE'), { timeout: 120000 });
 const out = JSON.parse((await page.title()).slice(5));
 for (const [k, v] of Object.entries(out)) {
-  console.log(`${k.padEnd(7)} def mean=${v.def.mean} max=${v.def.max} | slope mean=${v.slope.mean} max=${v.slope.max} | exact mean=${v.exact.mean} max=${v.exact.max} (n=${v.def.n})`);
+  console.log(
+    `${k.padEnd(7)} def mean=${v.def.mean} max=${v.def.max} | slope mean=${v.slope.mean} max=${v.slope.max} | exact mean=${v.exact.mean} max=${v.exact.max} (n=${v.def.n})`,
+  );
 }
-await browser.close(); server.close();
+await browser.close();
+server.close();

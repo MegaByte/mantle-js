@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- feMorphology at radius 8 and 48, dilate and erode, on large shapes (the operator branch
+       is hoisted out of the tap loop; radius 8 and 48 bracket the choice of log-doubling). Time with shaderArmAB with its move flag so the passes run every frame. -->
+  <defs>
+    <filter id="d8" x="-10%" y="-10%" width="120%" height="120%"><feMorphology operator="dilate" radius="8"/></filter>
+    <filter id="d48" x="-30%" y="-30%" width="160%" height="160%"><feMorphology operator="dilate" radius="48"/></filter>
+    <filter id="e8"><feMorphology operator="erode" radius="8"/></filter>
+    <filter id="e48"><feMorphology operator="erode" radius="48"/></filter>
+  </defs>
+  <rect width="1024" height="1024" fill="#f0efe9"/>
+  <circle cx="250" cy="250" r="150" fill="#e63946" filter="url(#d8)"/>
+  <circle cx="750" cy="250" r="130" fill="#457b9d" filter="url(#d48)"/>
+  <rect x="100" y="560" width="320" height="360" rx="40" fill="#2a9d8f" filter="url(#e8)"/>
+  <rect x="580" y="560" width="360" height="360" rx="40" fill="#f4a261" filter="url(#e48)"/>
+</svg>

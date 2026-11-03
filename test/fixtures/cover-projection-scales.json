@@ -1,0 +1,1373 @@
+{
+  "productionShaders": true,
+  "sdfRecognition": false,
+  "initialKernel": "slug",
+  "stallProbe": true,
+  "scope": "Cover raster support at equivalent document scales. Whole-image scale invariance and historical negative controls; separate independent oracle archive records remaining coverage-model errors.",
+  "cases": [
+    {
+      "name": "rect--20-axis",
+      "size": 64,
+      "bbox": [0, 0, 0.0001220703125, 0.0001220703125],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 0.0001220703125 0.0001220703125\"><rect x=\"3.075599670410156e-05\" y=\"2.6106834411621094e-05\" width=\"4.9114227294921875e-05\" height=\"3.9577484130859375e-05\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {},
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "rect--20-rotated",
+      "size": 64,
+      "bbox": [0, 0, 0.0001220703125, 0.0001220703125],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 0.0001220703125 0.0001220703125\"><rect x=\"3.075599670410156e-05\" y=\"2.6106834411621094e-05\" width=\"4.9114227294921875e-05\" height=\"3.9577484130859375e-05\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [0.92, 0.23, 0, -0.23, 0.92, 0, 0, 0, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "rect--20-sheared",
+      "size": 64,
+      "bbox": [0, 0, 0.0001220703125, 0.0001220703125],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 0.0001220703125 0.0001220703125\"><rect x=\"3.075599670410156e-05\" y=\"2.6106834411621094e-05\" width=\"4.9114227294921875e-05\" height=\"3.9577484130859375e-05\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [0.88, 0.13, 0, 0.22, 1.01, 0, 0.03, -0.02, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "rect--20-reflected",
+      "size": 64,
+      "bbox": [0, 0, 0.0001220703125, 0.0001220703125],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 0.0001220703125 0.0001220703125\"><rect x=\"3.075599670410156e-05\" y=\"2.6106834411621094e-05\" width=\"4.9114227294921875e-05\" height=\"3.9577484130859375e-05\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [-0.94, 0, 0, 0, 0.87, 0, 0, 0, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "rect-0-axis",
+      "size": 64,
+      "bbox": [0, 0, 128, 128],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128.0 128.0\"><rect x=\"32.25\" y=\"27.375\" width=\"51.5\" height=\"41.5\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {},
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "rect-0-rotated",
+      "size": 64,
+      "bbox": [0, 0, 128, 128],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128.0 128.0\"><rect x=\"32.25\" y=\"27.375\" width=\"51.5\" height=\"41.5\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [0.92, 0.23, 0, -0.23, 0.92, 0, 0, 0, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "rect-0-sheared",
+      "size": 64,
+      "bbox": [0, 0, 128, 128],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128.0 128.0\"><rect x=\"32.25\" y=\"27.375\" width=\"51.5\" height=\"41.5\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [0.88, 0.13, 0, 0.22, 1.01, 0, 0.03, -0.02, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "rect-0-reflected",
+      "size": 64,
+      "bbox": [0, 0, 128, 128],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128.0 128.0\"><rect x=\"32.25\" y=\"27.375\" width=\"51.5\" height=\"41.5\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [-0.94, 0, 0, 0, 0.87, 0, 0, 0, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "rect-20-axis",
+      "size": 64,
+      "bbox": [0, 0, 134217728, 134217728],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 134217728.0 134217728.0\"><rect x=\"33816576.0\" y=\"28704768.0\" width=\"54001664.0\" height=\"43515904.0\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {},
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "rect-20-rotated",
+      "size": 64,
+      "bbox": [0, 0, 134217728, 134217728],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 134217728.0 134217728.0\"><rect x=\"33816576.0\" y=\"28704768.0\" width=\"54001664.0\" height=\"43515904.0\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [0.92, 0.23, 0, -0.23, 0.92, 0, 0, 0, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "rect-20-sheared",
+      "size": 64,
+      "bbox": [0, 0, 134217728, 134217728],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 134217728.0 134217728.0\"><rect x=\"33816576.0\" y=\"28704768.0\" width=\"54001664.0\" height=\"43515904.0\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [0.88, 0.13, 0, 0.22, 1.01, 0, 0.03, -0.02, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "rect-20-reflected",
+      "size": 64,
+      "bbox": [0, 0, 134217728, 134217728],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 134217728.0 134217728.0\"><rect x=\"33816576.0\" y=\"28704768.0\" width=\"54001664.0\" height=\"43515904.0\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [-0.94, 0, 0, 0, 0.87, 0, 0, 0, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "circle--20-axis",
+      "size": 64,
+      "bbox": [0, 0, 0.0001220703125, 0.0001220703125],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 0.0001220703125 0.0001220703125\"><circle cx=\"5.841255187988281e-05\" cy=\"5.4717063903808594e-05\" r=\"2.2172927856445312e-05\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {},
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "circle--20-rotated",
+      "size": 64,
+      "bbox": [0, 0, 0.0001220703125, 0.0001220703125],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 0.0001220703125 0.0001220703125\"><circle cx=\"5.841255187988281e-05\" cy=\"5.4717063903808594e-05\" r=\"2.2172927856445312e-05\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [0.92, 0.23, 0, -0.23, 0.92, 0, 0, 0, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "circle--20-sheared",
+      "size": 64,
+      "bbox": [0, 0, 0.0001220703125, 0.0001220703125],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 0.0001220703125 0.0001220703125\"><circle cx=\"5.841255187988281e-05\" cy=\"5.4717063903808594e-05\" r=\"2.2172927856445312e-05\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [0.88, 0.13, 0, 0.22, 1.01, 0, 0.03, -0.02, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "circle--20-reflected",
+      "size": 64,
+      "bbox": [0, 0, 0.0001220703125, 0.0001220703125],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 0.0001220703125 0.0001220703125\"><circle cx=\"5.841255187988281e-05\" cy=\"5.4717063903808594e-05\" r=\"2.2172927856445312e-05\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [-0.94, 0, 0, 0, 0.87, 0, 0, 0, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "circle-0-axis",
+      "size": 64,
+      "bbox": [0, 0, 128, 128],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128.0 128.0\"><circle cx=\"61.25\" cy=\"57.375\" r=\"23.25\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {},
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "circle-0-rotated",
+      "size": 64,
+      "bbox": [0, 0, 128, 128],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128.0 128.0\"><circle cx=\"61.25\" cy=\"57.375\" r=\"23.25\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [0.92, 0.23, 0, -0.23, 0.92, 0, 0, 0, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "circle-0-sheared",
+      "size": 64,
+      "bbox": [0, 0, 128, 128],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128.0 128.0\"><circle cx=\"61.25\" cy=\"57.375\" r=\"23.25\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [0.88, 0.13, 0, 0.22, 1.01, 0, 0.03, -0.02, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "circle-0-reflected",
+      "size": 64,
+      "bbox": [0, 0, 128, 128],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128.0 128.0\"><circle cx=\"61.25\" cy=\"57.375\" r=\"23.25\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [-0.94, 0, 0, 0, 0.87, 0, 0, 0, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "circle-20-axis",
+      "size": 64,
+      "bbox": [0, 0, 134217728, 134217728],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 134217728.0 134217728.0\"><circle cx=\"64225280.0\" cy=\"60162048.0\" r=\"24379392.0\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {},
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "circle-20-rotated",
+      "size": 64,
+      "bbox": [0, 0, 134217728, 134217728],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 134217728.0 134217728.0\"><circle cx=\"64225280.0\" cy=\"60162048.0\" r=\"24379392.0\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [0.92, 0.23, 0, -0.23, 0.92, 0, 0, 0, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "circle-20-sheared",
+      "size": 64,
+      "bbox": [0, 0, 134217728, 134217728],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 134217728.0 134217728.0\"><circle cx=\"64225280.0\" cy=\"60162048.0\" r=\"24379392.0\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [0.88, 0.13, 0, 0.22, 1.01, 0, 0.03, -0.02, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "circle-20-reflected",
+      "size": 64,
+      "bbox": [0, 0, 134217728, 134217728],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 134217728.0 134217728.0\"><circle cx=\"64225280.0\" cy=\"60162048.0\" r=\"24379392.0\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [-0.94, 0, 0, 0, 0.87, 0, 0, 0, 1]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "rounded--20-axis",
+      "size": 64,
+      "bbox": [0, 0, 0.0001220703125, 0.0001220703125],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 0.0001220703125 0.0001220703125\"><rect x=\"3.075599670410156e-05\" y=\"2.6106834411621094e-05\" width=\"4.9114227294921875e-05\" height=\"3.9577484130859375e-05\" rx=\"1.0609626770019531e-05\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {},
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "rounded-0-axis",
+      "size": 64,
+      "bbox": [0, 0, 128, 128],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128.0 128.0\"><rect x=\"32.25\" y=\"27.375\" width=\"51.5\" height=\"41.5\" rx=\"11.125\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {},
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "rounded-20-axis",
+      "size": 64,
+      "bbox": [0, 0, 134217728, 134217728],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 134217728.0 134217728.0\"><rect x=\"33816576.0\" y=\"28704768.0\" width=\"54001664.0\" height=\"43515904.0\" rx=\"11665408.0\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {},
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "baselineAAC",
+          "engine": "aac",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAAC",
+          "engine": "aac",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "projective--20",
+      "size": 64,
+      "bbox": [0, 0, 0.0001220703125, 0.0001220703125],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 0.0001220703125 0.0001220703125\"><rect x=\"3.075599670410156e-05\" y=\"2.6106834411621094e-05\" width=\"4.9114227294921875e-05\" height=\"3.9577484130859375e-05\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [1.76, 0.24, 0.04, -0.3, 1.82, -0.03, 0.06, -0.08, 2]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "projective-0",
+      "size": 64,
+      "bbox": [0, 0, 128.0, 128.0],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128.0 128.0\"><rect x=\"32.25\" y=\"27.375\" width=\"51.5\" height=\"41.5\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [1.76, 0.24, 0.04, -0.3, 1.82, -0.03, 0.06, -0.08, 2]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "projective-20",
+      "size": 64,
+      "bbox": [0, 0, 134217728.0, 134217728.0],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 134217728.0 134217728.0\"><rect x=\"33816576.0\" y=\"28704768.0\" width=\"54001664.0\" height=\"43515904.0\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [1.76, 0.24, 0.04, -0.3, 1.82, -0.03, 0.06, -0.08, 2]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "projective-24",
+      "size": 64,
+      "bbox": [0, 0, 2147483648.0, 2147483648.0],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 2147483648.0 2147483648.0\"><rect x=\"541065216.0\" y=\"459276288.0\" width=\"864026624.0\" height=\"696254464.0\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [1.76, 0.24, 0.04, -0.3, 1.82, -0.03, 0.06, -0.08, 2]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "projective-reflected--20",
+      "size": 64,
+      "bbox": [0, 0, 0.0001220703125, 0.0001220703125],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 0.0001220703125 0.0001220703125\"><rect x=\"3.075599670410156e-05\" y=\"2.6106834411621094e-05\" width=\"4.9114227294921875e-05\" height=\"3.9577484130859375e-05\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [-1.88, 0.16, -0.05, 0.24, 1.74, 0.04, -0.06, 0.04, 2]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "projective-reflected-0",
+      "size": 64,
+      "bbox": [0, 0, 128.0, 128.0],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128.0 128.0\"><rect x=\"32.25\" y=\"27.375\" width=\"51.5\" height=\"41.5\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [-1.88, 0.16, -0.05, 0.24, 1.74, 0.04, -0.06, 0.04, 2]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "projective-reflected-20",
+      "size": 64,
+      "bbox": [0, 0, 134217728.0, 134217728.0],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 134217728.0 134217728.0\"><rect x=\"33816576.0\" y=\"28704768.0\" width=\"54001664.0\" height=\"43515904.0\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [-1.88, 0.16, -0.05, 0.24, 1.74, 0.04, -0.06, 0.04, 2]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    },
+    {
+      "name": "projective-reflected-24",
+      "size": 64,
+      "bbox": [0, 0, 2147483648.0, 2147483648.0],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 2147483648.0 2147483648.0\"><rect x=\"541065216.0\" y=\"459276288.0\" width=\"864026624.0\" height=\"696254464.0\" fill=\"#e63333\" fill-opacity=\".45\"/></svg>",
+      "drawOptions": {
+        "worldMatrix": [-1.88, 0.16, -0.05, 0.24, 1.74, 0.04, -0.06, 0.04, 2]
+      },
+      "arms": [
+        {
+          "name": "baselineSlug",
+          "engine": "slug",
+          "source": "baseline",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateSlug",
+          "engine": "slug",
+          "sdfRecognition": false
+        },
+        {
+          "name": "candidateAA",
+          "engine": "slug",
+          "sdfRecognition": false
+        }
+      ],
+      "comparisonBase": "baselineSlug",
+      "batch": 1,
+      "rounds": 1,
+      "checkImageRestoration": true
+    }
+  ]
+}

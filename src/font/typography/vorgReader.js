@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // vorgReader.js — VORG (Vertical Origin) table.
 //
 // Provides per-glyph Y-origin offsets for vertical writing-mode
@@ -34,11 +37,15 @@ export class VorgReader {
     this._metricsBase = off + 8;
   }
 
-  get hasTable() { return this._tableOff >= 0; }
+  get hasTable() {
+    return this._tableOff >= 0;
+  }
 
   /// Default vertical-origin Y (font units). Returned for glyphs that
   /// don't have a per-glyph override.
-  get defaultVertOriginY() { return this._defaultY; }
+  get defaultVertOriginY() {
+    return this._defaultY;
+  }
 
   /// Returns the vertical-origin Y for `gid` (font units). Falls
   /// back to defaultVertOriginY when no per-glyph entry exists.
@@ -48,7 +55,8 @@ export class VorgReader {
     if (this._count === 0) return this._defaultY;
     const v = this._view;
     const base = this._metricsBase;
-    let lo = 0, hi = this._count - 1;
+    let lo = 0,
+      hi = this._count - 1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
       const recOff = base + mid * 4;

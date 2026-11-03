@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100">
+  <g id="red"><rect x="0" y="0" width="60" height="100" fill="#d33"/><rect x="40" y="0" width="60" height="100" fill="#d33"/></g>
+  <rect id="green" x="100" y="0" width="100" height="100" fill="#3a3"/>
+  <rect id="blue" x="200" y="0" width="100" height="100" fill="#33d"/>
+  <rect id="top" x="80" y="20" width="60" height="60" fill="#fa0"/>
+  <rect id="ghost" x="250" y="40" width="30" height="30" fill="none" pointer-events="all"/>
+</svg>

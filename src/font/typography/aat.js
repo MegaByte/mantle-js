@@ -1,5 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // font/typography/aat — opt-in registration for Apple Advanced Typography
-// readers (morx glyph metamorphosis + kerx extended kerning).
+// readers (morx glyph metamorphosis + kerx extended kerning + trak tracking).
 //
 //   import { registerAatReaders } from '@kontek/mantle/font/typography/aat';
 //   registerAatReaders();
@@ -11,6 +14,7 @@
 import { AatMorx } from './aatMorx.js';
 import { AatMort } from './aatMort.js';
 import { AatKerx } from './aatKerx.js';
+import { AatTrak } from './aatTrak.js';
 import { FeatReader } from './featReader.js';
 import { registerReader } from '../readerRegistry.js';
 
@@ -22,7 +26,8 @@ export function registerAatReaders() {
   registerReader('morx', (tables) => new AatMorx(tables));
   registerReader('mort', (tables) => new AatMort(tables));
   registerReader('kerx', (tables) => new AatKerx(tables));
+  registerReader('trak', (tables) => new AatTrak(tables));
   registerReader('feat', (tables) => new FeatReader(tables));
 }
 
-export { AatMorx, AatMort, AatKerx, FeatReader };
+export { AatMorx, AatMort, AatKerx, AatTrak, FeatReader };

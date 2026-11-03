@@ -1,0 +1,236 @@
+{
+  "productionShaders": true,
+  "sdfRecognition": false,
+  "forceUnified": false,
+  "defaults": {
+    "rounds": 1,
+    "batch": 1,
+    "repetitions": 1
+  },
+  "cases": [
+    {
+      "name": "nested-translucent-morph-0.25",
+      "size": 128,
+      "bbox": [0, 0, 128, 128],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><g opacity=\"0.63\"><path id=\"red\" fill=\"#e63333\" fill-opacity=\"0.51\" d=\"M8 8h64v64h-64Z\"/><g opacity=\"0.7\"><path id=\"green\" fill=\"#33cc66\" fill-opacity=\"0.42\" d=\"M40 24h64v64h-64Z\"/></g><path id=\"blue\" fill=\"#3366e6\" fill-opacity=\"0.35\" d=\"M24 56h64v48h-64Z\"/></g></svg>",
+      "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><g opacity=\"0.37\"><path id=\"red\" fill=\"#e63333\" fill-opacity=\"0.51\" d=\"M16 4h64v64h-64Z\"/><g opacity=\"0.4\"><path id=\"green\" fill=\"#33cc66\" fill-opacity=\"0.42\" d=\"M48 20h64v64h-64Z\"/></g><path id=\"blue\" fill=\"#3366e6\" fill-opacity=\"0.35\" d=\"M32 52h64v48h-64Z\"/></g></svg>",
+      "poseSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><g opacity=\"0.565\"><path id=\"red\" fill=\"#e63333\" fill-opacity=\"0.51\" d=\"M10 7h64v64h-64Z\"/><g opacity=\"0.625\"><path id=\"green\" fill=\"#33cc66\" fill-opacity=\"0.42\" d=\"M42 23h64v64h-64Z\"/></g><path id=\"blue\" fill=\"#3366e6\" fill-opacity=\"0.35\" d=\"M26 55h64v48h-64Z\"/></g></svg>",
+      "morphT": 0.25,
+      "morphCycle": [0, 0.25, 0.5, 0.75, 1],
+      "checkMorphRestoration": true,
+      "morphGpuSmallPlanes": true,
+      "arms": [
+        {
+          "name": "lbGpu",
+          "engine": "lb",
+          "morph": true
+        },
+        {
+          "name": "lbAA",
+          "engine": "lb",
+          "morph": true
+        },
+        {
+          "name": "lbCpu",
+          "engine": "lb",
+          "morph": true,
+          "morphCpu": true
+        },
+        {
+          "name": "lbPose",
+          "engine": "lb",
+          "pose": true
+        },
+        {
+          "name": "cpGpu",
+          "engine": "cpatch",
+          "morph": true
+        },
+        {
+          "name": "cpAA",
+          "engine": "cpatch",
+          "morph": true
+        },
+        {
+          "name": "slugGpu",
+          "engine": "slug",
+          "morph": true,
+          "morphCpu": false
+        },
+        {
+          "name": "slugCpu",
+          "engine": "slug",
+          "morph": true,
+          "morphCpu": true
+        },
+        {
+          "name": "aacGpu",
+          "engine": "aac",
+          "morph": true,
+          "morphCpu": false
+        },
+        {
+          "name": "aacCpu",
+          "engine": "aac",
+          "morph": true,
+          "morphCpu": true
+        },
+        {
+          "name": "slugPose",
+          "engine": "slug",
+          "pose": true
+        }
+      ],
+      "comparisonBase": "slugPose",
+      "colorSamples": [
+        {
+          "x": 20,
+          "y": 20,
+          "rgba": [66, 15, 15, 73]
+        },
+        {
+          "x": 50,
+          "y": 40,
+          "rgba": [56, 41, 26, 92]
+        },
+        {
+          "x": 60,
+          "y": 65,
+          "rgba": [47, 47, 62, 110]
+        },
+        {
+          "x": 30,
+          "y": 65,
+          "rgba": [53, 30, 55, 98]
+        },
+        {
+          "x": 95,
+          "y": 50,
+          "rgba": [8, 30, 15, 38]
+        },
+        {
+          "x": 70,
+          "y": 95,
+          "rgba": [10, 20, 45, 50]
+        },
+        {
+          "x": 115,
+          "y": 115,
+          "rgba": [0, 0, 0, 0]
+        }
+      ]
+    },
+    {
+      "name": "nested-translucent-morph-0.75",
+      "size": 128,
+      "bbox": [0, 0, 128, 128],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><g opacity=\"0.63\"><path id=\"red\" fill=\"#e63333\" fill-opacity=\"0.51\" d=\"M8 8h64v64h-64Z\"/><g opacity=\"0.7\"><path id=\"green\" fill=\"#33cc66\" fill-opacity=\"0.42\" d=\"M40 24h64v64h-64Z\"/></g><path id=\"blue\" fill=\"#3366e6\" fill-opacity=\"0.35\" d=\"M24 56h64v48h-64Z\"/></g></svg>",
+      "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><g opacity=\"0.37\"><path id=\"red\" fill=\"#e63333\" fill-opacity=\"0.51\" d=\"M16 4h64v64h-64Z\"/><g opacity=\"0.4\"><path id=\"green\" fill=\"#33cc66\" fill-opacity=\"0.42\" d=\"M48 20h64v64h-64Z\"/></g><path id=\"blue\" fill=\"#3366e6\" fill-opacity=\"0.35\" d=\"M32 52h64v48h-64Z\"/></g></svg>",
+      "poseSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><g opacity=\"0.435\"><path id=\"red\" fill=\"#e63333\" fill-opacity=\"0.51\" d=\"M14 5h64v64h-64Z\"/><g opacity=\"0.475\"><path id=\"green\" fill=\"#33cc66\" fill-opacity=\"0.42\" d=\"M46 21h64v64h-64Z\"/></g><path id=\"blue\" fill=\"#3366e6\" fill-opacity=\"0.35\" d=\"M30 53h64v48h-64Z\"/></g></svg>",
+      "morphT": 0.75,
+      "morphCycle": [0, 0.25, 0.5, 0.75, 1],
+      "checkMorphRestoration": true,
+      "morphGpuSmallPlanes": true,
+      "arms": [
+        {
+          "name": "lbGpu",
+          "engine": "lb",
+          "morph": true
+        },
+        {
+          "name": "lbAA",
+          "engine": "lb",
+          "morph": true
+        },
+        {
+          "name": "lbCpu",
+          "engine": "lb",
+          "morph": true,
+          "morphCpu": true
+        },
+        {
+          "name": "lbPose",
+          "engine": "lb",
+          "pose": true
+        },
+        {
+          "name": "cpGpu",
+          "engine": "cpatch",
+          "morph": true
+        },
+        {
+          "name": "cpAA",
+          "engine": "cpatch",
+          "morph": true
+        },
+        {
+          "name": "slugGpu",
+          "engine": "slug",
+          "morph": true,
+          "morphCpu": false
+        },
+        {
+          "name": "slugCpu",
+          "engine": "slug",
+          "morph": true,
+          "morphCpu": true
+        },
+        {
+          "name": "aacGpu",
+          "engine": "aac",
+          "morph": true,
+          "morphCpu": false
+        },
+        {
+          "name": "aacCpu",
+          "engine": "aac",
+          "morph": true,
+          "morphCpu": true
+        },
+        {
+          "name": "slugPose",
+          "engine": "slug",
+          "pose": true
+        }
+      ],
+      "comparisonBase": "slugPose",
+      "colorSamples": [
+        {
+          "x": 20,
+          "y": 20,
+          "rgba": [51, 11, 11, 57]
+        },
+        {
+          "x": 50,
+          "y": 40,
+          "rgba": [45, 27, 18, 67]
+        },
+        {
+          "x": 60,
+          "y": 65,
+          "rgba": [37, 33, 47, 83]
+        },
+        {
+          "x": 30,
+          "y": 65,
+          "rgba": [41, 23, 42, 76]
+        },
+        {
+          "x": 95,
+          "y": 50,
+          "rgba": [4, 18, 9, 22]
+        },
+        {
+          "x": 70,
+          "y": 95,
+          "rgba": [8, 16, 35, 39]
+        },
+        {
+          "x": 115,
+          "y": 115,
+          "rgba": [0, 0, 0, 0]
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,9 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // font/scripts/ — opt-in script shapers.
 //
-// Convenience entry: import this to enable EVERY script shaper at
+// Convenience entry: import this to enable every script shaper at
 // once. Equivalent to:
 //
 //   import { registerArabicShaping } from '@kontek/mantle/font/scripts/arabic';
@@ -20,14 +23,18 @@
 
 import { registerArabicShaping } from './arabic.js';
 import { registerHangulShaping } from './hangul.js';
-import { registerIndicShaping  } from './indic.js';
-import { registerMathStretchy  } from './math.js';
-import { registerThaiShaping   } from './thai.js';
-import { registerUseShaping    } from './use.js';
+import { registerIndicShaping } from './indic.js';
+import { registerMathStretchy } from './math.js';
+import { registerThaiShaping } from './thai.js';
+import { registerUseShaping } from './use.js';
 
 export {
-  registerArabicShaping, registerHangulShaping, registerIndicShaping,
-  registerMathStretchy, registerThaiShaping, registerUseShaping,
+  registerArabicShaping,
+  registerHangulShaping,
+  registerIndicShaping,
+  registerMathStretchy,
+  registerThaiShaping,
+  registerUseShaping,
 };
 
 export function registerAllScriptShapers() {

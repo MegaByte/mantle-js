@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // svgTextAnchorPerTspanSmoke.mjs — SVG 2 chunk model: a <tspan> with
 // absolute x= starts a new text-positioning chunk; text-anchor on that
 // tspan governs the chunk's alignment independently of the root
@@ -11,17 +14,21 @@ import importSvg from '../../src/svg/importer.js';
 
 if (typeof globalThis.DOMParser === 'undefined') globalThis.DOMParser = DOMParser;
 
-const arial = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')));
+const arial = new MantleFontAsset(
+  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')),
+);
 arial.getMetrics(0x41);
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 const META_HEADER_BYTES = 32;
 const asMetaF32 = (bundle) =>
-  new Float32Array(bundle.meta, META_HEADER_BYTES,
-    bundle.numShapes * bundle.metaFloatsPerShape);
+  new Float32Array(bundle.meta, META_HEADER_BYTES, bundle.numShapes * bundle.metaFloatsPerShape);
 // bbox is (xmin, ymin, xmax, ymax) at f0-3.
 const xmin = (b, mf, i) => mf[i * b.metaFloatsPerShape + 0];
 const xmax = (b, mf, i) => mf[i * b.metaFloatsPerShape + 2];
@@ -39,8 +46,11 @@ const xmax = (b, mf, i) => mf[i * b.metaFloatsPerShape + 2];
   const x0 = xmin(b, mf, 0);
   const xN = xmax(b, mf, b.numShapes - 1);
   const center = (x0 + xN) / 2;
-  if (Math.abs(center - 100) > 5) fail(`T1 expected center ~100, got ${center.toFixed(2)} (x0=${x0.toFixed(2)} xN=${xN.toFixed(2)})`);
-  else ok(`T1 root middle: center=${center.toFixed(2)}, half-width ${((xN-x0)/2).toFixed(2)}`);
+  if (Math.abs(center - 100) > 5)
+    fail(
+      `T1 expected center ~100, got ${center.toFixed(2)} (x0=${x0.toFixed(2)} xN=${xN.toFixed(2)})`,
+    );
+  else ok(`T1 root middle: center=${center.toFixed(2)}, half-width ${((xN - x0) / 2).toFixed(2)}`);
 }
 
 // T2: root anchor=start, child tspan x=300 anchor=middle.
@@ -56,13 +66,17 @@ const xmax = (b, mf, i) => mf[i * b.metaFloatsPerShape + 2];
     const mf = asMetaF32(b);
     // Glyphs are in order: A, B, C.
     const aMin = xmin(b, mf, 0);
-    const bMin = xmin(b, mf, 1), cMax = xmax(b, mf, 2);
+    const bMin = xmin(b, mf, 1),
+      cMax = xmax(b, mf, 2);
     // A: at x=100 (root anchor=start, no shift).
     if (Math.abs(aMin - 100) > 5) fail(`T2 'A' xmin=${aMin.toFixed(2)} (expected ~100)`);
     // BC: centered at 300.
     const bcCenter = (bMin + cMax) / 2;
     if (Math.abs(bcCenter - 300) > 5) fail(`T2 'BC' center=${bcCenter.toFixed(2)} (expected ~300)`);
-    if (failures === 0) ok(`T2 mixed root-start + tspan-middle: A@${aMin.toFixed(1)}, BC center @${bcCenter.toFixed(1)}`);
+    if (failures === 0)
+      ok(
+        `T2 mixed root-start + tspan-middle: A@${aMin.toFixed(1)}, BC center @${bcCenter.toFixed(1)}`,
+      );
   }
 }
 
@@ -78,12 +92,14 @@ const xmax = (b, mf, i) => mf[i * b.metaFloatsPerShape + 2];
   if (b.numShapes !== 3) fail(`T3 expected 3 shapes, got ${b.numShapes}`);
   else {
     const mf = asMetaF32(b);
-    const aMin = xmin(b, mf, 0), aMax = xmax(b, mf, 0);
+    const aMin = xmin(b, mf, 0),
+      aMax = xmax(b, mf, 0);
     const cMax = xmax(b, mf, 2);
     const aCenter = (aMin + aMax) / 2;
     if (Math.abs(aCenter - 100) > 5) fail(`T3 'A' center=${aCenter.toFixed(2)} (expected ~100)`);
     if (Math.abs(cMax - 400) > 5) fail(`T3 'BC' end=${cMax.toFixed(2)} (expected ~400)`);
-    if (failures === 0) ok(`T3 root-middle + tspan-end: A center@${aCenter.toFixed(1)}, BC ends@${cMax.toFixed(1)}`);
+    if (failures === 0)
+      ok(`T3 root-middle + tspan-end: A center@${aCenter.toFixed(1)}, BC ends@${cMax.toFixed(1)}`);
   }
 }
 
@@ -103,7 +119,8 @@ const xmax = (b, mf, i) => mf[i * b.metaFloatsPerShape + 2];
     const bcCenter = (xmin(b, mf, 1) + xmax(b, mf, 2)) / 2;
     if (Math.abs(aCenter - 100) > 5) fail(`T4 'A' center=${aCenter.toFixed(2)} (expected ~100)`);
     if (Math.abs(bcCenter - 300) > 5) fail(`T4 'BC' center=${bcCenter.toFixed(2)} (expected ~300)`);
-    if (failures === 0) ok(`T4 tspan inherits middle: A@${aCenter.toFixed(1)}, BC@${bcCenter.toFixed(1)}`);
+    if (failures === 0)
+      ok(`T4 tspan inherits middle: A@${aCenter.toFixed(1)}, BC@${bcCenter.toFixed(1)}`);
   }
 }
 
@@ -123,11 +140,14 @@ const xmax = (b, mf, i) => mf[i * b.metaFloatsPerShape + 2];
     const x0 = xmin(b, mf, 0);
     const xN = xmax(b, mf, 4);
     const center = (x0 + xN) / 2;
-    if (Math.abs(center - 100) > 5) fail(`T5 expected single-chunk center ~100, got ${center.toFixed(2)}`);
+    if (Math.abs(center - 100) > 5)
+      fail(`T5 expected single-chunk center ~100, got ${center.toFixed(2)}`);
     else ok(`T5 styled-only tspan keeps parent chunk: ABCDE centered@${center.toFixed(1)}`);
   }
 }
 
 console.log();
-console.log(failures === 0 ? 'SVG-ANCHOR-PER-TSPAN PASS' : `SVG-ANCHOR-PER-TSPAN FAIL (${failures})`);
+console.log(
+  failures === 0 ? 'SVG-ANCHOR-PER-TSPAN PASS' : `SVG-ANCHOR-PER-TSPAN FAIL (${failures})`,
+);
 process.exit(failures === 0 ? 0 : 1);

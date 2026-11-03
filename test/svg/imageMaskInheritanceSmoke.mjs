@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // imageMaskInheritanceSmoke.mjs — verifies an <image> inherits its
 // mask / clip-path from the ancestor <g> stack (resolve own style →
 // own attr → ancestor stack via currentMaskRef() / currentClipRef()),
@@ -12,7 +15,8 @@
 import { DOMParser as DP } from '@xmldom/xmldom';
 globalThis.DOMParser = DP;
 function stubImageIO() {
-  const W = 10, H = 10;
+  const W = 10,
+    H = 10;
   globalThis.Image = class FakeImage {
     set src(_) {
       this.naturalWidth = W;
@@ -25,14 +29,18 @@ function stubImageIO() {
     createElement(tag) {
       if (tag !== 'canvas') throw new Error('FakeDoc: only canvas supported');
       return {
-        width: 0, height: 0,
+        width: 0,
+        height: 0,
         getContext() {
           return {
             drawImage() {},
             getImageData(_x, _y, w, h) {
               const data = new Uint8ClampedArray(w * h * 4);
               for (let i = 0; i < w * h; i++) {
-                data[i*4+0] = 255; data[i*4+1] = 0; data[i*4+2] = 0; data[i*4+3] = 255;
+                data[i * 4 + 0] = 255;
+                data[i * 4 + 1] = 0;
+                data[i * 4 + 2] = 0;
+                data[i * 4 + 3] = 255;
               }
               return { data };
             },
@@ -46,14 +54,17 @@ stubImageIO();
 import importSvg from '../../src/svg/importer.js';
 
 let failures = 0;
-const ok   = (msg) => console.log('ok', msg);
-const fail = (msg) => { failures++; console.error('FAIL', msg); };
+const ok = (msg) => console.log('ok', msg);
+const fail = (msg) => {
+  failures++;
+  console.error('FAIL', msg);
+};
 
 const STRIDE = 48;
 const META_MASKID = 31;
 const META_CLIPID = 30;
-const META_FLAGS  = 27;
-const FLAG_LAYER  = 0x100;
+const META_FLAGS = 27;
+const FLAG_LAYER = 0x100;
 
 function inspect(sections) {
   const mf = new Float32Array(sections.meta, 32);
@@ -84,16 +95,19 @@ function inspect(sections) {
 </svg>`;
   const s = await importSvg(svg);
   const rows = inspect(s);
-  const visibleRows = rows.filter(r => !r.isLayer);
-  const layerRows = rows.filter(r => r.isLayer);
+  const visibleRows = rows.filter((r) => !r.isLayer);
+  const layerRows = rows.filter((r) => r.isLayer);
   if (visibleRows.length < 2)
-    fail(`T1 expected ≥ 2 visible rows (rect + image), got ${visibleRows.length}: ${JSON.stringify(rows)}`);
-  else if (visibleRows.some(r => r.maskId === 0))
-    fail(`T1 one or more visible rows have maskId=0 (mask didn't inherit). Rows: ${JSON.stringify(visibleRows)}`);
-  else if (layerRows.length === 0)
-    fail(`T1 no FLAG_LAYER mask geometry row emitted`);
+    fail(
+      `T1 expected ≥ 2 visible rows (rect + image), got ${visibleRows.length}: ${JSON.stringify(rows)}`,
+    );
+  else if (visibleRows.some((r) => r.maskId === 0))
+    fail(
+      `T1 one or more visible rows have maskId=0 (mask didn't inherit). Rows: ${JSON.stringify(visibleRows)}`,
+    );
+  else if (layerRows.length === 0) fail(`T1 no FLAG_LAYER mask geometry row emitted`);
   else {
-    const uniqueMasks = new Set(visibleRows.map(r => r.maskId));
+    const uniqueMasks = new Set(visibleRows.map((r) => r.maskId));
     if (uniqueMasks.size !== 1)
       fail(`T1 visible rows reference DIFFERENT mask ids (rect vs image): ${[...uniqueMasks]}`);
     else
@@ -101,7 +115,7 @@ function inspect(sections) {
   }
 }
 
-// ---- T2: <image> with its OWN mask attribute ------------------------
+// ---- T2: <image> with its own mask attribute ------------------------
 {
   const svg = `<?xml version="1.0"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
@@ -110,13 +124,11 @@ function inspect(sections) {
 </svg>`;
   const s = await importSvg(svg);
   const rows = inspect(s);
-  const visibleRows = rows.filter(r => !r.isLayer);
-  if (visibleRows.length < 1)
-    fail(`T2 expected ≥ 1 image row, got ${visibleRows.length}`);
-  else if (visibleRows.some(r => r.maskId === 0))
+  const visibleRows = rows.filter((r) => !r.isLayer);
+  if (visibleRows.length < 1) fail(`T2 expected ≥ 1 image row, got ${visibleRows.length}`);
+  else if (visibleRows.some((r) => r.maskId === 0))
     fail(`T2 <image mask=> glyphs have maskId=0: ${JSON.stringify(visibleRows)}`);
-  else
-    ok(`T2 <image mask="..."> direct attribute consumed (id=${visibleRows[0].maskId})`);
+  else ok(`T2 <image mask="..."> direct attribute consumed (id=${visibleRows[0].maskId})`);
 }
 
 // ---- T3: <image> inside <g clip-path=> inherits the clip ------------
@@ -130,11 +142,10 @@ function inspect(sections) {
 </svg>`;
   const s = await importSvg(svg);
   const rows = inspect(s);
-  const visibleRows = rows.filter(r => !r.isLayer);
-  if (visibleRows.some(r => r.clipId === 0))
+  const visibleRows = rows.filter((r) => !r.isLayer);
+  if (visibleRows.some((r) => r.clipId === 0))
     fail(`T3 <image> inside <g clip-path=> has clipId=0: ${JSON.stringify(visibleRows)}`);
-  else
-    ok(`T3 <image> inside <g clip-path=> inherits the clip`);
+  else ok(`T3 <image> inside <g clip-path=> inherits the clip`);
 }
 
 // ---- T4: bare <image> (no mask anywhere) — no inheritance ghost -----
@@ -145,12 +156,41 @@ function inspect(sections) {
 </svg>`;
   const s = await importSvg(svg);
   const rows = inspect(s);
-  if (rows.some(r => r.maskId !== 0 || r.clipId !== 0))
+  if (rows.some((r) => r.maskId !== 0 || r.clipId !== 0))
     fail(`T4 plain <image> picked up a phantom mask/clip: ${JSON.stringify(rows)}`);
-  else
-    ok(`T4 bare <image> with no mask/clip in ancestry stays at 0 (no ghost inheritance)`);
+  else ok(`T4 bare <image> with no mask/clip in ancestry stays at 0 (no ghost inheritance)`);
+}
+
+// Resource coordinates follow the same document transform as the image quad.
+{
+  const doc = (transform) =>
+    `<svg xmlns="http://www.w3.org/2000/svg"><image transform="${transform}" href="x://bitmap.png" x="2" y="3" width="4" height="5" preserveAspectRatio="none"/></svg>`;
+  const a = await importSvg(doc('matrix(2 0 0 3 7 11)')),
+    m = new Float32Array(a.meta, 32);
+  if ([11, 20, 8, 15].some((v, i) => m[36 + i] !== v) || m[28] !== 0)
+    fail('positive affine image rectangle');
+  else ok('positive scale and translation use the document-space image rectangle');
+  const z = await importSvg(doc('matrix(0 2 -3 0 7 11)')),
+    n = new Float32Array(z.meta, 32),
+    id = n[28],
+    g = new Float32Array(z.gradients),
+    off = (id - 1) * 16;
+  if (
+    !(id > 0) ||
+    [0, -1 / 3, 1 / 2, 0, -5.5, 7 / 3].some((v, i) => Math.abs(g[off + 4 + i] - v) > 1e-6)
+  )
+    fail('rotated image affine resource');
+  else ok('rotated image carries its inverse affine map in a paint record');
+  const f = await importSvg(
+    '<svg xmlns="http://www.w3.org/2000/svg"><defs><filter id="f"><feOffset dx="10" dy="20"/></filter></defs><g transform="matrix(0 2 -3 0 7 11)"><rect width="4" height="5" filter="url(#f)"/></g></svg>',
+  );
+  const p = f.filterGraphs.find(Boolean).nodes.find((n) => n.type === 'feOffset').params;
+  if (p.dx !== -60 || p.dy !== 20) fail('filter offset document vector');
+  else ok('filter offsets use the linear document transform without its translation');
 }
 
 console.log();
-console.log(failures === 0 ? 'IMAGE-MASK-INHERITANCE PASS' : `IMAGE-MASK-INHERITANCE FAIL (${failures})`);
+console.log(
+  failures === 0 ? 'IMAGE-MASK-INHERITANCE PASS' : `IMAGE-MASK-INHERITANCE FAIL (${failures})`,
+);
 process.exit(failures === 0 ? 0 : 1);

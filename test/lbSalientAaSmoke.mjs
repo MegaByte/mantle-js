@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // lbSalientAaSmoke — LB vs 8×SS / AAC must not show SALIENT AA errors.
 //
 // MSE can look fine while a few pixels jump solid↔empty next to each other
@@ -12,46 +15,88 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
-const N = 192, SS = 8;
+const N = 192,
+  SS = 8;
 const wrap = (d, n) =>
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n} ${n}" width="${n}" height="${n}"><path fill="#000000" d="${d}"/></svg>`;
 function circle(n) {
-  const c = n / 2, r = n * 0.36, k = 0.5523 * r;
-  const P = [[c - r, c], [c, c - r], [c + r, c], [c, c + r]];
+  const c = n / 2,
+    r = n * 0.36,
+    k = 0.5523 * r;
+  const P = [
+    [c - r, c],
+    [c, c - r],
+    [c + r, c],
+    [c, c + r],
+  ];
   let d = `M ${P[0][0]} ${P[0][1]} `;
   for (let i = 0; i < 4; i++) {
-    const A = P[i], B = P[(i + 1) % 4];
-    const ta = [-(A[1] - c), (A[0] - c)], tb = [-(B[1] - c), (B[0] - c)];
-    d += `C ${(A[0] + ta[0] / r * k).toFixed(4)} ${(A[1] + ta[1] / r * k).toFixed(4)} ${(B[0] - tb[0] / r * k).toFixed(4)} ${(B[1] - tb[1] / r * k).toFixed(4)} ${B[0]} ${B[1]} `;
+    const A = P[i],
+      B = P[(i + 1) % 4];
+    const ta = [-(A[1] - c), A[0] - c],
+      tb = [-(B[1] - c), B[0] - c];
+    d += `C ${(A[0] + (ta[0] / r) * k).toFixed(4)} ${(A[1] + (ta[1] / r) * k).toFixed(4)} ${(B[0] - (tb[0] / r) * k).toFixed(4)} ${(B[1] - (tb[1] / r) * k).toFixed(4)} ${B[0]} ${B[1]} `;
   }
   return d + 'Z';
 }
 function tiny(n) {
-  const c = n / 2, r = n * 0.028, k = 0.5523 * r;
-  const P = [[c - r, c], [c, c - r], [c + r, c], [c, c + r]];
+  const c = n / 2,
+    r = n * 0.028,
+    k = 0.5523 * r;
+  const P = [
+    [c - r, c],
+    [c, c - r],
+    [c + r, c],
+    [c, c + r],
+  ];
   let d = `M ${P[0][0]} ${P[0][1]} `;
   for (let i = 0; i < 4; i++) {
-    const A = P[i], B = P[(i + 1) % 4];
-    const ta = [-(A[1] - c), (A[0] - c)], tb = [-(B[1] - c), (B[0] - c)];
-    d += `C ${(A[0] + ta[0] / r * k).toFixed(4)} ${(A[1] + ta[1] / r * k).toFixed(4)} ${(B[0] - tb[0] / r * k).toFixed(4)} ${(B[1] - tb[1] / r * k).toFixed(4)} ${B[0]} ${B[1]} `;
+    const A = P[i],
+      B = P[(i + 1) % 4];
+    const ta = [-(A[1] - c), A[0] - c],
+      tb = [-(B[1] - c), B[0] - c];
+    d += `C ${(A[0] + (ta[0] / r) * k).toFixed(4)} ${(A[1] + (ta[1] / r) * k).toFixed(4)} ${(B[0] - (tb[0] / r) * k).toFixed(4)} ${(B[1] - (tb[1] / r) * k).toFixed(4)} ${B[0]} ${B[1]} `;
   }
   return d + 'Z';
 }
 function tri(n) {
-  return `M ${0.12 * n} ${0.15 * n} L ${0.88 * n} ${0.42 * n} L ${0.30 * n} ${0.90 * n} Z`;
+  return `M ${0.12 * n} ${0.15 * n} L ${0.88 * n} ${0.42 * n} L ${0.3 * n} ${0.9 * n} Z`;
 }
 function ellipse(n) {
-  const cx = n / 2, cy = n / 2, rx = n * 0.40, ry = n * 0.26, k = 0.5523;
-  const P = [[cx - rx, cy], [cx, cy - ry], [cx + rx, cy], [cx, cy + ry]];
+  const cx = n / 2,
+    cy = n / 2,
+    rx = n * 0.4,
+    ry = n * 0.26,
+    k = 0.5523;
+  const P = [
+    [cx - rx, cy],
+    [cx, cy - ry],
+    [cx + rx, cy],
+    [cx, cy + ry],
+  ];
   let d = `M ${P[0][0]} ${P[0][1]} `;
-  const C = [[[cx - rx, cy - ry * k], [cx - rx * k, cy - ry]],
-    [[cx + rx * k, cy - ry], [cx + rx, cy - ry * k]],
-    [[cx + rx, cy + ry * k], [cx + rx * k, cy + ry]],
-    [[cx - rx * k, cy + ry], [cx - rx, cy + ry * k]]];
+  const C = [
+    [
+      [cx - rx, cy - ry * k],
+      [cx - rx * k, cy - ry],
+    ],
+    [
+      [cx + rx * k, cy - ry],
+      [cx + rx, cy - ry * k],
+    ],
+    [
+      [cx + rx, cy + ry * k],
+      [cx + rx * k, cy + ry],
+    ],
+    [
+      [cx - rx * k, cy + ry],
+      [cx - rx, cy + ry * k],
+    ],
+  ];
   for (let i = 0; i < 4; i++) {
     const B = P[(i + 1) % 4];
     d += `C ${C[i][0][0].toFixed(4)} ${C[i][0][1].toFixed(4)} ${C[i][1][0].toFixed(4)} ${C[i][1][1].toFixed(4)} ${B[0]} ${B[1]} `;
@@ -142,18 +187,25 @@ window.__ready = true;
 
 const server = http.createServer((q, res) => {
   try {
-    if (q.url === '/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(HTML); return; }
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
     const pp = decodeURIComponent(q.url.split('?')[0]);
     res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
     res.end(readFileSync(path.join(ROOT, pp)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const br = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
 const pg = await br.newPage();
 pg.on('pageerror', (e) => console.error(' [err]', e.message));
 await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
-await pg.waitForFunction(() => window.__ready === true, { timeout: 120000 });
+await pg.waitForFunction(() => window.__ready === true, { timeout: 120000, polling: 100 });
 const shapes = [
   ['circle', wrap(circle(N), N), wrap(circle(N * SS), N * SS)],
   ['tiny', wrap(tiny(N), N), wrap(tiny(N * SS), N * SS)],
@@ -161,25 +213,50 @@ const shapes = [
   ['ellipse', wrap(ellipse(N), N), wrap(ellipse(N * SS), N * SS)],
 ];
 const rows = await pg.evaluate((s) => window.__run(s), shapes);
-await br.close(); server.close();
+await br.close();
+server.close();
 
 let fail = 0;
-const ok = (c, m) => c ? console.log('  ok ' + m) : (fail++, console.error('  FAIL ' + m));
+const ok = (c, m) => (c ? console.log('  ok ' + m) : (fail++, console.error('  FAIL ' + m)));
 const by = Object.fromEntries(rows.map((r) => [r.name, r]));
 for (const r of rows) {
-  console.log(`  ${r.name.padEnd(8)} mean=${r.mean.toFixed(2)} max=${r.max.toFixed(0)} bad=${r.nBad} spikes=${r.spikes} wobble=${r.wobble}/${r.runs} kinds=${JSON.stringify(r.kinds)}`);
+  console.log(
+    `  ${r.name.padEnd(8)} mean=${r.mean.toFixed(2)} max=${r.max.toFixed(0)} bad=${r.nBad} spikes=${r.spikes} wobble=${r.wobble}/${r.runs} kinds=${JSON.stringify(r.kinds)}`,
+  );
 }
 
-ok((by.circle.kinds[7] || 0) > 0, `kappa circle takes kind-7 SDF (${by.circle.kinds[7] || 0} verts)`);
-ok((by.tiny.kinds[7] || 0) > 0, `tiny kappa disc takes kind-7 SDF (${by.tiny.kinds[7] || 0} verts)`);
-ok(by.circle.spikes === 0 && by.circle.nBad === 0, `circle: no spikes/bad (spikes=${by.circle.spikes}, bad=${by.circle.nBad})`);
-ok(by.tiny.spikes === 0 && by.tiny.nBad === 0, `tiny: no spikes/bad (spikes=${by.tiny.spikes}, bad=${by.tiny.nBad})`);
-ok(by.circle.wobble === 0 && by.tiny.wobble === 0 && by.tri.wobble === 0,
-  `monotone ramps (circle/tiny/tri wobble ${by.circle.wobble}/${by.tiny.wobble}/${by.tri.wobble})`);
-ok(by.tri.spikes <= 2 && by.tri.nBad <= 4, `triangle spikes/bad bounded (${by.tri.spikes}/${by.tri.nBad})`);
-ok((by.ellipse.kinds[7] || 0) > 0, `kappa ellipse takes kind-7 elliptical SDF (${by.ellipse.kinds[7] || 0} verts)`);
-ok(by.ellipse.spikes === 0 && by.ellipse.nBad === 0,
-  `ellipse: no spikes/bad (spikes=${by.ellipse.spikes}, bad=${by.ellipse.nBad})`);
+ok(
+  (by.circle.kinds[7] || 0) > 0,
+  `kappa circle takes kind-7 SDF (${by.circle.kinds[7] || 0} verts)`,
+);
+ok(
+  (by.tiny.kinds[7] || 0) > 0,
+  `tiny kappa disc takes kind-7 SDF (${by.tiny.kinds[7] || 0} verts)`,
+);
+ok(
+  by.circle.spikes === 0 && by.circle.nBad === 0,
+  `circle: no spikes/bad (spikes=${by.circle.spikes}, bad=${by.circle.nBad})`,
+);
+ok(
+  by.tiny.spikes === 0 && by.tiny.nBad === 0,
+  `tiny: no spikes/bad (spikes=${by.tiny.spikes}, bad=${by.tiny.nBad})`,
+);
+ok(
+  by.circle.wobble === 0 && by.tiny.wobble === 0 && by.tri.wobble === 0,
+  `monotone ramps (circle/tiny/tri wobble ${by.circle.wobble}/${by.tiny.wobble}/${by.tri.wobble})`,
+);
+ok(
+  by.tri.spikes <= 2 && by.tri.nBad <= 4,
+  `triangle spikes/bad bounded (${by.tri.spikes}/${by.tri.nBad})`,
+);
+ok(
+  (by.ellipse.kinds[7] || 0) > 0,
+  `kappa ellipse takes kind-7 elliptical SDF (${by.ellipse.kinds[7] || 0} verts)`,
+);
+ok(
+  by.ellipse.spikes === 0 && by.ellipse.nBad === 0,
+  `ellipse: no spikes/bad (spikes=${by.ellipse.spikes}, bad=${by.ellipse.nBad})`,
+);
 ok(by.ellipse.wobble === 0, `ellipse monotone (wobble=${by.ellipse.wobble})`);
 
 console.log(fail ? `\nLB-SALIENT-AA FAIL (${fail})` : '\nLB-SALIENT-AA PASS');

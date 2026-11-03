@@ -1,0 +1,6 @@
+[
+  {
+    "name": "baseline morphology",
+    "file": { "morphFrag": "probes/filtperf/pre-morphology.morph.frag.glsl" }
+  }
+]

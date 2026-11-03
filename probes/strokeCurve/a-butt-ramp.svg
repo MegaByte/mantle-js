@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Butt-end plane. One quad, butt caps. Both ends carry a full antialiasing ramp across their own plane, not half of one. -->
+  <rect width="200" height="200" fill="#ffffff"/>
+  <path d="M 40 100 Q 100 30 160 100" fill="none" stroke="#000000" stroke-width="18" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="4"/>
+</svg>

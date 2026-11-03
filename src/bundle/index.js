@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // bundle/ — bundle data spec + introspection.
 //
 // Standalone subpath (`@kontek/mantle/bundle`) for consumers
@@ -17,5 +20,6 @@
 export * from './layout.js';
 
 // Feature introspection. inspect(bundle) → BigInt flag mask;
-// inspectAll([bundles]) → union; toNames(flags) → string[].
+// inspectAll([bundles]) → union; toNames(flags) → string[]. (The scene-level fill-omit helpers,
+// featuresToFillOmit / BAKED_FILL_FEATURES, belong to the renderer.)
 export { Features, inspect, inspectAll, toNames } from './featureSet.js';

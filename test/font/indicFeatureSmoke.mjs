@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // indicFeatureSmoke.mjs — GSUB Indic feature dispatch.
 // Verifies the GsubReader picks up the 15 Indic feature tags and the
 // dispatch returns sensible results for real Devanagari + Bengali fonts.
@@ -6,29 +9,58 @@ import { readFileSync } from 'fs';
 import { MantleFontAsset } from '../../src/font/fontAsset.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // Test fonts: KohinoorBangla.ttc (Bengali) + DevanagariSangamMN.ttc (Devanagari).
 // Apple ships them as TTCs; our reader takes face 0.
 let devaFont = null;
 let bengFont = null;
 try {
-  devaFont = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc')));
+  devaFont = new MantleFontAsset(
+    new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc')),
+  );
   devaFont.getMetrics(0x0915);
-} catch (e) { console.log('Skip Devanagari font:', e.message); }
+} catch (e) {
+  console.log('Skip Devanagari font:', e.message);
+}
 try {
-  bengFont = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/KohinoorBangla.ttc')));
+  bengFont = new MantleFontAsset(
+    new Uint8Array(readFileSync('/System/Library/Fonts/KohinoorBangla.ttc')),
+  );
   bengFont.getMetrics(0x0995);
-} catch (e) { console.log('Skip Bengali font:', e.message); }
+} catch (e) {
+  console.log('Skip Bengali font:', e.message);
+}
 
 // ----- T1: Devanagari font has Indic features ---------------------
 if (devaFont) {
   const gsub = devaFont.gsub;
   if (!gsub.hasIndicFeatures) fail('T1 Devanagari font has no Indic features (bug)');
   else {
-    const tags = ['nukt','akhn','rphf','rkrf','pref','blwf','half','vatu','cjct','pres','abvs','blws','psts','haln','calt'];
-    const present = tags.filter(t => gsub._indicLookupsByTag(t) != null && gsub._indicLookupsByTag(t).length > 0);
+    const tags = [
+      'nukt',
+      'akhn',
+      'rphf',
+      'rkrf',
+      'pref',
+      'blwf',
+      'half',
+      'vatu',
+      'cjct',
+      'pres',
+      'abvs',
+      'blws',
+      'psts',
+      'haln',
+      'calt',
+    ];
+    const present = tags.filter(
+      (t) => gsub._indicLookupsByTag(t) != null && gsub._indicLookupsByTag(t).length > 0,
+    );
     if (present.length === 0) fail('T1 no tags present despite hasIndicFeatures');
     else ok(`T1 Devanagari Sangam MN features: ${present.join(' ')}`);
   }
@@ -38,7 +70,7 @@ if (devaFont) {
 if (devaFont) {
   // ra=U+0930 (gid?), halant=U+094D (gid?)
   const raGid = devaFont.codepointToGlyphId(0x0930);
-  const halantGid = devaFont.codepointToGlyphId(0x094D);
+  const halantGid = devaFont.codepointToGlyphId(0x094d);
   if (!raGid || !halantGid) {
     fail(`T2 missing gids: ra=${raGid} halant=${halantGid}`);
   } else {
@@ -74,15 +106,35 @@ if (bengFont) {
   const gsub = bengFont.gsub;
   if (!gsub.hasIndicFeatures) fail('T4 Bengali font has no Indic features');
   else {
-    const tags = ['nukt','akhn','rphf','rkrf','pref','blwf','half','vatu','cjct','pres','abvs','blws','psts','haln','calt'];
-    const present = tags.filter(t => gsub._indicLookupsByTag(t) != null && gsub._indicLookupsByTag(t).length > 0);
+    const tags = [
+      'nukt',
+      'akhn',
+      'rphf',
+      'rkrf',
+      'pref',
+      'blwf',
+      'half',
+      'vatu',
+      'cjct',
+      'pres',
+      'abvs',
+      'blws',
+      'psts',
+      'haln',
+      'calt',
+    ];
+    const present = tags.filter(
+      (t) => gsub._indicLookupsByTag(t) != null && gsub._indicLookupsByTag(t).length > 0,
+    );
     ok(`T4 Kohinoor Bangla features: ${present.join(' ') || '(none)'}`);
   }
 }
 
 // ----- T5: Latin font has NO Indic features ------------------
 {
-  const arial = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')));
+  const arial = new MantleFontAsset(
+    new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')),
+  );
   arial.getMetrics(0x41);
   if (arial.gsub.hasIndicFeatures) fail('T5 Arial unexpectedly has Indic features');
   else ok(`T5 Arial hasIndicFeatures = false (expected for Latin font)`);

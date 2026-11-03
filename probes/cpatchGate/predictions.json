@@ -1,0 +1,45 @@
+{
+  "_": "Predicted GPU pixel differences for the CPatch hull-row gate: a tree without the gate against the tree with it. From the CPU kernel model: probes/cpatchGate/_rowGateSpill.mjs --patches, M=512 over each moved patch's own box plus 2px, RASTER set to the ASSET's extent so the numbers are at the raster a 512x512 render of the whole drawing uses.",
+  "_correction": "Two instrument traps price a fence wrongly: a CPU model whose hull-row term is a superseded hard step misprices a fence by 60x, and a measure that counts pixels CROSSING 0.5 is blind to a hull row's actual work -- attenuating a pixel from 1.0 to 0.7. Both numbers below are integrated coverage, and `pixelsTouched` is area over which the coverage moves by at least one 8-bit step.",
+  "_property": "The row set only grows: not one patch in the corpus loses the rows a flat bar would give it, and the decomposition is byte-identical (every shape's vertex count unchanged). But a hull row is NOT a free fence -- it also attenuates the patch's own AA band where the kernel's redundancy test does not fire, so a pixel can lose ink the shape HAS. `orphanedInterior` is that cost, measured: ink the fenced patch stops painting that no other patch of the shape paints either.",
+  "_readThis": "pixelsTouched counts a pixel once per patch that moves it, and the GPU's 8-bit quantisation and the shape's own colour hide some of them, so it runs 2-4x high: e.g. 382.5 / 65.8 / 83.1 against the GPU's 200 / 15 / 115.",
+  "size": 512,
+  "tiger": {
+    "asset": "../MantleSamples/Assets/Mantle/tiger.svg",
+    "assetExtent": 935.97,
+    "shapesWithMovedRows": 122,
+    "patchesGainingRows": 288,
+    "patchesLosingRows": 0,
+    "inkHeldOutsideContourPx2": 123.23,
+    "orphanedInteriorPx2": 4.41,
+    "pixelsTouched": 382.5,
+    "maxPixels": 600,
+    "coverageErrorVsExactReference": "1577.3 -> 1486.0 px^2 over the 175 affected shapes (-5.8%)",
+    "expect": "order 150-400 pixels differ. The fences remove 123 px^2 of ink the shapes do not have against 4.4 px^2 of interior they do -- a 28:1 trade -- so the frame should be closer to the references, not further. This is the asset that carries the case."
+  },
+  "lbMemBudget": {
+    "asset": "examples/smoke/lbMemBudget__SVG.svg",
+    "assetExtent": 898.3,
+    "shapesWithMovedRows": 44,
+    "patchesGainingRows": 76,
+    "patchesLosingRows": 0,
+    "inkHeldOutsideContourPx2": 15.29,
+    "orphanedInteriorPx2": 0.4,
+    "pixelsTouched": 65.8,
+    "maxPixels": 200,
+    "expect": "order 15-60 pixels, predominantly darker. 38:1 in favour."
+  },
+  "star": {
+    "asset": "examples/smoke/engineDeclineIsolation__STAR.svg",
+    "assetExtent": 260.0,
+    "shapesWithMovedRows": 1,
+    "patchesGainingRows": 86,
+    "patchesLosingRows": 0,
+    "inkHeldOutsideContourPx2": 0.2,
+    "orphanedInteriorPx2": 2.58,
+    "pixelsTouched": 83.1,
+    "maxPixels": 250,
+    "coverageErrorVsExactReference": "61.90 -> 64.18 px^2 (+2.29)",
+    "expect": "order 80-150 pixels, and this asset gets slightly WORSE -- predicted and accepted, not a surprise. It has NO hull rows at all without the gate, so its 86 new fences are the cleanest test of what a fence costs: they hold 0.20 px^2 of ink outside the contour and orphan 2.58 px^2 inside it, 13:1 against. Trusting the emptiness escape would spare it (61.90, unchanged) and would cost tiger 50.4 px^2 and leave tiger #188 painting 1.01 px^2 outside its own shape, so the escape stays off. The residual is interior AA attenuation by a hull row whose redundancy test does not fire -- a kernel question, not a gate one."
+  }
+}

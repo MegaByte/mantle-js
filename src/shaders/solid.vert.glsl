@@ -1,4 +1,6 @@
 #version 300 es
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
 layout(location=0) in vec2 aPos;
 uniform vec4 uGlobalBBox;
 uniform vec2 uCanvasAR;

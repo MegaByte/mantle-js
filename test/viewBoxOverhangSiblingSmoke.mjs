@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // viewBoxOverhangSiblingSmoke.mjs — a shape that OVERHANGS the viewBox must not
 // drop its on-canvas siblings. In tight (default) bbox mode the importer's
 // globalBBox must NOT aggregate geometry extending outside the viewBox: SVG
@@ -13,25 +16,29 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { openReady } from './_pageReady.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 // Canonical: white rounded-rect bg + diagonal stripe overlay clipped to the bg,
 // where the stripes overhang the 340×120 viewBox.
-const CLIPPED = '<svg viewBox="0 0 340 120" xmlns="http://www.w3.org/2000/svg">'
-  + '<defs><clipPath id="round"><rect x="0" y="0" width="340" height="120" rx="16" ry="16"/></clipPath></defs>'
-  + '<rect id="bg" x="0" y="0" width="340" height="120" rx="16" ry="16" fill="#ffffff"/>'
-  + '<g clip-path="url(#round)"><g transform="rotate(45 170 60)" fill="#2fbeea" fill-opacity="0.5">'
-  + '<rect x="-120" y="-120" width="13" height="360"/><rect x="-94" y="-120" width="13" height="360"/></g></g></svg>';
+const CLIPPED =
+  '<svg viewBox="0 0 340 120" xmlns="http://www.w3.org/2000/svg">' +
+  '<defs><clipPath id="round"><rect x="0" y="0" width="340" height="120" rx="16" ry="16"/></clipPath></defs>' +
+  '<rect id="bg" x="0" y="0" width="340" height="120" rx="16" ry="16" fill="#ffffff"/>' +
+  '<g clip-path="url(#round)"><g transform="rotate(45 170 60)" fill="#2fbeea" fill-opacity="0.5">' +
+  '<rect x="-120" y="-120" width="13" height="360"/><rect x="-94" y="-120" width="13" height="360"/></g></g></svg>';
 // Minimal trigger (no clip): white bg + a non-rotated rect far outside the viewBox.
-const OVERHANG = '<svg viewBox="0 0 340 120" xmlns="http://www.w3.org/2000/svg">'
-  + '<rect id="bg" x="0" y="0" width="340" height="120" fill="#ffffff"/>'
-  + '<rect x="-3000" y="-3000" width="13" height="8000" fill="#2fbeea"/></svg>';
+const OVERHANG =
+  '<svg viewBox="0 0 340 120" xmlns="http://www.w3.org/2000/svg">' +
+  '<rect id="bg" x="0" y="0" width="340" height="120" fill="#ffffff"/>' +
+  '<rect x="-3000" y="-3000" width="13" height="8000" fill="#2fbeea"/></svg>';
 // Sanity control: bg alone.
-const CONTROL = '<svg viewBox="0 0 340 120" xmlns="http://www.w3.org/2000/svg">'
-  + '<rect x="0" y="0" width="340" height="120" fill="#ffffff"/></svg>';
+const CONTROL =
+  '<svg viewBox="0 0 340 120" xmlns="http://www.w3.org/2000/svg">' +
+  '<rect x="0" y="0" width="340" height="120" fill="#ffffff"/></svg>';
 
 const HTML = `<!DOCTYPE html><html><body style="margin:0">
 <canvas id="c" width="340" height="120"></canvas>
@@ -57,28 +64,50 @@ window.__ready = true;
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(HTML);
+    return;
+  }
   let p = decodeURIComponent(req.url.split('?')[0]);
   const ct = p.endsWith('.glsl') ? 'text/plain' : 'text/javascript';
-  try { res.writeHead(200, { 'content-type': ct + '; charset=utf-8' }); res.end(readFileSync(path.join(ROOT, p))); }
-  catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    res.writeHead(200, { 'content-type': ct + '; charset=utf-8' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 const isWhite = (p) => p[0] > 200 && p[1] > 200 && p[2] > 200;
 const isMagenta = (p) => p[0] > 200 && p[1] < 80 && p[2] > 200;
 
-const browser = await puppeteer.launch({ headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
 try {
-  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
-  await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
-} catch (e) { fail('setup: ' + e.message); await browser.close(); server.close(); process.exit(1); }
+  await openReady(page, `http://127.0.0.1:${port}/`, { ready: 'flag' });
+} catch (e) {
+  fail('setup: ' + e.message);
+  await browser.close();
+  server.close();
+  process.exit(1);
+}
 
 const r = await page.evaluate(() => window.__run());
 
@@ -97,8 +126,8 @@ else fail('globalBBox not clamped: ' + JSON.stringify(ob));
 
 // Clipped + rotated case: the un-clipped white bg renders.
 if (isWhite(r.clipped.tl) && isWhite(r.clipped.br))
-  ok('clipped repro: un-clipped white bg renders (clip+overhang no longer drops it)');
-else fail('clipped repro dropped the bg: ' + JSON.stringify(r.clipped));
+  ok('clipped case: un-clipped white bg renders (clip+overhang does not drop it)');
+else fail('clipped case dropped the bg: ' + JSON.stringify(r.clipped));
 
 await browser.close();
 server.close();

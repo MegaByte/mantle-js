@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // aatLookup.js — AAT Lookup table (glyph → value). Shared by morx /
 // mort / kerx state machines and kerx format-0/2/6 value tables.
 //
@@ -7,7 +10,7 @@
 
 // Width-dispatched value read as a plain function — this lookup sits
 // inside per-glyph-pair binary-search loops, so a per-call reader
-// closure was measurable allocation churn.
+// closure would be measurable allocation churn.
 function _rdVal(v, o, valueBytes) {
   return valueBytes === 4 ? v.getUint32(o, false) : v.getUint16(o, false);
 }
@@ -15,21 +18,26 @@ function _rdVal(v, o, valueBytes) {
 export function aatLookup(v, off, gid, numGlyphs, valueBytes = 2) {
   const format = v.getUint16(off, false);
   switch (format) {
-    case 0: { // simple array: value[numGlyphs]
+    case 0: {
+      // simple array: value[numGlyphs]
       if (gid >= numGlyphs) return -1;
       return _rdVal(v, off + 2 + gid * valueBytes, valueBytes);
     }
-    case 2: { // segment single value
+    case 2: {
+      // segment single value
       return _binSearchSegments(v, off, gid, false, valueBytes);
     }
-    case 4: { // segment array (offset to per-glyph values)
+    case 4: {
+      // segment array (offset to per-glyph values)
       return _binSearchSegments(v, off, gid, true, valueBytes);
     }
-    case 6: { // single glyph table
+    case 6: {
+      // single glyph table
       const unitSize = v.getUint16(off + 2, false);
       const nUnits = v.getUint16(off + 4, false);
       const base = off + 12;
-      let lo = 0, hi = nUnits - 1;
+      let lo = 0,
+        hi = nUnits - 1;
       while (lo <= hi) {
         const mid = (lo + hi) >> 1;
         const u = base + mid * unitSize;
@@ -40,14 +48,16 @@ export function aatLookup(v, off, gid, numGlyphs, valueBytes = 2) {
       }
       return -1;
     }
-    case 8: { // trimmed array
+    case 8: {
+      // trimmed array
       const first = v.getUint16(off + 2, false);
       const count = v.getUint16(off + 4, false);
       if (gid < first || gid >= first + count) return -1;
       return _rdVal(v, off + 6 + (gid - first) * valueBytes, valueBytes);
     }
-    case 10: { // trimmed array with variable unit size
-      const unitSize = v.getUint16(off + 2, false);   // 1, 2, or 4 bytes
+    case 10: {
+      // trimmed array with variable unit size
+      const unitSize = v.getUint16(off + 2, false); // 1, 2, or 4 bytes
       const first = v.getUint16(off + 4, false);
       const count = v.getUint16(off + 6, false);
       if (gid < first || gid >= first + count) return -1;
@@ -65,16 +75,20 @@ export function aatLookup(v, off, gid, numGlyphs, valueBytes = 2) {
 // value-or-offset}]. When `valuesByOffset`, the third u16 is an offset
 // (from the subtable start `off`) to a per-glyph u16 value array.
 function _binSearchSegments(v, off, gid, valuesByOffset, valueBytes = 2) {
-  const unitSize = v.getUint16(off + 2, false);     // = 6
+  const unitSize = v.getUint16(off + 2, false); // = 6
   const nUnits = v.getUint16(off + 4, false);
   const base = off + 12;
-  let lo = 0, hi = nUnits - 1;
+  let lo = 0,
+    hi = nUnits - 1;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
     const u = base + mid * unitSize;
     const last = v.getUint16(u, false);
     const firstG = v.getUint16(u + 2, false);
-    if (last === 0xFFFF && firstG === 0xFFFF) { hi = mid - 1; continue; } // terminator guard
+    if (last === 0xffff && firstG === 0xffff) {
+      hi = mid - 1;
+      continue;
+    } // terminator guard
     if (gid < firstG) hi = mid - 1;
     else if (gid > last) lo = mid + 1;
     else {

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // featReader.js — AAT 'feat' (feature-name) table reader.
 //
 // Enumerates the typographic features a font exposes (ligatures, swashes,
@@ -12,14 +15,17 @@ export class FeatReader {
   constructor(tables) {
     this._view = tables.view;
     this._off = -1;
-    this._features = null;   // lazily parsed [{feature, exclusive, settings:[{value,nameIndex}], nameIndex}]
+    this._features = null; // lazily parsed [{feature, exclusive, settings:[{value,nameIndex}], nameIndex}]
     if (!tables.feat) return;
-    const v = tables.view, off = tables.feat[0];
+    const v = tables.view,
+      off = tables.feat[0];
     if (v.getUint32(off, false) !== 0x00010000) return;
     this._off = off;
   }
 
-  get hasFeat() { return this._off >= 0; }
+  get hasFeat() {
+    return this._off >= 0;
+  }
 
   /// Parsed feature records: each { feature (id), exclusive (bool),
   /// nameIndex (name-table id), settings: [{ value, nameIndex }] }.
@@ -32,13 +38,14 @@ export class FeatReader {
     if (this._features != null) return;
     this._features = [];
     if (this._off < 0) return;
-    const v = this._view, off = this._off;
+    const v = this._view,
+      off = this._off;
     const count = v.getUint16(off + 4, false);
     for (let i = 0; i < count; i++) {
       const r = off + 12 + i * 12;
       const feature = v.getUint16(r, false);
       const nSettings = v.getUint16(r + 2, false);
-      const settingTableOff = off + v.getUint32(r + 4, false);   // offset from feat start
+      const settingTableOff = off + v.getUint32(r + 4, false); // offset from feat start
       const featureFlags = v.getUint16(r + 8, false);
       const nameIndex = v.getInt16(r + 10, false);
       const exclusive = (featureFlags & 0x8000) !== 0;

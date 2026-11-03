@@ -1,5 +1,11 @@
-import { readFileSync } from 'fs'; import http from 'http'; import path from 'path';
-import { fileURLToPath } from 'url'; import puppeteer from 'puppeteer';
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+import { readFileSync } from 'fs';
+import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { launchBrowser } from '../test/_launch.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const raw = readFileSync(process.env.F, 'utf8');
 const HTML = `<!DOCTYPE html><html><body><script type="module">
@@ -21,12 +27,27 @@ await tryLoad('rewritten', sized);
 out.push('head: ' + sized.slice(0, 180));
 window.__out = out; window.__ready = true;
 </${'script'}></body></html>`;
-const server = http.createServer((q,res)=>{ if(q.url.split('?')[0]==='/'){res.writeHead(200,{'Content-Type':'text/html'});res.end(HTML);return;}
-  try{ const b=readFileSync(path.join(ROOT,q.url.split('?')[0])); res.writeHead(200); res.end(b);}catch{res.writeHead(404);res.end('nf');}});
-await new Promise(r=>server.listen(0,r));
-const br = await puppeteer.launch({headless:'new',args:['--no-sandbox']});
-const pg = await br.newPage(); pg.on('pageerror',e=>console.error(' [err]',e.message));
-await pg.goto(`http://127.0.0.1:${server.address().port}/`,{waitUntil:'load'});
-await pg.waitForFunction('window.__ready===true',{timeout:60000});
-for (const l of await pg.evaluate(()=>window.__out)) console.log('  '+l);
-await br.close(); server.close();
+const server = http.createServer((q, res) => {
+  if (q.url.split('?')[0] === '/') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(HTML);
+    return;
+  }
+  try {
+    const b = readFileSync(path.join(ROOT, q.url.split('?')[0]));
+    res.writeHead(200);
+    res.end(b);
+  } catch {
+    res.writeHead(404);
+    res.end('nf');
+  }
+});
+await new Promise((r) => server.listen(0, r));
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
+const pg = await br.newPage();
+pg.on('pageerror', (e) => console.error(' [err]', e.message));
+await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load' });
+await pg.waitForFunction('window.__ready===true', { timeout: 60000 });
+for (const l of await pg.evaluate(() => window.__out)) console.log('  ' + l);
+await br.close();
+server.close();

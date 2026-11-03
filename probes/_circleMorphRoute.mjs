@@ -1,17 +1,21 @@
 #!/usr/bin/env node
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
 // probes/_circleMorphRoute.mjs — does a circle→circle (and ring→ring) morph
 // route through the LB pair, and how close is mid-t to the Slug morph?
 import http from 'http';
 import path from 'path';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const N = 256;
 
-const circleSvg = (cx, cy, r, extra = '') => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">${extra}<circle cx="${cx}" cy="${cy}" r="${r}" fill="#204080"/></svg>`;
-const ringSvg = (cx, cy, r0, r1) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200"><path fill-rule="evenodd" fill="#204080" d="M ${cx - r1} ${cy} A ${r1} ${r1} 0 1 0 ${cx + r1} ${cy} A ${r1} ${r1} 0 1 0 ${cx - r1} ${cy} Z M ${cx - r0} ${cy} A ${r0} ${r0} 0 1 0 ${cx + r0} ${cy} A ${r0} ${r0} 0 1 0 ${cx - r0} ${cy} Z"/></svg>`;
+const circleSvg = (cx, cy, r, extra = '') =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">${extra}<circle cx="${cx}" cy="${cy}" r="${r}" fill="#204080"/></svg>`;
+const ringSvg = (cx, cy, r0, r1) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200"><path fill-rule="evenodd" fill="#204080" d="M ${cx - r1} ${cy} A ${r1} ${r1} 0 1 0 ${cx + r1} ${cy} A ${r1} ${r1} 0 1 0 ${cx - r1} ${cy} Z M ${cx - r0} ${cy} A ${r0} ${r0} 0 1 0 ${cx + r0} ${cy} A ${r0} ${r0} 0 1 0 ${cx - r0} ${cy} Z"/></svg>`;
 
 const HTML = `<!DOCTYPE html><html><body>
 <canvas id="c" width="${N}" height="${N}"></canvas>
@@ -68,20 +72,35 @@ document.title = 'DONE ' + JSON.stringify({ circ, ring });
 
 const server = http.createServer((q, res) => {
   try {
-    if (q.url === '/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(HTML); return; }
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
     const pp = decodeURIComponent(q.url.split('?')[0]);
     res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
     res.end(readFileSync(path.join(ROOT, pp)));
-  } catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const br = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
 const pg = await br.newPage();
 pg.on('pageerror', (e) => console.error(' [err]', e.message));
 pg.on('console', (m) => console.log(' [pg]', m.text()));
 await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
 let ok = false;
-for (let i = 0; i < 240; i++) { ok = await pg.evaluate(() => document.title.startsWith('DONE')); if (ok) break; await new Promise(r => setTimeout(r, 500)); }
-if (!ok) { console.error('TIMEOUT'); process.exit(1); }
+for (let i = 0; i < 240; i++) {
+  ok = await pg.evaluate(() => document.title.startsWith('DONE'));
+  if (ok) break;
+  await new Promise((r) => setTimeout(r, 500));
+}
+if (!ok) {
+  console.error('TIMEOUT');
+  process.exit(1);
+}
 console.log(JSON.stringify(JSON.parse((await pg.title()).slice(5)), null, 1));
-await br.close(); server.close();
+await br.close();
+server.close();

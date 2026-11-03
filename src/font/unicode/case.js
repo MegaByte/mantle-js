@@ -1,11 +1,15 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Full Unicode upper/lower case mapping (locale-independent), including
 // multi-character expansions (ß→SS, ﬀ→FF, ...). Deterministic; does not depend
 // on the platform's locale tables. Title-casing is per character (callers that
 // need word-aware title case segment first).
-import { caseData } from "./tables/caseData.js";
+import { caseData } from './tables/caseData.js';
 
 function findIndex(keys, cp) {
-  let lo = 0, hi = keys.length - 1;
+  let lo = 0,
+    hi = keys.length - 1;
   while (lo <= hi) {
     const m = (lo + hi) >> 1;
     const k = keys[m];
@@ -17,7 +21,7 @@ function findIndex(keys, cp) {
 }
 
 function mapStr(str, keys, off, data) {
-  let out = "";
+  let out = '';
   for (const ch of str) {
     const cp = ch.codePointAt(0);
     const idx = findIndex(keys, cp);

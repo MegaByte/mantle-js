@@ -1,11 +1,21 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Opt-in entry "@kontek/mantle/font/unicode": registers the platform-first +
 // table-fallback Unicode layer into the font pipeline and re-exports the public
 // surface. Pulls in the shipped UAX #15 (NFC) and UAX #29 (grapheme) engines as
 // the fallback used when the platform API is behind/broken.
-import { registerUnicode } from "../unicodeRegistry.js";
-import { normalizeNFC, segmentGraphemes, setUnicodePolicy, unicodeStatus, nfcMode, graphemeMode } from "./capabilities.js";
-import { toNFC, toNFCCodepoints } from "./nfc.js";
-import { graphemeBoundaries, eachGrapheme } from "./graphemes.js";
+import { registerUnicode } from '../unicodeRegistry.js';
+import {
+  normalizeNFC,
+  segmentGraphemes,
+  setUnicodePolicy,
+  unicodeStatus,
+  nfcMode,
+  graphemeMode,
+} from './capabilities.js';
+import { toNFC, toNFCCodepoints } from './nfc.js';
+import { graphemeBoundaries, eachGrapheme } from './graphemes.js';
 
 let _registered = false;
 
@@ -17,6 +27,8 @@ export function registerUnicodeFallback() {
 }
 
 registerUnicodeFallback();
+
+export { registerUnicode, segmentWordStarts } from '../unicodeRegistry.js';
 
 export {
   normalizeNFC,

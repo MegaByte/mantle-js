@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Stroke on SVG <text> and font fallback in the SVG text path.
 
 import { readFileSync } from 'fs';
@@ -8,28 +11,35 @@ import importSvg from '../../src/svg/importer.js';
 
 if (typeof globalThis.DOMParser === 'undefined') globalThis.DOMParser = DOMParser;
 
-const arial = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')));
-const gothic = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/AppleGothic.ttf')));
-arial.getMetrics(0x41); gothic.getMetrics(0x41);
+const arial = new MantleFontAsset(
+  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')),
+);
+const gothic = new MantleFontAsset(
+  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/AppleGothic.ttf')),
+);
+arial.getMetrics(0x41);
+gothic.getMetrics(0x41);
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 const META_HEADER_BYTES = 32;
 const asMetaF32 = (bundle) =>
-  new Float32Array(bundle.meta, META_HEADER_BYTES,
-    bundle.numShapes * bundle.metaFloatsPerShape);
+  new Float32Array(bundle.meta, META_HEADER_BYTES, bundle.numShapes * bundle.metaFloatsPerShape);
 const readFill = (b, mf, i) => {
   const s = b.metaFloatsPerShape;
-  return [mf[i*s+4], mf[i*s+5], mf[i*s+6], mf[i*s+7]];
+  return [mf[i * s + 4], mf[i * s + 5], mf[i * s + 6], mf[i * s + 7]];
 };
 const readStroke = (b, mf, i) => {
   // Layout: bbox(0-3), fill(4-7), stroke(8-11), strokeWidth(12).
   const s = b.metaFloatsPerShape;
-  return [mf[i*s+8], mf[i*s+9], mf[i*s+10], mf[i*s+11]];
+  return [mf[i * s + 8], mf[i * s + 9], mf[i * s + 10], mf[i * s + 11]];
 };
-const readStrokeWidth = (b, mf, i) => mf[i*b.metaFloatsPerShape+12];
+const readStrokeWidth = (b, mf, i) => mf[i * b.metaFloatsPerShape + 12];
 
 // T1: stroke="red" stroke-width=2 on <text>. The encoder splits
 // fill + stroke into TWO meta rows per glyph at pack time, so a
@@ -46,7 +56,8 @@ const readStrokeWidth = (b, mf, i) => mf[i*b.metaFloatsPerShape+12];
     const mf = asMetaF32(b);
     // Find the fill row (alpha=1, non-zero RGB matching white) and
     // the stroke row (where strokeWidth > 0).
-    let fillRow = -1, strokeRow = -1;
+    let fillRow = -1,
+      strokeRow = -1;
     for (let i = 0; i < b.numShapes; i++) {
       if (readStrokeWidth(b, mf, i) > 0) strokeRow = i;
       else fillRow = i;
@@ -58,7 +69,8 @@ const readStrokeWidth = (b, mf, i) => mf[i*b.metaFloatsPerShape+12];
       const [sr, sg, sbl] = readStroke(b, mf, strokeRow);
       const sw = readStrokeWidth(b, mf, strokeRow);
       if (!(fr > 0.9 && fg > 0.9 && fbl > 0.9)) fail(`T1 fill row not white: [${fr},${fg},${fbl}]`);
-      else if (!(sr > 0.9 && sg < 0.1 && sbl < 0.1)) fail(`T1 stroke row not red: [${sr},${sg},${sbl}]`);
+      else if (!(sr > 0.9 && sg < 0.1 && sbl < 0.1))
+        fail(`T1 stroke row not red: [${sr},${sg},${sbl}]`);
       else if (Math.abs(sw - 2) > 0.5) fail(`T1 stroke-width=${sw}`);
       else ok(`T1 <text stroke=red sw=2>: fill row white, stroke row red sw=${sw.toFixed(2)}`);
     }
@@ -76,11 +88,12 @@ const readStrokeWidth = (b, mf, i) => mf[i*b.metaFloatsPerShape+12];
   else {
     const mf = asMetaF32(b);
     // Look at the two stroke rows — should be one red sw=2, one blue sw=4.
-    let redSw = 0, blueSw = 0;
+    let redSw = 0,
+      blueSw = 0;
     for (let i = 0; i < b.numShapes; i++) {
       const sw = readStrokeWidth(b, mf, i);
       if (sw <= 0) continue;
-      const [r, g, bl] = readStroke(b, mf, i);  // stroke row stores color at f8-11
+      const [r, g, bl] = readStroke(b, mf, i); // stroke row stores color at f8-11
       if (r > 0.9 && g < 0.1) redSw = sw;
       else if (bl > 0.9 && r < 0.1) blueSw = sw;
     }
@@ -114,7 +127,8 @@ const readStrokeWidth = (b, mf, i) => mf[i*b.metaFloatsPerShape+12];
   // Without fallback: 가 falls back to Arial's .notdef (3 shapes still
   // because .notdef is a hollow rectangle).
   const noFb = await importSvg(svg, {
-    fonts: { Arial: arial }, svgTextLayout: buildSvgTextGlyphs,
+    fonts: { Arial: arial },
+    svgTextLayout: buildSvgTextGlyphs,
   });
   // With fallback: 가 resolves through Gothic — bbox should be larger
   // (real CJK glyph is closer to em-square than Arial's .notdef).
@@ -122,7 +136,8 @@ const readStrokeWidth = (b, mf, i) => mf[i*b.metaFloatsPerShape+12];
   const layoutWithFb = (text, font, x, y, fontSize) =>
     buildSvgTextGlyphs(text, font, x, y, fontSize, [gothic]);
   const wFb = await importSvg(svg, {
-    fonts: { Arial: arial }, svgTextLayout: layoutWithFb,
+    fonts: { Arial: arial },
+    svgTextLayout: layoutWithFb,
   });
   if (noFb.numShapes !== 3 || wFb.numShapes !== 3) {
     fail(`T4 shape counts noFb=${noFb.numShapes} wFb=${wFb.numShapes}`);
@@ -131,13 +146,19 @@ const readStrokeWidth = (b, mf, i) => mf[i*b.metaFloatsPerShape+12];
     const mfFb = asMetaF32(wFb);
     // Compare the 가 glyph (idx 2) bbox width.
     const sNo = noFb.metaFloatsPerShape;
-    const wNo = mfNo[2*sNo + 2] - mfNo[2*sNo + 0];
-    const wFb2 = mfFb[2*sNo + 2] - mfFb[2*sNo + 0];
-    if (Math.abs(wNo - wFb2) < 1) fail(`T4 fallback didn't change 가 (widths ${wNo.toFixed(2)} vs ${wFb2.toFixed(2)})`);
-    else ok(`T4 SVG fallback resolves 가: noFb w=${wNo.toFixed(2)} (.notdef) → fb w=${wFb2.toFixed(2)} (Gothic)`);
+    const wNo = mfNo[2 * sNo + 2] - mfNo[2 * sNo + 0];
+    const wFb2 = mfFb[2 * sNo + 2] - mfFb[2 * sNo + 0];
+    if (Math.abs(wNo - wFb2) < 1)
+      fail(`T4 fallback didn't change 가 (widths ${wNo.toFixed(2)} vs ${wFb2.toFixed(2)})`);
+    else
+      ok(
+        `T4 SVG fallback resolves 가: noFb w=${wNo.toFixed(2)} (.notdef) → fb w=${wFb2.toFixed(2)} (Gothic)`,
+      );
   }
 }
 
 console.log();
-console.log(failures === 0 ? 'SVG-TEXT-STROKE-FALLBACK PASS' : `SVG-TEXT-STROKE-FALLBACK FAIL (${failures})`);
+console.log(
+  failures === 0 ? 'SVG-TEXT-STROKE-FALLBACK PASS' : `SVG-TEXT-STROKE-FALLBACK FAIL (${failures})`,
+);
 process.exit(failures === 0 ? 0 : 1);

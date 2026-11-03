@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // OpenType Lookup.lookupFlag decoder + skip predicate.
 //
 // The 16-bit lookupFlag bitfield tells the context-matching engine which
@@ -24,11 +27,11 @@
 /// passed separately because it lives at a variable offset
 /// (lookupOff + 6 + subTableCount * 2).
 export function makeLookupFilter(lookupFlag, markFilteringSet, gdef) {
-  const ignoreBases   = (lookupFlag & 0x0002) !== 0;
-  const ignoreLigs    = (lookupFlag & 0x0004) !== 0;
-  const ignoreMarks   = (lookupFlag & 0x0008) !== 0;
-  const useMarkSet    = (lookupFlag & 0x0010) !== 0;
-  const markAttachClass = (lookupFlag >> 8) & 0xFF;
+  const ignoreBases = (lookupFlag & 0x0002) !== 0;
+  const ignoreLigs = (lookupFlag & 0x0004) !== 0;
+  const ignoreMarks = (lookupFlag & 0x0008) !== 0;
+  const useMarkSet = (lookupFlag & 0x0010) !== 0;
+  const markAttachClass = (lookupFlag >> 8) & 0xff;
   const hasGdef = gdef && gdef.hasTable;
   // Fast path: no filtering bits set → predicate always returns false.
   if (!ignoreBases && !ignoreLigs && !ignoreMarks && !useMarkSet && markAttachClass === 0) {
@@ -42,7 +45,7 @@ export function makeLookupFilter(lookupFlag, markFilteringSet, gdef) {
     skip: (gid) => {
       const cls = gdef.getGlyphClass(gid);
       if (ignoreBases && cls === 1) return true; // Base
-      if (ignoreLigs  && cls === 2) return true; // Ligature
+      if (ignoreLigs && cls === 2) return true; // Ligature
       if (ignoreMarks && cls === 3) return true; // Mark
       // UseMarkFilteringSet: skip MARKS NOT in the named set
       if (useMarkSet && cls === 3 && markFilteringSet >= 0) {
@@ -83,9 +86,8 @@ export function nextNonSkippedBackward(seq, start, filter) {
 /// to construct a filter.
 export function readLookupFlags(view, lookupOff) {
   const lookupFlag = view.getUint16(lookupOff + 2, false);
-  const subCount   = view.getUint16(lookupOff + 4, false);
-  const markFilteringSet = (lookupFlag & 0x0010) !== 0
-    ? view.getUint16(lookupOff + 6 + subCount * 2, false)
-    : -1;
+  const subCount = view.getUint16(lookupOff + 4, false);
+  const markFilteringSet =
+    (lookupFlag & 0x0010) !== 0 ? view.getUint16(lookupOff + 6 + subCount * 2, false) : -1;
   return { lookupFlag, markFilteringSet, subCount };
 }

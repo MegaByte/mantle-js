@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // svg/auto — automatic, tree-shaking-friendly filter / COLR handler
 // registration.
 //
@@ -38,12 +41,13 @@ import { featuresToModules } from '../bundle/featureManifest.js';
  *   callers don't re-parse); `registered` lists the subpaths pulled in.
  */
 export async function autoRegisterForSvg(svgOrBundle, opts = {}) {
-  const bundle = (typeof svgOrBundle === 'string')
-    ? await importSvg(svgOrBundle, { bundleForm: false, ...opts })
-    : svgOrBundle;
+  const bundle =
+    typeof svgOrBundle === 'string'
+      ? await importSvg(svgOrBundle, { bundleForm: false, ...opts })
+      : svgOrBundle;
   const registered = [];
   for (const subpath of featuresToModules(inspect(bundle))) {
-    await import(subpath);                 // side-effect: the module self-registers
+    await import(subpath); // side-effect: the module self-registers
     registered.push(subpath.replace('@kontek/mantle/', ''));
   }
   return { bundle, registered };

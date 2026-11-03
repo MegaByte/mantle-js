@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // @kontek/mantle/fallback — the no-WebGL native-SVG renderer, importable
 // WITHOUT pulling the WebGL pipeline.
 //

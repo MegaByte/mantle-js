@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Blurs wider than the Gaussian tap table reaches (sigma > 85.3), which both blur routes run as
+       three or more box passes a direction (filterGraph/blurKernel.js; the box pass is what this times): sigma 100 and 180. Time with shaderArmAB with its move flag so the passes run every frame. -->
+  <defs>
+    <filter id="b100" x="-150%" y="-150%" width="400%" height="400%"><feGaussianBlur stdDeviation="100"/></filter>
+    <filter id="b180" x="-250%" y="-250%" width="600%" height="600%"><feGaussianBlur stdDeviation="180"/></filter>
+  </defs>
+  <rect width="1024" height="1024" fill="#f3f1ec"/>
+  <circle cx="300" cy="320" r="120" fill="#e76f51" filter="url(#b100)"/>
+  <rect x="600" y="560" width="200" height="180" rx="30" fill="#2a9d8f" filter="url(#b180)"/>
+</svg>

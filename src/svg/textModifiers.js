@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // svg/textModifiers.js — Text-side driver primitives (Rive
 // TextFollowPathModifier / TextVariationModifier / per-glyph
 // addressing for animator ranges).
@@ -33,39 +36,29 @@ import { buildPathArcLengthLut, samplePathAt } from './textures.js';
 // `.segs` is rewritten to the warped position; `.followed = true`
 // on every output entry.
 //
-// Implementation: each glyph's anchor is `penX + advance/2`
-// (advance-midpoint, for stable spacing on tight curves). The flat
-// baseline position lies at (anchor, 0). The
-// on-path position is `samplePathAt(lut, anchorOnPath)`. We lerp
-// both the position and the rotation via the strength slider.
-//
 // `pathSegs`: a Seg[] in the same coordinate space as the glyph
 // segs (typically em-applied SVG user-units).
 export function textFollowPath(glyphs, pathSegs, opts = {}) {
   if (!glyphs || glyphs.length === 0 || !pathSegs || pathSegs.length === 0) {
     return glyphs ? glyphs.slice() : [];
   }
-  const strength = (opts.strength === undefined) ? 1 : Math.max(0, Math.min(1, opts.strength));
-  const start    = (opts.start    === undefined) ? 0 : Math.max(0, Math.min(1, opts.start));
-  const end      = (opts.end      === undefined) ? 1 : Math.max(0, Math.min(1, opts.end));
-  const offset   = (opts.offset   === undefined) ? 0 : opts.offset;
-  const radial   = !!opts.radial;
+  const strength = opts.strength === undefined ? 1 : Math.max(0, Math.min(1, opts.strength));
+  const start = opts.start === undefined ? 0 : Math.max(0, Math.min(1, opts.start));
+  const end = opts.end === undefined ? 1 : Math.max(0, Math.min(1, opts.end));
+  const offset = opts.offset === undefined ? 0 : opts.offset;
+  const radial = !!opts.radial;
   // Pre-build the path arc-length LUT (shared across all glyphs).
   const lut = buildPathArcLengthLut(pathSegs);
   // The on-path window is [start*total, end*total] in arc-length;
   // the OFFSET shifts the *anchor* (the s coordinate the glyph
-  // samples), not the window. Conventional Rive behaviour: glyphs
+  // samples), not the window. Conventional Rive behavior: glyphs
   // map their advance-midpoint to a fraction of the window plus
   // offset, modulo total when looping.
   const sWinStart = start * lut.total;
-  const sWinEnd   = end   * lut.total;
-  const sWin      = sWinEnd - sWinStart;
+  const sWinEnd = end * lut.total;
+  const sWin = sWinEnd - sWinStart;
   if (sWin <= 0) return [];
-  // Layout extent: glyphs cover [0, lastPenX+lastAdvance]. We
-  // proportion-map their anchor-x onto the window. (Rive's actual
-  // formula uses the layout's total advance width as the
-  // denominator; if no glyph has advance, fall back to penX
-  // span.)
+
   let layoutEnd = 0;
   for (const g of glyphs) {
     const e = (g.penX || 0) + (g.advance || 0);
@@ -89,15 +82,20 @@ export function textFollowPath(glyphs, pathSegs, opts = {}) {
     // existing layout pose. On-path pose follows tangent (or normal,
     // for radial). Interpolate both.
     // Tangent → (tx, ty). Normal (rotated +90° CCW in y-down) → (-ty, tx).
-    let ax = sample.tx, ay = sample.ty;
-    let nx = -ay,       ny = ax;
+    let ax = sample.tx,
+      ay = sample.ty;
+    let nx = -ay,
+      ny = ax;
     if (radial) {
       // Radial orient: glyph's local-x axis = normal (so glyphs
       // splay outward), local-y = -tangent (so vertical stroke
       // points along path forward direction).
-      const tmpX = ax, tmpY = ay;
-      ax = nx;  ay = ny;
-      nx = -tmpX; ny = -tmpY;
+      const tmpX = ax,
+        tmpY = ay;
+      ax = nx;
+      ay = ny;
+      nx = -tmpX;
+      ny = -tmpY;
     }
     // Strength lerp on axes: identity-rotation flat baseline = (1,0)/(0,1).
     const aXmix = ax * strength + 1 * (1 - strength);
@@ -107,20 +105,20 @@ export function textFollowPath(glyphs, pathSegs, opts = {}) {
     // Flat position is (cx, 0); on-path is (sample.x, sample.y);
     // lerp.
     const px = sample.x * strength + cx * (1 - strength);
-    const py = sample.y * strength + 0  * (1 - strength);
+    const py = sample.y * strength + 0 * (1 - strength);
     const xf = (p) => {
       const lx = p[0] - cx;
       const ly = p[1];
-      return [px + aXmix * lx + nXmix * ly,
-              py + aYmix * lx + nYmix * ly];
+      return [px + aXmix * lx + nXmix * ly, py + aYmix * lx + nYmix * ly];
     };
     const xformed = new Array(g.segs.length);
     for (let i = 0; i < g.segs.length; i++) {
       const sg = g.segs[i];
-      if      (sg.type === SEG_LINE)  xformed[i] = mkLine (xf(sg.p1), xf(sg.p2));
-      else if (sg.type === SEG_QUAD)  xformed[i] = mkQuad (xf(sg.p1), xf(sg.p2), xf(sg.p3));
-      else if (sg.type === SEG_CUBIC) xformed[i] = mkCubic(xf(sg.p1), xf(sg.p2), xf(sg.p3), xf(sg.p4));
-      else                            xformed[i] = sg;
+      if (sg.type === SEG_LINE) xformed[i] = mkLine(xf(sg.p1), xf(sg.p2));
+      else if (sg.type === SEG_QUAD) xformed[i] = mkQuad(xf(sg.p1), xf(sg.p2), xf(sg.p3));
+      else if (sg.type === SEG_CUBIC)
+        xformed[i] = mkCubic(xf(sg.p1), xf(sg.p2), xf(sg.p3), xf(sg.p4));
+      else xformed[i] = sg;
     }
     out.push({
       ...g,
@@ -157,22 +155,22 @@ export function textFollowPath(glyphs, pathSegs, opts = {}) {
 // tags supported by the font's fvar table are valid.
 export function textVariationApply(glyphs, range, axes) {
   if (!glyphs || glyphs.length === 0) return glyphs ? glyphs.slice() : [];
-  const sI = (range && range.startIndex   !== undefined) ? range.startIndex   : 0;
-  const eI = (range && range.endIndex     !== undefined) ? range.endIndex     : glyphs.length;
-  const fS = (range && range.fallOffStart !== undefined) ? range.fallOffStart : 0;
-  const fE = (range && range.fallOffEnd   !== undefined) ? range.fallOffEnd   : 0;
+  const sI = range && range.startIndex !== undefined ? range.startIndex : 0;
+  const eI = range && range.endIndex !== undefined ? range.endIndex : glyphs.length;
+  const fS = range && range.fallOffStart !== undefined ? range.fallOffStart : 0;
+  const fE = range && range.fallOffEnd !== undefined ? range.fallOffEnd : 0;
   const axesArr = Object.keys(axes || {});
   if (!axesArr.length) return glyphs.slice();
   const out = new Array(glyphs.length);
   for (let i = 0; i < glyphs.length; i++) {
     const g = glyphs[i];
-    let weight = 0;            // 0 = use base, 1 = use target
+    let weight = 0; // 0 = use base, 1 = use target
     if (i >= sI && i <= eI) {
       const inStart = i - sI;
-      const inEnd   = eI - i;
+      const inEnd = eI - i;
       // Linear ramp in/out via the falloff lengths.
-      const wIn  = fS > 0 ? Math.min(1, inStart / fS) : 1;
-      const wOut = fE > 0 ? Math.min(1, inEnd   / fE) : 1;
+      const wIn = fS > 0 ? Math.min(1, inStart / fS) : 1;
+      const wOut = fE > 0 ? Math.min(1, inEnd / fE) : 1;
       weight = Math.max(0, Math.min(wIn, wOut));
     }
     const varCoords = { ...(g.varCoords || {}) };
@@ -214,10 +212,10 @@ export function textVariationApply(glyphs, range, axes) {
 // easing: 'linear' (default), 'easeIn', 'easeOut', 'easeInOut'.
 export function applyGlyphRange(glyphs, range, props) {
   if (!glyphs || glyphs.length === 0) return glyphs ? glyphs.slice() : [];
-  const sI = (range && range.startIndex   !== undefined) ? range.startIndex   : 0;
-  const eI = (range && range.endIndex     !== undefined) ? range.endIndex     : glyphs.length;
-  const fS = (range && range.fallOffStart !== undefined) ? range.fallOffStart : 0;
-  const fE = (range && range.fallOffEnd   !== undefined) ? range.fallOffEnd   : 0;
+  const sI = range && range.startIndex !== undefined ? range.startIndex : 0;
+  const eI = range && range.endIndex !== undefined ? range.endIndex : glyphs.length;
+  const fS = range && range.fallOffStart !== undefined ? range.fallOffStart : 0;
+  const fE = range && range.fallOffEnd !== undefined ? range.fallOffEnd : 0;
   const easing = (range && range.easing) || 'linear';
   const easeFn = pickEasing(easing);
   const propKeys = Object.keys(props || {});
@@ -228,9 +226,9 @@ export function applyGlyphRange(glyphs, range, props) {
     let raw = 0;
     if (i >= sI && i <= eI) {
       const inStart = i - sI;
-      const inEnd   = eI - i;
-      const wIn  = fS > 0 ? Math.min(1, inStart / fS) : 1;
-      const wOut = fE > 0 ? Math.min(1, inEnd   / fE) : 1;
+      const inEnd = eI - i;
+      const wIn = fS > 0 ? Math.min(1, inStart / fS) : 1;
+      const wOut = fE > 0 ? Math.min(1, inEnd / fE) : 1;
       raw = Math.max(0, Math.min(wIn, wOut));
     }
     const w = easeFn(raw);
@@ -238,7 +236,12 @@ export function applyGlyphRange(glyphs, range, props) {
     for (const k of propKeys) {
       const spec = props[k];
       if (!spec) continue;
-      const base = spec.base !== undefined ? spec.base : (Array.isArray(spec.target) ? spec.target.map(() => 0) : 0);
+      const base =
+        spec.base !== undefined
+          ? spec.base
+          : Array.isArray(spec.target)
+            ? spec.target.map(() => 0)
+            : 0;
       const target = spec.target;
       if (Array.isArray(target)) {
         const baseArr = Array.isArray(base) ? base : target.map(() => base);
@@ -254,10 +257,14 @@ export function applyGlyphRange(glyphs, range, props) {
 
 function pickEasing(name) {
   switch (name) {
-    case 'easeIn':     return (t) => t * t;
-    case 'easeOut':    return (t) => 1 - (1 - t) * (1 - t);
-    case 'easeInOut':  return (t) => (t < 0.5) ? (2 * t * t) : (1 - Math.pow(-2 * t + 2, 2) / 2);
+    case 'easeIn':
+      return (t) => t * t;
+    case 'easeOut':
+      return (t) => 1 - (1 - t) * (1 - t);
+    case 'easeInOut':
+      return (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
     case 'linear':
-    default:           return (t) => t;
+    default:
+      return (t) => t;
   }
 }

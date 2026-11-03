@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // primitives/all.js — import every SVG filter primitive, registering all
 // handlers, for the full <filter> set. Feature-splitting consumers
 // instead import only the primitive modules their assets exercise.
@@ -8,7 +11,7 @@ import './blur.js';
 import './morphology.js';
 import './offset.js';
 import './colorMatrix.js';
-import './lighting.js';          // feDiffuseLighting + feSpecularLighting
+import './lighting.js'; // feDiffuseLighting + feSpecularLighting
 import './displacementMap.js';
 import './turbulence.js';
 import './tile.js';

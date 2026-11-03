@@ -1,4 +1,5 @@
 #version 300 es
+
 layout(location=0) in vec2 aPos;
 uniform vec4 uGlobalBBox;
 uniform vec2 uCanvasAR;

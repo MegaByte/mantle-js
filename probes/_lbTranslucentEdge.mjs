@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Translucent-rect edge AA: does LB over/under-fill the edge band vs Slug?
 // Opaque fills hide edge-coverage error (interior clamps); a translucent fill
 // (slot alpha 0.392) exposes an over-fill as a DARKER RING at the perimeter.
@@ -5,7 +8,7 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 // a translucent axis-aligned rect, straight edges only, single shape
@@ -45,25 +48,54 @@ window.__out = { slug: prof(slug), lb: prof(lb),
   slugRouted: renderer.debugStats.loopBlinnRouteCount };
 window.__ready = true;
 </script></body></html>`;
-const server = http.createServer((req,res)=>{ try{
-  if(req.url==='/'){res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(HTML);return;}
-  const p=decodeURIComponent(req.url.split('?')[0]);
-  res.writeHead(200,{'content-type':p.endsWith('.glsl')?'text/plain':'text/javascript'});res.end(readFileSync(path.join(ROOT,p)));
-}catch{if(!res.headersSent)res.writeHead(404);res.end();}});
-await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const port=server.address().port;
-const browser=await puppeteer.launch({headless:'new',args:['--enable-unsafe-swiftshader','--no-sandbox']});
-const page=await browser.newPage();
-page.on('pageerror',e=>console.error('[page-err]',e.message));
-page.on('console',m=>{if(m.type()==='error')console.error('[console]',m.text());});
-await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'load',timeout:15000});
-await page.waitForFunction(()=>window.__ready===true,{timeout:10000});
-const o=await page.evaluate(()=>window.__out);
-console.log('interior R  slug=%d lb=%d  (fill darkens R; equal edges should not go BELOW interior)', o.slug.interiorR, o.lb.interiorR);
+const server = http.createServer((req, res) => {
+  try {
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(HTML);
+      return;
+    }
+    const p = decodeURIComponent(req.url.split('?')[0]);
+    res.writeHead(200, { 'content-type': p.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const port = server.address().port;
+const browser = await launchBrowser({
+  headless: 'new',
+  args: ['--enable-unsafe-swiftshader', '--no-sandbox'],
+});
+const page = await browser.newPage();
+page.on('pageerror', (e) => console.error('[page-err]', e.message));
+page.on('console', (m) => {
+  if (m.type() === 'error') console.error('[console]', m.text());
+});
+await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 15000 });
+await page.waitForFunction(() => window.__ready === true, { timeout: 10000 });
+const o = await page.evaluate(() => window.__out);
+console.log(
+  'interior R  slug=%d lb=%d  (fill darkens R; equal edges should not go BELOW interior)',
+  o.slug.interiorR,
+  o.lb.interiorR,
+);
 console.log('left  edge minR  slug=%d lb=%d', o.slug.leftMinR, o.lb.leftMinR);
 console.log('top   edge minR  slug=%d lb=%d', o.slug.topMinR, o.lb.topMinR);
 console.log('bot   edge minR  slug=%d lb=%d', o.slug.botMinR, o.lb.botMinR);
-console.log('LB over-fill ring? left=%d top=%d bot=%d (interior-minR<0 ⇒ edge DARKER than interior = ring)',
-  o.lb.interiorR-o.lb.leftMinR, o.lb.interiorR-o.lb.topMinR, o.lb.interiorR-o.lb.botMinR);
-console.log('Slug ring?        left=%d top=%d bot=%d', o.slug.interiorR-o.slug.leftMinR, o.slug.interiorR-o.slug.topMinR, o.slug.interiorR-o.slug.botMinR);
-await browser.close(); server.close();
+console.log(
+  'LB over-fill ring? left=%d top=%d bot=%d (interior-minR<0 ⇒ edge DARKER than interior = ring)',
+  o.lb.interiorR - o.lb.leftMinR,
+  o.lb.interiorR - o.lb.topMinR,
+  o.lb.interiorR - o.lb.botMinR,
+);
+console.log(
+  'Slug ring?        left=%d top=%d bot=%d',
+  o.slug.interiorR - o.slug.leftMinR,
+  o.slug.interiorR - o.slug.topMinR,
+  o.slug.interiorR - o.slug.botMinR,
+);
+await browser.close();
+server.close();

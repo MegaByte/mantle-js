@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // fvarReaderSmoke.mjs — variable-font axis discovery + normalize.
 
 import { readFileSync, existsSync } from 'fs';
@@ -7,8 +10,11 @@ import { registerVariableFontReaders } from '../../src/font/variations/index.js'
 registerVariableFontReaders();
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // ----- T1: non-variable font reports isVariable=false ------------------
 {
@@ -18,8 +24,7 @@ const ok   = (msg) => console.log('ok ' + msg);
     const b = new Uint8Array(readFileSync(f));
     const font = new MantleFontAsset(b);
     if (font.isVariable) fail('T1 Arial should not be variable');
-    else if (font.fvar.axes != null && font.fvar.axes.length > 0)
-      fail('T1 Arial reports axes');
+    else if (font.fvar.axes != null && font.fvar.axes.length > 0) fail('T1 Arial reports axes');
     else ok('T1 Arial → isVariable=false');
   }
 }
@@ -35,7 +40,7 @@ const ok   = (msg) => console.log('ok ' + msg);
     else if (font.fvar.axes.length !== 2)
       fail(`T2 SFArabic axes=${font.fvar.axes.length}, expected 2`);
     else {
-      const tags = font.fvar.axes.map(a => a.tag).sort();
+      const tags = font.fvar.axes.map((a) => a.tag).sort();
       if (tags[0] !== 'opsz' || tags[1] !== 'wght')
         fail(`T2 SFArabic axis tags ${tags}, expected ['opsz','wght']`);
       else ok(`T2 SFArabic axes: ${tags.join(',')}`);
@@ -74,7 +79,10 @@ const ok   = (msg) => console.log('ok ' + msg);
     else {
       let ok_ = true;
       for (let i = 0; i < coords.length; i++) {
-        if (coords[i] !== font.fvar.axes[i].default) { ok_ = false; break; }
+        if (coords[i] !== font.fvar.axes[i].default) {
+          ok_ = false;
+          break;
+        }
       }
       if (!ok_) fail('T4 defaultCoords mismatch');
       else ok(`T4 defaultCoords matches each axis.default`);
@@ -91,9 +99,9 @@ const ok   = (msg) => console.log('ok ' + msg);
     const font = new MantleFontAsset(b);
     // Build raw coords at min, default, max for each axis.
     const axes = font.fvar.axes;
-    const atMin = axes.map(a => a.min);
-    const atDef = axes.map(a => a.default);
-    const atMax = axes.map(a => a.max);
+    const atMin = axes.map((a) => a.min);
+    const atDef = axes.map((a) => a.default);
+    const atMax = axes.map((a) => a.max);
     const nMin = font.fvar.normalizeCoords(atMin);
     const nDef = font.fvar.normalizeCoords(atDef);
     const nMax = font.fvar.normalizeCoords(atMax);
@@ -105,7 +113,7 @@ const ok   = (msg) => console.log('ok ' + msg);
         if (axes[i].min === axes[i].default && nMin[i] !== 0) ok_ = false;
         else if (axes[i].max === axes[i].default && nMax[i] !== 0) ok_ = false;
         else if (axes[i].min !== axes[i].default && nMin[i] !== -1) ok_ = false;
-        else if (axes[i].max !== axes[i].default && nMax[i] !== 1)  ok_ = false;
+        else if (axes[i].max !== axes[i].default && nMax[i] !== 1) ok_ = false;
         if (nDef[i] !== 0) ok_ = false;
       }
     }
@@ -126,9 +134,54 @@ const ok   = (msg) => console.log('ok ' + msg);
     else {
       const sample = insts[0];
       if (!sample.subfamilyName) fail(`T6 first instance has empty subfamilyName`);
-      else ok(`T6 NewYork instances[0].subfamilyName='${sample.subfamilyName}' (${insts.length} total)`);
+      else
+        ok(
+          `T6 NewYork instances[0].subfamilyName='${sample.subfamilyName}' (${insts.length} total)`,
+        );
     }
   }
+}
+
+// Original binary axis records exercise the prescribed normalization precision.
+{
+  const view = new DataView(new ArrayBuffer(80));
+  view.setUint16(0, 1);
+  view.setUint16(4, 16);
+  view.setUint16(8, 1);
+  view.setUint16(10, 20);
+  view.setUint32(16, 0x77676874); // wght
+  view.setInt32(20, -65536);
+  view.setInt32(28, 65536);
+  const axis = new FvarTable({ view, fvar: [0, 36] });
+  for (const [input, expected] of [
+    [-2, -16384],
+    [-0.3, -4915],
+    [-0.1, -1638],
+    [0, 0],
+    [0.1, 1639],
+    [0.3, 4915],
+    [0.7, 11469],
+    [2, 16384],
+  ]) {
+    for (const coords of [[input], { wght: input }]) {
+      if (axis.normalizeCoords(coords)[0] !== expected / 16384)
+        fail(`T7 fixed normalization ${input}`);
+    }
+  }
+  view.setUint16(40, 1);
+  view.setUint16(46, 1);
+  view.setUint16(48, 4);
+  for (const [i, from, to] of [
+    [0, -16384, -16384],
+    [1, -12288, -8192],
+    [2, 0, 0],
+    [3, 16384, 16384],
+  ]) {
+    view.setInt16(50 + i * 4, from);
+    view.setInt16(52 + i * 4, to);
+  }
+  const remapped = new FvarTable({ view, fvar: [0, 36], avar: [40, 26] });
+  if (remapped.normalizeCoords([-0.6])[0] !== -6554 / 16384) fail('T7 fixed avar remap');
 }
 
 console.log();

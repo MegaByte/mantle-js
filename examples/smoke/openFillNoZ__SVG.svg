@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A minimal case: ONE filled subpath that is not closed with Z.
+     SVG fills an open subpath as if closed, so this is legal and common art.
+
+     With an interior-skip occupancy grid built from the path as authored, Slug and AAC paint
+     33,850 px OUTSIDE the path at full opacity at 1024 px (ink +31.6% over an exact reference,
+     one 32,777 px component); Loop-Blinn renders it exactly. Appending Z to the same d collapses
+     it to 11 stray px.
+
+     The viewBox is far from the origin relative to its own extent, which several tolerance
+     families key on. The single cubic plus its synthetic closing line is the whole contour: two
+     segments, one of them is_fill_only.
+
+     So the grid is built from the closed contour: built from the path as authored, the missing
+     closing edge would let its crossing parity certify cells past the chord, and the skip would
+     paint them solid. The grid lands off thread, so only a page that waits for it can see this;
+     see test/openSubpathOccupancySmoke.mjs. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="1740 778 28 28">
+  <path fill="#db7200" d="M 1762.4 783.1 C 1762.1 799.2 1745.3 799.2 1745.3 799.2"/>
+</svg>

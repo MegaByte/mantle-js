@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // glyphCache.js — LRU glyph cache.
 //
 // Caches {segs, metrics} per codepoint. Map iteration order is the
@@ -8,7 +11,7 @@ export class MantleGlyphCache {
   constructor(byteBudget = 64 * 1024 * 1024) {
     this.byteBudget = byteBudget;
     this._bytes = 0;
-    this._map = new Map();  // codepoint → { segs, metrics, byteCost }
+    this._map = new Map(); // codepoint → { segs, metrics, byteCost }
   }
 
   tryGet(codepoint) {
@@ -33,7 +36,10 @@ export class MantleGlyphCache {
     }
   }
 
-  clear() { this._map.clear(); this._bytes = 0; }
+  clear() {
+    this._map.clear();
+    this._bytes = 0;
+  }
 }
 
 function _approxCost(segs) {

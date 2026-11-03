@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // nestedSvgImageSmoke.mjs — verify <image href="data:image/svg+xml,...">
 // nesting: the inner SVG's shapes get spliced into the outer bundle
 // with a transform mapping inner viewBox → outer (x, y, w, h) rect.
@@ -8,8 +11,11 @@ import { importSvg } from '../../src/svg/importer.js';
 import { isSvgHref, decodeSvgDataUrl } from '../../src/svg/image.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL', msg); failures++; };
-const ok   = (msg) => console.log('ok', msg);
+const fail = (msg) => {
+  console.error('FAIL', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok', msg);
 
 // ----- T1: isSvgHref classification ---------------------------------
 {
@@ -28,7 +34,10 @@ const ok   = (msg) => console.log('ok', msg);
   let allPass = true;
   for (const [href, want] of cases) {
     const got = isSvgHref(href);
-    if (got !== want) { fail(`T1 isSvgHref('${href}') want=${want} got=${got}`); allPass = false; }
+    if (got !== want) {
+      fail(`T1 isSvgHref('${href}') want=${want} got=${got}`);
+      allPass = false;
+    }
   }
   if (allPass) ok('T1 isSvgHref classifies all 10 cases correctly');
 }
@@ -50,7 +59,8 @@ const ok   = (msg) => console.log('ok', msg);
 // one red rect filling its 100×100 viewBox. After import, the bundle
 // should have ≥1 shape and globalBBox should include the outer rect.
 {
-  const inner = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg>';
+  const inner =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg>';
   const href = 'data:image/svg+xml;base64,' + Buffer.from(inner, 'utf8').toString('base64');
   const outer = `<?xml version="1.0"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
@@ -60,7 +70,7 @@ const ok   = (msg) => console.log('ok', msg);
   if (!bundle || bundle.numShapes < 1) fail(`T3 expected ≥1 shape, got ${bundle?.numShapes}`);
   else {
     // globalBBox is [xmin, ymin, w, h]. With xMidYMid meet on a
-    // square 100×100 → 30×40 rect, the inner content centres in
+    // square 100×100 → 30×40 rect, the inner content centers in
     // a 30×30 region offset by Y=5 (40-30=10 slack / 2).
     const [bx, by, bw, bh] = bundle.globalBBox;
     // Allow some tolerance.
@@ -68,13 +78,17 @@ const ok   = (msg) => console.log('ok', msg);
     else if (by < 24 || by > 26) fail(`T3 globalBBox y off: ${by}`);
     else if (bw < 29 || bw > 31) fail(`T3 globalBBox w off: ${bw}`);
     else if (bh < 29 || bh > 31) fail(`T3 globalBBox h off: ${bh}`);
-    else ok(`T3 nested SVG via data URL: ${bundle.numShapes} shape(s), bbox=[${bx},${by},${bw},${bh}] (xMidYMid meet centred)`);
+    else
+      ok(
+        `T3 nested SVG via data URL: ${bundle.numShapes} shape(s), bbox=[${bx},${by},${bw},${bh}] (xMidYMid meet centerd)`,
+      );
   }
 }
 
 // ----- T4: preserveAspectRatio="none" stretches non-uniformly ------
 {
-  const inner = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg>';
+  const inner =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg>';
   const href = 'data:image/svg+xml,' + encodeURIComponent(inner);
   const outer = `<?xml version="1.0"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
@@ -85,8 +99,12 @@ const ok   = (msg) => console.log('ok', msg);
   else {
     // 'none' → fills the whole 30×40 rect.
     const [bx, by, bw, bh] = bundle.globalBBox;
-    if (Math.abs(bx - 10) > 0.5 || Math.abs(by - 20) > 0.5
-       || Math.abs(bw - 30) > 0.5 || Math.abs(bh - 40) > 0.5)
+    if (
+      Math.abs(bx - 10) > 0.5 ||
+      Math.abs(by - 20) > 0.5 ||
+      Math.abs(bw - 30) > 0.5 ||
+      Math.abs(bh - 40) > 0.5
+    )
       fail(`T4 PAR=none expected [10,20,30,40], got [${bx},${by},${bw},${bh}]`);
     else ok(`T4 preserveAspectRatio="none" fills full 30×40 rect`);
   }
@@ -94,7 +112,8 @@ const ok   = (msg) => console.log('ok', msg);
 
 // ----- T5: external *.svg URL via svgTextLoader callback -----------
 {
-  const inner = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="green"/></svg>';
+  const inner =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="green"/></svg>';
   const outer = `<?xml version="1.0"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
   <image x="0" y="0" width="100" height="100" href="icon.svg"/>

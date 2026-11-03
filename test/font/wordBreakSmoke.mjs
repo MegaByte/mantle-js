@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // wordBreakSmoke.mjs — JS-only word-aware CJK wrap behavior.
 //
 // Verifies that with Intl.Segmenter('word') in play, multi-character
@@ -12,15 +15,19 @@ import { buildStyled } from '../../src/font/textRun.js';
 import { defaultStyle } from '../../src/font/markupParser.js';
 
 const gothic = new MantleFontAsset(
-  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/AppleGothic.ttf'))
+  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/AppleGothic.ttf')),
 );
 gothic.getMetrics(0x41);
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
-const build = async (text, opts) => await buildStyled([{ text, style: defaultStyle() }], gothic, opts || {});
+const build = async (text, opts) =>
+  await buildStyled([{ text, style: defaultStyle() }], gothic, opts || {});
 
 // ---- T1: Japanese "今日は良い天気" word-boundary wrap ----
 {
@@ -38,11 +45,14 @@ const build = async (text, opts) => await buildStyled([{ text, style: defaultSty
   const stride = b.metaFloatsPerShape;
   let goodIdx = -1;
   for (let i = 0; i < b.numShapes; i++) {
-    if (b.shapeIds[i].includes('u826F')) { goodIdx = i; break; }
+    if (b.shapeIds[i].includes('u826F')) {
+      goodIdx = i;
+      break;
+    }
   }
   if (goodIdx < 0) fail(`T1 '良' not found`);
   else {
-    const xmin = b.metaFloats[goodIdx*stride + 0];
+    const xmin = b.metaFloats[goodIdx * stride + 0];
     // 良 should be near line-start (xmin ~ 0 to 0.2em).
     if (xmin > 0.3) fail(`T1 '良' xmin=${xmin.toFixed(3)} — not at word-aware line-start`);
     else ok(`T1 Japanese wraps at word boundary: 良 xmin=${xmin.toFixed(3)} (line-start)`);
@@ -75,11 +85,14 @@ const build = async (text, opts) => await buildStyled([{ text, style: defaultSty
   const stride = b.metaFloatsPerShape;
   let imaIdx = -1;
   for (let i = 0; i < b.numShapes; i++) {
-    if (b.shapeIds[i].includes('u4ECA')) { imaIdx = i; break; }
+    if (b.shapeIds[i].includes('u4ECA')) {
+      imaIdx = i;
+      break;
+    }
   }
   if (imaIdx < 0) fail(`T3 '今' not found`);
   else {
-    const xmin = b.metaFloats[imaIdx*stride + 0];
+    const xmin = b.metaFloats[imaIdx * stride + 0];
     if (xmin > 0.3) fail(`T3 '今' xmin=${xmin.toFixed(3)} not line-start`);
     else ok(`T3 mixed Latin+JP wraps at space: 今 xmin=${xmin.toFixed(3)}`);
   }

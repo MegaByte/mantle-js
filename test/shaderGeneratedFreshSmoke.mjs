@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // shaderGeneratedFreshSmoke.mjs — the committed generated/*.glsl files must be
 // UP TO DATE with the source .glsl. Re-assembles every shader from source
 // in-memory (assembleShader = preprocess + tidy, the same the build uses) and
@@ -7,7 +10,11 @@ import { readFileSync, existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
-  SHADER_FILENAMES, HELPER_FILENAMES, assembleShader,
+  SHADER_FILENAMES,
+  HELPER_FILENAMES,
+  assembleShader,
+  bundledModuleSource,
+  bundledSourcesModuleSource,
 } from '../src/shaders/index.js';
 
 const DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/shaders');
@@ -16,18 +23,31 @@ const read = (f) => readFileSync(path.join(DIR, f), 'utf8');
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
 const helpers = {};
 for (const [marker, file] of HELPER_FILENAMES) helpers[marker] = read(file);
 
-let checked = 0, drift = 0, missing = 0;
+let checked = 0,
+  drift = 0,
+  missing = 0;
 for (const [, file] of SHADER_FILENAMES) {
   let raw;
-  try { raw = read(file); } catch { continue; }   // optional shader absent
-  const fresh = assembleShader(raw, helpers);      // unminified (build default)
+  try {
+    raw = read(file);
+  } catch {
+    continue;
+  } // optional shader absent
+  const fresh = assembleShader(raw, helpers); // unminified (build default)
   const genPath = path.join(GEN, file);
-  if (!existsSync(genPath)) { missing++; if (missing <= 3) console.error(`  missing: generated/${file}`); continue; }
+  if (!existsSync(genPath)) {
+    missing++;
+    if (missing <= 3) console.error(`  missing: generated/${file}`);
+    continue;
+  }
   checked++;
   if (readFileSync(genPath, 'utf8') !== fresh) {
     drift++;
@@ -50,6 +70,51 @@ for (const [, file] of SHADER_FILENAMES) {
 }
 if (markerLeft === 0) ok('no generated file has an unspliced @@marker@@ (valid standalone GLSL)');
 else fail(`${markerLeft} generated file(s) still contain @@markers@@`);
+
+// bundled.js (what fromPackage()/loadShaders() import) must be exactly the generated set as JS strings.
+{
+  const entries = [];
+  for (const [key, file] of SHADER_FILENAMES) {
+    const genPath = path.join(GEN, file);
+    if (existsSync(genPath)) entries.push([key, readFileSync(genPath, 'utf8')]);
+  }
+  const bundledPath = path.join(DIR, 'bundled.js');
+  if (!existsSync(bundledPath))
+    fail('src/shaders/bundled.js is missing - run: npm run build:shaders');
+  else if (readFileSync(bundledPath, 'utf8') !== bundledModuleSource(entries))
+    fail('src/shaders/bundled.js is stale - run: npm run build:shaders');
+  else ok(`bundled.js byte-matches the generated set (${entries.length} shaders)`);
+}
+
+// bundledSources.js (what fromPackage()/loadShaders() import) must be fresh, and splicing it must reproduce generated/*.glsl.
+{
+  const sources = [];
+  for (const [key, file] of SHADER_FILENAMES) {
+    try {
+      sources.push([key, read(file)]);
+    } catch {
+      /* optional */
+    }
+  }
+  const hl = HELPER_FILENAMES.map(([marker, file]) => [marker, read(file)]);
+  const p = path.join(DIR, 'bundledSources.js');
+  if (!existsSync(p)) fail('src/shaders/bundledSources.js is missing - run: npm run build:shaders');
+  else {
+    if (readFileSync(p, 'utf8') !== bundledSourcesModuleSource(sources, hl))
+      fail('src/shaders/bundledSources.js is stale - run: npm run build:shaders');
+    else ok('bundledSources.js is fresh');
+    const { SOURCES, HELPERS } = await import(p);
+    let bad = 0;
+    for (const [key, file] of SHADER_FILENAMES) {
+      if (typeof SOURCES[key] !== 'string') continue;
+      if (assembleShader(SOURCES[key], HELPERS) !== readFileSync(path.join(GEN, file), 'utf8'))
+        bad++;
+    }
+    bad === 0
+      ? ok('splicing bundledSources.js reproduces every generated/*.glsl byte for byte')
+      : fail(bad + ' shader(s) differ when spliced from bundledSources.js');
+  }
+}
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nSHADER-GENERATED-FRESH PASS');
 process.exit(failures ? 1 : 0);

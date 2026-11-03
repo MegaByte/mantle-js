@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // cffReader.js — Type 2 CharString-based outlines. Handles both CFF
 // 1.0 (legacy OTF) and CFF 2.0 (variable OTF).
 //
@@ -14,7 +17,7 @@
 //      ItemVariationStore; consumed by the blend operator in the
 //      Type 2 interpreter.
 //   5. CFF2 Type 2 charstrings drop hint operators + the width
-//      prefix; add blend (23) and vsindex (15). Encoded by the
+//      prefix; add blend (16) and vsindex (15). Encoded by the
 //      interpreter's _isCff2 flag.
 
 import { CharStringInterp } from './charStringInterp.js';
@@ -96,7 +99,7 @@ export class CffReader {
     this._charsetReady = false;
 
     this._parseTopDict();
-    this._nGlyphs = this._readCount(this._charStringsOff);
+    this._nGlyphs = this._readItemCount(this._charStringsOff);
 
     if (version === 2) {
       // CFF2: parse FDArray (universal) + FDSelect (when present;
@@ -109,20 +112,23 @@ export class CffReader {
       // .otf): Private DICTs + local subrs live PER Font DICT, selected
       // per glyph by FDSelect. The INDEX readers are version-aware, so
       // the CFF2 parse machinery applies directly. Falling back to the
-      // (absent) top-level Private DICT threw 'callsubr without local
-      // subrs' / used the wrong bias — broken or blank glyphs.
+      // (absent) top-level Private DICT would throw 'callsubr without local
+      // subrs' / use the wrong bias — broken or blank glyphs.
       this._parseFdArray();
       if (this._fdSelectOff > 0) this._parseFdSelect();
     } else {
       // CFF1: single Private DICT per font.
       this._parsePrivateDict(this._privateOff, this._privateLen);
-      if (this._lsubrIndexOff >= 0)
-        this._nLocalSubrs = this._readCount(this._lsubrIndexOff);
+      if (this._lsubrIndexOff >= 0) this._nLocalSubrs = this._readCount(this._lsubrIndexOff);
     }
   }
 
-  get numGlyphs() { return this._nGlyphs; }
-  get version()   { return this._version; }
+  get numGlyphs() {
+    return this._nGlyphs;
+  }
+  get version() {
+    return this._version;
+  }
   /// Lazily-constructed ItemVariationStore for CFF2 blend. Returns
   /// null for CFF1 or CFF2 fonts with no vstore.
   get itemVariationStore() {
@@ -132,8 +138,7 @@ export class CffReader {
       // are an INDEX-style length prefix (uint16). The actual IVS
       // starts 2 bytes in.
       const view = new DataView(this._b.buffer, this._b.byteOffset, this._b.byteLength);
-      this._ivs = new ItemVariationStore({ bytes: this._b, view },
-                                          this._vstoreOff + 2);
+      this._ivs = new ItemVariationStore({ bytes: this._b, view }, this._vstoreOff + 2);
     }
     return this._ivs;
   }
@@ -160,21 +165,32 @@ export class CffReader {
     if (gid < 0 || gid >= this._nGlyphs) return null;
     const r = this._readIndexEntry(this._charStringsOff, gid);
     if (r.len === 0) return null;
-    let lsubrIndexOff, nLocalSubrs;
+    let lsubrIndexOff,
+      nLocalSubrs,
+      vsindex = 0;
     if (this._fds) {
       // Per-glyph FD picks the Private DICT (and its local Subrs) —
       // CFF2 always; CFF1 when CID-keyed.
       const fdIdx = this._gidToFdIdx ? this._gidToFdIdx[gid] : 0;
       const fd = this._fds[fdIdx] || this._fds[0];
       lsubrIndexOff = fd.lsubrIndexOff;
-      nLocalSubrs   = fd.nLocalSubrs;
+      nLocalSubrs = fd.nLocalSubrs;
+      vsindex = fd.vsindex || 0;
     } else {
       lsubrIndexOff = this._lsubrIndexOff;
-      nLocalSubrs   = this._nLocalSubrs;
+      nLocalSubrs = this._nLocalSubrs;
     }
-    const interp = new CharStringInterp(this._b, this._gsubrIndexOff,
-      lsubrIndexOff, this._nGlobalSubrs, nLocalSubrs,
-      this._version === 2, this.itemVariationStore, varCoords);
+    const interp = new CharStringInterp(
+      this._b,
+      this._gsubrIndexOff,
+      lsubrIndexOff,
+      this._nGlobalSubrs,
+      nLocalSubrs,
+      this._version === 2,
+      this.itemVariationStore,
+      varCoords,
+      vsindex,
+    );
     const segs = interp.run(r.off, r.len);
     return { segs, seac: interp._seac };
   }
@@ -186,14 +202,15 @@ export class CffReader {
   _composeSeac(seac, varCoords) {
     this._ensureCharset();
     if (!this._sidToGid) return null;
-    const bSid = stdEncToSid(seac.bchar), aSid = stdEncToSid(seac.achar);
-    const bGid = this._sidToGid.get(bSid), aGid = this._sidToGid.get(aSid);
+    const bSid = stdEncToSid(seac.bchar),
+      aSid = stdEncToSid(seac.achar);
+    const bGid = this._sidToGid.get(bSid),
+      aGid = this._sidToGid.get(aSid);
     if (bGid == null || aGid == null) return null;
     const base = this._runGlyph(bGid, varCoords);
-    const acc  = this._runGlyph(aGid, varCoords);
+    const acc = this._runGlyph(aGid, varCoords);
     const out = base && base.segs ? base.segs.slice() : [];
-    if (acc && acc.segs)
-      for (const s of acc.segs) out.push(translateSeg(s, seac.adx, seac.ady));
+    if (acc && acc.segs) for (const s of acc.segs) out.push(translateSeg(s, seac.adx, seac.ady));
     return out.length ? out : null;
   }
 
@@ -203,11 +220,12 @@ export class CffReader {
   _ensureCharset() {
     if (this._charsetReady) return;
     this._charsetReady = true;
-    if (this._version === 2) return;            // CFF2 has no charset
+    if (this._version === 2) return; // CFF2 has no charset
     const n = this._nGlyphs;
-    const gidToSid = new Int32Array(n);          // gid 0 = .notdef = SID 0
+    const gidToSid = new Int32Array(n); // gid 0 = .notdef = SID 0
     const off = this._charsetOff;
-    if (off === 0) {                             // predefined ISOAdobe
+    if (off === 0) {
+      // predefined ISOAdobe
       for (let g = 0; g < n; g++) gidToSid[g] = g;
     } else if (off === 1 || off === 2) {
       // Expert / ExpertSubset predefined charsets are not built (seac fonts
@@ -216,19 +234,28 @@ export class CffReader {
     } else {
       let o = this._base + off;
       const fmt = this._b[o++];
-      let gid = 1;                               // gid 0 is implicit .notdef
+      let gid = 1; // gid 0 is implicit .notdef
       if (fmt === 0) {
-        for (; gid < n; gid++) { gidToSid[gid] = readU16(this._b, o); o += 2; }
+        for (; gid < n; gid++) {
+          gidToSid[gid] = readU16(this._b, o);
+          o += 2;
+        }
       } else if (fmt === 1 || fmt === 2) {
         while (gid < n) {
-          const first = readU16(this._b, o); o += 2;
+          const first = readU16(this._b, o);
+          o += 2;
           let nLeft;
-          if (fmt === 1) { nLeft = this._b[o]; o += 1; }
-          else           { nLeft = readU16(this._b, o); o += 2; }
+          if (fmt === 1) {
+            nLeft = this._b[o];
+            o += 1;
+          } else {
+            nLeft = readU16(this._b, o);
+            o += 2;
+          }
           for (let i = 0; i <= nLeft && gid < n; i++) gidToSid[gid++] = first + i;
         }
       } else {
-        return;                                  // unknown charset format
+        return; // unknown charset format
       }
     }
     const sidToGid = new Map();
@@ -243,10 +270,20 @@ export class CffReader {
   /// CFF2 INDEX: uint32 count + uint8 offSize + offset table + data.
   /// Differs by 2 bytes in the count field (and trivially empty
   /// INDEX = just the count, no offSize/table).
-  get _countSize() { return this._version === 2 ? 4 : 2; }
+  get _countSize() {
+    return this._version === 2 ? 4 : 2;
+  }
   _readCount(indexOff) {
-    return this._version === 2 ? readU32(this._b, indexOff)
-                                : readU16(this._b, indexOff);
+    return this._version === 2 ? readU32(this._b, indexOff) : readU16(this._b, indexOff);
+  }
+
+  /// An INDEX count that is about to size an array or a loop. An entry takes at least an offset byte, so a count past the font's
+  /// size is corrupt; CFF2's 32-bit count otherwise asks for two billion Font DICTs from a 400-byte font.
+  _readItemCount(indexOff) {
+    const count = this._readCount(indexOff);
+    if (count < 0 || count > this._b.length)
+      throw new Error(`CFF INDEX count ${count} exceeds the font data`);
+    return count;
   }
 
   _readIndexEntry(indexOff, idx) {
@@ -275,6 +312,10 @@ export class CffReader {
   _parseTopDict() {
     let o = this._topDictOff;
     const end = this._topDictOff + this._topDictLen;
+    // A corrupt INDEX offset can claim a Top DICT billions of bytes long; reading past the font yields undefined
+    // bytes forever (4 s of spin on a 1 KB font), so a DICT that leaves the data is refused outright.
+    if (!(this._topDictLen >= 0) || end > this._b.length)
+      throw new Error('CFF Top DICT extends past the font data');
     const operands = [];
     while (o < end) {
       const b0 = this._b[o++];
@@ -282,19 +323,24 @@ export class CffReader {
         operands.push(this._readDictOperand(b0, () => {}, o, true));
         o = this._dictOpCursor;
       } else if (b0 === 28) {
-        operands.push(signed16((this._b[o] << 8) | this._b[o + 1])); o += 2;
+        operands.push(signed16((this._b[o] << 8) | this._b[o + 1]));
+        o += 2;
       } else if (b0 === 29) {
-        operands.push(signed32((this._b[o] << 24) | (this._b[o + 1] << 16) | (this._b[o + 2] << 8) | this._b[o + 3]));
+        operands.push(
+          signed32(
+            (this._b[o] << 24) | (this._b[o + 1] << 16) | (this._b[o + 2] << 8) | this._b[o + 3],
+          ),
+        );
         o += 4;
       } else if (b0 === 30) {
         // BCD real: skip until end marker.
         while (o < end) {
           const v = this._b[o++];
-          if ((v & 0x0F) === 0x0F || (v & 0xF0) === 0xF0) break;
+          if ((v & 0x0f) === 0x0f || (v & 0xf0) === 0xf0) break;
         }
         operands.push(0);
       } else {
-        const op = (b0 === 12) ? (12 * 256 + this._b[o++]) : b0;
+        const op = b0 === 12 ? 12 * 256 + this._b[o++] : b0;
         this._handleTopDictOperator(op, operands);
         operands.length = 0;
       }
@@ -318,37 +364,39 @@ export class CffReader {
       case 24: // vstore (CFF2 only) — offset to ItemVariationStore
         if (operands.length > 0) this._vstoreOff = this._base + operands[operands.length - 1];
         break;
-      case (12 * 256 + 36): // FDArray (CFF2 universal; CFF1 CIDKeyed)
+      case 12 * 256 + 36: // FDArray (CFF2 universal; CFF1 CIDKeyed)
         if (operands.length > 0) this._fdArrayOff = this._base + operands[operands.length - 1];
         break;
-      case (12 * 256 + 37): // FDSelect (same)
+      case 12 * 256 + 37: // FDSelect (same)
         if (operands.length > 0) this._fdSelectOff = this._base + operands[operands.length - 1];
         break;
     }
   }
 
-  /// Parse the FDArray INDEX. Each entry is a Font DICT (same DICT
-  /// format as Top DICT); we only care about its Private DICT key
-  /// (18). Used by CFF2 (always) and CIDKeyed CFF1.
   _parseFdArray() {
     if (this._fdArrayOff === 0) {
       // Shouldn't happen for spec-compliant CFF2, but be defensive:
       // synthesize a single FD pointing at the Top-DICT-supplied
       // Private DICT.
-      this._fds = [{ privateOff: this._privateOff, privateLen: this._privateLen,
-                     lsubrIndexOff: -1, nLocalSubrs: 0 }];
+      this._fds = [
+        {
+          privateOff: this._privateOff,
+          privateLen: this._privateLen,
+          lsubrIndexOff: -1,
+          nLocalSubrs: 0,
+        },
+      ];
       this._parsePrivateDict(this._privateOff, this._privateLen, this._fds[0]);
       return;
     }
-    const count = this._readCount(this._fdArrayOff);
+    const count = this._readItemCount(this._fdArrayOff);
     this._fds = new Array(count);
     for (let i = 0; i < count; i++) {
       const fdRec = this._readIndexEntry(this._fdArrayOff, i);
       const fd = { privateOff: 0, privateLen: 0, lsubrIndexOff: -1, nLocalSubrs: 0 };
       this._parseFontDict(fdRec.off, fdRec.len, fd);
       if (fd.privateLen > 0) this._parsePrivateDict(fd.privateOff, fd.privateLen, fd);
-      if (fd.lsubrIndexOff >= 0)
-        fd.nLocalSubrs = this._readCount(fd.lsubrIndexOff);
+      if (fd.lsubrIndexOff >= 0) fd.nLocalSubrs = this._readCount(fd.lsubrIndexOff);
       this._fds[i] = fd;
     }
   }
@@ -365,18 +413,23 @@ export class CffReader {
         operands.push(this._readDictOperand(b0, () => {}, o, true));
         o = this._dictOpCursor;
       } else if (b0 === 28) {
-        operands.push(signed16((this._b[o] << 8) | this._b[o + 1])); o += 2;
+        operands.push(signed16((this._b[o] << 8) | this._b[o + 1]));
+        o += 2;
       } else if (b0 === 29) {
-        operands.push(signed32((this._b[o] << 24) | (this._b[o + 1] << 16) | (this._b[o + 2] << 8) | this._b[o + 3]));
+        operands.push(
+          signed32(
+            (this._b[o] << 24) | (this._b[o + 1] << 16) | (this._b[o + 2] << 8) | this._b[o + 3],
+          ),
+        );
         o += 4;
       } else if (b0 === 30) {
         while (o < end) {
           const v = this._b[o++];
-          if ((v & 0x0F) === 0x0F || (v & 0xF0) === 0xF0) break;
+          if ((v & 0x0f) === 0x0f || (v & 0xf0) === 0xf0) break;
         }
         operands.push(0);
       } else {
-        const op = (b0 === 12) ? (12 * 256 + this._b[o++]) : b0;
+        const op = b0 === 12 ? 12 * 256 + this._b[o++] : b0;
         if (op === 18 && operands.length >= 2) {
           fd.privateLen = operands[operands.length - 2];
           fd.privateOff = this._base + operands[operands.length - 1];
@@ -400,34 +453,40 @@ export class CffReader {
       for (let i = 0; i < nRanges; i++) {
         ranges.push({
           first: readU16(this._b, cursor),
-          fd:    this._b[cursor + 2],
+          fd: this._b[cursor + 2],
         });
         cursor += 3;
       }
       const sentinel = readU16(this._b, cursor);
       for (let i = 0; i < nRanges; i++) {
         const start = ranges[i].first;
-        const stop  = (i + 1 < nRanges) ? ranges[i + 1].first : sentinel;
+        const stop = i + 1 < nRanges ? ranges[i + 1].first : sentinel;
         for (let g = start; g < stop && g < this._nGlyphs; g++) map[g] = ranges[i].fd;
       }
     } else if (format === 4) {
       // Format 4 uses uint32 first, uint16 fd. Used for very large fonts.
-      const nRanges = (this._b[o + 1] << 24) | (this._b[o + 2] << 16)
-                   | (this._b[o + 3] <<  8) |  this._b[o + 4];
+      const nRanges =
+        (this._b[o + 1] << 24) | (this._b[o + 2] << 16) | (this._b[o + 3] << 8) | this._b[o + 4];
       let cursor = o + 5;
       const ranges = [];
       for (let i = 0; i < nRanges; i++) {
-        const first = (this._b[cursor] << 24) | (this._b[cursor + 1] << 16)
-                    | (this._b[cursor + 2] << 8) | this._b[cursor + 3];
-        const fd    = readU16(this._b, cursor + 4);
+        const first =
+          (this._b[cursor] << 24) |
+          (this._b[cursor + 1] << 16) |
+          (this._b[cursor + 2] << 8) |
+          this._b[cursor + 3];
+        const fd = readU16(this._b, cursor + 4);
         ranges.push({ first, fd });
         cursor += 6;
       }
-      const sentinel = (this._b[cursor] << 24) | (this._b[cursor + 1] << 16)
-                    | (this._b[cursor + 2] << 8) | this._b[cursor + 3];
+      const sentinel =
+        (this._b[cursor] << 24) |
+        (this._b[cursor + 1] << 16) |
+        (this._b[cursor + 2] << 8) |
+        this._b[cursor + 3];
       for (let i = 0; i < nRanges; i++) {
         const start = ranges[i].first;
-        const stop  = (i + 1 < nRanges) ? ranges[i + 1].first : sentinel;
+        const stop = i + 1 < nRanges ? ranges[i + 1].first : sentinel;
         for (let g = start; g < stop && g < this._nGlyphs; g++) map[g] = ranges[i].fd;
       }
     } else {
@@ -447,23 +506,31 @@ export class CffReader {
         operands.push(this._readDictOperand(b0, () => {}, o, true));
         o = this._dictOpCursor;
       } else if (b0 === 28) {
-        operands.push(signed16((this._b[o] << 8) | this._b[o + 1])); o += 2;
+        operands.push(signed16((this._b[o] << 8) | this._b[o + 1]));
+        o += 2;
       } else if (b0 === 29) {
-        operands.push(signed32((this._b[o] << 24) | (this._b[o + 1] << 16) | (this._b[o + 2] << 8) | this._b[o + 3]));
+        operands.push(
+          signed32(
+            (this._b[o] << 24) | (this._b[o + 1] << 16) | (this._b[o + 2] << 8) | this._b[o + 3],
+          ),
+        );
         o += 4;
       } else if (b0 === 30) {
         while (o < end) {
           const v = this._b[o++];
-          if ((v & 0x0F) === 0x0F || (v & 0xF0) === 0xF0) break;
+          if ((v & 0x0f) === 0x0f || (v & 0xf0) === 0xf0) break;
         }
         operands.push(0);
       } else {
-        const op = (b0 === 12) ? (12 * 256 + this._b[o++]) : b0;
+        const op = b0 === 12 ? 12 * 256 + this._b[o++] : b0;
         // Key 19 = Subrs offset (relative to Private DICT start).
         if (op === 19 && operands.length > 0) {
           const lsubrOff = privOff + operands[operands.length - 1];
           if (fdOut) fdOut.lsubrIndexOff = lsubrOff;
-          else       this._lsubrIndexOff = lsubrOff;
+          else this._lsubrIndexOff = lsubrOff;
+        }
+        if (this._version === 2 && op === 22 && operands.length > 0 && fdOut) {
+          fdOut.vsindex = Math.max(0, operands[operands.length - 1] | 0);
         }
         operands.length = 0;
       }
@@ -471,29 +538,48 @@ export class CffReader {
   }
 
   _readDictOperand(b0, _unused, o, advance) {
-    if (b0 >= 32 && b0 <= 246) { this._dictOpCursor = o; return b0 - 139; }
-    if (b0 >= 247 && b0 <= 250) { const v = (b0 - 247) * 256 + this._b[o++] + 108; this._dictOpCursor = o; return v; }
-    if (b0 >= 251 && b0 <= 254) { const v = -((b0 - 251) * 256) - this._b[o++] - 108; this._dictOpCursor = o; return v; }
+    if (b0 >= 32 && b0 <= 246) {
+      this._dictOpCursor = o;
+      return b0 - 139;
+    }
+    if (b0 >= 247 && b0 <= 250) {
+      const v = (b0 - 247) * 256 + this._b[o++] + 108;
+      this._dictOpCursor = o;
+      return v;
+    }
+    if (b0 >= 251 && b0 <= 254) {
+      const v = -((b0 - 251) * 256) - this._b[o++] - 108;
+      this._dictOpCursor = o;
+      return v;
+    }
     throw new Error('unexpected DICT byte ' + b0);
   }
 }
 
-function readU16(b, o) { return (b[o] << 8) | b[o + 1]; }
-function readU32(b, o) { return ((b[o] << 24) >>> 0) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]; }
+function readU16(b, o) {
+  return (b[o] << 8) | b[o + 1];
+}
+function readU32(b, o) {
+  return ((b[o] << 24) >>> 0) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3];
+}
 function readOffN(b, o, n) {
   let v = 0;
   for (let i = 0; i < n; i++) v = (v << 8) | b[o + i];
   return v;
 }
-function signed16(v) { return v >= 0x8000 ? v - 0x10000 : v; }
-function signed32(v) { return v | 0; }
+function signed16(v) {
+  return v >= 0x8000 ? v - 0x10000 : v;
+}
+function signed32(v) {
+  return v | 0;
+}
 
 // Translate every control point of a segment by (dx, dy). Used by seac to
 // place the accent relative to the base glyph. Preserves seg type/flags.
 function translateSeg(s, dx, dy) {
   const t = (p) => [p[0] + dx, p[1] + dy];
   if (s.type === SEG_CUBIC) return mkCubic(t(s.p1), t(s.p2), t(s.p3), t(s.p4));
-  if (s.type === SEG_QUAD)  return mkQuad(t(s.p1), t(s.p2), t(s.p3));
+  if (s.type === SEG_QUAD) return mkQuad(t(s.p1), t(s.p2), t(s.p3));
   return mkLine(t(s.p1), t(s.p2), s.is_fill_only);
 }
 
@@ -502,16 +588,64 @@ function translateSeg(s, dx, dy) {
 // out so codes 32..126 map linearly to SIDs 1..95; the upper range (accents
 // + Latin-1 symbols) is sparse.
 const _STD_ENC_UPPER = {
-  161:96,162:97,163:98,164:99,165:100,166:101,167:102,168:103,169:104,170:105,
-  171:106,172:107,173:108,174:109,175:110,177:111,178:112,179:113,180:114,
-  182:115,183:116,184:117,185:118,186:119,187:120,188:121,189:122,191:123,
-  193:124,194:125,195:126,196:127,197:128,198:129,199:130,200:131,202:132,
-  203:133,205:134,206:135,207:136,208:137,225:138,227:139,232:140,233:141,
-  234:142,235:143,241:144,245:145,248:146,249:147,250:148,251:149,
+  161: 96,
+  162: 97,
+  163: 98,
+  164: 99,
+  165: 100,
+  166: 101,
+  167: 102,
+  168: 103,
+  169: 104,
+  170: 105,
+  171: 106,
+  172: 107,
+  173: 108,
+  174: 109,
+  175: 110,
+  177: 111,
+  178: 112,
+  179: 113,
+  180: 114,
+  182: 115,
+  183: 116,
+  184: 117,
+  185: 118,
+  186: 119,
+  187: 120,
+  188: 121,
+  189: 122,
+  191: 123,
+  193: 124,
+  194: 125,
+  195: 126,
+  196: 127,
+  197: 128,
+  198: 129,
+  199: 130,
+  200: 131,
+  202: 132,
+  203: 133,
+  205: 134,
+  206: 135,
+  207: 136,
+  208: 137,
+  225: 138,
+  227: 139,
+  232: 140,
+  233: 141,
+  234: 142,
+  235: 143,
+  241: 144,
+  245: 145,
+  248: 146,
+  249: 147,
+  250: 148,
+  251: 149,
 };
 function stdEncToSid(code) {
   code &= 0xff;
-  if (code >= 32 && code <= 126) return code - 31;   // space..asciitilde → SID 1..95
+  if (code >= 32 && code <= 126) return code - 31; // space..asciitilde → SID 1..95
   return _STD_ENC_UPPER[code] || 0;
 }
 
@@ -522,7 +656,8 @@ function stdEncToSid(code) {
 // callsubr/callgsubr silently no-ops (missing contours).
 export function readCffIndexEntry(b, indexOff, idx, isCff2 = false) {
   const count = isCff2
-    ? (((b[indexOff] << 24) | (b[indexOff + 1] << 16) | (b[indexOff + 2] << 8) | b[indexOff + 3]) >>> 0)
+    ? ((b[indexOff] << 24) | (b[indexOff + 1] << 16) | (b[indexOff + 2] << 8) | b[indexOff + 3]) >>>
+      0
     : readU16(b, indexOff);
   if (count === 0) return { off: 0, len: 0 };
   const offSize = b[indexOff + (isCff2 ? 4 : 2)];

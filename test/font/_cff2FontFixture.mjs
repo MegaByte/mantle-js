@@ -1,5 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // _cff2FontFixture.mjs — minimal sfnt with a CFF2 outlines table.
-// Synthesized inline (no binary-font vendoring) so the slice 7 smokes
+// Synthesized inline (no binary-font vendoring) so the CFF2 smokes
 // can exercise the CFF2 reader independently.
 //
 // Fixture options:
@@ -12,70 +15,144 @@
 //     wght=normalized 0 the x is +250 (default); at normalized 1
 //     it's +500. Exercises CFF2 variation end-to-end.
 
-const TAG = (s) => (s.charCodeAt(0) << 24) | (s.charCodeAt(1) << 16) | (s.charCodeAt(2) << 8) | s.charCodeAt(3);
+const TAG = (s) =>
+  (s.charCodeAt(0) << 24) | (s.charCodeAt(1) << 16) | (s.charCodeAt(2) << 8) | s.charCodeAt(3);
 
 class Be {
-  constructor() { this.bytes = []; }
-  u8(n)  { this.bytes.push(n & 0xff); }
-  u16(n) { this.bytes.push((n >> 8) & 0xff, n & 0xff); }
-  s16(n) { this.u16(n & 0xffff); }
-  u32(n) { this.bytes.push((n >>> 24) & 0xff, (n >>> 16) & 0xff,
-                           (n >>>  8) & 0xff,  n         & 0xff); }
-  fixed(major, minor) { this.u16(major); this.u16(minor); }
-  longDateTime() { this.u32(0); this.u32(0); }
-  raw(arr) { for (const b of arr) this.bytes.push(b & 0xff); }
-  pad4()   { while (this.bytes.length & 3) this.bytes.push(0); }
-  get length() { return this.bytes.length; }
-  toUint8() { return new Uint8Array(this.bytes); }
+  constructor() {
+    this.bytes = [];
+  }
+  u8(n) {
+    this.bytes.push(n & 0xff);
+  }
+  u16(n) {
+    this.bytes.push((n >> 8) & 0xff, n & 0xff);
+  }
+  s16(n) {
+    this.u16(n & 0xffff);
+  }
+  u32(n) {
+    this.bytes.push((n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff);
+  }
+  fixed(major, minor) {
+    this.u16(major);
+    this.u16(minor);
+  }
+  longDateTime() {
+    this.u32(0);
+    this.u32(0);
+  }
+  raw(arr) {
+    for (const b of arr) this.bytes.push(b & 0xff);
+  }
+  pad4() {
+    while (this.bytes.length & 3) this.bytes.push(0);
+  }
+  get length() {
+    return this.bytes.length;
+  }
+  toUint8() {
+    return new Uint8Array(this.bytes);
+  }
 }
 
 // ----- shared TTF tables ---------------------------------------------------
 
 function buildHead(unitsPerEm) {
   const b = new Be();
-  b.fixed(1, 0); b.fixed(1, 0); b.u32(0); b.u32(0x5F0F3CF5);
-  b.u16(0); b.u16(unitsPerEm); b.longDateTime(); b.longDateTime();
-  b.s16(0); b.s16(-200); b.s16(unitsPerEm); b.s16(unitsPerEm);
-  b.u16(0); b.u16(8); b.s16(2); b.s16(0); b.s16(0);
+  b.fixed(1, 0);
+  b.fixed(1, 0);
+  b.u32(0);
+  b.u32(0x5f0f3cf5);
+  b.u16(0);
+  b.u16(unitsPerEm);
+  b.longDateTime();
+  b.longDateTime();
+  b.s16(0);
+  b.s16(-200);
+  b.s16(unitsPerEm);
+  b.s16(unitsPerEm);
+  b.u16(0);
+  b.u16(8);
+  b.s16(2);
+  b.s16(0);
+  b.s16(0);
   return b.toUint8();
 }
 function buildHhea(unitsPerEm, n) {
   const b = new Be();
-  b.fixed(1, 0); b.s16(unitsPerEm); b.s16(-200); b.s16(0);
-  b.u16(unitsPerEm); b.s16(0); b.s16(0); b.s16(unitsPerEm);
-  b.s16(1); b.s16(0); b.s16(0); b.s16(0); b.s16(0); b.s16(0); b.s16(0); b.s16(0);
+  b.fixed(1, 0);
+  b.s16(unitsPerEm);
+  b.s16(-200);
+  b.s16(0);
+  b.u16(unitsPerEm);
+  b.s16(0);
+  b.s16(0);
+  b.s16(unitsPerEm);
+  b.s16(1);
+  b.s16(0);
+  b.s16(0);
+  b.s16(0);
+  b.s16(0);
+  b.s16(0);
+  b.s16(0);
+  b.s16(0);
   b.u16(n);
   return b.toUint8();
 }
 function buildHmtx(adv, lsb) {
   const b = new Be();
-  for (let i = 0; i < adv.length; i++) { b.u16(adv[i]); b.s16(lsb[i] || 0); }
+  for (let i = 0; i < adv.length; i++) {
+    b.u16(adv[i]);
+    b.s16(lsb[i] || 0);
+  }
   return b.toUint8();
 }
 function buildMaxp(n) {
   const b = new Be();
-  b.fixed(0, 0x5000);  // version 0.5 for CFF/OTF
+  b.fixed(0, 0x5000); // version 0.5 for CFF/OTF
   b.u16(n);
   return b.toUint8();
 }
 function buildCmap(codepoint) {
   const sub = new Be();
   const length = 16 + 8 * 2;
-  sub.u16(4); sub.u16(length); sub.u16(0); sub.u16(4); sub.u16(4); sub.u16(1); sub.u16(0);
-  sub.u16(codepoint); sub.u16(0xFFFF);
+  sub.u16(4);
+  sub.u16(length);
   sub.u16(0);
-  sub.u16(codepoint); sub.u16(0xFFFF);
-  sub.s16((1 - codepoint) & 0xffff); sub.s16(1);
-  sub.u16(0); sub.u16(0);
+  sub.u16(4);
+  sub.u16(4);
+  sub.u16(1);
+  sub.u16(0);
+  sub.u16(codepoint);
+  sub.u16(0xffff);
+  sub.u16(0);
+  sub.u16(codepoint);
+  sub.u16(0xffff);
+  sub.s16((1 - codepoint) & 0xffff);
+  sub.s16(1);
+  sub.u16(0);
+  sub.u16(0);
   const b = new Be();
-  b.u16(0); b.u16(1); b.u16(3); b.u16(1); b.u32(12);
+  b.u16(0);
+  b.u16(1);
+  b.u16(3);
+  b.u16(1);
+  b.u32(12);
   b.raw(Array.from(sub.toUint8()));
   return b.toUint8();
 }
 function buildPost() {
   const b = new Be();
-  b.fixed(3, 0); b.u32(0); b.s16(-100); b.s16(50); b.u32(1);
-  b.u32(0); b.u32(0); b.u32(0); b.u32(0);
+  b.fixed(3, 0);
+  b.u32(0);
+  b.s16(-100);
+  b.s16(50);
+  b.u32(1);
+  b.u32(0);
+  b.u32(0);
+  b.u32(0);
+  b.u32(0);
   return b.toUint8();
 }
 
@@ -98,7 +175,8 @@ function buildIndex(items, useU32Count = false) {
   // INDEXes change. Wait — per CFF2 spec §3.1, count IS u32.)
   // CFF1 uses uint16 count. Our useU32Count flag picks.
   const b = new Be();
-  if (useU32Count) b.u32(items.length); else b.u16(items.length);
+  if (useU32Count) b.u32(items.length);
+  else b.u16(items.length);
   if (items.length === 0) return b.toUint8();
   // Total data length.
   let total = 0;
@@ -107,9 +185,9 @@ function buildIndex(items, useU32Count = false) {
   let offSize = 1;
   while (true) {
     const maxOff = total + 1;
-    if (offSize === 1 && maxOff <= 0xFF) break;
-    if (offSize === 2 && maxOff <= 0xFFFF) break;
-    if (offSize === 3 && maxOff <= 0xFFFFFF) break;
+    if (offSize === 1 && maxOff <= 0xff) break;
+    if (offSize === 2 && maxOff <= 0xffff) break;
+    if (offSize === 3 && maxOff <= 0xffffff) break;
     offSize++;
     if (offSize >= 4) break;
   }
@@ -128,17 +206,15 @@ function buildIndex(items, useU32Count = false) {
 function writeOff(b, v, size) {
   if (size === 1) b.u8(v);
   else if (size === 2) b.u16(v);
-  else if (size === 3) { b.u8((v >>> 16) & 0xff); b.u16(v & 0xffff); }
-  else b.u32(v);
+  else if (size === 3) {
+    b.u8((v >>> 16) & 0xff);
+    b.u16(v & 0xffff);
+  } else b.u32(v);
 }
 
 // ----- CFF2 fixture builder -----------------------------------------------
 
-export function buildCff2TestFont({
-  codepoint = 0x41,
-  unitsPerEm = 1000,
-  variable = false,
-} = {}) {
+export function buildCff2TestFont({ codepoint = 0x41, unitsPerEm = 1000, variable = false } = {}) {
   // Triangle glyph charstring. CFF2 Type 2 — no width prefix, no
   // endchar (implicit). Coords are CFF accumulated deltas relative
   // to glyph origin.
@@ -154,22 +230,23 @@ export function buildCff2TestFont({
 
   const charstring = new Be();
   // rmoveto 200 0
-  cffOperandU(charstring, 200); cffOperandU(charstring, 0);
-  charstring.u8(0x15);  // rmoveto
+  cffOperandU(charstring, 200);
+  cffOperandU(charstring, 0);
+  charstring.u8(0x15); // rmoveto
   if (variable) {
     // Need to push the rlineto pair (dx, dy) but with dx as a blended value.
     // CFF2 blend layout:
     //   v1 v2 ... vN  dv1_r1 ... dv1_rK dv2_r1 ... dv2_rK ... N blend
     // We want to blend ONE value (the dx = 50 default + delta 250 at peak).
     // So push: 50 (default dx), then 250 (delta), then 1 (N), then blend.
-    cffOperandU(charstring, 50);   // default dx
-    cffOperandU(charstring, 250);  // delta for region 0
-    cffOperandU(charstring, 1);    // N (number of values being blended)
-    charstring.u8(0x10);           // blend (opcode 16)
+    cffOperandU(charstring, 50); // default dx
+    cffOperandU(charstring, 250); // delta for region 0
+    cffOperandU(charstring, 1); // N (number of values being blended)
+    charstring.u8(0x10); // blend (opcode 16)
     // After blend, ONE value remains on stack (the blended dx).
     // Push dy = 700 to complete the rlineto pair.
     cffOperandU(charstring, 700);
-    charstring.u8(0x05);           // rlineto
+    charstring.u8(0x05); // rlineto
     // Now the second edge. We need to return to the right vertex.
     // Without blend, that's rlineto 50 -700. With blend we need to
     // counter-balance: the right vertex is at (300, 0), top at
@@ -180,15 +257,17 @@ export function buildCff2TestFont({
     cffOperandU(charstring, 50);
     cffOperandU(charstring, -250);
     cffOperandU(charstring, 1);
-    charstring.u8(0x10);  // blend
+    charstring.u8(0x10); // blend
     cffOperandU(charstring, -700);
-    charstring.u8(0x05);  // rlineto
+    charstring.u8(0x05); // rlineto
   } else {
     // rlineto 50 700
-    cffOperandU(charstring, 50); cffOperandU(charstring, 700);
+    cffOperandU(charstring, 50);
+    cffOperandU(charstring, 700);
     charstring.u8(0x05);
     // rlineto 50 -700
-    cffOperandU(charstring, 50); cffOperandU(charstring, -700);
+    cffOperandU(charstring, 50);
+    cffOperandU(charstring, -700);
     charstring.u8(0x05);
   }
   // (Implicit close at end-of-charstring; CFF2 has no endchar.)
@@ -232,24 +311,26 @@ export function buildCff2TestFont({
     const ivs = new Be();
     // ItemVariationStore body (we'll compute offsets relative to here)
     const ivsStart = ivs.length;
-    ivs.u16(1);                                  // format
+    ivs.u16(1); // format
     const regionListOffPos = ivs.length;
-    ivs.u32(0);                                  // regionListOffset (patched)
-    ivs.u16(1);                                  // ivdCount
+    ivs.u32(0); // regionListOffset (patched)
+    ivs.u16(1); // ivdCount
     const ivdOffPos = ivs.length;
-    ivs.u32(0);                                  // ivd[0] offset (patched)
+    ivs.u32(0); // ivd[0] offset (patched)
     // Region list at end of header
     const regionListStart = ivs.length;
-    ivs.u16(1);                                  // axisCount
-    ivs.u16(1);                                  // regionCount
+    ivs.u16(1); // axisCount
+    ivs.u16(1); // regionCount
     // Region 0 axis 0: start=0 peak=16384 (1.0) end=16384
-    ivs.s16(0); ivs.s16(16384); ivs.s16(16384);
+    ivs.s16(0);
+    ivs.s16(16384);
+    ivs.s16(16384);
     // ItemVariationData[0]
     const ivd0Start = ivs.length;
-    ivs.u16(0);                                  // itemCount
-    ivs.u16(0);                                  // shortDeltaCount
-    ivs.u16(1);                                  // regionIndexCount
-    ivs.u16(0);                                  // regionIndexes[0] = 0
+    ivs.u16(0); // itemCount
+    ivs.u16(0); // shortDeltaCount
+    ivs.u16(1); // regionIndexCount
+    ivs.u16(0); // regionIndexes[0] = 0
     // No delta rows (itemCount=0).
     // Patch offsets (relative to IVS start).
     const ivsBytes = ivs.toUint8();
@@ -289,8 +370,10 @@ export function buildCff2TestFont({
     const t = new Be();
     for (const op of ops) {
       for (const v of op.operands) cffOperandU(t, v);
-      if (op.op >= 256) { t.u8(12); t.u8(op.op - 12 * 256); }
-      else t.u8(op.op);
+      if (op.op >= 256) {
+        t.u8(12);
+        t.u8(op.op - 12 * 256);
+      } else t.u8(op.op);
     }
     return t.toUint8();
   }
@@ -300,9 +383,9 @@ export function buildCff2TestFont({
   // emitted byte length matches.
   function buildTopDict(charStringsOff, fdArrayOff, fdSelectOff, vstoreOff) {
     const ops = [
-      { op: 17,            operands: [charStringsOff] },  // CharStrings
-      { op: 12 * 256 + 36, operands: [fdArrayOff] },      // FDArray
-      { op: 12 * 256 + 37, operands: [fdSelectOff] },     // FDSelect
+      { op: 17, operands: [charStringsOff] }, // CharStrings
+      { op: 12 * 256 + 36, operands: [fdArrayOff] }, // FDArray
+      { op: 12 * 256 + 37, operands: [fdSelectOff] }, // FDSelect
     ];
     if (variable) ops.push({ op: 24, operands: [vstoreOff] });
     return emitTopDict(ops);
@@ -332,11 +415,11 @@ export function buildCff2TestFont({
   // numGlyphs = 2.
   const fdSelect = (() => {
     const b = new Be();
-    b.u8(3);                  // format
-    b.u16(1);                 // nRanges
-    b.u16(0);                 // first gid
-    b.u8(0);                  // fd index
-    b.u16(2);                 // sentinel (numGlyphs)
+    b.u8(3); // format
+    b.u16(1); // nRanges
+    b.u16(0); // first gid
+    b.u8(0); // fd index
+    b.u16(2); // sentinel (numGlyphs)
     return b.toUint8();
   })();
 
@@ -350,9 +433,7 @@ export function buildCff2TestFont({
   //   fdSelect.length + charStrings.length.
 
   function buildFontDict(privateLen, privateOff) {
-    const ops = [
-      { op: 18, operands: [privateLen, privateOff] },
-    ];
+    const ops = [{ op: 18, operands: [privateLen, privateOff] }];
     return emitTopDict(ops);
   }
 
@@ -361,7 +442,7 @@ export function buildCff2TestFont({
   const fdArrayPlaceholder = buildIndex([placeholderFD], true);
 
   // Final layout: fdArrayOff = cursor; fdSelectOff = fdArrayOff + fdArray.length
-  const fdArrayOff  = cursor;
+  const fdArrayOff = cursor;
   cursor += fdArrayPlaceholder.length;
   const fdSelectOff = cursor;
   cursor += fdSelect.length;
@@ -372,26 +453,30 @@ export function buildCff2TestFont({
 
   // Now rebuild Font DICT with real Private offset, then re-emit FDArray.
   const fontDict = buildFontDict(privateDict.length, privateOff);
-  const fdArray  = buildIndex([fontDict], true);
+  const fdArray = buildIndex([fontDict], true);
   // CRITICAL: fdArray length might differ from placeholder if Font
   // DICT bytes encode differently. Our cffOperandU uses fixed 3-byte
   // i16 form, so lengths are stable. Assert just in case.
   if (fdArray.length !== fdArrayPlaceholder.length) {
-    throw new Error(`CFF2 fixture: FDArray length mismatch (placeholder=${fdArrayPlaceholder.length}, final=${fdArray.length}); offsets would be off by ${fdArray.length - fdArrayPlaceholder.length}.`);
+    throw new Error(
+      `CFF2 fixture: FDArray length mismatch (placeholder=${fdArrayPlaceholder.length}, final=${fdArray.length}); offsets would be off by ${fdArray.length - fdArrayPlaceholder.length}.`,
+    );
   }
 
   // Build the real Top DICT with all offsets resolved.
   const realTopDict = buildTopDict(charStringsOff, fdArrayOff, fdSelectOff, vstoreOff);
   if (realTopDict.length !== topDictSize) {
-    throw new Error(`CFF2 fixture: Top DICT length mismatch (placeholder=${topDictSize}, final=${realTopDict.length}).`);
+    throw new Error(
+      `CFF2 fixture: Top DICT length mismatch (placeholder=${topDictSize}, final=${realTopDict.length}).`,
+    );
   }
 
   // Header.
   const header = new Be();
-  header.u8(2);                   // major
-  header.u8(0);                   // minor
-  header.u8(hdrSize);             // hdrSize
-  header.u16(topDictSize);        // topDictSize
+  header.u8(2); // major
+  header.u8(0); // minor
+  header.u8(hdrSize); // hdrSize
+  header.u16(topDictSize); // topDictSize
 
   // Concatenate everything.
   const out = new Be();
@@ -408,7 +493,7 @@ export function buildCff2TestFont({
 
 // ----- sfnt assembly ------------------------------------------------------
 
-function tableDir(records, sfntVersion = 0x4F54544F /* 'OTTO' for CFF */) {
+function tableDir(records, sfntVersion = 0x4f54544f /* 'OTTO' for CFF */) {
   const n = records.length;
   const dirSize = 12 + 16 * n;
   let cursor = dirSize;
@@ -426,8 +511,12 @@ function tableDir(records, sfntVersion = 0x4F54544F /* 'OTTO' for CFF */) {
   const dv = new DataView(out.buffer);
   dv.setUint32(0, sfntVersion, false);
   dv.setUint16(4, n, false);
-  let pow = 1, log = 0;
-  while ((pow << 1) <= n) { pow <<= 1; log++; }
+  let pow = 1,
+    log = 0;
+  while (pow << 1 <= n) {
+    pow <<= 1;
+    log++;
+  }
   dv.setUint16(6, pow * 16, false);
   dv.setUint16(8, log, false);
   dv.setUint16(10, n * 16 - pow * 16, false);
@@ -450,7 +539,7 @@ export function buildCff2TestSfnt(opts = {}) {
   const { cffBytes, numGlyphs } = buildCff2TestFont(opts);
   const unitsPerEm = opts.unitsPerEm || 1000;
   const advances = [unitsPerEm, unitsPerEm];
-  const lsbs     = [0, 0];
+  const lsbs = [0, 0];
   const codepoint = opts.codepoint || 0x41;
   const records = [
     { tag: TAG('head'), bytes: buildHead(unitsPerEm) },
@@ -462,4 +551,12 @@ export function buildCff2TestSfnt(opts = {}) {
     { tag: opts.variable ? TAG('CFF2') : TAG('CFF2'), bytes: cffBytes },
   ];
   return tableDir(records);
+}
+
+// Independent synthetic CFF2 fonts: inherited Private1 and explicit CharString0.
+export function buildPrivateVsindexFixtures() {
+  return [
+    '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',
+  ].map((value) => new Uint8Array(Buffer.from(value, 'base64')));
 }

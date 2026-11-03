@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // viewElementSmoke.mjs — verify SVG <view> fragment-id resolution.
 //
 // The <view> element lets an SVG carry alternate viewBox/PAR pairs
@@ -10,8 +13,11 @@ globalThis.DOMParser = DP;
 import { importSvg } from '../../src/svg/importer.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL', msg); failures++; };
-const ok   = (msg) => console.log('ok', msg);
+const fail = (msg) => {
+  console.error('FAIL', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok', msg);
 
 // Test SVG with one <view> that zooms into the top-left quadrant.
 const svg = `<?xml version="1.0"?>

@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="white"/><defs><filter id="f" x="-30%" y="-30%" width="170%" height="170%" color-interpolation-filters="sRGB"><feDropShadow dx="4" dy="4" stdDeviation="1.5" flood-color="#000" flood-opacity=".5"/></filter></defs><rect x="16" y="14" width="28" height="26" rx="4" fill="#e04020" filter="url(#f)"/><rect x="16" y="14" width="28" height="26" rx="4" fill="none" stroke="#2040c0" stroke-width="6" filter="url(#f)"/></svg>

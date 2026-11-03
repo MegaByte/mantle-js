@@ -1,0 +1,2 @@
+# _gpuRowGateCheck.mjs --save writes raw frames here; they are run output, not inputs.
+out/

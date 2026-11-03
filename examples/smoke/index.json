@@ -1,5 +1,115 @@
 [
  {
+  "file": "aacBandLevels__SVG.svg",
+  "smoke": "aacBandLevelsSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "aacClipConfound__AUTHORED.svg",
+  "smoke": "aacClipConfoundSmoke.mjs",
+  "const": "AUTHORED"
+ },
+ {
+  "file": "aacClipConfound__STRIPPED.svg",
+  "smoke": "aacClipConfoundSmoke.mjs",
+  "const": "STRIPPED"
+ },
+ {
+  "file": "aacCoverRunGpu__MID.svg",
+  "smoke": "aacCoverRunGpuSmoke.mjs",
+  "const": "MID"
+ },
+ {
+  "file": "aacCoverRunGpu__MIX.svg",
+  "smoke": "aacCoverRunGpuSmoke.mjs",
+  "const": "MIX"
+ },
+ {
+  "file": "aacHalfPixelScale__SVG.svg",
+  "smoke": "aacHalfPixelScaleSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "aacPointsColorMatrixGpu__OPAQ.svg",
+  "smoke": "aacPointsColorMatrixGpuSmoke.mjs",
+  "const": "OPAQ"
+ },
+ {
+  "file": "aacPointsColorMatrixGpu__SVG_FILL.svg",
+  "smoke": "aacPointsColorMatrixGpuSmoke.mjs",
+  "const": "SVG_FILL"
+ },
+ {
+  "file": "aacPointsColorMatrixGpu__SVG_GSTROKE.svg",
+  "smoke": "aacPointsColorMatrixGpuSmoke.mjs",
+  "const": "SVG_GSTROKE"
+ },
+ {
+  "file": "aacPointsColorMatrixGpu__SVG_STROKE.svg",
+  "smoke": "aacPointsColorMatrixGpuSmoke.mjs",
+  "const": "SVG_STROKE"
+ },
+ {
+  "file": "aacPointsColorMatrixGpu__TRANS.svg",
+  "smoke": "aacPointsColorMatrixGpuSmoke.mjs",
+  "const": "TRANS"
+ },
+ {
+  "file": "aacPointsRoute__SVG_FILL.svg",
+  "smoke": "aacPointsRouteSmoke.mjs",
+  "const": "SVG_FILL"
+ },
+ {
+  "file": "aacPointsRoute__SVG_GSTROKE.svg",
+  "smoke": "aacPointsRouteSmoke.mjs",
+  "const": "SVG_GSTROKE"
+ },
+ {
+  "file": "aacPointsRoute__SVG_STROKE.svg",
+  "smoke": "aacPointsRouteSmoke.mjs",
+  "const": "SVG_STROKE"
+ },
+ {
+  "file": "aacPointsRowGateDefault__SVG.svg",
+  "smoke": "aacPointsRowGateDefaultSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "aacPresence__BG.svg",
+  "smoke": "aacPresenceSmoke.mjs",
+  "const": "BG"
+ },
+ {
+  "file": "aacPresence__INV.svg",
+  "smoke": "aacPresenceSmoke.mjs",
+  "const": "INV"
+ },
+ {
+  "file": "aacRotatedFootprint__wrap_M_200_200_Q_800_100_800.svg",
+  "smoke": "aacRotatedFootprintSmoke.mjs",
+  "const": "wrap_M_200_200_Q_800_100_800"
+ },
+ {
+  "file": "aacRotatedFootprint__wrap_M_500_120_L_590_390_L_87.svg",
+  "smoke": "aacRotatedFootprintSmoke.mjs",
+  "const": "wrap_M_500_120_L_590_390_L_87"
+ },
+ {
+  "file": "aacRotatedFootprint__wrap_M_500_180_a_260_320_0_1.svg",
+  "smoke": "aacRotatedFootprintSmoke.mjs",
+  "const": "wrap_M_500_180_a_260_320_0_1"
+ },
+ {
+  "file": "aacRotatedFootprint__wrap_M_500_180_a_320_320_0_1.svg",
+  "smoke": "aacRotatedFootprintSmoke.mjs",
+  "const": "wrap_M_500_180_a_320_320_0_1"
+ },
+ {
+  "file": "aacRotatedFootprint__wrap_M_700_300_C_700_150_300.svg",
+  "smoke": "aacRotatedFootprintSmoke.mjs",
+  "const": "wrap_M_700_300_C_700_150_300"
+ },
+ {
   "file": "aaMonotonic__RING.svg",
   "smoke": "aaMonotonicSmoke.mjs",
   "const": "RING",
@@ -8,6 +118,236 @@
  {
   "file": "aaMonotonic__SVG.svg",
   "smoke": "aaMonotonicSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "alphaPlanMorphPose__doc_44_42.svg",
+  "smoke": "alphaPlanMorphPoseSmoke.mjs",
+  "const": "doc_44_42"
+ },
+ {
+  "file": "alphaPlanMorphPose__doc_6_6.svg",
+  "smoke": "alphaPlanMorphPoseSmoke.mjs",
+  "const": "doc_6_6"
+ },
+ {
+  "file": "alphaSlotBudget__SVG.svg",
+  "smoke": "alphaSlotBudgetSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "alphaSlotRender__CURVY.svg",
+  "smoke": "alphaSlotRenderSmoke.mjs",
+  "const": "CURVY"
+ },
+ {
+  "file": "alphaSlotRender__PAUSE.svg",
+  "smoke": "alphaSlotRenderSmoke.mjs",
+  "const": "PAUSE"
+ },
+ {
+  "file": "alphaSlotRender__TWO.svg",
+  "smoke": "alphaSlotRenderSmoke.mjs",
+  "const": "TWO"
+ },
+ {
+  "file": "animationAudit__svg_g_id_idle_rect_id_b_x_0.svg",
+  "smoke": "animationAuditSmoke.mjs",
+  "const": "svg_g_id_idle_rect_id_b_x_0"
+ },
+ {
+  "file": "animationAudit__svg_path_id_s_fill_red_d_M50.svg",
+  "smoke": "animationAuditSmoke.mjs",
+  "const": "svg_path_id_s_fill_red_d_M50"
+ },
+ {
+  "file": "animationAudit__svg_rect_id_r_x_0_y_0_width.svg",
+  "smoke": "animationAuditSmoke.mjs",
+  "const": "svg_rect_id_r_x_0_y_0_width"
+ },
+ {
+  "file": "animationAudit__svg_rect_id_r_x_10_y_10_widt.svg",
+  "smoke": "animationAuditSmoke.mjs",
+  "const": "svg_rect_id_r_x_10_y_10_widt"
+ },
+ {
+  "file": "animationAudit__svg_rect_id_r_x_10_y_40_widt.svg",
+  "smoke": "animationAuditSmoke.mjs",
+  "const": "svg_rect_id_r_x_10_y_40_widt"
+ },
+ {
+  "file": "animationAudit__svg_rect_id_r_x_50_y_0_width.svg",
+  "smoke": "animationAuditSmoke.mjs",
+  "const": "svg_rect_id_r_x_50_y_0_width"
+ },
+ {
+  "file": "animationAudit__svg_rect_id_r_x_50_y_10_widt.svg",
+  "smoke": "animationAuditSmoke.mjs",
+  "const": "svg_rect_id_r_x_50_y_10_widt"
+ },
+ {
+  "file": "animationAudit__svg_rect_id_s_x_10_y_10_widt.svg",
+  "smoke": "animationAuditSmoke.mjs",
+  "const": "svg_rect_id_s_x_10_y_10_widt"
+ },
+ {
+  "file": "animationAudit__svg_rect_id_s_x_30_y_30_widt.svg",
+  "smoke": "animationAuditSmoke.mjs",
+  "const": "svg_rect_id_s_x_30_y_30_widt"
+ },
+ {
+  "file": "animationAuditRender__circle.svg",
+  "smoke": "animationAuditRenderSmoke.mjs",
+  "const": "circle"
+ },
+ {
+  "file": "animationAuditRender__diamond.svg",
+  "smoke": "animationAuditRenderSmoke.mjs",
+  "const": "diamond"
+ },
+ {
+  "file": "animationAuditRender__doc_rect_x_30_y_30_width_40.svg",
+  "smoke": "animationAuditRenderSmoke.mjs",
+  "const": "doc_rect_x_30_y_30_width_40"
+ },
+ {
+  "file": "animationAuditRender__ell_0.svg",
+  "smoke": "animationAuditRenderSmoke.mjs",
+  "const": "ell_0"
+ },
+ {
+  "file": "animationAuditRender__ell_180.svg",
+  "smoke": "animationAuditRenderSmoke.mjs",
+  "const": "ell_180"
+ },
+ {
+  "file": "animationAuditRender__ell_90.svg",
+  "smoke": "animationAuditRenderSmoke.mjs",
+  "const": "ell_90"
+ },
+ {
+  "file": "animationAuditRender__lerpPoly_0_5.svg",
+  "smoke": "animationAuditRenderSmoke.mjs",
+  "const": "lerpPoly_0_5"
+ },
+ {
+  "file": "animationAuditRender__rect.svg",
+  "smoke": "animationAuditRenderSmoke.mjs",
+  "const": "rect"
+ },
+ {
+  "file": "apiArgumentContract__doc_rect_width_100_height_10.svg",
+  "smoke": "apiArgumentContractSmoke.mjs",
+  "const": "doc_rect_width_100_height_10"
+ },
+ {
+  "file": "apiArgumentContract__doc_rect_width_9_height_9_fi.svg",
+  "smoke": "apiArgumentContractSmoke.mjs",
+  "const": "doc_rect_width_9_height_9_fi"
+ },
+ {
+  "file": "arcDeepZoomRender__ARCS.svg",
+  "smoke": "arcDeepZoomRenderSmoke.mjs",
+  "const": "ARCS"
+ },
+ {
+  "file": "arcDeepZoomRender__CIRCLE.svg",
+  "smoke": "arcDeepZoomRenderSmoke.mjs",
+  "const": "CIRCLE"
+ },
+ {
+  "file": "arcDeepZoomRender__ELLIPSE.svg",
+  "smoke": "arcDeepZoomRenderSmoke.mjs",
+  "const": "ELLIPSE"
+ },
+ {
+  "file": "arcDeepZoomRender__GRADIENT.svg",
+  "smoke": "arcDeepZoomRenderSmoke.mjs",
+  "const": "GRADIENT"
+ },
+ {
+  "file": "arcRebuildEquivariance__ARC_SVG_ROTATED.svg",
+  "smoke": "arcRebuildEquivarianceSmoke.mjs",
+  "const": "ARC_SVG_ROTATED"
+ },
+ {
+  "file": "arcRebuildEquivariance__ARC_SVG.svg",
+  "smoke": "arcRebuildEquivarianceSmoke.mjs",
+  "const": "ARC_SVG"
+ },
+ {
+  "file": "arcsJoinRender__svg_CURVED_arcs.svg",
+  "smoke": "arcsJoinRenderSmoke.mjs",
+  "const": "svg_CURVED_arcs"
+ },
+ {
+  "file": "arcsJoinRender__svg_CURVED_miter.svg",
+  "smoke": "arcsJoinRenderSmoke.mjs",
+  "const": "svg_CURVED_miter"
+ },
+ {
+  "file": "arcsJoinRender__svg_CURVED_round.svg",
+  "smoke": "arcsJoinRenderSmoke.mjs",
+  "const": "svg_CURVED_round"
+ },
+ {
+  "file": "arcsJoinRender__svg_POLY_arcs.svg",
+  "smoke": "arcsJoinRenderSmoke.mjs",
+  "const": "svg_POLY_arcs"
+ },
+ {
+  "file": "arcsJoinRender__svg_POLY_miter.svg",
+  "smoke": "arcsJoinRenderSmoke.mjs",
+  "const": "svg_POLY_miter"
+ },
+ {
+  "file": "bakeDeferredClass__MANY.svg",
+  "smoke": "bakeDeferredClassSmoke.mjs",
+  "const": "MANY"
+ },
+ {
+  "file": "bakeDeferredClass__SVG.svg",
+  "smoke": "bakeDeferredClassSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "bandDiscriminatorTwin__SVG.svg",
+  "smoke": "bandDiscriminatorSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "bandSegmentCountBound__SVG.svg",
+  "smoke": "bandSegmentCountBoundSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "bindSetBatchCap__doc_path_d_M10_10_C60_0_90_4.svg",
+  "smoke": "bindSetBatchCapSmoke.mjs",
+  "const": "doc_path_d_M10_10_C60_0_90_4"
+ },
+ {
+  "file": "bindSetBatchCap__doc_path_d_M10_10_C60_0_90_42.svg",
+  "smoke": "bindSetBatchCapSmoke.mjs",
+  "const": "doc_path_d_M10_10_C60_0_90_4"
+ },
+ {
+  "file": "bindSetBatchCap__doc_path_d_M10_10_L90_10_L50.svg",
+  "smoke": "bindSetBatchCapSmoke.mjs",
+  "const": "doc_path_d_M10_10_L90_10_L50"
+ },
+ {
+  "file": "bindSetBatchCap__doc_path_d_M10_10_L90_10_L502.svg",
+  "smoke": "bindSetBatchCapSmoke.mjs",
+  "const": "doc_path_d_M10_10_L90_10_L50"
+ },
+ {
+  "file": "bundleDisposeForgetsPrewarm__SVG.svg",
+  "smoke": "bundleDisposeForgetsPrewarmSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "bundleDisposeReleasesHandleRender__SVG.svg",
+  "smoke": "bundleDisposeReleasesHandleRenderSmoke.mjs",
   "const": "SVG"
  },
  {
@@ -56,6 +396,11 @@
   "const": "SIMPLE_SVG"
  },
  {
+  "file": "cacheBlendBackdropRender__UNDER.svg",
+  "smoke": "cacheBlendBackdropRenderSmoke.mjs",
+  "const": "UNDER"
+ },
+ {
   "file": "cacheLbParity__SVG.svg",
   "smoke": "cacheLbParitySmoke.mjs",
   "const": "SVG"
@@ -64,6 +409,11 @@
   "file": "channelLerp__SVG_CHANNELS.svg",
   "smoke": "channelLerpSmoke.mjs",
   "const": "SVG_CHANNELS"
+ },
+ {
+  "file": "channelLerp__SVG_TRAIN.svg",
+  "smoke": "channelLerpSmoke.mjs",
+  "const": "SVG_TRAIN"
  },
  {
   "file": "clipCoverage__CLIP.svg",
@@ -76,6 +426,11 @@
   "const": "CONTENT"
  },
  {
+  "file": "coefTexWarm__SVG.svg",
+  "smoke": "coefTexWarmSmoke.mjs",
+  "const": "SVG"
+ },
+ {
   "file": "coincidentAa__DUPE.svg",
   "smoke": "coincidentAaSmoke.mjs",
   "const": "DUPE"
@@ -84,6 +439,51 @@
   "file": "coincidentAa__REF.svg",
   "smoke": "coincidentAaSmoke.mjs",
   "const": "REF"
+ },
+ {
+  "file": "colorImageRender__doc_defs_RAMP_defs_BAR_OLD_P.svg",
+  "smoke": "colorImageRenderSmoke.mjs",
+  "const": "doc_defs_RAMP_defs_BAR_OLD_P"
+ },
+ {
+  "file": "colorImageRender__doc_defs_RAMP_defs_BAR.svg",
+  "smoke": "colorImageRenderSmoke.mjs",
+  "const": "doc_defs_RAMP_defs_BAR"
+ },
+ {
+  "file": "colorImageRender__doc_image_href_COMB_x_28_y_2.svg",
+  "smoke": "colorImageRenderSmoke.mjs",
+  "const": "doc_image_href_COMB_x_28_y_2"
+ },
+ {
+  "file": "colorImageRender__doc_image_href_EDGE_x_8_y_24.svg",
+  "smoke": "colorImageRenderSmoke.mjs",
+  "const": "doc_image_href_EDGE_x_8_y_24"
+ },
+ {
+  "file": "colorImageRender__doc_IMG.svg",
+  "smoke": "colorImageRenderSmoke.mjs",
+  "const": "doc_IMG"
+ },
+ {
+  "file": "colorImageRender__doc_rect_x_28_y_28_width_8_h.svg",
+  "smoke": "colorImageRenderSmoke.mjs",
+  "const": "doc_rect_x_28_y_28_width_8_h"
+ },
+ {
+  "file": "colorImageRender__doc_rect_x_8_y_8_width_48_he.svg",
+  "smoke": "colorImageRenderSmoke.mjs",
+  "const": "doc_rect_x_8_y_8_width_48_he"
+ },
+ {
+  "file": "colorImageRender__doc_rect_x_8_y_8_width_48_he2.svg",
+  "smoke": "colorImageRenderSmoke.mjs",
+  "const": "doc_rect_x_8_y_8_width_48_he"
+ },
+ {
+  "file": "colorImageRender__doc_rect_x_8_y_8_width_48_he3.svg",
+  "smoke": "colorImageRenderSmoke.mjs",
+  "const": "doc_rect_x_8_y_8_width_48_he"
  },
  {
   "file": "colorMatrix__SVG_TWO_RECTS.svg",
@@ -96,15 +496,235 @@
   "const": "SVG"
  },
  {
+  "file": "compositingGroupRender__doc_defs_g_id_u_TWO_g_defs_u.svg",
+  "smoke": "compositingGroupRenderSmoke.mjs",
+  "const": "doc_defs_g_id_u_TWO_g_defs_u"
+ },
+ {
+  "file": "compositingGroupRender__doc_defs_rect_id_r_width_30.svg",
+  "smoke": "compositingGroupRenderSmoke.mjs",
+  "const": "doc_defs_rect_id_r_width_30"
+ },
+ {
+  "file": "compositingGroupRender__doc_g_opacity_G_0_5_TWO_g.svg",
+  "smoke": "compositingGroupRenderSmoke.mjs",
+  "const": "doc_g_opacity_G_0_5_TWO_g"
+ },
+ {
+  "file": "compositingGroupRender__doc_g_opacity_G_g_opacity_G.svg",
+  "smoke": "compositingGroupRenderSmoke.mjs",
+  "const": "doc_g_opacity_G_g_opacity_G"
+ },
+ {
+  "file": "compositingGroupRender__doc_g_opacity_G_TWO_g.svg",
+  "smoke": "compositingGroupRenderSmoke.mjs",
+  "const": "doc_g_opacity_G_TWO_g"
+ },
+ {
+  "file": "compositingGroupRender__doc_MASK_g_opacity_5_TWO_LEA.svg",
+  "smoke": "compositingGroupRenderSmoke.mjs",
+  "const": "doc_MASK_g_opacity_5_TWO_LEA"
+ },
+ {
+  "file": "compositingGroupRender__doc_MASK_TWO_LEAF_MASKED.svg",
+  "smoke": "compositingGroupRenderSmoke.mjs",
+  "const": "doc_MASK_TWO_LEAF_MASKED"
+ },
+ {
+  "file": "compositingGroupRender__doc_rect_x_10_y_10_width_30.svg",
+  "smoke": "compositingGroupRenderSmoke.mjs",
+  "const": "doc_rect_x_10_y_10_width_30"
+ },
+ {
+  "file": "compositingGroupRender__doc_rect_x_10_y_10_width_302.svg",
+  "smoke": "compositingGroupRenderSmoke.mjs",
+  "const": "doc_rect_x_10_y_10_width_30"
+ },
+ {
+  "file": "convolveUniformKernel__LONE.svg",
+  "smoke": "convolveUniformKernelSmoke.mjs",
+  "const": "LONE"
+ },
+ {
+  "file": "coverKernelPresence__BIG.svg",
+  "smoke": "coverKernelPresenceSmoke.mjs",
+  "const": "BIG"
+ },
+ {
+  "file": "coverKernelPresence__MIXED.svg",
+  "smoke": "coverKernelPresenceSmoke.mjs",
+  "const": "MIXED"
+ },
+ {
+  "file": "coverQuadAaReach__wrap_M_10_10_L_54_10_L_54_54.svg",
+  "smoke": "coverQuadAaReachSmoke.mjs",
+  "const": "wrap_M_10_10_L_54_10_L_54_54"
+ },
+ {
+  "file": "coverQuadAaReach__wrap_M_20_8_L_56_26_L_44_56_L.svg",
+  "smoke": "coverQuadAaReachSmoke.mjs",
+  "const": "wrap_M_20_8_L_56_26_L_44_56_L"
+ },
+ {
+  "file": "coverQuadAaReach__wrap_M_32_8_A_24_24_0_1_1_31.svg",
+  "smoke": "coverQuadAaReachSmoke.mjs",
+  "const": "wrap_M_32_8_A_24_24_0_1_1_31"
+ },
+ {
+  "file": "coverQuadAaReach__wrap_M_32_8_L_56_32_L_32_56_L.svg",
+  "smoke": "coverQuadAaReachSmoke.mjs",
+  "const": "wrap_M_32_8_L_56_32_L_32_56_L"
+ },
+ {
+  "file": "coverQuadAaReach__wrap_M_46_16_C_46_6_18_6_18_1.svg",
+  "smoke": "coverQuadAaReachSmoke.mjs",
+  "const": "wrap_M_46_16_C_46_6_18_6_18_1"
+ },
+ {
+  "file": "coverQuadAaReach__wrap_M_8_32_A_24_24_0_0_0_56.svg",
+  "smoke": "coverQuadAaReachSmoke.mjs",
+  "const": "wrap_M_8_32_A_24_24_0_0_0_56"
+ },
+ {
   "file": "coverQuadBatch__SVG.svg",
   "smoke": "coverQuadBatchSmoke.mjs",
   "const": "SVG",
   "generated": true
  },
  {
+  "file": "cpatchCubicAreaGpu__svg_path_fill_d433a9_fill_op.svg",
+  "smoke": "cpatchCubicAreaGpuSmoke.mjs",
+  "const": "svg_path_fill_d433a9_fill_op"
+ },
+ {
+  "file": "cpatchKernelPresence__SVG.svg",
+  "smoke": "cpatchKernelPresenceSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "cpatchMorphBlendPremise__ringSvg_0.svg",
+  "smoke": "cpatchMorphBlendPremiseSmoke.mjs",
+  "const": "ringSvg_0"
+ },
+ {
+  "file": "cpatchMorphBlendPremise__ringSvg_1.svg",
+  "smoke": "cpatchMorphBlendPremiseSmoke.mjs",
+  "const": "ringSvg_1"
+ },
+ {
+  "file": "cpatchMorphBlendPremise__wrap_BLOB_A.svg",
+  "smoke": "cpatchMorphBlendPremiseSmoke.mjs",
+  "const": "wrap_BLOB_A"
+ },
+ {
+  "file": "cpatchMorphBlendPremise__wrap_BLOB_B.svg",
+  "smoke": "cpatchMorphBlendPremiseSmoke.mjs",
+  "const": "wrap_BLOB_B"
+ },
+ {
+  "file": "cpatchMorphBlendState__svgAt_0.svg",
+  "smoke": "cpatchMorphBlendStateSmoke.mjs",
+  "const": "svgAt_0"
+ },
+ {
+  "file": "cpatchMorphBlendState__svgAt_1.svg",
+  "smoke": "cpatchMorphBlendStateSmoke.mjs",
+  "const": "svgAt_1"
+ },
+ {
+  "file": "cpatchMorphCertification__svg_125.svg",
+  "smoke": "cpatchMorphCertificationSmoke.mjs",
+  "const": "svg_125"
+ },
+ {
+  "file": "cpatchMorphCertification__svg_375.svg",
+  "smoke": "cpatchMorphCertificationSmoke.mjs",
+  "const": "svg_375"
+ },
+ {
+  "file": "cpatchMorphGpuBlend__DST.svg",
+  "smoke": "cpatchMorphGpuBlendSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "cpatchMorphGpuBlend__SRC.svg",
+  "smoke": "cpatchMorphGpuBlendSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "cpatchMorphMixedRows__one_PA_false.svg",
+  "smoke": "cpatchMorphMixedRowsSmoke.mjs",
+  "const": "one_PA_false"
+ },
+ {
+  "file": "cpatchMorphMixedRows__one_PA_true_2.svg",
+  "smoke": "cpatchMorphMixedRowsSmoke.mjs",
+  "const": "one_PA_true_2"
+ },
+ {
+  "file": "cpatchMorphMixedRows__one_PB_false.svg",
+  "smoke": "cpatchMorphMixedRowsSmoke.mjs",
+  "const": "one_PB_false"
+ },
+ {
+  "file": "cpatchMorphMixedRows__one_PB_true_14.svg",
+  "smoke": "cpatchMorphMixedRowsSmoke.mjs",
+  "const": "one_PB_true_14"
+ },
+ {
+  "file": "cpatchMorphMixedRows__two_PA_PA.svg",
+  "smoke": "cpatchMorphMixedRowsSmoke.mjs",
+  "const": "two_PA_PA"
+ },
+ {
+  "file": "cpatchMorphMixedRows__two_PB_PB.svg",
+  "smoke": "cpatchMorphMixedRowsSmoke.mjs",
+  "const": "two_PB_PB"
+ },
+ {
+  "file": "cpatchMorphSwitchBackRender__A.svg",
+  "smoke": "cpatchMorphSwitchBackRenderSmoke.mjs",
+  "const": "A"
+ },
+ {
+  "file": "cpatchMorphSwitchBackRender__B.svg",
+  "smoke": "cpatchMorphSwitchBackRenderSmoke.mjs",
+  "const": "B"
+ },
+ {
+  "file": "cpatchMorphUnplannedRowsRender__A.svg",
+  "smoke": "cpatchMorphUnplannedRowsRenderSmoke.mjs",
+  "const": "A"
+ },
+ {
+  "file": "cpatchMorphUnplannedRowsRender__B.svg",
+  "smoke": "cpatchMorphUnplannedRowsRenderSmoke.mjs",
+  "const": "B"
+ },
+ {
+  "file": "cpatchPinDeclineRecord__SRC.svg",
+  "smoke": "cpatchPinDeclineRecordSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "cpatchSeamSplit__svg.svg",
+  "smoke": "cpatchSeamSplitSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "cpatchSplitLedgerGpu__svg.svg",
+  "smoke": "cpatchSplitLedgerGpuSmoke.mjs",
+  "const": "svg"
+ },
+ {
   "file": "cssClassFill__scaleBar.svg",
   "smoke": "cssClassFillSmoke.mjs",
   "const": "scaleBar"
+ },
+ {
+  "file": "curveCoefUnitMask__SVG.svg",
+  "smoke": "curveCoefUnitMaskSmoke.mjs",
+  "const": "SVG"
  },
  {
   "file": "cuspFill__SVG.svg",
@@ -113,16 +733,206 @@
   "generated": true
  },
  {
+  "file": "debugHookGate__ROTATED_ARCS.svg",
+  "smoke": "debugHookGateSmoke.mjs",
+  "const": "ROTATED_ARCS"
+ },
+ {
+  "file": "debugHookGate__TIGERISH.svg",
+  "smoke": "debugHookGateSmoke.mjs",
+  "const": "TIGERISH"
+ },
+ {
   "file": "debugOverlay__SVG.svg",
   "smoke": "debugOverlaySmoke.mjs",
   "const": "SVG",
   "generated": true
  },
  {
+  "file": "declaredChannelLerpWarm__POSE_0.svg",
+  "smoke": "declaredChannelLerpWarmSmoke.mjs",
+  "const": "POSE_0"
+ },
+ {
+  "file": "declaredChannelLerpWarm__POSE_5.svg",
+  "smoke": "declaredChannelLerpWarmSmoke.mjs",
+  "const": "POSE_5"
+ },
+ {
+  "file": "declareReach__SVG.svg",
+  "smoke": "declareReachSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "declareStream__MONO.svg",
+  "smoke": "declareStreamSmoke.mjs",
+  "const": "MONO"
+ },
+ {
+  "file": "declareStream__svg_circle_cx_50_cy_50_r_30.svg",
+  "smoke": "declareStreamSmoke.mjs",
+  "const": "svg_circle_cx_50_cy_50_r_30"
+ },
+ {
+  "file": "declareStream__svg_path_d_M10_10_L_60_90_L.svg",
+  "smoke": "declareStreamSmoke.mjs",
+  "const": "svg_path_d_M10_10_L_60_90_L"
+ },
+ {
+  "file": "declareStream__svg_rect_x_10_y_10_width_50.svg",
+  "smoke": "declareStreamSmoke.mjs",
+  "const": "svg_rect_x_10_y_10_width_50"
+ },
+ {
+  "file": "depthBitsQueryPerDraw__SVG.svg",
+  "smoke": "depthBitsQueryPerDrawSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "disposeLifecycle__doc_g_id_p0_rect_width_10_he.svg",
+  "smoke": "disposeLifecycleSmoke.mjs",
+  "const": "doc_g_id_p0_rect_width_10_he"
+ },
+ {
+  "file": "disposeLifecycle__RECT.svg",
+  "smoke": "disposeLifecycleSmoke.mjs",
+  "const": "RECT"
+ },
+ {
+  "file": "droppedContent__fade_0_000.svg",
+  "smoke": "droppedContentSmoke.mjs",
+  "const": "fade_0_000"
+ },
+ {
+  "file": "droppedContent__fade_0_551.svg",
+  "smoke": "droppedContentSmoke.mjs",
+  "const": "fade_0_551"
+ },
+ {
+  "file": "droppedContent__wrap_NORMAL.svg",
+  "smoke": "droppedContentSmoke.mjs",
+  "const": "wrap_NORMAL"
+ },
+ {
+  "file": "emptyBundleWarm__INVISIBLE.svg",
+  "smoke": "emptyBundleWarmSmoke.mjs",
+  "const": "INVISIBLE"
+ },
+ {
+  "file": "emptyBundleWarm__SOLID.svg",
+  "smoke": "emptyBundleWarmSmoke.mjs",
+  "const": "SOLID"
+ },
+ {
+  "file": "engineDeclineIsolation__STAR.svg",
+  "smoke": "engineDeclineIsolationSmoke.mjs",
+  "const": "STAR"
+ },
+ {
+  "file": "enginePeer__SVG.svg",
+  "smoke": "enginePeerSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "engineSelectionTerms__svgOf_CIRCLE.svg",
+  "smoke": "engineSelectionTermsSmoke.mjs",
+  "const": "svgOf_CIRCLE"
+ },
+ {
+  "file": "engineSelectionTerms__svgOf_path_fill_264_d_M100_300.svg",
+  "smoke": "engineSelectionTermsSmoke.mjs",
+  "const": "svgOf_path_fill_264_d_M100_300"
+ },
+ {
+  "file": "engineSelectionTerms__svgOf_path_fill_333_d_M100_100.svg",
+  "smoke": "engineSelectionTermsSmoke.mjs",
+  "const": "svgOf_path_fill_333_d_M100_100"
+ },
+ {
+  "file": "engineSelectionTerms__svgOf_SMALLBLOB.svg",
+  "smoke": "engineSelectionTermsSmoke.mjs",
+  "const": "svgOf_SMALLBLOB"
+ },
+ {
+  "file": "engineSelectionTerms__svgOf_STAR.svg",
+  "smoke": "engineSelectionTermsSmoke.mjs",
+  "const": "svgOf_STAR"
+ },
+ {
   "file": "engineSwitchIndependence__SVG.svg",
   "smoke": "engineSwitchIndependenceSmoke.mjs",
   "const": "SVG",
   "generated": true
+ },
+ {
+  "file": "entryPointRoute__CIRCLE.svg",
+  "smoke": "entryPointRouteSmoke.mjs",
+  "const": "CIRCLE"
+ },
+ {
+  "file": "entryPointRoute__GLYPHS.svg",
+  "smoke": "entryPointRouteSmoke.mjs",
+  "const": "GLYPHS"
+ },
+ {
+  "file": "entryPointRoute__MIXED.svg",
+  "smoke": "entryPointRouteSmoke.mjs",
+  "const": "MIXED"
+ },
+ {
+  "file": "evenOddCoincidentRender__eo_ARC_ARC.svg",
+  "smoke": "evenOddCoincidentRenderSmoke.mjs",
+  "const": "eo_ARC_ARC"
+ },
+ {
+  "file": "evenOddCoincidentRender__eo_CUB_CUB_CUB.svg",
+  "smoke": "evenOddCoincidentRenderSmoke.mjs",
+  "const": "eo_CUB_CUB_CUB"
+ },
+ {
+  "file": "evenOddCoincidentRender__eo_CUB_CUB_REV.svg",
+  "smoke": "evenOddCoincidentRenderSmoke.mjs",
+  "const": "eo_CUB_CUB_REV"
+ },
+ {
+  "file": "evenOddCoincidentRender__eo_CUB_CUB_ROT.svg",
+  "smoke": "evenOddCoincidentRenderSmoke.mjs",
+  "const": "eo_CUB_CUB_ROT"
+ },
+ {
+  "file": "evenOddCoincidentRender__eo_CUB_CUB.svg",
+  "smoke": "evenOddCoincidentRenderSmoke.mjs",
+  "const": "eo_CUB_CUB"
+ },
+ {
+  "file": "evenOddCoincidentRender__eo_QUAD_QUAD.svg",
+  "smoke": "evenOddCoincidentRenderSmoke.mjs",
+  "const": "eo_QUAD_QUAD"
+ },
+ {
+  "file": "evenOddCoincidentRender__eo_TRI_SQUARE_TRI.svg",
+  "smoke": "evenOddCoincidentRenderSmoke.mjs",
+  "const": "eo_TRI_SQUARE_TRI"
+ },
+ {
+  "file": "evenOddCoincidentRender__eo_TRI_TRI.svg",
+  "smoke": "evenOddCoincidentRenderSmoke.mjs",
+  "const": "eo_TRI_TRI"
+ },
+ {
+  "file": "evenOddCoincidentRender__svg_path_fill_000_d_CUB_CUB.svg",
+  "smoke": "evenOddCoincidentRenderSmoke.mjs",
+  "const": "svg_path_fill_000_d_CUB_CUB"
+ },
+ {
+  "file": "evenOddCoincidentRender__svg_path_fill_000_d_CUB_CUB2.svg",
+  "smoke": "evenOddCoincidentRenderSmoke.mjs",
+  "const": "svg_path_fill_000_d_CUB_CUB"
+ },
+ {
+  "file": "evenOddCoincidentRender__svg_path_fill_000_d_CUB_M108.svg",
+  "smoke": "evenOddCoincidentRenderSmoke.mjs",
+  "const": "svg_path_fill_000_d_CUB_M108"
  },
  {
   "file": "exportFrameSvg__ART.svg",
@@ -150,6 +960,101 @@
   "const": "SHEET"
  },
  {
+  "file": "feImageExternalRender__svg.svg",
+  "smoke": "feImageExternalRenderSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "feImageOrientationRender__EXT_SVG.svg",
+  "smoke": "feImageOrientationRenderSmoke.mjs",
+  "const": "EXT_SVG"
+ },
+ {
+  "file": "fillBezoutOmit__BLOB.svg",
+  "smoke": "fillBezoutOmitSmoke.mjs",
+  "const": "BLOB"
+ },
+ {
+  "file": "fillBezoutOmit__RECT.svg",
+  "smoke": "fillBezoutOmitSmoke.mjs",
+  "const": "RECT"
+ },
+ {
+  "file": "fillCancelledWindingRender__svgOf_M0_0H100Q90_25_80_50Q90.svg",
+  "smoke": "fillCancelledWindingRenderSmoke.mjs",
+  "const": "svgOf_M0_0H100Q90_25_80_50Q90"
+ },
+ {
+  "file": "fillCancelledWindingRender__svgOf_M64_10L118_100H10ZM64_10.svg",
+  "smoke": "fillCancelledWindingRenderSmoke.mjs",
+  "const": "svgOf_M64_10L118_100H10ZM64_10"
+ },
+ {
+  "file": "fillNormalizeBands__svg_M10_10_L40_10_L40_40_L10.svg",
+  "smoke": "fillNormalizeBandsSmoke.mjs",
+  "const": "svg_M10_10_L40_10_L40_40_L10"
+ },
+ {
+  "file": "fillPrewarmOwnership__SVG.svg",
+  "smoke": "fillPrewarmOwnershipSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "fillPxFloorScale__SVG.svg",
+  "smoke": "fillPxFloorScaleSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "fillRouteClass__BLOB_A.svg",
+  "smoke": "fillRouteClassSmoke.mjs",
+  "const": "BLOB_A"
+ },
+ {
+  "file": "fillRouteClass__BLOB_B.svg",
+  "smoke": "fillRouteClassSmoke.mjs",
+  "const": "BLOB_B"
+ },
+ {
+  "file": "fillRouteClass__BLOBS.svg",
+  "smoke": "fillRouteClassSmoke.mjs",
+  "const": "BLOBS"
+ },
+ {
+  "file": "fillRouteClass__svg_rect_x_10_y_10_width_80.svg",
+  "smoke": "fillRouteClassSmoke.mjs",
+  "const": "svg_rect_x_10_y_10_width_80"
+ },
+ {
+  "file": "fillRouteParityGpu__MA.svg",
+  "smoke": "fillRouteParityGpuSmoke.mjs",
+  "const": "MA"
+ },
+ {
+  "file": "fillRouteParityGpu__MB.svg",
+  "smoke": "fillRouteParityGpuSmoke.mjs",
+  "const": "MB"
+ },
+ {
+  "file": "fillRouteParityGpu__STATIC.svg",
+  "smoke": "fillRouteParityGpuSmoke.mjs",
+  "const": "STATIC"
+ },
+ {
+  "file": "fillUsageRegistration__GRAD.svg",
+  "smoke": "fillUsageRegistrationSmoke.mjs",
+  "const": "GRAD"
+ },
+ {
+  "file": "fillUsageRegistration__SOLID.svg",
+  "smoke": "fillUsageRegistrationSmoke.mjs",
+  "const": "SOLID"
+ },
+ {
+  "file": "fillVariantNoWait__DOC.svg",
+  "smoke": "fillVariantNoWaitSmoke.mjs",
+  "const": "DOC"
+ },
+ {
   "file": "filterBakeCache__SVG.svg",
   "smoke": "filterBakeCacheSmoke.mjs",
   "const": "SVG"
@@ -165,9 +1070,29 @@
   "const": "SVG"
  },
  {
+  "file": "filterCacheBudgetGrow__SVG.svg",
+  "smoke": "filterCacheBudgetGrowSmoke.mjs",
+  "const": "SVG"
+ },
+ {
   "file": "filterCacheHit__CARD.svg",
   "smoke": "filterCacheHitSmoke.mjs",
   "const": "CARD"
+ },
+ {
+  "file": "filterCacheResidencyRender__SVG.svg",
+  "smoke": "filterCacheResidencyRenderSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "filterCacheResize__SVG.svg",
+  "smoke": "filterCacheResizeSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "filterFrameAlloc__doc_IN.svg",
+  "smoke": "filterFrameAllocSmoke.mjs",
+  "const": "doc_IN"
  },
  {
   "file": "filterFrameOrigin__BLURRED.svg",
@@ -185,9 +1110,299 @@
   "const": "PLAIN"
  },
  {
+  "file": "filterGraphTweenReach__GRAPH.svg",
+  "smoke": "filterGraphTweenReachSmoke.mjs",
+  "const": "GRAPH"
+ },
+ {
+  "file": "filterGraphTweenReach__SINGLE.svg",
+  "smoke": "filterGraphTweenReachSmoke.mjs",
+  "const": "SINGLE"
+ },
+ {
   "file": "filterGraphWorldScale__SVG.svg",
   "smoke": "filterGraphWorldScaleSmoke.mjs",
   "const": "SVG"
+ },
+ {
+  "file": "filterLeafGroupRender__doc_old_FILTERS_feDropShadow.svg",
+  "smoke": "filterLeafGroupRenderSmoke.mjs",
+  "const": "doc_old_FILTERS_feDropShadow"
+ },
+ {
+  "file": "filterOffCanvasRender__SCALE_SVG.svg",
+  "smoke": "filterOffCanvasRenderSmoke.mjs",
+  "const": "SCALE_SVG"
+ },
+ {
+  "file": "filterOverrideTables__BLUR.svg",
+  "smoke": "filterOverrideTablesSmoke.mjs",
+  "const": "BLUR"
+ },
+ {
+  "file": "filterOverrideTables__GRAPH.svg",
+  "smoke": "filterOverrideTablesSmoke.mjs",
+  "const": "GRAPH"
+ },
+ {
+  "file": "filterOverrideTables__GROUP.svg",
+  "smoke": "filterOverrideTablesSmoke.mjs",
+  "const": "GROUP"
+ },
+ {
+  "file": "filterOverrideTables__MASK.svg",
+  "smoke": "filterOverrideTablesSmoke.mjs",
+  "const": "MASK"
+ },
+ {
+  "file": "filterOverrideTables__PATTERN.svg",
+  "smoke": "filterOverrideTablesSmoke.mjs",
+  "const": "PATTERN"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_color_interp.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_color_interp"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_color_interp2.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_color_interp"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_color_interp3.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_color_interp"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_color_interp4.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_color_interp"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_color_interp5.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_color_interp"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_color_interp6.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_color_interp"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_color_interp7.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_color_interp"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_color_interp8.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_color_interp"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_color_interp9.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_color_interp"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_feColorMatri.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_feColorMatri"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_feComponentT.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_feComponentT"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_feDropShadow.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_feDropShadow"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_feDropShadow2.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_feDropShadow"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_feGaussianBl.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_feGaussianBl"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_feGaussianBl2.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_feGaussianBl"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_feGaussianBl3.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_feGaussianBl"
+ },
+ {
+  "file": "filterParamTween__doc_filter_id_f_feGaussianBl4.svg",
+  "smoke": "filterParamTweenSmoke.mjs",
+  "const": "doc_filter_id_f_feGaussianBl"
+ },
+ {
+  "file": "filterPixelFixRender__cell_BL_feDiffuseLighting_in.svg",
+  "smoke": "filterPixelFixRenderSmoke.mjs",
+  "const": "cell_BL_feDiffuseLighting_in"
+ },
+ {
+  "file": "filterPixelFixRender__cell_BL_feDiffuseLighting_in2.svg",
+  "smoke": "filterPixelFixRenderSmoke.mjs",
+  "const": "cell_BL_feDiffuseLighting_in"
+ },
+ {
+  "file": "filterPixelFixRender__cell_feComponentTransfer_feFu.svg",
+  "smoke": "filterPixelFixRenderSmoke.mjs",
+  "const": "cell_feComponentTransfer_feFu"
+ },
+ {
+  "file": "filterPixelFixRender__cell_feConvolveMatrix_order_3.svg",
+  "smoke": "filterPixelFixRenderSmoke.mjs",
+  "const": "cell_feConvolveMatrix_order_3"
+ },
+ {
+  "file": "filterPixelFixRender__cell_feDropShadow_dx_5_dy_5_s.svg",
+  "smoke": "filterPixelFixRenderSmoke.mjs",
+  "const": "cell_feDropShadow_dx_5_dy_5_s"
+ },
+ {
+  "file": "filterPixelFixRender__cell_feDropShadow_dx_5_dy_5.svg",
+  "smoke": "filterPixelFixRenderSmoke.mjs",
+  "const": "cell_feDropShadow_dx_5_dy_5"
+ },
+ {
+  "file": "filterPixelFixRender__cell_feImage_href_im_defs_ima.svg",
+  "smoke": "filterPixelFixRenderSmoke.mjs",
+  "const": "cell_feImage_href_im_defs_ima"
+ },
+ {
+  "file": "filterPixelFixRender__cell_feOffset_dx_3_dy_0_resul.svg",
+  "smoke": "filterPixelFixRenderSmoke.mjs",
+  "const": "cell_feOffset_dx_3_dy_0_resul"
+ },
+ {
+  "file": "filterPixelFixRender__cell_feOffset_in_SourceAlpha.svg",
+  "smoke": "filterPixelFixRenderSmoke.mjs",
+  "const": "cell_feOffset_in_SourceAlpha"
+ },
+ {
+  "file": "filterPoolTrimRender__A.svg",
+  "smoke": "filterPoolTrimRenderSmoke.mjs",
+  "const": "A"
+ },
+ {
+  "file": "filterPoolTrimRender__B.svg",
+  "smoke": "filterPoolTrimRenderSmoke.mjs",
+  "const": "B"
+ },
+ {
+  "file": "filterPoolTrimRender__BLUR.svg",
+  "smoke": "filterPoolTrimRenderSmoke.mjs",
+  "const": "BLUR"
+ },
+ {
+  "file": "filterPoolTrimRender__PLAIN.svg",
+  "smoke": "filterPoolTrimRenderSmoke.mjs",
+  "const": "PLAIN"
+ },
+ {
+  "file": "filterRegionImport__doc_data_mantle_filter_regio.svg",
+  "smoke": "filterRegionImportSmoke.mjs",
+  "const": "doc_data_mantle_filter_regio"
+ },
+ {
+  "file": "filterRegionImport__doc_data_mantle_filter_regio2.svg",
+  "smoke": "filterRegionImportSmoke.mjs",
+  "const": "doc_data_mantle_filter_regio"
+ },
+ {
+  "file": "filterRegionImport__doc_filterUnits_userSpaceOnU.svg",
+  "smoke": "filterRegionImportSmoke.mjs",
+  "const": "doc_filterUnits_userSpaceOnU"
+ },
+ {
+  "file": "filterRegionImport__doc_filterUnits_userSpaceOnU2.svg",
+  "smoke": "filterRegionImportSmoke.mjs",
+  "const": "doc_filterUnits_userSpaceOnU"
+ },
+ {
+  "file": "filterRegionImport__doc_filterUnits_userSpaceOnU3.svg",
+  "smoke": "filterRegionImportSmoke.mjs",
+  "const": "doc_filterUnits_userSpaceOnU"
+ },
+ {
+  "file": "filterRegionImport__doc_filterUnits_userSpaceOnU4.svg",
+  "smoke": "filterRegionImportSmoke.mjs",
+  "const": "doc_filterUnits_userSpaceOnU"
+ },
+ {
+  "file": "filterRegionImport__doc_filterUnits_userSpaceOnU5.svg",
+  "smoke": "filterRegionImportSmoke.mjs",
+  "const": "doc_filterUnits_userSpaceOnU"
+ },
+ {
+  "file": "filterRegionImport__doc_GROUPED.svg",
+  "smoke": "filterRegionImportSmoke.mjs",
+  "const": "doc_GROUPED"
+ },
+ {
+  "file": "filterRegionImport__doc_SQUARE.svg",
+  "smoke": "filterRegionImportSmoke.mjs",
+  "const": "doc_SQUARE"
+ },
+ {
+  "file": "filterRegionImport__doc_x_0_25_y_0_25_width_1_5.svg",
+  "smoke": "filterRegionImportSmoke.mjs",
+  "const": "doc_x_0_25_y_0_25_width_1_5"
+ },
+ {
+  "file": "filterRegionImport__doc_x_0_25_y_0_25_width_1_52.svg",
+  "smoke": "filterRegionImportSmoke.mjs",
+  "const": "doc_x_0_25_y_0_25_width_1_5"
+ },
+ {
+  "file": "filterRegionTransform__FILTER_REGION_DEMO.svg",
+  "smoke": "filterRegionTransformSmoke.mjs",
+  "const": "FILTER_REGION_DEMO"
+ },
+ {
+  "file": "filterResultRecycleRender__GROUP.svg",
+  "smoke": "filterResultRecycleRenderSmoke.mjs",
+  "const": "GROUP"
+ },
+ {
+  "file": "filterResultRecycleRender__SHAPE.svg",
+  "smoke": "filterResultRecycleRenderSmoke.mjs",
+  "const": "SHAPE"
+ },
+ {
+  "file": "filterScratchCeiling__MANY.svg",
+  "smoke": "filterScratchCeilingSmoke.mjs",
+  "const": "MANY"
+ },
+ {
+  "file": "filterScratchCeiling__SVG.svg",
+  "smoke": "filterScratchCeilingSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "filterSubregionImport__SVG_CSS.svg",
+  "smoke": "filterSubregionImportSmoke.mjs",
+  "const": "SVG_CSS"
+ },
+ {
+  "file": "filterSubregionImport__SVG_OBB.svg",
+  "smoke": "filterSubregionImportSmoke.mjs",
+  "const": "SVG_OBB"
+ },
+ {
+  "file": "filterSubregionImport__SVG_SUBREGION.svg",
+  "smoke": "filterSubregionImportSmoke.mjs",
+  "const": "SVG_SUBREGION"
  },
  {
   "file": "filterWorldScale__SVG.svg",
@@ -195,9 +1410,314 @@
   "const": "SVG"
  },
  {
+  "file": "frameEntryContract__svg.svg",
+  "smoke": "frameEntryContractSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "frameEntryWarm__svg.svg",
+  "smoke": "frameEntryWarmSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "glslEmuFidelity__SVG.svg",
+  "smoke": "glslEmuFidelitySmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "gradientManyStopsRender__svg.svg",
+  "smoke": "gradientManyStopsRenderSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "groupAlphaRender__bare_g_id_s0_rect_x_4_y_4_wid.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "bare_g_id_s0_rect_x_4_y_4_wid"
+ },
+ {
+  "file": "groupAlphaRender__bare_rect_x_2_y_2_width_14_he.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "bare_rect_x_2_y_2_width_14_he"
+ },
+ {
+  "file": "groupAlphaRender__bare_rect_x_20_y_20_width_30.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "bare_rect_x_20_y_20_width_30"
+ },
+ {
+  "file": "groupAlphaRender__bare_rect_x_4_y_4_width_30_he.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "bare_rect_x_4_y_4_width_30_he"
+ },
+ {
+  "file": "groupAlphaRender__bare_rect_x_4_y_4_width_40_he.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "bare_rect_x_4_y_4_width_40_he"
+ },
+ {
+  "file": "groupAlphaRender__doc_g_opacity_25_TWO_circle.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_g_opacity_25_TWO_circle"
+ },
+ {
+  "file": "groupAlphaRender__doc_g_opacity_5_TWO_g.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_g_opacity_5_TWO_g"
+ },
+ {
+  "file": "groupAlphaRender__doc_g_opacity_a_g_opacity_5.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_g_opacity_a_g_opacity_5"
+ },
+ {
+  "file": "groupAlphaRender__doc_g_opacity_a_path_d_M4_60.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_g_opacity_a_path_d_M4_60"
+ },
+ {
+  "file": "groupAlphaRender__doc_g_opacity_a_rect_x_14_y.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_g_opacity_a_rect_x_14_y"
+ },
+ {
+  "file": "groupAlphaRender__doc_g_opacity_a_rect_x_4_y_4.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_g_opacity_a_rect_x_4_y_4"
+ },
+ {
+  "file": "groupAlphaRender__doc_g_opacity_a_rect_x_4_y_42.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_g_opacity_a_rect_x_4_y_4"
+ },
+ {
+  "file": "groupAlphaRender__doc_g_opacity_a_TWO_g.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_g_opacity_a_TWO_g"
+ },
+ {
+  "file": "groupAlphaRender__doc_path_d_M4_60_L12_34_L20.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_path_d_M4_60_L12_34_L20"
+ },
+ {
+  "file": "groupAlphaRender__doc_path_d_M4_60_L12_34_L202.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_path_d_M4_60_L12_34_L20"
+ },
+ {
+  "file": "groupAlphaRender__doc_rect_x_14_y_14_width_36.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_rect_x_14_y_14_width_36"
+ },
+ {
+  "file": "groupAlphaRender__doc_rect_x_14_y_14_width_362.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_rect_x_14_y_14_width_36"
+ },
+ {
+  "file": "groupAlphaRender__doc_rect_x_4_y_4_width_26_5.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_rect_x_4_y_4_width_26_5"
+ },
+ {
+  "file": "groupAlphaRender__doc_rect_x_4_y_4_width_26_52.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_rect_x_4_y_4_width_26_5"
+ },
+ {
+  "file": "groupAlphaRender__doc_rect_x_4_y_4_width_26_he.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_rect_x_4_y_4_width_26_he"
+ },
+ {
+  "file": "groupAlphaRender__doc_rect_x_4_y_4_width_26_he2.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_rect_x_4_y_4_width_26_he"
+ },
+ {
+  "file": "groupAlphaRender__doc_TWO_circle_cx_32_cy_32_r.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_TWO_circle_cx_32_cy_32_r"
+ },
+ {
+  "file": "groupAlphaRender__doc_TWO.svg",
+  "smoke": "groupAlphaRenderSmoke.mjs",
+  "const": "doc_TWO"
+ },
+ {
+  "file": "groupAtlasRender__bare_rect_x_8_y_10_width_40_h.svg",
+  "smoke": "groupAtlasRenderSmoke.mjs",
+  "const": "bare_rect_x_8_y_10_width_40_h"
+ },
+ {
+  "file": "groupAtlasRender__doc_rect_x_8_y_10_width_40_h.svg",
+  "smoke": "groupAtlasRenderSmoke.mjs",
+  "const": "doc_rect_x_8_y_10_width_40_h"
+ },
+ {
+  "file": "groupFilterRectRender__art_blurOffset_KIDS_1_style.svg",
+  "smoke": "groupFilterRectRenderSmoke.mjs",
+  "const": "art_blurOffset_KIDS_1_style"
+ },
+ {
+  "file": "groupFilterRectRender__art_blurOffset_KIDS.svg",
+  "smoke": "groupFilterRectRenderSmoke.mjs",
+  "const": "art_blurOffset_KIDS"
+ },
+ {
+  "file": "groupFilterRectRender__art_filter_id_f_feDropShadow.svg",
+  "smoke": "groupFilterRectRenderSmoke.mjs",
+  "const": "art_filter_id_f_feDropShadow"
+ },
+ {
+  "file": "groupFilterRectRender__art_filter_id_f_filterUnits.svg",
+  "smoke": "groupFilterRectRenderSmoke.mjs",
+  "const": "art_filter_id_f_filterUnits"
+ },
+ {
+  "file": "groupFilterRectRender__art_filter_id_f_filterUnits2.svg",
+  "smoke": "groupFilterRectRenderSmoke.mjs",
+  "const": "art_filter_id_f_filterUnits"
+ },
+ {
+  "file": "groupFilterRectRender__art_filter_id_f_filterUnits3.svg",
+  "smoke": "groupFilterRectRenderSmoke.mjs",
+  "const": "art_filter_id_f_filterUnits"
+ },
+ {
+  "file": "groupFilterRectRender__art_filter_id_f_WIDE_feGauss.svg",
+  "smoke": "groupFilterRectRenderSmoke.mjs",
+  "const": "art_filter_id_f_WIDE_feGauss"
+ },
+ {
+  "file": "groupFilterRectRender__art_filter_id_f_WIDE_feGauss2.svg",
+  "smoke": "groupFilterRectRenderSmoke.mjs",
+  "const": "art_filter_id_f_WIDE_feGauss"
+ },
+ {
+  "file": "groupFilterRectRender__art_filter_id_f_x_20_y_20_wi.svg",
+  "smoke": "groupFilterRectRenderSmoke.mjs",
+  "const": "art_filter_id_f_x_20_y_20_wi"
+ },
+ {
+  "file": "groupFilterRectRender__art_filter_id_f_x_5_y_5_widt.svg",
+  "smoke": "groupFilterRectRenderSmoke.mjs",
+  "const": "art_filter_id_f_x_5_y_5_widt"
+ },
+ {
+  "file": "groupFilterRectRender__scaled_1e_3.svg",
+  "smoke": "groupFilterRectRenderSmoke.mjs",
+  "const": "scaled_1e_3"
+ },
+ {
+  "file": "groupFilterRectRender__scaled_1e3.svg",
+  "smoke": "groupFilterRectRenderSmoke.mjs",
+  "const": "scaled_1e3"
+ },
+ {
+  "file": "groupFrameTarget__svg_g_opacity_0_5_SQ_LEAF_g.svg",
+  "smoke": "groupFrameTargetSmoke.mjs",
+  "const": "svg_g_opacity_0_5_SQ_LEAF_g"
+ },
+ {
+  "file": "groupFrameTarget__svg_SQ_LEAF.svg",
+  "smoke": "groupFrameTargetSmoke.mjs",
+  "const": "svg_SQ_LEAF"
+ },
+ {
+  "file": "groupIdsEveryBundle__svg_svg_id_inner_x_10_y_10_w.svg",
+  "smoke": "groupIdsEveryBundleSmoke.mjs",
+  "const": "svg_svg_id_inner_x_10_y_10_w"
+ },
+ {
+  "file": "groupIdsEveryBundle__svg_symbol_id_s_rect_width_5.svg",
+  "smoke": "groupIdsEveryBundleSmoke.mjs",
+  "const": "svg_symbol_id_s_rect_width_5"
+ },
+ {
+  "file": "groupLeafDepth__svg_g_opacity_0_5_SQ_g.svg",
+  "smoke": "groupLeafDepthSmoke.mjs",
+  "const": "svg_g_opacity_0_5_SQ_g"
+ },
+ {
+  "file": "groupLeafDepth__svg_g_style_isolation_isolat.svg",
+  "smoke": "groupLeafDepthSmoke.mjs",
+  "const": "svg_g_style_isolation_isolat"
+ },
+ {
+  "file": "groupLeafDepth__svg_SQ.svg",
+  "smoke": "groupLeafDepthSmoke.mjs",
+  "const": "svg_SQ"
+ },
+ {
+  "file": "groupOverBlitRender__svg_g_opacity_0_6_RED_BLUE_g.svg",
+  "smoke": "groupOverBlitRenderSmoke.mjs",
+  "const": "svg_g_opacity_0_6_RED_BLUE_g"
+ },
+ {
+  "file": "groupOverBlitRender__svg_GROUND_g_opacity_0_5_RED.svg",
+  "smoke": "groupOverBlitRenderSmoke.mjs",
+  "const": "svg_GROUND_g_opacity_0_5_RED"
+ },
+ {
+  "file": "groupOverBlitRender__svg_GROUND_g_opacity_0_5_RED2.svg",
+  "smoke": "groupOverBlitRenderSmoke.mjs",
+  "const": "svg_GROUND_g_opacity_0_5_RED"
+ },
+ {
+  "file": "groupOverBlitRender__svg_GROUND_g_style_isolation.svg",
+  "smoke": "groupOverBlitRenderSmoke.mjs",
+  "const": "svg_GROUND_g_style_isolation"
+ },
+ {
+  "file": "groupOverBlitRender__svg_rect_x_0_y_0_width_120_h.svg",
+  "smoke": "groupOverBlitRenderSmoke.mjs",
+  "const": "svg_rect_x_0_y_0_width_120_h"
+ },
+ {
+  "file": "groupOverBlitRender__svg_rect_x_0_y_0_width_120_h2.svg",
+  "smoke": "groupOverBlitRenderSmoke.mjs",
+  "const": "svg_rect_x_0_y_0_width_120_h"
+ },
+ {
   "file": "groupRect__SCENE.svg",
   "smoke": "groupRectSmoke.mjs",
   "const": "SCENE"
+ },
+ {
+  "file": "groupTargetPickWarm__ARCS.svg",
+  "smoke": "groupTargetPickWarmSmoke.mjs",
+  "const": "ARCS"
+ },
+ {
+  "file": "groupTargetPickWarm__TILE.svg",
+  "smoke": "groupTargetPickWarmSmoke.mjs",
+  "const": "TILE"
+ },
+ {
+  "file": "groupTargetsRender__POSE_A.svg",
+  "smoke": "groupTargetsRenderSmoke.mjs",
+  "const": "POSE_A"
+ },
+ {
+  "file": "groupTargetsRender__POSE_B.svg",
+  "smoke": "groupTargetsRenderSmoke.mjs",
+  "const": "POSE_B"
+ },
+ {
+  "file": "groupTargetsRender__RUN.svg",
+  "smoke": "groupTargetsRenderSmoke.mjs",
+  "const": "RUN"
+ },
+ {
+  "file": "groupTargetsRender__TWO.svg",
+  "smoke": "groupTargetsRenderSmoke.mjs",
+  "const": "TWO"
+ },
+ {
+  "file": "gwnChordLune__SVG.svg",
+  "smoke": "gwnChordLuneSmoke.mjs",
+  "const": "SVG"
  },
  {
   "file": "gwnCurveRange__CLAW.svg",
@@ -217,10 +1737,450 @@
   "generated": true
  },
  {
+  "file": "gwnKernelScale__SVG.svg",
+  "smoke": "gwnKernelScaleSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "gwnTreeBoxScale__svgAt_1.svg",
+  "smoke": "gwnTreeBoxScaleSmoke.mjs",
+  "const": "svgAt_1"
+ },
+ {
+  "file": "gwnTreeHook__SVG.svg",
+  "smoke": "gwnTreeHookSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "handleKeptRows__svg_rect_id_vis_x_10_y_10_wi.svg",
+  "smoke": "handleKeptRowsSmoke.mjs",
+  "const": "svg_rect_id_vis_x_10_y_10_wi"
+ },
+ {
+  "file": "handleKeptRows__svg_rect_x_10_y_10_width_20.svg",
+  "smoke": "handleKeptRowsSmoke.mjs",
+  "const": "svg_rect_x_10_y_10_width_20"
+ },
+ {
+  "file": "hitNonScalingDash__svg.svg",
+  "smoke": "hitNonScalingDashSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "hitQueryContract__svg_circle_cx_30_cy_30_r_20.svg",
+  "smoke": "hitQueryContractSmoke.mjs",
+  "const": "svg_circle_cx_30_cy_30_r_20"
+ },
+ {
+  "file": "hitQueryContract__svg_g_opacity_5_rect_x_10_y.svg",
+  "smoke": "hitQueryContractSmoke.mjs",
+  "const": "svg_g_opacity_5_rect_x_10_y"
+ },
+ {
+  "file": "hitQueryContract__svg_path_d_M_4_4H_6V_6H_4Z_f.svg",
+  "smoke": "hitQueryContractSmoke.mjs",
+  "const": "svg_path_d_M_4_4H_6V_6H_4Z_f"
+ },
+ {
+  "file": "hitQueryContract__svg_path_d_M_7_0H_8V_7H_7Z_f.svg",
+  "smoke": "hitQueryContractSmoke.mjs",
+  "const": "svg_path_d_M_7_0H_8V_7H_7Z_f"
+ },
+ {
+  "file": "hitQueryContract__svg_path_d_M10_10H40V60H10Z.svg",
+  "smoke": "hitQueryContractSmoke.mjs",
+  "const": "svg_path_d_M10_10H40V60H10Z"
+ },
+ {
+  "file": "hitQueryContract__svg_path_d_M10_10H60V60H10Z.svg",
+  "smoke": "hitQueryContractSmoke.mjs",
+  "const": "svg_path_d_M10_10H60V60H10Z"
+ },
+ {
+  "file": "hitQueryContract__svg_path_d_M30_50A20_20_0_1.svg",
+  "smoke": "hitQueryContractSmoke.mjs",
+  "const": "svg_path_d_M30_50A20_20_0_1"
+ },
+ {
+  "file": "hitQueryContract__svg.svg",
+  "smoke": "hitQueryContractSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "hitSpecModel__svg_a_href_https_example_com.svg",
+  "smoke": "hitSpecModelSmoke.mjs",
+  "const": "svg_a_href_https_example_com"
+ },
+ {
+  "file": "hitSpecModel__svg_circle_cx_50_cy_50_r_30.svg",
+  "smoke": "hitSpecModelSmoke.mjs",
+  "const": "svg_circle_cx_50_cy_50_r_30"
+ },
+ {
+  "file": "hitSpecModel__svg_defs_rect_id_r_x_10_y_10.svg",
+  "smoke": "hitSpecModelSmoke.mjs",
+  "const": "svg_defs_rect_id_r_x_10_y_10"
+ },
+ {
+  "file": "hitSpecModel__svg_path_d_M20_50H80_fill_no.svg",
+  "smoke": "hitSpecModelSmoke.mjs",
+  "const": "svg_path_d_M20_50H80_fill_no"
+ },
+ {
+  "file": "hitSpecModel__svg_rect_id_below_x_0_y_0_wi.svg",
+  "smoke": "hitSpecModelSmoke.mjs",
+  "const": "svg_rect_id_below_x_0_y_0_wi"
+ },
+ {
+  "file": "hitSpecModel__svg_rect_id_m_x_10_y_10_widt.svg",
+  "smoke": "hitSpecModelSmoke.mjs",
+  "const": "svg_rect_id_m_x_10_y_10_widt"
+ },
+ {
+  "file": "hitSpecModel__svg_rect_x_10_y_10_width_40.svg",
+  "smoke": "hitSpecModelSmoke.mjs",
+  "const": "svg_rect_x_10_y_10_width_40"
+ },
+ {
+  "file": "hitSprite__SHEET.svg",
+  "smoke": "hitSpriteSmoke.mjs",
+  "const": "SHEET"
+ },
+ {
+  "file": "idleInferenceMotion__doc_path_id_a_d_M10_10_C_60.svg",
+  "smoke": "idleInferenceMotionSmoke.mjs",
+  "const": "doc_path_id_a_d_M10_10_C_60"
+ },
+ {
+  "file": "importerGeometryAudit__wrap_path_d_M10_10_H90_V90_H1.svg",
+  "smoke": "importerGeometryAuditSmoke.mjs",
+  "const": "wrap_path_d_M10_10_H90_V90_H1"
+ },
+ {
+  "file": "importerGeometryAudit__wrap_path_d_M10_30_H60_V70_H1.svg",
+  "smoke": "importerGeometryAuditSmoke.mjs",
+  "const": "wrap_path_d_M10_30_H60_V70_H1"
+ },
+ {
+  "file": "importerGeometryAuditRender__doc_circle_cx_18_cy_32_r_8_c.svg",
+  "smoke": "importerGeometryAuditRenderSmoke.mjs",
+  "const": "doc_circle_cx_18_cy_32_r_8_c"
+ },
+ {
+  "file": "importerGeometryAuditRender__doc_circle_cx_32_cy_32_r_12.svg",
+  "smoke": "importerGeometryAuditRenderSmoke.mjs",
+  "const": "doc_circle_cx_32_cy_32_r_12"
+ },
+ {
+  "file": "importerGeometryAuditRender__doc_rect_x_10_y_24_width_16.svg",
+  "smoke": "importerGeometryAuditRenderSmoke.mjs",
+  "const": "doc_rect_x_10_y_24_width_16"
+ },
+ {
+  "file": "importerGeometryAuditRender__doc.svg",
+  "smoke": "importerGeometryAuditRenderSmoke.mjs",
+  "const": "doc"
+ },
+ {
+  "file": "importerScaleInvariant__svgDoc_0_0_64_64_path_d_M0_3_0.svg",
+  "smoke": "importerScaleInvariantSmoke.mjs",
+  "const": "svgDoc_0_0_64_64_path_d_M0_3_0"
+ },
+ {
+  "file": "importerScaleInvariant__svgDoc_0_0_64_64_path_d_M10_10.svg",
+  "smoke": "importerScaleInvariantSmoke.mjs",
+  "const": "svgDoc_0_0_64_64_path_d_M10_10"
+ },
+ {
+  "file": "importerScaleInvariant__svgDoc_0_0_64_64_path_d_M10_30.svg",
+  "smoke": "importerScaleInvariantSmoke.mjs",
+  "const": "svgDoc_0_0_64_64_path_d_M10_30"
+ },
+ {
+  "file": "importerScaleInvariant__svgDoc_0_0_64_64_path_d_M10_40.svg",
+  "smoke": "importerScaleInvariantSmoke.mjs",
+  "const": "svgDoc_0_0_64_64_path_d_M10_40"
+ },
+ {
+  "file": "importerScaleInvariant__svgDoc_0_0_64_64_path_d_M4_30_C.svg",
+  "smoke": "importerScaleInvariantSmoke.mjs",
+  "const": "svgDoc_0_0_64_64_path_d_M4_30_C"
+ },
+ {
+  "file": "importerScaleInvariant__svgDoc_0_0_64_64_path_d_M4_4_L3.svg",
+  "smoke": "importerScaleInvariantSmoke.mjs",
+  "const": "svgDoc_0_0_64_64_path_d_M4_4_L3"
+ },
+ {
+  "file": "importerScaleInvariant__svgDoc_0_0_64_64_path_d_M4_4_L32.svg",
+  "smoke": "importerScaleInvariantSmoke.mjs",
+  "const": "svgDoc_0_0_64_64_path_d_M4_4_L3"
+ },
+ {
+  "file": "importerScaleInvariant__svgDoc_0_0_64_64_path_d_M4_4_L4.svg",
+  "smoke": "importerScaleInvariantSmoke.mjs",
+  "const": "svgDoc_0_0_64_64_path_d_M4_4_L4"
+ },
+ {
+  "file": "importerScaleInvariant__svgDoc_0_0_64_64_path_d_M4_4_Q4.svg",
+  "smoke": "importerScaleInvariantSmoke.mjs",
+  "const": "svgDoc_0_0_64_64_path_d_M4_4_Q4"
+ },
+ {
+  "file": "importerScaleInvariant__svgDoc_0_0_64_64_path_d_M46_045.svg",
+  "smoke": "importerScaleInvariantSmoke.mjs",
+  "const": "svgDoc_0_0_64_64_path_d_M46_045"
+ },
+ {
+  "file": "importerSemanticsRender__dashed_16_16_8.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "dashed_16_16_8"
+ },
+ {
+  "file": "importerSemanticsRender__dashed_1em_1em_0_5em.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "dashed_1em_1em_0_5em"
+ },
+ {
+  "file": "importerSemanticsRender__dashed_20_20_10.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "dashed_20_20_10"
+ },
+ {
+  "file": "importerSemanticsRender__doc_rect_x_8_y_8_width_48_he.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "doc_rect_x_8_y_8_width_48_he"
+ },
+ {
+  "file": "importerSemanticsRender__doc_rect_x_8_y_8_width_48_he2.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "doc_rect_x_8_y_8_width_48_he"
+ },
+ {
+  "file": "importerSemanticsRender__doc_rect_x_8_y_8_width_48_he3.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "doc_rect_x_8_y_8_width_48_he"
+ },
+ {
+  "file": "importerSemanticsRender__doc_rect_x_8_y_8_width_48_he4.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "doc_rect_x_8_y_8_width_48_he"
+ },
+ {
+  "file": "importerSemanticsRender__doc.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "doc"
+ },
+ {
+  "file": "importerSemanticsRender__flood_flood_color_black_flood.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "flood_flood_color_black_flood"
+ },
+ {
+  "file": "importerSemanticsRender__flood_flood_color_lime_flood_o.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "flood_flood_color_lime_flood_o"
+ },
+ {
+  "file": "importerSemanticsRender__flood_style_flood_color_lime_f.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "flood_style_flood_color_lime_f"
+ },
+ {
+  "file": "importerSemanticsRender__NEST_id_s_width_20_height_20.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "NEST_id_s_width_20_height_20"
+ },
+ {
+  "file": "importerSemanticsRender__NEST_x_10_y_10_width_20_heigh.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "NEST_x_10_y_10_width_20_heigh"
+ },
+ {
+  "file": "importerSemanticsRender__NEST_x_10_y_10_width_40_heigh.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "NEST_x_10_y_10_width_40_heigh"
+ },
+ {
+  "file": "importerSemanticsRender__radial_radialGradient_id_g_cx_8.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "radial_radialGradient_id_g_cx_8"
+ },
+ {
+  "file": "importerSemanticsRender__radial_radialGradient_id_g_cx_82.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "radial_radialGradient_id_g_cx_8"
+ },
+ {
+  "file": "importerSemanticsRender__radial_radialGradient_id_p_r_5.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "radial_radialGradient_id_p_r_5"
+ },
+ {
+  "file": "importerSemanticsRender__regionDoc_height_0_SHAPE.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "regionDoc_height_0_SHAPE"
+ },
+ {
+  "file": "importerSemanticsRender__regionDoc_height_1_SHAPE.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "regionDoc_height_1_SHAPE"
+ },
+ {
+  "file": "importerSemanticsRender__regionDoc_width_0_GROUP.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "regionDoc_width_0_GROUP"
+ },
+ {
+  "file": "importerSemanticsRender__regionDoc_width_0_SHAPE.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "regionDoc_width_0_SHAPE"
+ },
+ {
+  "file": "importerSemanticsRender__regionDoc_width_1_GROUP.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "regionDoc_width_1_GROUP"
+ },
+ {
+  "file": "importerSemanticsRender__regionDoc_width_1_SHAPE.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "regionDoc_width_1_SHAPE"
+ },
+ {
+  "file": "importerSemanticsRender__shadowDoc_feDropShadow_dx_6_dy_6_s.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "shadowDoc_feDropShadow_dx_6_dy_6_s"
+ },
+ {
+  "file": "importerSemanticsRender__shadowDoc_feDropShadow_dx_6_dy_6_s2.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "shadowDoc_feDropShadow_dx_6_dy_6_s"
+ },
+ {
+  "file": "importerSemanticsRender__shadowDoc_feDropShadow_dx_6_dy_6_s3.svg",
+  "smoke": "importerSemanticsRenderSmoke.mjs",
+  "const": "shadowDoc_feDropShadow_dx_6_dy_6_s"
+ },
+ {
+  "file": "importLeafCascade__doc_g_opacity_0_5_rect_x_50.svg",
+  "smoke": "importLeafCascadeSmoke.mjs",
+  "const": "doc_g_opacity_0_5_rect_x_50"
+ },
+ {
+  "file": "importSpecChromeRender__doc_R_viewBox_0_0_0_0.svg",
+  "smoke": "importSpecChromeRenderSmoke.mjs",
+  "const": "doc_R_viewBox_0_0_0_0"
+ },
+ {
+  "file": "importSpecChromeRender__doc_R_viewBox_0_0_0_100.svg",
+  "smoke": "importSpecChromeRenderSmoke.mjs",
+  "const": "doc_R_viewBox_0_0_0_100"
+ },
+ {
+  "file": "importSpecChromeRender__doc_R_viewBox_0_0_100_0.svg",
+  "smoke": "importSpecChromeRenderSmoke.mjs",
+  "const": "doc_R_viewBox_0_0_100_0"
+ },
+ {
+  "file": "importSpecChromeRender__doc_svg_width_50_height_50_v.svg",
+  "smoke": "importSpecChromeRenderSmoke.mjs",
+  "const": "doc_svg_width_50_height_50_v"
+ },
+ {
+  "file": "importSpecChromeRender__doc_svg_width_50_height_50_v2.svg",
+  "smoke": "importSpecChromeRenderSmoke.mjs",
+  "const": "doc_svg_width_50_height_50_v"
+ },
+ {
+  "file": "importSpecChromeRender__doc_symbol_id_s_viewBox_0_0.svg",
+  "smoke": "importSpecChromeRenderSmoke.mjs",
+  "const": "doc_symbol_id_s_viewBox_0_0"
+ },
+ {
+  "file": "importSpecEdges__doc_R_viewBox_0_0_0_10.svg",
+  "smoke": "importSpecEdgesSmoke.mjs",
+  "const": "doc_R_viewBox_0_0_0_10"
+ },
+ {
   "file": "incrementalStroke__SVG.svg",
   "smoke": "incrementalStrokeSmoke.mjs",
   "const": "SVG",
   "generated": true
+ },
+ {
+  "file": "inheritanceRender__svg_FONT_FACE_g_text_anchor.svg",
+  "smoke": "inheritanceRenderSmoke.mjs",
+  "const": "svg_FONT_FACE_g_text_anchor"
+ },
+ {
+  "file": "inheritanceRender__svg_FONT_FACE_text_x_10_y_11.svg",
+  "smoke": "inheritanceRenderSmoke.mjs",
+  "const": "svg_FONT_FACE_text_x_10_y_11"
+ },
+ {
+  "file": "inheritanceRender__svg_use_href_c_color_0c0_rec.svg",
+  "smoke": "inheritanceRenderSmoke.mjs",
+  "const": "svg_use_href_c_color_0c0_rec"
+ },
+ {
+  "file": "inheritanceRender__svg_use_href_l_stroke_lineca.svg",
+  "smoke": "inheritanceRenderSmoke.mjs",
+  "const": "svg_use_href_l_stroke_lineca"
+ },
+ {
+  "file": "inheritanceRender__svg_use_href_r_fill_rule_eve.svg",
+  "smoke": "inheritanceRenderSmoke.mjs",
+  "const": "svg_use_href_r_fill_rule_eve"
+ },
+ {
+  "file": "inheritanceRender__svg_use_href_r_g_fill_rule_e.svg",
+  "smoke": "inheritanceRenderSmoke.mjs",
+  "const": "svg_use_href_r_g_fill_rule_e"
+ },
+ {
+  "file": "inheritanceRender__svg_use_href_s_x_20_y_20_wid.svg",
+  "smoke": "inheritanceRenderSmoke.mjs",
+  "const": "svg_use_href_s_x_20_y_20_wid"
+ },
+ {
+  "file": "inheritanceRender__svg_use_href_v_visibility_hi.svg",
+  "smoke": "inheritanceRenderSmoke.mjs",
+  "const": "svg_use_href_v_visibility_hi"
+ },
+ {
+  "file": "inheritedChannelOpacity__SHAPES.svg",
+  "smoke": "inheritedChannelOpacitySmoke.mjs",
+  "const": "SHAPES"
+ },
+ {
+  "file": "inheritedChannelOpacityRender__svg_FONT_FACE_g_fill_opacity.svg",
+  "smoke": "inheritedChannelOpacityRenderSmoke.mjs",
+  "const": "svg_FONT_FACE_g_fill_opacity"
+ },
+ {
+  "file": "inheritedChannelOpacityRender__svg_g_fill_opacity_0_45_use.svg",
+  "smoke": "inheritedChannelOpacityRenderSmoke.mjs",
+  "const": "svg_g_fill_opacity_0_45_use"
+ },
+ {
+  "file": "inheritedChannelOpacityRender__svg_use_href_s_x_30_y_30_wid.svg",
+  "smoke": "inheritedChannelOpacityRenderSmoke.mjs",
+  "const": "svg_use_href_s_x_30_y_30_wid"
+ },
+ {
+  "file": "inheritedChannelOpacityRender__svg_use_href_t_x_30_y_30_fil.svg",
+  "smoke": "inheritedChannelOpacityRenderSmoke.mjs",
+  "const": "svg_use_href_t_x_30_y_30_fil"
+ },
+ {
+  "file": "instancedAsyncPixelGpu__SVG.svg",
+  "smoke": "instancedAsyncPixelGpuSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "instancedAsyncSpecialization__SVG.svg",
+  "smoke": "instancedAsyncSpecializationSmoke.mjs",
+  "const": "SVG"
  },
  {
   "file": "instancedBundleRenderDiff__SVG.svg",
@@ -228,25 +2188,86 @@
   "const": "SVG"
  },
  {
+  "file": "instancedFillPinnedDefines__SVG.svg",
+  "smoke": "instancedFillPinnedDefinesSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "instancedFlatTintAlphaRender__CIRCLE.svg",
+  "smoke": "instancedFlatTintAlphaRenderSmoke.mjs",
+  "const": "CIRCLE"
+ },
+ {
   "file": "instancedFog__SVG.svg",
   "smoke": "instancedFogSmoke.mjs",
   "const": "SVG"
  },
  {
-  "file": "keepInvisibleShapes__svg_0_000.svg",
-  "smoke": "keepInvisibleShapesSmoke.mjs",
-  "const": "svg_0_000"
+  "file": "instancedLeanFirst__SVG.svg",
+  "smoke": "instancedLeanFirstSmoke.mjs",
+  "const": "SVG"
  },
  {
-  "file": "keepInvisibleShapes__svg_0_551.svg",
-  "smoke": "keepInvisibleShapesSmoke.mjs",
-  "const": "svg_0_551"
+  "file": "keepHidden__wrap_A.svg",
+  "smoke": "keepHiddenSmoke.mjs",
+  "const": "wrap_A"
+ },
+ {
+  "file": "keepHidden__wrap_g_display_none_rect_id_h.svg",
+  "smoke": "keepHiddenSmoke.mjs",
+  "const": "wrap_g_display_none_rect_id_h"
+ },
+ {
+  "file": "keepHiddenRender__doc_g_visibility_hidden_rect.svg",
+  "smoke": "keepHiddenRenderSmoke.mjs",
+  "const": "doc_g_visibility_hidden_rect"
+ },
+ {
+  "file": "keepHiddenRender__doc.svg",
+  "smoke": "keepHiddenRenderSmoke.mjs",
+  "const": "doc"
+ },
+ {
+  "file": "layerStrokeArcsJoin__svg.svg",
+  "smoke": "layerStrokeArcsJoinSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "lbAcuteCorner__STAR.svg",
+  "smoke": "lbAcuteCornerSmoke.mjs",
+  "const": "STAR"
+ },
+ {
+  "file": "lbAnnulusEvenOdd__SVG.svg",
+  "smoke": "lbAnnulusEvenOddSmoke.mjs",
+  "const": "SVG",
+  "generated": true
  },
  {
   "file": "lbAnnulusSdf__SVG.svg",
   "smoke": "lbAnnulusSdfSmoke.mjs",
   "const": "SVG",
   "generated": true
+ },
+ {
+  "file": "lbArcCovSmall__SVG.svg",
+  "smoke": "lbArcCovSmallSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbBandHookGpu__BUMP_SVG.svg",
+  "smoke": "lbBandHookGpuSmoke.mjs",
+  "const": "BUMP_SVG"
+ },
+ {
+  "file": "lbBandHookGpu__SLIVER_SVG.svg",
+  "smoke": "lbBandHookGpuSmoke.mjs",
+  "const": "SLIVER_SVG"
+ },
+ {
+  "file": "lbBandInside__svg.svg",
+  "smoke": "lbBandInsideSmoke.mjs",
+  "const": "svg"
  },
  {
   "file": "lbBlendParity__SVG.svg",
@@ -285,14 +2306,24 @@
   "const": "MESA"
  },
  {
+  "file": "lbCornerShare__svg.svg",
+  "smoke": "lbCornerShareSmoke.mjs",
+  "const": "svg"
+ },
+ {
   "file": "lbCubicOverfill__wrap_SQUIRCLE.svg",
   "smoke": "lbCubicOverfillSmoke.mjs",
   "const": "wrap_SQUIRCLE"
  },
  {
-  "file": "lbCuspHoleParity__SVG.svg",
+  "file": "lbCuspHoleParity__CUSP_HOLE.svg",
   "smoke": "lbCuspHoleParitySmoke.mjs",
-  "const": "SVG"
+  "const": "CUSP_HOLE"
+ },
+ {
+  "file": "lbCuspHoleParity__SPIKE_TIP.svg",
+  "smoke": "lbCuspHoleParitySmoke.mjs",
+  "const": "SPIKE_TIP"
  },
  {
   "file": "lbDiagonalFrameParity__SVG.svg",
@@ -305,6 +2336,16 @@
   "smoke": "lbEllipticalRingParitySmoke.mjs",
   "const": "SVG",
   "generated": true
+ },
+ {
+  "file": "lbEmitOrder__SCURVE.svg",
+  "smoke": "lbEmitOrderSmoke.mjs",
+  "const": "SCURVE"
+ },
+ {
+  "file": "lbFillVariantCompile__SVG.svg",
+  "smoke": "lbFillVariantCompileSmoke.mjs",
+  "const": "SVG"
  },
  {
   "file": "lbFilterParity__SVG.svg",
@@ -372,9 +2413,146 @@
   "const": "SVG"
  },
  {
+  "file": "lbMorphBandHull__svgOf_A.svg",
+  "smoke": "lbMorphBandHullSmoke.mjs",
+  "const": "svgOf_A"
+ },
+ {
+  "file": "lbMorphBandHull__svgOf_B.svg",
+  "smoke": "lbMorphBandHullSmoke.mjs",
+  "const": "svgOf_B"
+ },
+ {
+  "file": "lbMorphChainGateRender__SVG_CUBIC_A.svg",
+  "smoke": "lbMorphChainGateRenderSmoke.mjs",
+  "const": "SVG_CUBIC_A"
+ },
+ {
+  "file": "lbMorphChainGateRender__SVG_CUBIC_B.svg",
+  "smoke": "lbMorphChainGateRenderSmoke.mjs",
+  "const": "SVG_CUBIC_B"
+ },
+ {
+  "file": "lbMorphChainGateRender__SVG_QUAD_A.svg",
+  "smoke": "lbMorphChainGateRenderSmoke.mjs",
+  "const": "SVG_QUAD_A"
+ },
+ {
+  "file": "lbMorphChainGateRender__SVG_QUAD_B.svg",
+  "smoke": "lbMorphChainGateRenderSmoke.mjs",
+  "const": "SVG_QUAD_B"
+ },
+ {
+  "file": "lbMorphChainGateRender__SVG_TEXT_A.svg",
+  "smoke": "lbMorphChainGateRenderSmoke.mjs",
+  "const": "SVG_TEXT_A"
+ },
+ {
+  "file": "lbMorphChainGateRender__SVG_TEXT_B.svg",
+  "smoke": "lbMorphChainGateRenderSmoke.mjs",
+  "const": "SVG_TEXT_B"
+ },
+ {
+  "file": "lbMorphChainGateRender__SVG_TRI_A.svg",
+  "smoke": "lbMorphChainGateRenderSmoke.mjs",
+  "const": "SVG_TRI_A"
+ },
+ {
+  "file": "lbMorphChainGateRender__SVG_TRI_B.svg",
+  "smoke": "lbMorphChainGateRenderSmoke.mjs",
+  "const": "SVG_TRI_B"
+ },
+ {
+  "file": "lbMorphEvenOdd__DST.svg",
+  "smoke": "lbMorphEvenOddSmoke.mjs",
+  "const": "DST",
+  "generated": true
+ },
+ {
+  "file": "lbMorphEvenOdd__SRC.svg",
+  "smoke": "lbMorphEvenOddSmoke.mjs",
+  "const": "SRC",
+  "generated": true
+ },
+ {
+  "file": "lbMorphGroupMetadata__svg_0.svg",
+  "smoke": "lbMorphGroupMetadataSmoke.mjs",
+  "const": "svg_0"
+ },
+ {
+  "file": "lbMorphGroupMetadata__svg_2.svg",
+  "smoke": "lbMorphGroupMetadataSmoke.mjs",
+  "const": "svg_2"
+ },
+ {
+  "file": "lbMorphRingPair__svgOf_M_40_160_L_160_160_L_160.svg",
+  "smoke": "lbMorphRingPairSmoke.mjs",
+  "const": "svgOf_M_40_160_L_160_160_L_160"
+ },
+ {
+  "file": "lbMorphRingPair__svgOf_M_40_160_L_160_160_L_1602.svg",
+  "smoke": "lbMorphRingPairSmoke.mjs",
+  "const": "svgOf_M_40_160_L_160_160_L_160"
+ },
+ {
+  "file": "lbPairBadFaceSplit__circle_64_64_30_30.svg",
+  "smoke": "lbPairBadFaceSplitSmoke.mjs",
+  "const": "circle_64_64_30_30"
+ },
+ {
+  "file": "lbPairBadFaceSplit__circle_66_63_40_35.svg",
+  "smoke": "lbPairBadFaceSplitSmoke.mjs",
+  "const": "circle_66_63_40_35"
+ },
+ {
+  "file": "lbPairCubicPlan__ring_70_70_35_35.svg",
+  "smoke": "lbPairCubicPlanSmoke.mjs",
+  "const": "ring_70_70_35_35"
+ },
+ {
+  "file": "lbPairCubicPlan__ring_80_50_40_25.svg",
+  "smoke": "lbPairCubicPlanSmoke.mjs",
+  "const": "ring_80_50_40_25"
+ },
+ {
+  "file": "lbPairCubicPlan__svg_0_0_40_40_A.svg",
+  "smoke": "lbPairCubicPlanSmoke.mjs",
+  "const": "svg_0_0_40_40_A"
+ },
+ {
+  "file": "lbPairCubicPlan__svg_0_0_40_40_B.svg",
+  "smoke": "lbPairCubicPlanSmoke.mjs",
+  "const": "svg_0_0_40_40_B"
+ },
+ {
+  "file": "lbPartialAdoption__svg.svg",
+  "smoke": "lbPartialAdoptionSmoke.mjs",
+  "const": "svg"
+ },
+ {
   "file": "lbPerShapeFallbackParity__SVG.svg",
   "smoke": "lbPerShapeFallbackParitySmoke.mjs",
   "const": "SVG"
+ },
+ {
+  "file": "lbPipeSceneOverflow__svg.svg",
+  "smoke": "lbPipeSceneOverflowSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "lbPrepareRoutes__FRAME.svg",
+  "smoke": "lbPrepareRoutesSmoke.mjs",
+  "const": "FRAME"
+ },
+ {
+  "file": "lbQuadArcContainment__CLEAR.svg",
+  "smoke": "lbQuadArcContainmentSmoke.mjs",
+  "const": "CLEAR"
+ },
+ {
+  "file": "lbQuadArcContainment__INTRUDE.svg",
+  "smoke": "lbQuadArcContainmentSmoke.mjs",
+  "const": "INTRUDE"
  },
  {
   "file": "lbQuadSeam__SVG.svg",
@@ -386,6 +2564,16 @@
   "file": "lbRecolorParity__SVG.svg",
   "smoke": "lbRecolorParitySmoke.mjs",
   "const": "SVG"
+ },
+ {
+  "file": "lbRingReach__svg_M162_100C169_31_136_44_1.svg",
+  "smoke": "lbRingReachSmoke.mjs",
+  "const": "svg_M162_100C169_31_136_44_1"
+ },
+ {
+  "file": "lbRingReach__svg_M288_45Q271_91_220_125Q1.svg",
+  "smoke": "lbRingReachSmoke.mjs",
+  "const": "svg_M288_45Q271_91_220_125Q1"
  },
  {
   "file": "lbRquadSeam__SVG.svg",
@@ -408,6 +2596,16 @@
   "file": "lbSplitRoute__SVG.svg",
   "smoke": "lbSplitRouteSmoke.mjs",
   "const": "SVG"
+ },
+ {
+  "file": "lbStraightChain__ngon_200.svg",
+  "smoke": "lbStraightChainSmoke.mjs",
+  "const": "ngon_200"
+ },
+ {
+  "file": "lbStraightChain__RECT.svg",
+  "smoke": "lbStraightChainSmoke.mjs",
+  "const": "RECT"
  },
  {
   "file": "lbStrokeParity__SVG.svg",
@@ -448,9 +2646,49 @@
   "generated": true
  },
  {
+  "file": "lbWorkerPoolCause__SVG.svg",
+  "smoke": "lbWorkerPoolCauseSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lbWorkerWireParity__svg.svg",
+  "smoke": "lbWorkerWireParitySmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "lbZeroAreaFace__ZERO_AREA_SCENE.svg",
+  "smoke": "lbZeroAreaFaceSmoke.mjs",
+  "const": "ZERO_AREA_SCENE"
+ },
+ {
   "file": "leanShaderRenderDiff__SVG.svg",
   "smoke": "leanShaderRenderDiffSmoke.mjs",
   "const": "SVG"
+ },
+ {
+  "file": "lifecycleRealContextRender__STARS.svg",
+  "smoke": "lifecycleRealContextRenderSmoke.mjs",
+  "const": "STARS"
+ },
+ {
+  "file": "lifecycleRealContextRender__SVG.svg",
+  "smoke": "lifecycleRealContextRenderSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "lifecycleRealContextRender__SVG2.svg",
+  "smoke": "lifecycleRealContextRenderSmoke.mjs",
+  "const": "SVG2"
+ },
+ {
+  "file": "loadingCallOverlap__doc_path_d_M10_10_L90_10_L50.svg",
+  "smoke": "loadingCallOverlapSmoke.mjs",
+  "const": "doc_path_d_M10_10_L90_10_L50"
+ },
+ {
+  "file": "loadingCallOverlap__doc_path_d_M10_50_C30_0_70_1.svg",
+  "smoke": "loadingCallOverlapSmoke.mjs",
+  "const": "doc_path_d_M10_50_C30_0_70_1"
  },
  {
   "file": "loopBlinnMorph__DST.svg",
@@ -463,6 +2701,26 @@
   "const": "SRC"
  },
  {
+  "file": "markerAspectRender__svg.svg",
+  "smoke": "markerAspectRenderSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "markerClipMaskRender__svg.svg",
+  "smoke": "markerClipMaskRenderSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "markerTransformRender__svg.svg",
+  "smoke": "markerTransformRenderSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "markerViewportClipRender__svg.svg",
+  "smoke": "markerViewportClipRenderSmoke.mjs",
+  "const": "svg"
+ },
+ {
   "file": "maskAnim__SVG.svg",
   "smoke": "maskAnimSmoke.mjs",
   "const": "SVG"
@@ -473,9 +2731,134 @@
   "const": "SHEET"
  },
  {
+  "file": "maskBakeNoNet__LATE.svg",
+  "smoke": "maskBakeNoNetSmoke.mjs",
+  "const": "LATE"
+ },
+ {
+  "file": "maskBakeNoNet__MASKED.svg",
+  "smoke": "maskBakeNoNetSmoke.mjs",
+  "const": "MASKED"
+ },
+ {
+  "file": "maskBakePerHandle__A.svg",
+  "smoke": "maskBakePerHandleSmoke.mjs",
+  "const": "A"
+ },
+ {
+  "file": "maskBakePerHandle__B.svg",
+  "smoke": "maskBakePerHandleSmoke.mjs",
+  "const": "B"
+ },
+ {
   "file": "maskCache__SVG.svg",
   "smoke": "maskCacheSmoke.mjs",
   "const": "SVG"
+ },
+ {
+  "file": "maskChildStrokeOmit__noStroke.svg",
+  "smoke": "maskChildStrokeOmitSmoke.mjs",
+  "const": "noStroke"
+ },
+ {
+  "file": "maskChildStrokeOmit__stroked.svg",
+  "smoke": "maskChildStrokeOmitSmoke.mjs",
+  "const": "stroked"
+ },
+ {
+  "file": "maskRegionRender__svg.svg",
+  "smoke": "maskRegionRenderSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "maskStandInNotStamped__ALL.svg",
+  "smoke": "maskStandInNotStampedSmoke.mjs",
+  "const": "ALL"
+ },
+ {
+  "file": "maskStandInNotStamped__LEAN.svg",
+  "smoke": "maskStandInNotStampedSmoke.mjs",
+  "const": "LEAN"
+ },
+ {
+  "file": "memoryBudget__BLOBS.svg",
+  "smoke": "memoryBudgetSmoke.mjs",
+  "const": "BLOBS"
+ },
+ {
+  "file": "memoryBudget__blurred_30_30_00f.svg",
+  "smoke": "memoryBudgetSmoke.mjs",
+  "const": "blurred_30_30_00f"
+ },
+ {
+  "file": "memoryBudget__blurred_60_60_0a0.svg",
+  "smoke": "memoryBudgetSmoke.mjs",
+  "const": "blurred_60_60_0a0"
+ },
+ {
+  "file": "memoryBudget__GROUPS.svg",
+  "smoke": "memoryBudgetSmoke.mjs",
+  "const": "GROUPS"
+ },
+ {
+  "file": "memoryBudget__svg_circle_cx_30_cy_30_r_20.svg",
+  "smoke": "memoryBudgetSmoke.mjs",
+  "const": "svg_circle_cx_30_cy_30_r_20"
+ },
+ {
+  "file": "memoryBudget__svg_path_d_M10_10L80_10L80_8.svg",
+  "smoke": "memoryBudgetSmoke.mjs",
+  "const": "svg_path_d_M10_10L80_10L80_8"
+ },
+ {
+  "file": "memoryBudget__svg_path_d_M20_20L70_20L70_7.svg",
+  "smoke": "memoryBudgetSmoke.mjs",
+  "const": "svg_path_d_M20_20L70_20L70_7"
+ },
+ {
+  "file": "memoryBudget__svg_rect_x_10_y_10_width_40.svg",
+  "smoke": "memoryBudgetSmoke.mjs",
+  "const": "svg_rect_x_10_y_10_width_40"
+ },
+ {
+  "file": "memoryBudget__svg_rect_x_20_y_20_width_60.svg",
+  "smoke": "memoryBudgetSmoke.mjs",
+  "const": "svg_rect_x_20_y_20_width_60"
+ },
+ {
+  "file": "memoryBudgetRender__OTHER.svg",
+  "smoke": "memoryBudgetRenderSmoke.mjs",
+  "const": "OTHER"
+ },
+ {
+  "file": "memoryBudgetRender__SCENE.svg",
+  "smoke": "memoryBudgetRenderSmoke.mjs",
+  "const": "SCENE"
+ },
+ {
+  "file": "memoryBudgetRender__STATIC_CP.svg",
+  "smoke": "memoryBudgetRenderSmoke.mjs",
+  "const": "STATIC_CP"
+ },
+ {
+  "file": "morphAliasResourceIds__A.svg",
+  "smoke": "morphAliasResourceIdsSmoke.mjs",
+  "const": "A"
+ },
+ {
+  "file": "morphAliasResourceIds__B.svg",
+  "smoke": "morphAliasResourceIdsSmoke.mjs",
+  "const": "B"
+ },
+ {
+  "file": "morphBandPlaneSize__doc_A.svg",
+  "smoke": "morphBandPlaneSizeSmoke.mjs",
+  "const": "doc_A"
+ },
+ {
+  "file": "morphBandPlaneSize__doc_B.svg",
+  "smoke": "morphBandPlaneSizeSmoke.mjs",
+  "const": "doc_B"
  },
  {
   "file": "morphClipRoute__DST.svg",
@@ -508,6 +2891,26 @@
   "const": "SRC"
  },
  {
+  "file": "morphDstOnlyStrokeBand__svg_path_id_a_fill_36c_d_M10.svg",
+  "smoke": "morphDstOnlyStrokeBandSmoke.mjs",
+  "const": "svg_path_id_a_fill_36c_d_M10"
+ },
+ {
+  "file": "morphDstOnlyStrokeBand__svg_path_id_a_fill_36c_d_M12.svg",
+  "smoke": "morphDstOnlyStrokeBandSmoke.mjs",
+  "const": "svg_path_id_a_fill_36c_d_M12"
+ },
+ {
+  "file": "morphFillParity__card_10.svg",
+  "smoke": "morphFillParitySmoke.mjs",
+  "const": "card_10"
+ },
+ {
+  "file": "morphFillParity__card_24.svg",
+  "smoke": "morphFillParitySmoke.mjs",
+  "const": "card_24"
+ },
+ {
   "file": "morphFilterRoute__DST.svg",
   "smoke": "morphFilterRouteSmoke.mjs",
   "const": "DST"
@@ -536,6 +2939,36 @@
   "file": "morphGradientRoute__SRC.svg",
   "smoke": "morphGradientRouteSmoke.mjs",
   "const": "SRC"
+ },
+ {
+  "file": "morphGradientStopLayoutRender__A.svg",
+  "smoke": "morphGradientStopLayoutRenderSmoke.mjs",
+  "const": "A"
+ },
+ {
+  "file": "morphGradientStopLayoutRender__B.svg",
+  "smoke": "morphGradientStopLayoutRenderSmoke.mjs",
+  "const": "B"
+ },
+ {
+  "file": "morphGroupOpacity__doc_g_opacity_5_rect_id_r_x.svg",
+  "smoke": "morphGroupOpacitySmoke.mjs",
+  "const": "doc_g_opacity_5_rect_id_r_x"
+ },
+ {
+  "file": "morphGroupOpacity__doc_g_rect_id_r_x_20_y_10_wi.svg",
+  "smoke": "morphGroupOpacitySmoke.mjs",
+  "const": "doc_g_rect_id_r_x_20_y_10_wi"
+ },
+ {
+  "file": "morphHitBitsOneSided__svg_rect_id_a_x_1_y_1_width.svg",
+  "smoke": "morphHitBitsOneSidedSmoke.mjs",
+  "const": "svg_rect_id_a_x_1_y_1_width"
+ },
+ {
+  "file": "morphHitBitsOneSided__svg_rect_id_a_x_3_y_3_width.svg",
+  "smoke": "morphHitBitsOneSidedSmoke.mjs",
+  "const": "svg_rect_id_a_x_3_y_3_width"
  },
  {
   "file": "morphIntervalSplit__FLIP_DST.svg",
@@ -606,6 +3039,16 @@
   "file": "morphOpenStrokeRoute__SRC.svg",
   "smoke": "morphOpenStrokeRouteSmoke.mjs",
   "const": "SRC"
+ },
+ {
+  "file": "morphPrimitivesOn__CIRCLE.svg",
+  "smoke": "morphPrimitivesOnSmoke.mjs",
+  "const": "CIRCLE"
+ },
+ {
+  "file": "morphPrimitivesOn__ELLIPSE.svg",
+  "smoke": "morphPrimitivesOnSmoke.mjs",
+  "const": "ELLIPSE"
  },
  {
   "file": "morphRoute__ring_70_70_35_35.svg",
@@ -733,6 +3176,26 @@
   "const": "SHEET"
  },
  {
+  "file": "nativeGradientMorph__A.svg",
+  "smoke": "nativeGradientMorphSmoke.mjs",
+  "const": "A"
+ },
+ {
+  "file": "nativeGradientMorph__B.svg",
+  "smoke": "nativeGradientMorphSmoke.mjs",
+  "const": "B"
+ },
+ {
+  "file": "nativeGradientMorph__PA.svg",
+  "smoke": "nativeGradientMorphSmoke.mjs",
+  "const": "PA"
+ },
+ {
+  "file": "nativeGradientMorph__PB.svg",
+  "smoke": "nativeGradientMorphSmoke.mjs",
+  "const": "PB"
+ },
+ {
   "file": "nativeIdlessMatchedMorph__DST.svg",
   "smoke": "nativeIdlessMatchedMorphSmoke.mjs",
   "const": "DST"
@@ -780,7 +3243,33 @@
  {
   "file": "nativeMorphPerf__PREFAB.svg",
   "smoke": "nativeMorphPerfSmoke.mjs",
-  "const": "PREFAB"
+  "const": "PREFAB",
+  "generated": true
+ },
+ {
+  "file": "nativeMorphStash__svg.svg",
+  "smoke": "nativeMorphStashSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "nativeOpenStrokePaintMorph__FADE_A.svg",
+  "smoke": "nativeOpenStrokePaintMorphSmoke.mjs",
+  "const": "FADE_A"
+ },
+ {
+  "file": "nativeOpenStrokePaintMorph__FADE_B.svg",
+  "smoke": "nativeOpenStrokePaintMorphSmoke.mjs",
+  "const": "FADE_B"
+ },
+ {
+  "file": "nativeOpenStrokePaintMorph__TICK_A.svg",
+  "smoke": "nativeOpenStrokePaintMorphSmoke.mjs",
+  "const": "TICK_A"
+ },
+ {
+  "file": "nativeOpenStrokePaintMorph__TICK_B.svg",
+  "smoke": "nativeOpenStrokePaintMorphSmoke.mjs",
+  "const": "TICK_B"
  },
  {
   "file": "nativeRecolor__SVG.svg",
@@ -793,8 +3282,18 @@
   "const": "PREFAB"
  },
  {
+  "file": "nativeStationaryClip__CLIP.svg",
+  "smoke": "nativeStationaryClipSmoke.mjs",
+  "const": "CLIP"
+ },
+ {
   "file": "nativeStationaryClip__CONTENT.svg",
   "smoke": "nativeStationaryClipSmoke.mjs",
+  "const": "CONTENT"
+ },
+ {
+  "file": "nativeTextClipClear__CONTENT.svg",
+  "smoke": "nativeTextClipClearSmoke.mjs",
   "const": "CONTENT"
  },
  {
@@ -813,6 +3312,81 @@
   "const": "PREFAB"
  },
  {
+  "file": "nestedMaskCases__clip_and_mask.svg",
+  "smoke": "nestedMaskCasesSmoke.mjs",
+  "const": "clip_and_mask"
+ },
+ {
+  "file": "nestedMaskCases__clip_in_clip.svg",
+  "smoke": "nestedMaskCasesSmoke.mjs",
+  "const": "clip_in_clip"
+ },
+ {
+  "file": "nestedMaskCases__clip_in_mask.svg",
+  "smoke": "nestedMaskCasesSmoke.mjs",
+  "const": "clip_in_mask"
+ },
+ {
+  "file": "nestedMaskCases__clip_use_in_mask.svg",
+  "smoke": "nestedMaskCasesSmoke.mjs",
+  "const": "clip_use_in_mask"
+ },
+ {
+  "file": "nestedMaskCases__mask_depth3.svg",
+  "smoke": "nestedMaskCasesSmoke.mjs",
+  "const": "mask_depth3"
+ },
+ {
+  "file": "nestedMaskCases__mask_g_child.svg",
+  "smoke": "nestedMaskCasesSmoke.mjs",
+  "const": "mask_g_child"
+ },
+ {
+  "file": "nestedMaskCases__mask_in_clip.svg",
+  "smoke": "nestedMaskCasesSmoke.mjs",
+  "const": "mask_in_clip"
+ },
+ {
+  "file": "nestedMaskCases__mask_nested.svg",
+  "smoke": "nestedMaskCasesSmoke.mjs",
+  "const": "mask_nested"
+ },
+ {
+  "file": "nestedMaskCases__mask_on_g.svg",
+  "smoke": "nestedMaskCasesSmoke.mjs",
+  "const": "mask_on_g"
+ },
+ {
+  "file": "nestedMaskCases__mask_on_masked_g.svg",
+  "smoke": "nestedMaskCasesSmoke.mjs",
+  "const": "mask_on_masked_g"
+ },
+ {
+  "file": "nestedMaskCases__mask_on_use.svg",
+  "smoke": "nestedMaskCasesSmoke.mjs",
+  "const": "mask_on_use"
+ },
+ {
+  "file": "nestedMaskCases__mask_one_shape.svg",
+  "smoke": "nestedMaskCasesSmoke.mjs",
+  "const": "mask_one_shape"
+ },
+ {
+  "file": "nestedMaskCases__mask_single.svg",
+  "smoke": "nestedMaskCasesSmoke.mjs",
+  "const": "mask_single"
+ },
+ {
+  "file": "nestedMaskCases__mask_use_child.svg",
+  "smoke": "nestedMaskCasesSmoke.mjs",
+  "const": "mask_use_child"
+ },
+ {
+  "file": "nestedMaskCases__two_masks_siblings.svg",
+  "smoke": "nestedMaskCasesSmoke.mjs",
+  "const": "two_masks_siblings"
+ },
+ {
   "file": "nineSliceFilter__FILT.svg",
   "smoke": "nineSliceFilterSmoke.mjs",
   "const": "FILT"
@@ -826,6 +3400,51 @@
   "file": "nineSliceInstance__SVG.svg",
   "smoke": "nineSliceInstanceSmoke.mjs",
   "const": "SVG"
+ },
+ {
+  "file": "noAaArcRow__FAR.svg",
+  "smoke": "noAaArcRowSmoke.mjs",
+  "const": "FAR"
+ },
+ {
+  "file": "noAaArcRow__FIXTURE.svg",
+  "smoke": "noAaArcRowSmoke.mjs",
+  "const": "FIXTURE"
+ },
+ {
+  "file": "noAaArcRow__GAP.svg",
+  "smoke": "noAaArcRowSmoke.mjs",
+  "const": "GAP"
+ },
+ {
+  "file": "noAaSelfCross__wrap_CROSS.svg",
+  "smoke": "noAaSelfCrossSmoke.mjs",
+  "const": "wrap_CROSS"
+ },
+ {
+  "file": "noAaSelfCross__wrap_CUSP.svg",
+  "smoke": "noAaSelfCrossSmoke.mjs",
+  "const": "wrap_CUSP"
+ },
+ {
+  "file": "noAaSelfCross__wrap_LOOP_true.svg",
+  "smoke": "noAaSelfCrossSmoke.mjs",
+  "const": "wrap_LOOP_true"
+ },
+ {
+  "file": "noAaSelfCross__wrap_LOOP.svg",
+  "smoke": "noAaSelfCrossSmoke.mjs",
+  "const": "wrap_LOOP"
+ },
+ {
+  "file": "noAaSelfCross__wrap_STAR_true.svg",
+  "smoke": "noAaSelfCrossSmoke.mjs",
+  "const": "wrap_STAR_true"
+ },
+ {
+  "file": "noAaSelfCross__wrap_STAR.svg",
+  "smoke": "noAaSelfCrossSmoke.mjs",
+  "const": "wrap_STAR"
  },
  {
   "file": "noAaStrokeCover__grid_N_0_0.svg",
@@ -848,6 +3467,66 @@
   "const": "grid_N_8_20_8"
  },
  {
+  "file": "noCoverFill__FILL_AND_STROKE.svg",
+  "smoke": "noCoverFillSmoke.mjs",
+  "const": "FILL_AND_STROKE"
+ },
+ {
+  "file": "nonBlockingGl__doc_g_opacity_0_5_rect_x_10.svg",
+  "smoke": "nonBlockingGlSmoke.mjs",
+  "const": "doc_g_opacity_0_5_rect_x_10"
+ },
+ {
+  "file": "nonBlockingGl__doc_path_d_M10_50_A_40_25_20.svg",
+  "smoke": "nonBlockingGlSmoke.mjs",
+  "const": "doc_path_d_M10_50_A_40_25_20"
+ },
+ {
+  "file": "nonBlockingGl__doc_path_d_M10_50_C_30_0_70.svg",
+  "smoke": "nonBlockingGlSmoke.mjs",
+  "const": "doc_path_d_M10_50_C_30_0_70"
+ },
+ {
+  "file": "nonBlockingGl__doc_path_d_M10_50_C_30_0_702.svg",
+  "smoke": "nonBlockingGlSmoke.mjs",
+  "const": "doc_path_d_M10_50_C_30_0_70"
+ },
+ {
+  "file": "nonBlockingGl__doc_path_id_s_d_M10_10_L_90.svg",
+  "smoke": "nonBlockingGlSmoke.mjs",
+  "const": "doc_path_id_s_d_M10_10_L_90"
+ },
+ {
+  "file": "nonBlockingGl__doc_path_id_s_d_M50_5_C_95_2.svg",
+  "smoke": "nonBlockingGlSmoke.mjs",
+  "const": "doc_path_id_s_d_M50_5_C_95_2"
+ },
+ {
+  "file": "objectBboxStroke__CLIPPED.svg",
+  "smoke": "objectBboxStrokeSmoke.mjs",
+  "const": "CLIPPED"
+ },
+ {
+  "file": "objectBboxStroke__PLAIN.svg",
+  "smoke": "objectBboxStrokeSmoke.mjs",
+  "const": "PLAIN"
+ },
+ {
+  "file": "objectBoundingBoxGradient__OBB_GRADIENT_DEMO.svg",
+  "smoke": "objectBoundingBoxGradientSmoke.mjs",
+  "const": "OBB_GRADIENT_DEMO"
+ },
+ {
+  "file": "objectBoundingBoxStrokeGradient__SVG.svg",
+  "smoke": "objectBoundingBoxStrokeGradientSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "objectBoundingBoxTransform__OBB_TRANSFORM_DEMO.svg",
+  "smoke": "objectBoundingBoxTransformSmoke.mjs",
+  "const": "OBB_TRANSFORM_DEMO"
+ },
+ {
   "file": "occlusionCull__NOT_COVERED.svg",
   "smoke": "occlusionCullSmoke.mjs",
   "const": "NOT_COVERED"
@@ -859,6 +3538,12 @@
   "generated": true
  },
  {
+  "file": "occlusionCull__WINDOW.svg",
+  "smoke": "occlusionCullSmoke.mjs",
+  "const": "WINDOW",
+  "generated": true
+ },
+ {
   "file": "occlusionCullOverride__SVG.svg",
   "smoke": "occlusionCullOverrideSmoke.mjs",
   "const": "SVG"
@@ -866,7 +3551,8 @@
  {
   "file": "occupancyAsync__SVG.svg",
   "smoke": "occupancyAsyncSmoke.mjs",
-  "const": "SVG"
+  "const": "SVG",
+  "generated": true
  },
  {
   "file": "occupancyImport__svg.svg",
@@ -876,6 +3562,21 @@
  {
   "file": "occupancyRenderDiff__SVG.svg",
   "smoke": "occupancyRenderDiffSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "opaquePrepass__SVG.svg",
+  "smoke": "opaquePrepassSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "opaquePrepassOptOut__svg.svg",
+  "smoke": "opaquePrepassOptOutSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "openFillNoZ__SVG.svg",
+  "smoke": "openFillNoZSmoke.mjs",
   "const": "SVG"
  },
  {
@@ -904,9 +3605,69 @@
   "const": "STROKED"
  },
  {
+  "file": "origin__wrap_circle_cx_40_cy_40_r_30.svg",
+  "smoke": "originSmoke.mjs",
+  "const": "wrap_circle_cx_40_cy_40_r_30"
+ },
+ {
+  "file": "origin__wrap_rect_width_1_height_1.svg",
+  "smoke": "originSmoke.mjs",
+  "const": "wrap_rect_width_1_height_1"
+ },
+ {
+  "file": "origin__wrap_rect_x_10_y_10_width_80.svg",
+  "smoke": "originSmoke.mjs",
+  "const": "wrap_rect_x_10_y_10_width_80"
+ },
+ {
+  "file": "origin__wrap_rect_x_100000_y_200000_w.svg",
+  "smoke": "originSmoke.mjs",
+  "const": "wrap_rect_x_100000_y_200000_w"
+ },
+ {
   "file": "overrideDirtyBand__SVG.svg",
   "smoke": "overrideDirtyBandSmoke.mjs",
   "const": "SVG"
+ },
+ {
+  "file": "overrideMove__doc_CASES_fill.svg",
+  "smoke": "overrideMoveSmoke.mjs",
+  "const": "doc_CASES_fill"
+ },
+ {
+  "file": "overrideMove__doc_CASES_mask2.svg",
+  "smoke": "overrideMoveSmoke.mjs",
+  "const": "doc_CASES_mask2"
+ },
+ {
+  "file": "overrideMove__doc_CASES_stroke.svg",
+  "smoke": "overrideMoveSmoke.mjs",
+  "const": "doc_CASES_stroke"
+ },
+ {
+  "file": "overrideMoveRender__SVG_M.svg",
+  "smoke": "overrideMoveRenderSmoke.mjs",
+  "const": "SVG_M"
+ },
+ {
+  "file": "overrideMoveRender__SVG_R.svg",
+  "smoke": "overrideMoveRenderSmoke.mjs",
+  "const": "SVG_R"
+ },
+ {
+  "file": "overrideTableContract__svg_rect_id_a_x_10_y_10_widt.svg",
+  "smoke": "overrideTableContractSmoke.mjs",
+  "const": "svg_rect_id_a_x_10_y_10_widt"
+ },
+ {
+  "file": "overrideTableContract__svg_rect_id_a_x_10_y_10_widt2.svg",
+  "smoke": "overrideTableContractSmoke.mjs",
+  "const": "svg_rect_id_a_x_10_y_10_widt"
+ },
+ {
+  "file": "overrideVisibilityFade__BAND_SVG.svg",
+  "smoke": "overrideVisibilityFadeSmoke.mjs",
+  "const": "BAND_SVG"
  },
  {
   "file": "overrideVisibilityFade__SVG.svg",
@@ -914,19 +3675,74 @@
   "const": "SVG"
  },
  {
-  "file": "pathBooleanSlice10__SVG.svg",
-  "smoke": "pathBooleanSlice10Smoke.mjs",
-  "const": "SVG"
+  "file": "paintImageMaskAuditRender__doc_rect_x_0_y_0_width_32_he.svg",
+  "smoke": "paintImageMaskAuditRenderSmoke.mjs",
+  "const": "doc_rect_x_0_y_0_width_32_he"
  },
  {
-  "file": "pathBooleanSlice8__SVG_THREE_DISJOINT.svg",
-  "smoke": "pathBooleanSlice8Smoke.mjs",
+  "file": "paintImageMaskAuditRender__doc_rect_x_24_y_8_width_16_h.svg",
+  "smoke": "paintImageMaskAuditRenderSmoke.mjs",
+  "const": "doc_rect_x_24_y_8_width_16_h"
+ },
+ {
+  "file": "paintImageMaskAuditRender__href_linearGradient_id_g_href.svg",
+  "smoke": "paintImageMaskAuditRenderSmoke.mjs",
+  "const": "href_linearGradient_id_g_href"
+ },
+ {
+  "file": "paintImageMaskAuditRender__href_linearGradient_id_g_href2.svg",
+  "smoke": "paintImageMaskAuditRenderSmoke.mjs",
+  "const": "href_linearGradient_id_g_href"
+ },
+ {
+  "file": "paintImageMaskAuditRender__href_linearGradient_id_g_href3.svg",
+  "smoke": "paintImageMaskAuditRenderSmoke.mjs",
+  "const": "href_linearGradient_id_g_href"
+ },
+ {
+  "file": "paintImageMaskAuditRender__nested_x_100_y_100_width_300_he.svg",
+  "smoke": "paintImageMaskAuditRenderSmoke.mjs",
+  "const": "nested_x_100_y_100_width_300_he"
+ },
+ {
+  "file": "paintImageMaskAuditRender__nested_x_24_y_0_width_16_height.svg",
+  "smoke": "paintImageMaskAuditRenderSmoke.mjs",
+  "const": "nested_x_24_y_0_width_16_height"
+ },
+ {
+  "file": "paintImageMaskAuditRender__wide_0_5.svg",
+  "smoke": "paintImageMaskAuditRenderSmoke.mjs",
+  "const": "wide_0_5"
+ },
+ {
+  "file": "paintImageMaskAuditRender__wide_0_50196.svg",
+  "smoke": "paintImageMaskAuditRenderSmoke.mjs",
+  "const": "wide_0_50196"
+ },
+ {
+  "file": "paintOrderStroke__svgFor_false.svg",
+  "smoke": "paintOrderStrokeSmoke.mjs",
+  "const": "svgFor_false"
+ },
+ {
+  "file": "paintOrderStroke__svgFor_true.svg",
+  "smoke": "paintOrderStrokeSmoke.mjs",
+  "const": "svgFor_true"
+ },
+ {
+  "file": "pathBooleanSilhouetteImport__SVG_THREE_DISJOINT.svg",
+  "smoke": "pathBooleanSilhouetteImportSmoke.mjs",
   "const": "SVG_THREE_DISJOINT"
  },
  {
-  "file": "pathBooleanSlice8__SVG_TWO_SQUARES.svg",
-  "smoke": "pathBooleanSlice8Smoke.mjs",
+  "file": "pathBooleanSilhouetteImport__SVG_TWO_SQUARES.svg",
+  "smoke": "pathBooleanSilhouetteImportSmoke.mjs",
   "const": "SVG_TWO_SQUARES"
+ },
+ {
+  "file": "pathBooleanSilhouetteVisual__SVG.svg",
+  "smoke": "pathBooleanSilhouetteVisualSmoke.mjs",
+  "const": "SVG"
  },
  {
   "file": "patternTransform__CONTROL.svg",
@@ -937,6 +3753,106 @@
   "file": "patternTransform__ROTATED.svg",
   "smoke": "patternTransformSmoke.mjs",
   "const": "ROTATED"
+ },
+ {
+  "file": "patternTransformPixel__svg_direct.svg",
+  "smoke": "patternTransformPixelSmoke.mjs",
+  "const": "svg_direct"
+ },
+ {
+  "file": "patternUnits__doc_pattern_id_base_width_26.svg",
+  "smoke": "patternUnitsSmoke.mjs",
+  "const": "doc_pattern_id_base_width_26"
+ },
+ {
+  "file": "patternUnits__doc_pattern_id_p_width_26_he.svg",
+  "smoke": "patternUnitsSmoke.mjs",
+  "const": "doc_pattern_id_p_width_26_he"
+ },
+ {
+  "file": "patternUnits__doc_pattern_id_p_width_26_he2.svg",
+  "smoke": "patternUnitsSmoke.mjs",
+  "const": "doc_pattern_id_p_width_26_he"
+ },
+ {
+  "file": "patternUnits__doc_pattern_id_p_x_0_1_y_0_2.svg",
+  "smoke": "patternUnitsSmoke.mjs",
+  "const": "doc_pattern_id_p_x_0_1_y_0_2"
+ },
+ {
+  "file": "patternUnits__doc_pattern_id_p_x_5_y_7_wid.svg",
+  "smoke": "patternUnitsSmoke.mjs",
+  "const": "doc_pattern_id_p_x_5_y_7_wid"
+ },
+ {
+  "file": "pinnedEngineDeclineRender__FEW.svg",
+  "smoke": "pinnedEngineDeclineRenderSmoke.mjs",
+  "const": "FEW"
+ },
+ {
+  "file": "pinnedEngineDeclineRender__MANY.svg",
+  "smoke": "pinnedEngineDeclineRenderSmoke.mjs",
+  "const": "MANY"
+ },
+ {
+  "file": "pointListTwoRenderers__X.svg",
+  "smoke": "pointListTwoRenderersSmoke.mjs",
+  "const": "X"
+ },
+ {
+  "file": "pointListTwoRenderers__Y.svg",
+  "smoke": "pointListTwoRenderersSmoke.mjs",
+  "const": "Y"
+ },
+ {
+  "file": "primDeepZoomRender__CIRCLE_LARGE.svg",
+  "smoke": "primDeepZoomRenderSmoke.mjs",
+  "const": "CIRCLE_LARGE"
+ },
+ {
+  "file": "primDeepZoomRender__CIRCLE_SMALL.svg",
+  "smoke": "primDeepZoomRenderSmoke.mjs",
+  "const": "CIRCLE_SMALL"
+ },
+ {
+  "file": "primDeepZoomRender__CIRCLE.svg",
+  "smoke": "primDeepZoomRenderSmoke.mjs",
+  "const": "CIRCLE"
+ },
+ {
+  "file": "primDeepZoomRender__RRECT.svg",
+  "smoke": "primDeepZoomRenderSmoke.mjs",
+  "const": "RRECT"
+ },
+ {
+  "file": "primStrokedBbox__CIRC.svg",
+  "smoke": "primStrokedBboxSmoke.mjs",
+  "const": "CIRC"
+ },
+ {
+  "file": "psoWarmQueue__svg_solid.svg",
+  "smoke": "psoWarmQueueSmoke.mjs",
+  "const": "svg_solid"
+ },
+ {
+  "file": "psoWarmQueue__svg_stroke.svg",
+  "smoke": "psoWarmQueueSmoke.mjs",
+  "const": "svg_stroke"
+ },
+ {
+  "file": "rayLaneReject__svg_0_0_100_100_path_d_M20_9.svg",
+  "smoke": "rayLaneRejectSmoke.mjs",
+  "const": "svg_0_0_100_100_path_d_M20_9"
+ },
+ {
+  "file": "rayLaneReject__svg_0_0_128_128_path_d_M10_1.svg",
+  "smoke": "rayLaneRejectSmoke.mjs",
+  "const": "svg_0_0_128_128_path_d_M10_1"
+ },
+ {
+  "file": "rayLaneReject__svg_0_0_64_64_path_d_M4_5_4.svg",
+  "smoke": "rayLaneRejectSmoke.mjs",
+  "const": "svg_0_0_64_64_path_d_M4_5_4"
  },
  {
   "file": "rectRxDropShadowRender__A.svg",
@@ -959,9 +3875,19 @@
   "const": "SVG"
  },
  {
+  "file": "renderRouteParity__svg.svg",
+  "smoke": "renderRouteParitySmoke.mjs",
+  "const": "svg"
+ },
+ {
   "file": "resolutionScale__SCENE.svg",
   "smoke": "resolutionScaleSmoke.mjs",
   "const": "SCENE"
+ },
+ {
+  "file": "rowEnginesGpu__SVG_B.svg",
+  "smoke": "rowEnginesGpuSmoke.mjs",
+  "const": "SVG_B"
  },
  {
   "file": "shaderBuild__SVG.svg",
@@ -1009,6 +3935,16 @@
   "const": "SRC_SVG"
  },
  {
+  "file": "shapeMorphDstOnly__DST.svg",
+  "smoke": "shapeMorphDstOnlySmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "shapeMorphDstOnly__SRC.svg",
+  "smoke": "shapeMorphDstOnlySmoke.mjs",
+  "const": "SRC"
+ },
+ {
   "file": "shapeMorphMaskFilter__POSE_A.svg",
   "smoke": "shapeMorphMaskFilterSmoke.mjs",
   "const": "POSE_A"
@@ -1019,9 +3955,59 @@
   "const": "POSE_B"
  },
  {
+  "file": "shapeMorphSourceRelease__A.svg",
+  "smoke": "shapeMorphSourceReleaseSmoke.mjs",
+  "const": "A"
+ },
+ {
+  "file": "shapeMorphSourceRelease__B.svg",
+  "smoke": "shapeMorphSourceReleaseSmoke.mjs",
+  "const": "B"
+ },
+ {
   "file": "sharedGroupCache__SVG_GREEN.svg",
   "smoke": "sharedGroupCacheSmoke.mjs",
   "const": "SVG_GREEN"
+ },
+ {
+  "file": "sharedGroupSiblingBake__SVG.svg",
+  "smoke": "sharedGroupSiblingBakeSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "sharedRendererOptions__SVG.svg",
+  "smoke": "sharedRendererOptionsSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "silhouetteClippedExtent__CLIPPED_SILHOUETTE_DEMO.svg",
+  "smoke": "silhouetteClippedExtentSmoke.mjs",
+  "const": "CLIPPED_SILHOUETTE_DEMO"
+ },
+ {
+  "file": "silhouetteRefIndex__SILHOUETTE_REFS.svg",
+  "smoke": "silhouetteRefIndexSmoke.mjs",
+  "const": "SILHOUETTE_REFS"
+ },
+ {
+  "file": "slugCurvedEdge__SLAB.svg",
+  "smoke": "slugCurvedEdgeSmoke.mjs",
+  "const": "SLAB"
+ },
+ {
+  "file": "slugCurvedEdge__wrap_M_500_180_a_260_320_0_1.svg",
+  "smoke": "slugCurvedEdgeSmoke.mjs",
+  "const": "wrap_M_500_180_a_260_320_0_1"
+ },
+ {
+  "file": "slugCurvedEdge__wrap_M_500_180_a_320_320_0_1.svg",
+  "smoke": "slugCurvedEdgeSmoke.mjs",
+  "const": "wrap_M_500_180_a_320_320_0_1"
+ },
+ {
+  "file": "slugCurvedEdge__wrap_M_700_300_C_700_150_300.svg",
+  "smoke": "slugCurvedEdgeSmoke.mjs",
+  "const": "wrap_M_700_300_C_700_150_300"
  },
  {
   "file": "slugQuadScale__svg_N_SS.svg",
@@ -1032,6 +4018,81 @@
   "file": "slugQuadScale__svg_N.svg",
   "smoke": "slugQuadScaleSmoke.mjs",
   "const": "svg_N"
+ },
+ {
+  "file": "specularZeroConstant__SVG.svg",
+  "smoke": "specularZeroConstantSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "splitStrokeBevelRoute__svg_DSTd_J.svg",
+  "smoke": "splitStrokeBevelRouteSmoke.mjs",
+  "const": "svg_DSTd_J"
+ },
+ {
+  "file": "splitStrokeBevelRoute__svg_SRCd_J.svg",
+  "smoke": "splitStrokeBevelRouteSmoke.mjs",
+  "const": "svg_SRCd_J"
+ },
+ {
+  "file": "splitStrokeCapRoute__svg_DSTd_C.svg",
+  "smoke": "splitStrokeCapRouteSmoke.mjs",
+  "const": "svg_DSTd_C"
+ },
+ {
+  "file": "splitStrokeCapRoute__svg_SRCd_C.svg",
+  "smoke": "splitStrokeCapRouteSmoke.mjs",
+  "const": "svg_SRCd_C"
+ },
+ {
+  "file": "splitStrokeGradientRoute__DST.svg",
+  "smoke": "splitStrokeGradientRouteSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "splitStrokeGradientRoute__SRC.svg",
+  "smoke": "splitStrokeGradientRouteSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "splitStrokeNonScalingRoute__DST.svg",
+  "smoke": "splitStrokeNonScalingRouteSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "splitStrokeNonScalingRoute__SRC.svg",
+  "smoke": "splitStrokeNonScalingRouteSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "splitStrokeRoute__DST.svg",
+  "smoke": "splitStrokeRouteSmoke.mjs",
+  "const": "DST"
+ },
+ {
+  "file": "splitStrokeRoute__SRC.svg",
+  "smoke": "splitStrokeRouteSmoke.mjs",
+  "const": "SRC"
+ },
+ {
+  "file": "spriteFilterAlphaRender__INSIDE.svg",
+  "smoke": "spriteFilterAlphaRenderSmoke.mjs",
+  "const": "INSIDE"
+ },
+ {
+  "file": "spriteFilterAlphaRender__OWN.svg",
+  "smoke": "spriteFilterAlphaRenderSmoke.mjs",
+  "const": "OWN"
+ },
+ {
+  "file": "spriteFilterAlphaRender__SHEET.svg",
+  "smoke": "spriteFilterAlphaRenderSmoke.mjs",
+  "const": "SHEET"
+ },
+ {
+  "file": "spriteFilterAlphaRender__WHOLE.svg",
+  "smoke": "spriteFilterAlphaRenderSmoke.mjs",
+  "const": "WHOLE"
  },
  {
   "file": "spriteMorph__SHEET.svg",
@@ -1046,6 +4107,26 @@
  {
   "file": "spriteMorphClip__SHEET.svg",
   "smoke": "spriteMorphClipSmoke.mjs",
+  "const": "SHEET"
+ },
+ {
+  "file": "spriteOtherGroupRender__AFTER.svg",
+  "smoke": "spriteOtherGroupRenderSmoke.mjs",
+  "const": "AFTER"
+ },
+ {
+  "file": "spriteOtherGroupRender__ALONE.svg",
+  "smoke": "spriteOtherGroupRenderSmoke.mjs",
+  "const": "ALONE"
+ },
+ {
+  "file": "spriteOtherGroupRender__NESTED.svg",
+  "smoke": "spriteOtherGroupRenderSmoke.mjs",
+  "const": "NESTED"
+ },
+ {
+  "file": "spriteOtherGroupRender__SHEET.svg",
+  "smoke": "spriteOtherGroupRenderSmoke.mjs",
   "const": "SHEET"
  },
  {
@@ -1064,14 +4145,209 @@
   "const": "SHEET"
  },
  {
+  "file": "spriteTimelineLazy__SHEET.svg",
+  "smoke": "spriteTimelineLazySmoke.mjs",
+  "const": "SHEET"
+ },
+ {
+  "file": "spriteViewDrawSprite__svg_g_id_a_rect_x_10_y_10_wi.svg",
+  "smoke": "spriteViewDrawSpriteSmoke.mjs",
+  "const": "svg_g_id_a_rect_x_10_y_10_wi"
+ },
+ {
   "file": "staticCache__SVG.svg",
   "smoke": "staticCacheSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "staticCacheDepthReleaseRender__SVG.svg",
+  "smoke": "staticCacheDepthReleaseRenderSmoke.mjs",
   "const": "SVG"
  },
  {
   "file": "staticCacheFilter__BLUR.svg",
   "smoke": "staticCacheFilterSmoke.mjs",
   "const": "BLUR"
+ },
+ {
+  "file": "streamFrameFixed__svg.svg",
+  "smoke": "streamFrameFixedSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "streamScopeGuard__DOC_path_d_M10_10_L60_10_fil.svg",
+  "smoke": "streamScopeGuardSmoke.mjs",
+  "const": "DOC_path_d_M10_10_L60_10_fil"
+ },
+ {
+  "file": "streamScopeGuard__DOC_rect_x_10_y_10_width_40.svg",
+  "smoke": "streamScopeGuardSmoke.mjs",
+  "const": "DOC_rect_x_10_y_10_width_40"
+ },
+ {
+  "file": "streamScopeGuard__DOC_rect_x_10_y_10_width_402.svg",
+  "smoke": "streamScopeGuardSmoke.mjs",
+  "const": "DOC_rect_x_10_y_10_width_40"
+ },
+ {
+  "file": "strictDerivedRegions__doc_path_d_M10_10_C_100_0_16.svg",
+  "smoke": "strictDerivedRegionsSmoke.mjs",
+  "const": "doc_path_d_M10_10_C_100_0_16"
+ },
+ {
+  "file": "strictDerivedRegions__doc_path_d_M10_20_L_90_80_M1.svg",
+  "smoke": "strictDerivedRegionsSmoke.mjs",
+  "const": "doc_path_d_M10_20_L_90_80_M1"
+ },
+ {
+  "file": "strictDerivedRegions__doc_path_d_M10_50_C_30_0_70.svg",
+  "smoke": "strictDerivedRegionsSmoke.mjs",
+  "const": "doc_path_d_M10_50_C_30_0_70"
+ },
+ {
+  "file": "strictDerivedRegions__doc_path_d_M45_45_C_50_40_55.svg",
+  "smoke": "strictDerivedRegionsSmoke.mjs",
+  "const": "doc_path_d_M45_45_C_50_40_55"
+ },
+ {
+  "file": "strictDerivedRegions__doc_rect_x_0_y_0_width_100_h.svg",
+  "smoke": "strictDerivedRegionsSmoke.mjs",
+  "const": "doc_rect_x_0_y_0_width_100_h"
+ },
+ {
+  "file": "strictPlay__doc_rect_x_0_y_0_width_100_h.svg",
+  "smoke": "strictPlaySmoke.mjs",
+  "const": "doc_rect_x_0_y_0_width_100_h"
+ },
+ {
+  "file": "strokeAttribution__svg_path_d_CURVE_fill_none_s.svg",
+  "smoke": "strokeAttributionSmoke.mjs",
+  "const": "svg_path_d_CURVE_fill_none_s"
+ },
+ {
+  "file": "strokeAttribution__svg_path_d_M16_16_L60_16_L60.svg",
+  "smoke": "strokeAttributionSmoke.mjs",
+  "const": "svg_path_d_M16_16_L60_16_L60"
+ },
+ {
+  "file": "strokeAttribution__svg_path_d_M20_20_L108_20_L1.svg",
+  "smoke": "strokeAttributionSmoke.mjs",
+  "const": "svg_path_d_M20_20_L108_20_L1"
+ },
+ {
+  "file": "strokeDashCapsRender__doc_dotDiscs.svg",
+  "smoke": "strokeDashCapsRenderSmoke.mjs",
+  "const": "doc_dotDiscs"
+ },
+ {
+  "file": "strokeDashCapsRender__doc_dotsPlus.svg",
+  "smoke": "strokeDashCapsRenderSmoke.mjs",
+  "const": "doc_dotsPlus"
+ },
+ {
+  "file": "strokeDashSeamMorphRender__doc_RECT.svg",
+  "smoke": "strokeDashSeamMorphRenderSmoke.mjs",
+  "const": "doc_RECT"
+ },
+ {
+  "file": "strokeDashSeamMorphRender__doc_SQUARE.svg",
+  "smoke": "strokeDashSeamMorphRenderSmoke.mjs",
+  "const": "doc_SQUARE"
+ },
+ {
+  "file": "strokeFootSignedZeroGpu__SVG.svg",
+  "smoke": "strokeFootSignedZeroGpuSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "strokeGatesExact__svg_200_200_path_d_M100_3_20.svg",
+  "smoke": "strokeGatesExactSmoke.mjs",
+  "const": "svg_200_200_path_d_M100_3_20"
+ },
+ {
+  "file": "strokeGatesExact__svg_240_200_path_d_POLY_fill.svg",
+  "smoke": "strokeGatesExactSmoke.mjs",
+  "const": "svg_240_200_path_d_POLY_fill"
+ },
+ {
+  "file": "strokeGatesExact__svg_240_200_path_d_POLY_fill2.svg",
+  "smoke": "strokeGatesExactSmoke.mjs",
+  "const": "svg_240_200_path_d_POLY_fill"
+ },
+ {
+  "file": "strokeJoinHairlineRender__svgOf_bevel_2.svg",
+  "smoke": "strokeJoinHairlineRenderSmoke.mjs",
+  "const": "svgOf_bevel_2"
+ },
+ {
+  "file": "strokeJoinHairlineRender__svgOf_miter_2.svg",
+  "smoke": "strokeJoinHairlineRenderSmoke.mjs",
+  "const": "svgOf_miter_2"
+ },
+ {
+  "file": "strokeJoinHairlineRender__svgOf_round_2.svg",
+  "smoke": "strokeJoinHairlineRenderSmoke.mjs",
+  "const": "svgOf_round_2"
+ },
+ {
+  "file": "strokeJoinHairlineRender__svgOf_round_4.svg",
+  "smoke": "strokeJoinHairlineRenderSmoke.mjs",
+  "const": "svgOf_round_4"
+ },
+ {
+  "file": "strokeLocalFrameRender__svg.svg",
+  "smoke": "strokeLocalFrameRenderSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "strokeReachGate__svg_200_200_path_d_M100_3_20.svg",
+  "smoke": "strokeReachGateSmoke.mjs",
+  "const": "svg_200_200_path_d_M100_3_20"
+ },
+ {
+  "file": "strokeReachGate__svg_240_200_path_d_POLY_fill.svg",
+  "smoke": "strokeReachGateSmoke.mjs",
+  "const": "svg_240_200_path_d_POLY_fill"
+ },
+ {
+  "file": "strokeReachGate__svg_240_200_path_d_POLY_fill2.svg",
+  "smoke": "strokeReachGateSmoke.mjs",
+  "const": "svg_240_200_path_d_POLY_fill"
+ },
+ {
+  "file": "strokeTypeOmitGpu__svg_curves_1.svg",
+  "smoke": "strokeTypeOmitGpuSmoke.mjs",
+  "const": "svg_curves_1"
+ },
+ {
+  "file": "strokeTypeOmitGpu__svg_M12_65_Q45_4_85_22_0_25.svg",
+  "smoke": "strokeTypeOmitGpuSmoke.mjs",
+  "const": "svg_M12_65_Q45_4_85_22_0_25"
+ },
+ {
+  "file": "strokeWidthOverrideReachRender__SVG_NARROW.svg",
+  "smoke": "strokeWidthOverrideReachRenderSmoke.mjs",
+  "const": "SVG_NARROW"
+ },
+ {
+  "file": "strokeWidthOverrideReachRender__SVG_WIDE.svg",
+  "smoke": "strokeWidthOverrideReachRenderSmoke.mjs",
+  "const": "SVG_WIDE"
+ },
+ {
+  "file": "strokeWidthOverrideRect__ONE.svg",
+  "smoke": "strokeWidthOverrideRectSmoke.mjs",
+  "const": "ONE"
+ },
+ {
+  "file": "strokeWidthOverrideRect__RUN.svg",
+  "smoke": "strokeWidthOverrideRectSmoke.mjs",
+  "const": "RUN"
+ },
+ {
+  "file": "submitThrow__svg_rect_x_10_y_10_width_20.svg",
+  "smoke": "submitThrowSmoke.mjs",
+  "const": "svg_rect_x_10_y_10_width_20"
  },
  {
   "file": "svgAuto__svg_rect_width_100_height_10.svg",
@@ -1082,6 +4358,46 @@
   "file": "svgAuto__svg_rect_width_100_height_102.svg",
   "smoke": "svgAutoSmoke.mjs",
   "const": "svg_rect_width_100_height_10"
+ },
+ {
+  "file": "svgImageDocumentRender__doc_rect_width_10_height_10.svg",
+  "smoke": "svgImageDocumentRenderSmoke.mjs",
+  "const": "doc_rect_width_10_height_10"
+ },
+ {
+  "file": "svgImageDocumentRender__doc_rect_width_10_height_102.svg",
+  "smoke": "svgImageDocumentRenderSmoke.mjs",
+  "const": "doc_rect_width_10_height_10"
+ },
+ {
+  "file": "svgImageDocumentRender__doc_rect_width_10_height_103.svg",
+  "smoke": "svgImageDocumentRenderSmoke.mjs",
+  "const": "doc_rect_width_10_height_10"
+ },
+ {
+  "file": "svgImageDocumentRender__doc_rect_width_10_height_104.svg",
+  "smoke": "svgImageDocumentRenderSmoke.mjs",
+  "const": "doc_rect_width_10_height_10"
+ },
+ {
+  "file": "svgImageDocumentRender__doc_rect_width_10_height_105.svg",
+  "smoke": "svgImageDocumentRenderSmoke.mjs",
+  "const": "doc_rect_width_10_height_10"
+ },
+ {
+  "file": "svgImageDocumentRender__doc_rect_width_6_height_6_fi.svg",
+  "smoke": "svgImageDocumentRenderSmoke.mjs",
+  "const": "doc_rect_width_6_height_6_fi"
+ },
+ {
+  "file": "svgImageDocumentRender__svg.svg",
+  "smoke": "svgImageDocumentRenderSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "svgStructureRender__svg_use_href_t_opacity_5_g_i.svg",
+  "smoke": "svgStructureRenderSmoke.mjs",
+  "const": "svg_use_href_t_opacity_5_g_i"
  },
  {
   "file": "svgTextDecoration__both.svg",
@@ -1107,6 +4423,11 @@
   "file": "svgTextDecoration__underlined.svg",
   "smoke": "svgTextDecorationSmoke.mjs",
   "const": "underlined"
+ },
+ {
+  "file": "svgTextImportRender__doc.svg",
+  "smoke": "svgTextImportRenderSmoke.mjs",
+  "const": "doc"
  },
  {
   "file": "svgTextSourceExpansion__SVG.svg",
@@ -1144,6 +4465,256 @@
   "const": "vertical"
  },
  {
+  "file": "switchSystemLanguageRender__svg.svg",
+  "smoke": "switchSystemLanguageRenderSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "timelinePairsWarm__svg_path_d_M15_50_C15_10_85.svg",
+  "smoke": "timelinePairsWarmSmoke.mjs",
+  "const": "svg_path_d_M15_50_C15_10_85"
+ },
+ {
+  "file": "timelinePairsWarm__svg_path_d_M20_50_C20_20_80.svg",
+  "smoke": "timelinePairsWarmSmoke.mjs",
+  "const": "svg_path_d_M20_50_C20_20_80"
+ },
+ {
+  "file": "timelinePairsWarm__svg_path_d_M30_50_C30_30_70.svg",
+  "smoke": "timelinePairsWarmSmoke.mjs",
+  "const": "svg_path_d_M30_50_C30_30_70"
+ },
+ {
+  "file": "timelineRefLifetime__circ_20.svg",
+  "smoke": "timelineRefLifetimeSmoke.mjs",
+  "const": "circ_20"
+ },
+ {
+  "file": "timelineRefLifetime__circ_25.svg",
+  "smoke": "timelineRefLifetimeSmoke.mjs",
+  "const": "circ_25"
+ },
+ {
+  "file": "timelineRefLifetime__circ_26.svg",
+  "smoke": "timelineRefLifetimeSmoke.mjs",
+  "const": "circ_26"
+ },
+ {
+  "file": "timelineRefLifetime__circ_30.svg",
+  "smoke": "timelineRefLifetimeSmoke.mjs",
+  "const": "circ_30"
+ },
+ {
+  "file": "timelineRefLifetime__circ_35.svg",
+  "smoke": "timelineRefLifetimeSmoke.mjs",
+  "const": "circ_35"
+ },
+ {
+  "file": "timelineRefLifetime__circ_36.svg",
+  "smoke": "timelineRefLifetimeSmoke.mjs",
+  "const": "circ_36"
+ },
+ {
+  "file": "timelineRefLifetime__svg_circle_id_q_cx_5_cy_5_r.svg",
+  "smoke": "timelineRefLifetimeSmoke.mjs",
+  "const": "svg_circle_id_q_cx_5_cy_5_r"
+ },
+ {
+  "file": "timelineRefLifetime__svg_rect_id_p_x_0_y_0_width.svg",
+  "smoke": "timelineRefLifetimeSmoke.mjs",
+  "const": "svg_rect_id_p_x_0_y_0_width"
+ },
+ {
+  "file": "timelineSharedPose__circ_40.svg",
+  "smoke": "timelineSharedPoseSmoke.mjs",
+  "const": "circ_40"
+ },
+ {
+  "file": "turbulenceStitch__svgFor_noStitch.svg",
+  "smoke": "turbulenceStitchSmoke.mjs",
+  "const": "svgFor_noStitch"
+ },
+ {
+  "file": "turbulenceStitch__svgFor_stitch.svg",
+  "smoke": "turbulenceStitchSmoke.mjs",
+  "const": "svgFor_stitch"
+ },
+ {
+  "file": "unifiedFillCurveTexIdx32Morph__svg_A_fill_3060c0_fill_opaci.svg",
+  "smoke": "unifiedFillCurveTexIdx32MorphSmoke.mjs",
+  "const": "svg_A_fill_3060c0_fill_opaci"
+ },
+ {
+  "file": "unifiedFillCurveTexIdx32Morph__svg_A_fill_3060c0.svg",
+  "smoke": "unifiedFillCurveTexIdx32MorphSmoke.mjs",
+  "const": "svg_A_fill_3060c0"
+ },
+ {
+  "file": "unifiedFillCurveTexIdx32Morph__svg_B_fill_3060c0_fill_opaci.svg",
+  "smoke": "unifiedFillCurveTexIdx32MorphSmoke.mjs",
+  "const": "svg_B_fill_3060c0_fill_opaci"
+ },
+ {
+  "file": "unifiedFillCurveTexIdx32Morph__svg_B_fill_3060c0.svg",
+  "smoke": "unifiedFillCurveTexIdx32MorphSmoke.mjs",
+  "const": "svg_B_fill_3060c0"
+ },
+ {
+  "file": "unifiedFillCurveTexOverflow__SVG.svg",
+  "smoke": "unifiedFillCurveTexOverflowSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "unifiedFillCurveTexWideIndex__SVG.svg",
+  "smoke": "unifiedFillCurveTexWideIndexSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "unifiedFillFeature__svg_g_opacity_0_5_path_fill.svg",
+  "smoke": "unifiedFillFeatureSmoke.mjs",
+  "const": "svg_g_opacity_0_5_path_fill"
+ },
+ {
+  "file": "unifiedFillFeature__svg_path_fill_3060c0_d_D_cir.svg",
+  "smoke": "unifiedFillFeatureSmoke.mjs",
+  "const": "svg_path_fill_3060c0_d_D_cir"
+ },
+ {
+  "file": "unifiedFillFeature__svg_path_fill_3060c0_d_D_cir2.svg",
+  "smoke": "unifiedFillFeatureSmoke.mjs",
+  "const": "svg_path_fill_3060c0_d_D_cir"
+ },
+ {
+  "file": "unifiedFillFeature__svg_path_fill_3060c0_d_D.svg",
+  "smoke": "unifiedFillFeatureSmoke.mjs",
+  "const": "svg_path_fill_3060c0_d_D"
+ },
+ {
+  "file": "unifiedFillFeature__svg_path_fill_3060c0_fill_op.svg",
+  "smoke": "unifiedFillFeatureSmoke.mjs",
+  "const": "svg_path_fill_3060c0_fill_op"
+ },
+ {
+  "file": "unifiedFillFeature__svg_path_fill_3060c0_fill_ru.svg",
+  "smoke": "unifiedFillFeatureSmoke.mjs",
+  "const": "svg_path_fill_3060c0_fill_ru"
+ },
+ {
+  "file": "unifiedFillFeature__svg_path_fill_3060c0_stroke.svg",
+  "smoke": "unifiedFillFeatureSmoke.mjs",
+  "const": "svg_path_fill_3060c0_stroke"
+ },
+ {
+  "file": "unifiedFillFeature__svg_path_fill_none_stroke_30.svg",
+  "smoke": "unifiedFillFeatureSmoke.mjs",
+  "const": "svg_path_fill_none_stroke_30"
+ },
+ {
+  "file": "unifiedFillFeature__svg_path_fill_none_stroke_302.svg",
+  "smoke": "unifiedFillFeatureSmoke.mjs",
+  "const": "svg_path_fill_none_stroke_30"
+ },
+ {
+  "file": "unifiedFilterSplit__SVG.svg",
+  "smoke": "unifiedFilterSplitSmoke.mjs",
+  "const": "SVG"
+ },
+ {
+  "file": "unifiedMorph__svg_A_fill_3060c0_fill_opaci.svg",
+  "smoke": "unifiedMorphSmoke.mjs",
+  "const": "svg_A_fill_3060c0_fill_opaci"
+ },
+ {
+  "file": "unifiedMorph__svg_A_fill_3060c0_stroke_102.svg",
+  "smoke": "unifiedMorphSmoke.mjs",
+  "const": "svg_A_fill_3060c0_stroke_102"
+ },
+ {
+  "file": "unifiedMorph__svg_A_fill_3060c0.svg",
+  "smoke": "unifiedMorphSmoke.mjs",
+  "const": "svg_A_fill_3060c0"
+ },
+ {
+  "file": "unifiedMorph__svg_A_fill_none_stroke_3060c.svg",
+  "smoke": "unifiedMorphSmoke.mjs",
+  "const": "svg_A_fill_none_stroke_3060c"
+ },
+ {
+  "file": "unifiedMorph__svg_B_fill_3060c0_fill_opaci.svg",
+  "smoke": "unifiedMorphSmoke.mjs",
+  "const": "svg_B_fill_3060c0_fill_opaci"
+ },
+ {
+  "file": "unifiedMorph__svg_B_fill_3060c0_stroke_102.svg",
+  "smoke": "unifiedMorphSmoke.mjs",
+  "const": "svg_B_fill_3060c0_stroke_102"
+ },
+ {
+  "file": "unifiedMorph__svg_B_fill_3060c0.svg",
+  "smoke": "unifiedMorphSmoke.mjs",
+  "const": "svg_B_fill_3060c0"
+ },
+ {
+  "file": "unifiedMorph__svg_B_fill_none_stroke_3060c.svg",
+  "smoke": "unifiedMorphSmoke.mjs",
+  "const": "svg_B_fill_none_stroke_3060c"
+ },
+ {
+  "file": "universalPrograms__svg_path_d_P_fill_48c.svg",
+  "smoke": "universalProgramsSmoke.mjs",
+  "const": "svg_path_d_P_fill_48c"
+ },
+ {
+  "file": "universalPrograms__svg_path_d_P_fill_none_strok.svg",
+  "smoke": "universalProgramsSmoke.mjs",
+  "const": "svg_path_d_P_fill_none_strok"
+ },
+ {
+  "file": "useBudget__wrap_defs_g_id_a_use_href_b_g.svg",
+  "smoke": "useBudgetSmoke.mjs",
+  "const": "wrap_defs_g_id_a_use_href_b_g"
+ },
+ {
+  "file": "useBudget__wrap_rect_width_9_height_9_g.svg",
+  "smoke": "useBudgetSmoke.mjs",
+  "const": "wrap_rect_width_9_height_9_g"
+ },
+ {
+  "file": "useInheritance__doc_defs_path_id_a_d_TRI_fil.svg",
+  "smoke": "useInheritanceSmoke.mjs",
+  "const": "doc_defs_path_id_a_d_TRI_fil"
+ },
+ {
+  "file": "useInheritance__doc_defs_text_id_t_x_10_y_50.svg",
+  "smoke": "useInheritanceSmoke.mjs",
+  "const": "doc_defs_text_id_t_x_10_y_50"
+ },
+ {
+  "file": "variantFirstDefault__svg_path_d_P_fill_48c_stroke.svg",
+  "smoke": "variantFirstDefaultSmoke.mjs",
+  "const": "svg_path_d_P_fill_48c_stroke"
+ },
+ {
+  "file": "variantFirstDefault__svg_path_d_P_fill_none_strok.svg",
+  "smoke": "variantFirstDefaultSmoke.mjs",
+  "const": "svg_path_d_P_fill_none_strok"
+ },
+ {
+  "file": "variantFirstDefault__svg_path_d_P_fill_none_strok2.svg",
+  "smoke": "variantFirstDefaultSmoke.mjs",
+  "const": "svg_path_d_P_fill_none_strok"
+ },
+ {
+  "file": "variantFirstOptIn__svg_path_d_P_fill_48c.svg",
+  "smoke": "variantFirstOptInSmoke.mjs",
+  "const": "svg_path_d_P_fill_48c"
+ },
+ {
+  "file": "variantFirstOptIn__svg_path_d_P_fill_none_strok.svg",
+  "smoke": "variantFirstOptInSmoke.mjs",
+  "const": "svg_path_d_P_fill_none_strok"
+ },
+ {
   "file": "viewBoxOverhangSibling__CLIPPED.svg",
   "smoke": "viewBoxOverhangSiblingSmoke.mjs",
   "const": "CLIPPED"
@@ -1159,8 +4730,68 @@
   "const": "OVERHANG"
  },
  {
+  "file": "warmKeepsBinding__doc_path_d_M10_50_C_30_0_70.svg",
+  "smoke": "warmKeepsBindingSmoke.mjs",
+  "const": "doc_path_d_M10_50_C_30_0_70"
+ },
+ {
+  "file": "warmManifestClasses__doc_path_d_M10_50_C_30_0_70.svg",
+  "smoke": "warmManifestClassesSmoke.mjs",
+  "const": "doc_path_d_M10_50_C_30_0_70"
+ },
+ {
+  "file": "warmManifestClasses__doc_path_d_M10_80_Q_50_0_90.svg",
+  "smoke": "warmManifestClassesSmoke.mjs",
+  "const": "doc_path_d_M10_80_Q_50_0_90"
+ },
+ {
+  "file": "warmManifestClasses__doc_rect_x_0_y_0_width_100_h.svg",
+  "smoke": "warmManifestClassesSmoke.mjs",
+  "const": "doc_rect_x_0_y_0_width_100_h"
+ },
+ {
+  "file": "warmPolicy__doc_path_d_M10_80_Q_50_0_90.svg",
+  "smoke": "warmPolicySmoke.mjs",
+  "const": "doc_path_d_M10_80_Q_50_0_90"
+ },
+ {
+  "file": "warmQueue__doc_path_d_M10_80_Q_50_0_90.svg",
+  "smoke": "warmQueueSmoke.mjs",
+  "const": "doc_path_d_M10_80_Q_50_0_90"
+ },
+ {
+  "file": "warmScene__svg.svg",
+  "smoke": "warmSceneSmoke.mjs",
+  "const": "svg"
+ },
+ {
+  "file": "zeroValuedAttributeRender__svg_g_opacity_0_rect_x_10_y.svg",
+  "smoke": "zeroValuedAttributeRenderSmoke.mjs",
+  "const": "svg_g_opacity_0_rect_x_10_y"
+ },
+ {
+  "file": "zeroValuedAttributeRender__svg_image_x_20_y_20_width_60.svg",
+  "smoke": "zeroValuedAttributeRenderSmoke.mjs",
+  "const": "svg_image_x_20_y_20_width_60"
+ },
+ {
+  "file": "zeroValuedAttributeRender__svg_image_x_20_y_20_width_602.svg",
+  "smoke": "zeroValuedAttributeRenderSmoke.mjs",
+  "const": "svg_image_x_20_y_20_width_60"
+ },
+ {
+  "file": "zeroValuedAttributeRender__svg_image_x_20_y_20_width_603.svg",
+  "smoke": "zeroValuedAttributeRenderSmoke.mjs",
+  "const": "svg_image_x_20_y_20_width_60"
+ },
+ {
   "file": "zOrderSubmit__BLUE.svg",
   "smoke": "zOrderSubmitSmoke.mjs",
   "const": "BLUE"
+ },
+ {
+  "file": "zOrderSubmit__RED.svg",
+  "smoke": "zOrderSubmitSmoke.mjs",
+  "const": "RED"
  }
 ]

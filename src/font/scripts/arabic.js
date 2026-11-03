@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Opt-in registration for Arabic shaping.
 //
 // Call registerArabicShaping() once at startup to enable positional-form
@@ -9,10 +12,14 @@
 //   registerArabicShaping();
 
 import {
-  ArabicJoiningType, ArabicForm,
-  isArabicCodepoint, resolveArabicForms, getArabicJoiningType,
+  ArabicJoiningType,
+  ArabicForm,
+  isArabicCodepoint,
+  resolveArabicForms,
+  getArabicJoiningType,
 } from './arabicJoining.js';
 import { registerArabicShaping as _register } from '../shaperRegistry.js';
+import { registerOtScriptTags } from '../otScriptTags.js';
 
 let _registered = false;
 
@@ -20,15 +27,23 @@ let _registered = false;
 export function registerArabicShaping() {
   if (_registered) return;
   _registered = true;
+  // Arabic forms live under the font's 'arab' script, which may carry
+  // features its DFLT script does not.
+  registerOtScriptTags();
   _register({
-    isArabicCodepoint, resolveArabicForms,
-    getArabicJoiningType, ArabicJoiningType,
+    isArabicCodepoint,
+    resolveArabicForms,
+    getArabicJoiningType,
+    ArabicJoiningType,
   });
 }
 
 // Re-export the shaper primitives for consumers that call them directly
 // (e.g. for bidi resolution or asset audits).
 export {
-  ArabicJoiningType, ArabicForm,
-  isArabicCodepoint, resolveArabicForms, getArabicJoiningType,
+  ArabicJoiningType,
+  ArabicForm,
+  isArabicCodepoint,
+  resolveArabicForms,
+  getArabicJoiningType,
 };

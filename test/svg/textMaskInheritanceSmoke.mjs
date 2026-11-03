@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // textMaskInheritanceSmoke.mjs — verifies <text> mask/clip-path
 // inheritance: the <text> branch reads its own mask/clip-path
 // attribute AND falls back to the ancestor stack, so a <text> inside
@@ -10,17 +13,21 @@ import { MantleFontAsset } from '../../src/font/fontAsset.js';
 import { buildSvgTextGlyphs } from '../../src/font/textRun.js';
 
 let failures = 0;
-const ok   = (msg) => console.log('ok', msg);
-const fail = (msg) => { failures++; console.error('FAIL', msg); };
+const ok = (msg) => console.log('ok', msg);
+const fail = (msg) => {
+  failures++;
+  console.error('FAIL', msg);
+};
 
 const arial = new MantleFontAsset(
-  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')));
+  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')),
+);
 
 const STRIDE = 48;
 const META_MASKID = 31;
 const META_CLIPID = 30;
-const META_FLAGS  = 27;
-const FLAG_LAYER  = 0x100;
+const META_FLAGS = 27;
+const FLAG_LAYER = 0x100;
 
 function inspect(sections) {
   const mf = new Float32Array(sections.meta, 32);
@@ -56,16 +63,19 @@ function inspect(sections) {
   const rows = inspect(s);
   // Expect: rect (1 row, maskId > 0), 5 glyph rows for "hello" (all
   // maskId > 0, all == rect's maskId), 1 mask-layer row (FLAG_LAYER).
-  const visibleRows = rows.filter(r => !r.isLayer);
-  const layerRows = rows.filter(r => r.isLayer);
+  const visibleRows = rows.filter((r) => !r.isLayer);
+  const layerRows = rows.filter((r) => r.isLayer);
   if (visibleRows.length < 6)
-    fail(`T1 expected ≥ 6 visible rows (rect + 5 glyphs), got ${visibleRows.length}: ${JSON.stringify(rows)}`);
-  else if (visibleRows.some(r => r.maskId === 0))
-    fail(`T1 one or more visible rows have maskId=0 (mask didn't inherit). Rows: ${JSON.stringify(visibleRows)}`);
-  else if (layerRows.length === 0)
-    fail(`T1 no FLAG_LAYER mask geometry row emitted`);
+    fail(
+      `T1 expected ≥ 6 visible rows (rect + 5 glyphs), got ${visibleRows.length}: ${JSON.stringify(rows)}`,
+    );
+  else if (visibleRows.some((r) => r.maskId === 0))
+    fail(
+      `T1 one or more visible rows have maskId=0 (mask didn't inherit). Rows: ${JSON.stringify(visibleRows)}`,
+    );
+  else if (layerRows.length === 0) fail(`T1 no FLAG_LAYER mask geometry row emitted`);
   else {
-    const uniqueMasks = new Set(visibleRows.map(r => r.maskId));
+    const uniqueMasks = new Set(visibleRows.map((r) => r.maskId));
     if (uniqueMasks.size !== 1)
       fail(`T1 visible rows reference DIFFERENT mask ids (rect vs text): ${[...uniqueMasks]}`);
     else
@@ -73,7 +83,7 @@ function inspect(sections) {
   }
 }
 
-// ---- T2: <text> with its OWN mask attribute -------------------------
+// ---- T2: <text> with its own mask attribute -------------------------
 {
   const svg = `<?xml version="1.0"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
@@ -85,13 +95,11 @@ function inspect(sections) {
     svgTextLayout: buildSvgTextGlyphs,
   });
   const rows = inspect(s);
-  const visibleRows = rows.filter(r => !r.isLayer);
-  if (visibleRows.length < 2)
-    fail(`T2 expected ≥ 2 glyphs, got ${visibleRows.length}`);
-  else if (visibleRows.some(r => r.maskId === 0))
+  const visibleRows = rows.filter((r) => !r.isLayer);
+  if (visibleRows.length < 2) fail(`T2 expected ≥ 2 glyphs, got ${visibleRows.length}`);
+  else if (visibleRows.some((r) => r.maskId === 0))
     fail(`T2 <text mask=> glyphs have maskId=0: ${JSON.stringify(visibleRows)}`);
-  else
-    ok(`T2 <text mask="..."> direct attribute consumed (id=${visibleRows[0].maskId})`);
+  else ok(`T2 <text mask="..."> direct attribute consumed (id=${visibleRows[0].maskId})`);
 }
 
 // ---- T3: <text> inside <g clip-path=> inherits the clip -------------
@@ -108,11 +116,10 @@ function inspect(sections) {
     svgTextLayout: buildSvgTextGlyphs,
   });
   const rows = inspect(s);
-  const visibleRows = rows.filter(r => !r.isLayer);
-  if (visibleRows.some(r => r.clipId === 0))
+  const visibleRows = rows.filter((r) => !r.isLayer);
+  if (visibleRows.some((r) => r.clipId === 0))
     fail(`T3 <text> inside <g clip-path=> has clipId=0: ${JSON.stringify(visibleRows)}`);
-  else
-    ok(`T3 <text> inside <g clip-path=> inherits the clip`);
+  else ok(`T3 <text> inside <g clip-path=> inherits the clip`);
 }
 
 // ---- T4: bare <text> (no mask anywhere) — no inheritance ghost ------
@@ -126,12 +133,13 @@ function inspect(sections) {
     svgTextLayout: buildSvgTextGlyphs,
   });
   const rows = inspect(s);
-  if (rows.some(r => r.maskId !== 0 || r.clipId !== 0))
+  if (rows.some((r) => r.maskId !== 0 || r.clipId !== 0))
     fail(`T4 plain <text> picked up a phantom mask/clip: ${JSON.stringify(rows)}`);
-  else
-    ok(`T4 bare <text> with no mask/clip in ancestry stays at 0 (no ghost inheritance)`);
+  else ok(`T4 bare <text> with no mask/clip in ancestry stays at 0 (no ghost inheritance)`);
 }
 
 console.log();
-console.log(failures === 0 ? 'TEXT-MASK-INHERITANCE PASS' : `TEXT-MASK-INHERITANCE FAIL (${failures})`);
+console.log(
+  failures === 0 ? 'TEXT-MASK-INHERITANCE PASS' : `TEXT-MASK-INHERITANCE FAIL (${failures})`,
+);
 process.exit(failures === 0 ? 0 : 1);

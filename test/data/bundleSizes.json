@@ -1,0 +1,270 @@
+{
+ "note": "min+gzip -9 bytes from scripts/measureBundleSizes.mjs (esbuild, browser, ESM, splitting; initial closure). Regenerate with --write.",
+ "esbuild": "0.28.2",
+ "sizes": {
+  "root": {
+   "gz": 705223,
+   "raw": 1950435,
+   "lazyGz": 105132,
+   "inlineGz": 801599,
+   "staticSrc": 6305443,
+   "staticModules": 354
+  },
+  "root:importSvg": {
+   "gz": 656701,
+   "raw": 1801196,
+   "lazyGz": 105138,
+   "inlineGz": 353300,
+   "staticSrc": 6305458,
+   "staticModules": 354
+  },
+  "bundle": {
+   "gz": 2735,
+   "raw": 6322,
+   "lazyGz": 0,
+   "inlineGz": 2735,
+   "staticSrc": 24892,
+   "staticModules": 5
+  },
+  "svg": {
+   "gz": 152448,
+   "raw": 412634,
+   "lazyGz": 1613,
+   "inlineGz": 153628,
+   "staticSrc": 1546925,
+   "staticModules": 89
+  },
+  "renderer": {
+   "gz": 305239,
+   "raw": 865023,
+   "lazyGz": 0,
+   "inlineGz": 305239,
+   "staticSrc": 3258394,
+   "staticModules": 153
+  },
+  "scene": {
+   "gz": 157118,
+   "raw": 426681,
+   "lazyGz": 1607,
+   "inlineGz": 158326,
+   "staticSrc": 1583800,
+   "staticModules": 91
+  },
+  "hitTest": {
+   "gz": 23433,
+   "raw": 58375,
+   "lazyGz": 0,
+   "inlineGz": 23433,
+   "staticSrc": 805312,
+   "staticModules": 42
+  },
+  "filterGraph": {
+   "gz": 5554,
+   "raw": 13305,
+   "lazyGz": 0,
+   "inlineGz": 5554,
+   "staticSrc": 74239,
+   "staticModules": 12
+  },
+  "fallback": {
+   "gz": 169491,
+   "raw": 439923,
+   "lazyGz": 378630,
+   "inlineGz": 541634,
+   "staticSrc": 1448056,
+   "staticModules": 95
+  },
+  "native": {
+   "gz": 67939,
+   "raw": 185838,
+   "lazyGz": 0,
+   "inlineGz": 67939,
+   "staticSrc": 653366,
+   "staticModules": 48
+  },
+  "native+text": {
+   "gz": 140048,
+   "raw": 374317,
+   "lazyGz": 1391,
+   "inlineGz": 141220,
+   "staticSrc": 1443500,
+   "staticModules": 97
+  },
+  "shaders": {
+   "gz": 3350,
+   "raw": 8575,
+   "lazyGz": 100139,
+   "inlineGz": 103432,
+   "staticSrc": 36719,
+   "staticModules": 3
+  },
+  "font/text": {
+   "gz": 96760,
+   "raw": 274639,
+   "lazyGz": 1391,
+   "inlineGz": 97821,
+   "staticSrc": 1091467,
+   "staticModules": 71
+  },
+  "font": {
+   "gz": 266304,
+   "raw": 744852,
+   "lazyGz": 3022,
+   "inlineGz": 268621,
+   "staticSrc": 2472287,
+   "staticModules": 193
+  },
+  "latinApp": {
+   "gz": 468913,
+   "raw": 1337337,
+   "lazyGz": 1511,
+   "inlineGz": 469832,
+   "staticSrc": 4594735,
+   "staticModules": 229
+  },
+  "shaders/bundled:fillVert": {
+   "gz": 8336,
+   "raw": 28376,
+   "lazyGz": 0,
+   "inlineGz": 8336,
+   "staticSrc": 868564,
+   "staticModules": 2
+  },
+  "shaders/bundled": {
+   "gz": 199379,
+   "raw": 845194,
+   "lazyGz": 0,
+   "inlineGz": 199379,
+   "staticSrc": 868544,
+   "staticModules": 2
+  },
+  "font/text+font/color": {
+   "gz": 102801,
+   "raw": 297456,
+   "lazyGz": 1391,
+   "inlineGz": 103876,
+   "staticSrc": 1325515,
+   "staticModules": 89
+  },
+  "font/text+font/color/svgInOtImport": {
+   "gz": 218044,
+   "raw": 610579,
+   "lazyGz": 3023,
+   "inlineGz": 220244,
+   "staticSrc": 2082472,
+   "staticModules": 133
+  },
+  "font/text+font/variations": {
+   "gz": 100329,
+   "raw": 286205,
+   "lazyGz": 1391,
+   "inlineGz": 101355,
+   "staticSrc": 1128871,
+   "staticModules": 80
+  },
+  "font/text+font/math": {
+   "gz": 98798,
+   "raw": 282253,
+   "lazyGz": 1391,
+   "inlineGz": 99868,
+   "staticSrc": 1110897,
+   "staticModules": 73
+  },
+  "font/text+font/formats/woff2": {
+   "gz": 101184,
+   "raw": 286327,
+   "lazyGz": 1390,
+   "inlineGz": 102254,
+   "staticSrc": 1119795,
+   "staticModules": 74
+  },
+  "font/text+font/typography/legacyKern": {
+   "gz": 97244,
+   "raw": 275758,
+   "lazyGz": 1391,
+   "inlineGz": 98286,
+   "staticSrc": 1094809,
+   "staticModules": 73
+  },
+  "font/text+font/typography/vertical": {
+   "gz": 97091,
+   "raw": 275467,
+   "lazyGz": 1391,
+   "inlineGz": 98162,
+   "staticSrc": 1094142,
+   "staticModules": 73
+  },
+  "font/text+font/typography/baseline": {
+   "gz": 97377,
+   "raw": 276347,
+   "lazyGz": 1391,
+   "inlineGz": 98426,
+   "staticSrc": 1096602,
+   "staticModules": 73
+  },
+  "font/text+font/scripts/arabic": {
+   "gz": 105446,
+   "raw": 291313,
+   "lazyGz": 1391,
+   "inlineGz": 106595,
+   "staticSrc": 1119998,
+   "staticModules": 77
+  },
+  "font/text+font/scripts/hangul": {
+   "gz": 103744,
+   "raw": 287389,
+   "lazyGz": 1391,
+   "inlineGz": 104856,
+   "staticSrc": 1113259,
+   "staticModules": 76
+  },
+  "font/text+font/scripts/indic": {
+   "gz": 108069,
+   "raw": 297617,
+   "lazyGz": 1391,
+   "inlineGz": 109235,
+   "staticSrc": 1138712,
+   "staticModules": 78
+  },
+  "font/text+font/scripts/math": {
+   "gz": 97158,
+   "raw": 275578,
+   "lazyGz": 1391,
+   "inlineGz": 98217,
+   "staticSrc": 1098417,
+   "staticModules": 73
+  },
+  "font/text+font/scripts/thai": {
+   "gz": 103827,
+   "raw": 287647,
+   "lazyGz": 1391,
+   "inlineGz": 104934,
+   "staticSrc": 1113801,
+   "staticModules": 76
+  },
+  "font/text+font/scripts/use": {
+   "gz": 105075,
+   "raw": 291699,
+   "lazyGz": 1391,
+   "inlineGz": 106242,
+   "staticSrc": 1125213,
+   "staticModules": 76
+  },
+  "font/text+font/scripts": {
+   "gz": 111995,
+   "raw": 307794,
+   "lazyGz": 1391,
+   "inlineGz": 113122,
+   "staticSrc": 1180262,
+   "staticModules": 90
+  },
+  "font/text+font/unicode": {
+   "gz": 109035,
+   "raw": 300795,
+   "lazyGz": 1391,
+   "inlineGz": 110200,
+   "staticSrc": 1127111,
+   "staticModules": 80
+  }
+ }
+}

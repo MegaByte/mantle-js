@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // nestedClipSmoke.mjs — verifies depth-1 nested <clipPath>.
 //
 // A clipPath's child shape can itself carry `clip-path="url(#other)"`.
@@ -18,13 +21,16 @@ globalThis.DOMParser = DP;
 import { importSvg } from '../../src/svg/importer.js';
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL', msg); failures++; };
-const ok   = (msg) => console.log('ok', msg);
+const fail = (msg) => {
+  console.error('FAIL', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok', msg);
 
-const META_STRIDE   = 48;    // floats per shape
-const META_FLAGS    = 27;    // float offset of flagsShape  (texel 6.w)
-const META_CLIPID   = 30;    // float offset of clipId      (texel 7.z)
-const FLAG_LAYER    = 0x100;
+const META_STRIDE = 48; // floats per shape
+const META_FLAGS = 27; // float offset of flagsShape  (texel 6.w)
+const META_CLIPID = 30; // float offset of clipId      (texel 7.z)
+const FLAG_LAYER = 0x100;
 
 function metaFloatsOf(bundle) {
   // bundle.meta is a 32-byte header + per-shape 48-float records.
@@ -55,13 +61,17 @@ function metaFloatsOf(bundle) {
   let visibleRow = -1;
   for (let i = 0; i < n; i++) {
     const flags = m[i * META_STRIDE + META_FLAGS] | 0;
-    if ((flags & FLAG_LAYER) === 0) { visibleRow = i; break; }
+    if ((flags & FLAG_LAYER) === 0) {
+      visibleRow = i;
+      break;
+    }
   }
   if (visibleRow < 0) fail('test1: no visible shape found');
   else {
     const visClipId = m[visibleRow * META_STRIDE + META_CLIPID] | 0;
     if (visClipId <= 0) fail(`test1: visible shape has clipId=${visClipId}, expected > 0`);
-    else if (visClipId > n) fail(`test1: visible clipId=${visClipId} out of range (numShapes=${n})`);
+    else if (visClipId > n)
+      fail(`test1: visible clipId=${visClipId} out of range (numShapes=${n})`);
     else ok(`test1: visible shape clipId=${visClipId} resolves to a meta row`);
 
     // The visible clipId points at C1's first layer row. That row
@@ -77,15 +87,16 @@ function metaFloatsOf(bundle) {
     const c1ChildClipId = m[c1FirstRow * META_STRIDE + META_CLIPID] | 0;
     if (c1ChildClipId <= 0)
       fail(`test1: C1 child clipId=${c1ChildClipId}, expected non-zero (the rewritten ref to C2)`);
-    else if (c1ChildClipId > n)
-      fail(`test1: C1 child clipId=${c1ChildClipId} out of range`);
+    else if (c1ChildClipId > n) fail(`test1: C1 child clipId=${c1ChildClipId} out of range`);
     else ok(`test1: nested clipId=${c1ChildClipId} is a valid meta-row reference`);
 
     // Verify it actually points at a FLAG_LAYER row (C2's first child).
     if (c1ChildClipId > 0 && c1ChildClipId <= n) {
       const c2FirstFlags = m[(c1ChildClipId - 1) * META_STRIDE + META_FLAGS] | 0;
       if ((c2FirstFlags & FLAG_LAYER) === 0)
-        fail(`test1: nested clip row ${c1ChildClipId - 1} should have FLAG_LAYER, flags=${c2FirstFlags}`);
+        fail(
+          `test1: nested clip row ${c1ChildClipId - 1} should have FLAG_LAYER, flags=${c2FirstFlags}`,
+        );
       else ok('test1: nested clipId points at a FLAG_LAYER row (C2)');
     }
   }
@@ -112,7 +123,10 @@ function metaFloatsOf(bundle) {
   let visibleRow = -1;
   for (let i = 0; i < n; i++) {
     const flags = m[i * META_STRIDE + META_FLAGS] | 0;
-    if ((flags & FLAG_LAYER) === 0) { visibleRow = i; break; }
+    if ((flags & FLAG_LAYER) === 0) {
+      visibleRow = i;
+      break;
+    }
   }
   if (visibleRow < 0) fail('test2: no visible shape');
   else {
@@ -165,8 +179,7 @@ function metaFloatsOf(bundle) {
     didTimeout = false;
     if (!bundle || typeof bundle.numShapes !== 'number')
       fail('test3: importer returned invalid bundle');
-    else
-      ok(`test3: self-referencing pattern terminated (${bundle.numShapes} shapes)`);
+    else ok(`test3: self-referencing pattern terminated (${bundle.numShapes} shapes)`);
   } catch (e) {
     clearTimeout(timer);
     didTimeout = false;
@@ -197,23 +210,27 @@ function metaFloatsOf(bundle) {
   const bundle = await importSvg(svg, {});
   const m = metaFloatsOf(bundle);
   const n = bundle.numShapes;
-  const META_MASKID = 31;  // texel 7.w
+  const META_MASKID = 31; // texel 7.w
 
   let visRow = -1;
   for (let i = 0; i < n; i++) {
     const flags = m[i * META_STRIDE + META_FLAGS] | 0;
-    if ((flags & FLAG_LAYER) === 0) { visRow = i; break; }
+    if ((flags & FLAG_LAYER) === 0) {
+      visRow = i;
+      break;
+    }
   }
   if (visRow < 0) fail('test4: no visible shape');
   else {
     const maskId = m[visRow * META_STRIDE + META_MASKID] | 0;
-    if (maskId <= 0 || maskId > n)
-      fail(`test4: visible maskId=${maskId} invalid (numShapes=${n})`);
+    if (maskId <= 0 || maskId > n) fail(`test4: visible maskId=${maskId} invalid (numShapes=${n})`);
     else {
       const maskFirstRow = maskId - 1;
       const maskFirstFlags = m[maskFirstRow * META_STRIDE + META_FLAGS] | 0;
       if ((maskFirstFlags & FLAG_LAYER) === 0)
-        fail(`test4: mask first row missing FLAG_LAYER (got flags=0x${maskFirstFlags.toString(16)})`);
+        fail(
+          `test4: mask first row missing FLAG_LAYER (got flags=0x${maskFirstFlags.toString(16)})`,
+        );
       else ok('test4: mask first row has FLAG_LAYER');
       const maskChildClipId = m[maskFirstRow * META_STRIDE + META_CLIPID] | 0;
       if (maskChildClipId <= 0 || maskChildClipId > n)
@@ -221,8 +238,11 @@ function metaFloatsOf(bundle) {
       else {
         const innerFlags = m[(maskChildClipId - 1) * META_STRIDE + META_FLAGS] | 0;
         if ((innerFlags & FLAG_LAYER) === 0)
-          fail(`test4: nested clipId points at row missing FLAG_LAYER (flags=0x${innerFlags.toString(16)})`);
-        else ok(`test4: mask child carries nested clipId=${maskChildClipId}, resolves to layer row`);
+          fail(
+            `test4: nested clipId points at row missing FLAG_LAYER (flags=0x${innerFlags.toString(16)})`,
+          );
+        else
+          ok(`test4: mask child carries nested clipId=${maskChildClipId}, resolves to layer row`);
       }
     }
   }

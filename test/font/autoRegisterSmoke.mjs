@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // autoRegisterSmoke.mjs — font/auto sniffs a font's tables + scripts and
 // registers exactly the optional subsystems it needs, with no manual
 // register*() calls. Validates the registry actually gets populated
@@ -11,18 +14,19 @@ import { MantleFontAsset } from '../../src/font/fontAsset.js';
 import { autoRegisterForFont } from '../../src/font/auto.js';
 
 let failures = 0;
-const fail = (m) => { console.error('FAIL', m); failures++; };
+const fail = (m) => {
+  console.error('FAIL', m);
+  failures++;
+};
 const ok = (m) => console.log('ok', m);
 
 const FONTS = {
   // A CFF/OTF font.
   cff: ['/System/Library/Fonts/Supplemental/STIXGeneral.otf'],
   // TrueType glyf Latin.
-  glyf: ['/System/Library/Fonts/Supplemental/Arial.ttf',
-         '/Library/Fonts/Arial.ttf'],
+  glyf: ['/System/Library/Fonts/Supplemental/Arial.ttf', '/Library/Fonts/Arial.ttf'],
   // Arabic (RTL → should auto-pull bidi + arabic shaper).
-  arabic: ['/System/Library/Fonts/GeezaPro.ttc',
-           '/System/Library/Fonts/SFArabic.ttf'],
+  arabic: ['/System/Library/Fonts/GeezaPro.ttc', '/System/Library/Fonts/SFArabic.ttf'],
 };
 
 function firstExisting(paths) {
@@ -38,14 +42,15 @@ async function loadAuto(path) {
 }
 
 function firstGlyphSegs(asset, ch) {
-  return asset.getGlyphSegs(ch.codePointAt(0));   // takes a codepoint
+  return asset.getGlyphSegs(ch.codePointAt(0)); // takes a codepoint
 }
 
 // ---- T1: CFF/OTF font → font/formats/cff auto-registered, glyphs non-blank.
 {
   const p = firstExisting(FONTS.cff);
-  if (!p) { console.log('SKIP T1 (no CFF/OTF system font)'); }
-  else {
+  if (!p) {
+    console.log('SKIP T1 (no CFF/OTF system font)');
+  } else {
     const { asset, registered } = await loadAuto(p);
     if (!registered.includes('font/formats/cff'))
       fail(`T1 expected font/formats/cff in [${registered}]`);
@@ -60,8 +65,9 @@ function firstGlyphSegs(asset, ch) {
 // ---- T2: plain glyf TTF → CFF NOT pulled (stays lean).
 {
   const p = firstExisting(FONTS.glyf);
-  if (!p) { console.log('SKIP T2 (no glyf system font)'); }
-  else {
+  if (!p) {
+    console.log('SKIP T2 (no glyf system font)');
+  } else {
     const { asset, registered } = await loadAuto(p);
     if (registered.includes('font/formats/cff'))
       fail(`T2 glyf font should NOT pull CFF; registered=[${registered}]`);
@@ -76,8 +82,9 @@ function firstGlyphSegs(asset, ch) {
 // ---- T3: Arabic font → arabic shaper + bidi auto-pulled.
 {
   const p = firstExisting(FONTS.arabic);
-  if (!p) { console.log('SKIP T3 (no Arabic system font)'); }
-  else {
+  if (!p) {
+    console.log('SKIP T3 (no Arabic system font)');
+  } else {
     const { registered } = await loadAuto(p);
     const lp = p.toLowerCase();
     const isArabicFont = lp.includes('geeza') || lp.includes('arabic');
@@ -85,8 +92,8 @@ function firstGlyphSegs(asset, ch) {
       // Shaping comes from EITHER the OT Arabic shaper (GSUB 'arab') OR
       // the AAT path (morx) for AAT fonts like GeezaPro. Either way, an
       // RTL Arabic font must auto-pull bidi (via OS/2 range coverage).
-      const hasShaper = registered.includes('font/scripts/arabic') ||
-                        registered.includes('font/typography/aat');
+      const hasShaper =
+        registered.includes('font/scripts/arabic') || registered.includes('font/typography/aat');
       if (!hasShaper)
         fail(`T3 expected an Arabic shaper (scripts/arabic or aat); registered=[${registered}]`);
       else if (!registered.includes('font/typography/bidi'))

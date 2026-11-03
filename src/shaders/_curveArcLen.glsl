@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // _curveArcLen.glsl — cubic coefficient form, 1-D Horner eval, and Gauss–Legendre
 // 16-point arc length. Shared (spliced via the @@CURVE_ARCLEN@@ marker) by the
 // Slug fill walk, the morph stroke FRAG, and the morph stroke VERT. Pure math, no

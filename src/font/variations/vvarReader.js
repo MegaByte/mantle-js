@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // vvarReader.js — OpenType 'VVAR' (Vertical Metrics Variations).
 // Structurally identical to HVAR but for vertical advance / TSB / BSB
 // instead of horizontal advance / LSB / RSB.
@@ -23,23 +26,22 @@ export class VvarTable {
     //   u32 tsbMappingOffset
     //   u32 bsbMappingOffset
     //   u32 vorgMappingOffset
-    const ivsOff       = v.getUint32(off +  4, false);
-    const advMapOff    = v.getUint32(off +  8, false);
-    const tsbMapOff    = v.getUint32(off + 12, false);
-    // bsbMapOff and vorgMapOff at off+16 and +20; unused.
+    const ivsOff = v.getUint32(off + 4, false);
+    const advMapOff = v.getUint32(off + 8, false);
+    const tsbMapOff = v.getUint32(off + 12, false);
+    const orgMapOff = v.getUint32(off + 20, false);
     this._tables = tables;
     this._tableOff = off;
     this._ivs = new ItemVariationStore(tables, off + ivsOff);
-    this._advMap = advMapOff > 0
-      ? new DeltaSetIndexMap(tables, off + advMapOff)
-      : null;
-    this._tsbMap = tsbMapOff > 0
-      ? new DeltaSetIndexMap(tables, off + tsbMapOff)
-      : null;
+    this._advMap = advMapOff > 0 ? new DeltaSetIndexMap(tables, off + advMapOff) : null;
+    this._tsbMap = tsbMapOff > 0 ? new DeltaSetIndexMap(tables, off + tsbMapOff) : null;
+    this._orgMap = orgMapOff > 0 ? new DeltaSetIndexMap(tables, off + orgMapOff) : null;
     this._present = true;
   }
 
-  get hasVvar() { return this._present; }
+  get hasVvar() {
+    return this._present;
+  }
 
   /// Advance-height delta (font units) for `gid` at `nCoords`.
   advanceDelta(gid, nCoords) {
@@ -54,6 +56,13 @@ export class VvarTable {
       innerIdx = gid;
     }
     return this._ivs.getDelta(outerIdx, innerIdx, nCoords);
+  }
+
+  /// CFF2 VORG delta. An absent map leaves the origin unchanged.
+  originDelta(gid, nCoords) {
+    if (!this._present || this._orgMap == null) return 0;
+    const map = this._orgMap.lookup(gid);
+    return this._ivs.getDelta(map.outer, map.inner, nCoords);
   }
 
   /// Top-side-bearing delta. Mostly absent in real fonts; returns 0.

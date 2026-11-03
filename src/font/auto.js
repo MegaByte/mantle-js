@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // font/auto — automatic, tree-shaking-friendly reader/shaper registration.
 //
 //   import { autoRegisterForFont } from '@kontek/mantle/font/auto';
@@ -6,7 +9,7 @@
 //
 // Sniffs a font's sfnt table directory (and GSUB/GPOS script list) and
 // registers exactly the optional subsystems that font needs — CFF
-// outlines, variable-font readers, colour-glyph formats, MATH, AAT,
+// outlines, variable-font readers, color-glyph formats, MATH, AAT,
 // legacy kern, vertical / baseline / justification tables, the right
 // script shaper(s), and bidi for RTL scripts.
 //
@@ -25,8 +28,7 @@ import { parseTtfTables } from './ttfTables.js';
 import { decodeIfWoff2 } from './fontAsset.js';
 
 function _isWoff2(b) {
-  return b && b.length >= 4 &&
-    b[0] === 0x77 && b[1] === 0x4F && b[2] === 0x46 && b[3] === 0x32; // 'wOF2'
+  return b && b.length >= 4 && b[0] === 0x77 && b[1] === 0x4f && b[2] === 0x46 && b[3] === 0x32; // 'wOF2'
 }
 
 // RTL coverage from OS/2 ulUnicodeRange1 (offset 42, u32 big-endian).
@@ -48,27 +50,76 @@ function _collectScriptTags(view, rec, out) {
   const count = view.getUint16(slOff, false);
   for (let i = 0; i < count; i++) {
     const p = slOff + 2 + i * 6;
-    out.add(String.fromCharCode(
-      view.getUint8(p), view.getUint8(p + 1), view.getUint8(p + 2), view.getUint8(p + 3)));
+    out.add(
+      String.fromCharCode(
+        view.getUint8(p),
+        view.getUint8(p + 1),
+        view.getUint8(p + 2),
+        view.getUint8(p + 3),
+      ),
+    );
   }
 }
 
 // OT script tags (incl. the v2 '...2' Indic variants) → shaper subpath.
 const _INDIC = new Set([
-  'deva', 'dev2', 'beng', 'bng2', 'guru', 'gur2', 'gujr', 'gjr2',
-  'orya', 'ory2', 'taml', 'tml2', 'telu', 'tel2', 'knda', 'knd2',
-  'mlym', 'mlm2', 'sinh',
+  'deva',
+  'dev2',
+  'beng',
+  'bng2',
+  'guru',
+  'gur2',
+  'gujr',
+  'gjr2',
+  'orya',
+  'ory2',
+  'taml',
+  'tml2',
+  'telu',
+  'tel2',
+  'knda',
+  'knd2',
+  'mlym',
+  'mlm2',
+  'sinh',
 ]);
 // USE (Universal Shaping Engine) scripts — pragmatic common subset.
 const _USE = new Set([
-  'khmr', 'mymr', 'mym2', 'java', 'bali', 'sund', 'batk', 'tglg',
-  'buhd', 'tagb', 'cham', 'tale', 'talu', 'lana', 'cakm', 'bugi',
-  'tfng', 'mtei', 'newa', 'gran', 'tibt',
+  'khmr',
+  'mymr',
+  'mym2',
+  'java',
+  'bali',
+  'sund',
+  'batk',
+  'tglg',
+  'buhd',
+  'tagb',
+  'cham',
+  'tale',
+  'talu',
+  'lana',
+  'cakm',
+  'bugi',
+  'tfng',
+  'mtei',
+  'newa',
+  'gran',
+  'tibt',
 ]);
 // RTL scripts that need the bidi reorder pass.
 const _RTL = new Set([
-  'arab', 'hebr', 'syrc', 'thaa', 'nko ', 'adlm', 'rohg', 'yezi',
-  'mand', 'samr', 'mend',
+  'arab',
+  'hebr',
+  'syrc',
+  'thaa',
+  'nko ',
+  'adlm',
+  'rohg',
+  'yezi',
+  'mand',
+  'samr',
+  'mend',
 ]);
 
 /**
@@ -94,7 +145,9 @@ const _RTL = new Set([
 export async function detectFontModules(bytes, opts = {}) {
   const faceIndex = opts.faceIndex || 0;
   const modules = [];
-  const add = (cond, pkg, register) => { if (cond) modules.push({ pkg, register, label: pkg }); };
+  const add = (cond, pkg, register) => {
+    if (cond) modules.push({ pkg, register, label: pkg });
+  };
 
   // 1. WOFF2 → must decode to sfnt before the table directory can be
   // sniffed, and decoding needs the woff2 reader registered. This module
@@ -106,6 +159,15 @@ export async function detectFontModules(bytes, opts = {}) {
     const m = await import('@kontek/mantle/font/formats/woff2');
     m.registerWoff2Reader();
     sfnt = await decodeIfWoff2(bytes);
+  } else if (
+    bytes &&
+    bytes.length >= 4 &&
+    bytes[0] === 0x77 &&
+    bytes[1] === 0x4f &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46
+  ) {
+    sfnt = await decodeIfWoff2(bytes); // WOFF 1.0: no reader to register
   }
 
   // NFC + grapheme segmentation are universal to text (not font-table-driven),
@@ -120,13 +182,19 @@ export async function detectFontModules(bytes, opts = {}) {
 
   // 3. Tables → readers.
   add(t.cff || t.cff2, 'font/formats/cff', 'registerCffReader');
-  add(t.fvar || t.gvar || t.hvar || t.vvar || t.mvar || t.avar || t.stat,
-    'font/variations', 'registerVariableFontReaders');
-  add(t.colr || t.cbdt || t.cblc || t.ebdt || t.eblc || t.sbix || t.svg,
-    'font/color', 'registerColorEmojiReaders');
+  add(
+    t.fvar || t.gvar || t.hvar || t.vvar || t.mvar || t.avar || t.stat,
+    'font/variations',
+    'registerVariableFontReaders',
+  );
+  add(
+    t.colr || t.cbdt || t.cblc || t.ebdt || t.eblc || t.sbix || t.svg,
+    'font/color',
+    'registerColorEmojiReaders',
+  );
+  add(t.svg, 'font/color/svgInOtImport', 'registerSvgInOtImport');
   add(t.math, 'font/math', 'registerMathReader');
-  add(t.morx || t.mort || t.kerx || t.feat || t.ankr,
-    'font/typography/aat', 'registerAatReaders');
+  add(t.morx || t.mort || t.kerx || t.feat || t.ankr, 'font/typography/aat', 'registerAatReaders');
   // Register legacy 'kern' whenever the table exists. Can't gate on "GPOS
   // has no kern feature" without parsing GPOS features, and a GPOS *table*
   // can be present with NO pair kerning (mark/cursive only); gating on
@@ -145,10 +213,14 @@ export async function detectFontModules(bytes, opts = {}) {
   _collectScriptTags(view, t.gpos, tags);
 
   let wantBidi = false;
-  if (tags.has('arab')) { add(true, 'font/scripts/arabic', 'registerArabicShaping'); wantBidi = true; }
+  if (tags.has('arab')) {
+    add(true, 'font/scripts/arabic', 'registerArabicShaping');
+    wantBidi = true;
+  }
   if ([..._INDIC].some((s) => tags.has(s))) add(true, 'font/scripts/indic', 'registerIndicShaping');
   if (tags.has('thai') || tags.has('lao ')) add(true, 'font/scripts/thai', 'registerThaiShaping');
-  if (tags.has('hang') || tags.has('jamo')) add(true, 'font/scripts/hangul', 'registerHangulShaping');
+  if (tags.has('hang') || tags.has('jamo'))
+    add(true, 'font/scripts/hangul', 'registerHangulShaping');
   if ([..._USE].some((s) => tags.has(s))) add(true, 'font/scripts/use', 'registerUseShaping');
   if (tags.has('math')) add(true, 'font/scripts/math', 'registerMathStretchy');
 

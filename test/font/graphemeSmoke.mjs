@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // Grapheme-cluster integration. Verifies:
 //   - Each emitted glyph slot carries a clusterStart flag.
 //   - clusterStart matches the runtime's grapheme segmentation for
@@ -11,20 +14,23 @@ import { buildStyled, buildTextRun } from '../../src/font/textRun.js';
 import { defaultStyle } from '../../src/font/markupParser.js';
 
 const arial = new MantleFontAsset(
-  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf'))
+  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')),
 );
 arial.getMetrics(0x41);
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // ---- T1: simple ASCII — every slot is clusterStart=true ----
 {
   // We can't access slots directly from the bundle, but we can verify
   // via Intl.Segmenter that the segmentation matches expectations.
   const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-  const clusters = Array.from(seg.segment('hello')).map(s => s.segment);
+  const clusters = Array.from(seg.segment('hello')).map((s) => s.segment);
   if (clusters.length !== 5) fail(`T1 expected 5 ASCII clusters, got ${clusters.length}`);
   else ok(`T1 ASCII: 5 single-cp clusters`);
 }
@@ -32,7 +38,7 @@ const ok   = (msg) => console.log('ok ' + msg);
 // ---- T2: precomposed é is ONE cluster ----
 {
   const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-  const clusters = Array.from(seg.segment('café')).map(s => s.segment);
+  const clusters = Array.from(seg.segment('café')).map((s) => s.segment);
   if (clusters.length !== 4) fail(`T2 'café' expected 4 clusters, got ${clusters.length}`);
   else ok(`T2 'café' precomposed: 4 clusters`);
 }
@@ -42,16 +48,20 @@ const ok   = (msg) => console.log('ok ' + msg);
   const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
   // 'café' with explicit NFD form
   const nfd = 'café';
-  const clusters = Array.from(seg.segment(nfd)).map(s => s.segment);
-  if (clusters.length !== 4) fail(`T3 NFD 'café' expected 4 clusters, got ${clusters.length}: ${JSON.stringify(clusters)}`);
+  const clusters = Array.from(seg.segment(nfd)).map((s) => s.segment);
+  if (clusters.length !== 4)
+    fail(`T3 NFD 'café' expected 4 clusters, got ${clusters.length}: ${JSON.stringify(clusters)}`);
   else ok(`T3 NFD 'café': 4 clusters (e + ◌́ groups)`);
 }
 
 // ---- T4: family-emoji ZWJ chain is ONE cluster ----
 {
   const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-  const clusters = Array.from(seg.segment('a👨‍👩‍👧b')).map(s => s.segment);
-  if (clusters.length !== 3) fail(`T4 ZWJ expected 3 clusters (a / family / b), got ${clusters.length}: ${JSON.stringify(clusters)}`);
+  const clusters = Array.from(seg.segment('a👨‍👩‍👧b')).map((s) => s.segment);
+  if (clusters.length !== 3)
+    fail(
+      `T4 ZWJ expected 3 clusters (a / family / b), got ${clusters.length}: ${JSON.stringify(clusters)}`,
+    );
   else ok(`T4 ZWJ family-emoji: 3 clusters`);
 }
 
@@ -72,7 +82,10 @@ const ok   = (msg) => console.log('ok ' + msg);
   const ids = b.shapeIds;
   let firstEmoji = -1;
   for (let i = 0; i < ids.length; i++) {
-    if (ids[i].includes('u1F468')) { firstEmoji = i; break; }
+    if (ids[i].includes('u1F468')) {
+      firstEmoji = i;
+      break;
+    }
   }
   if (firstEmoji < 0) fail(`T5 family-emoji not found in bundle (${ids.length} shapes)`);
   else {
@@ -91,16 +104,24 @@ const ok   = (msg) => console.log('ok ' + msg);
     }
     // And the joiners are gone: no u200D shape anywhere in the bundle.
     const zwjLeaked = ids.some((s) => s.includes('u200D'));
-    if (!ok5) fail(`T5 ZWJ family not contiguous in output: ${ids.slice(firstEmoji, firstEmoji + 3).join(' / ')}`);
-    else if (zwjLeaked) fail(`T5 ZWJ (default-ignorable) leaked a shape into the bundle: ${ids.filter((s) => s.includes('u200D')).join(' / ')}`);
+    if (!ok5)
+      fail(
+        `T5 ZWJ family not contiguous in output: ${ids.slice(firstEmoji, firstEmoji + 3).join(' / ')}`,
+      );
+    else if (zwjLeaked)
+      fail(
+        `T5 ZWJ (default-ignorable) leaked a shape into the bundle: ${ids.filter((s) => s.includes('u200D')).join(' / ')}`,
+      );
     else ok(`T5 ZWJ chain stays contiguous across wrap, joiners hidden`);
   }
 }
 
 // ---- T6: regression — Latin wrap unaffected by cluster gate ----
 {
-  const wrapped = await buildStyled([{ text: 'AAA BBB CCC', style: defaultStyle() }], arial, { maxWidthEm: 3 });
-  const single  = await buildTextRun('AAA BBB CCC', arial);
+  const wrapped = await buildStyled([{ text: 'AAA BBB CCC', style: defaultStyle() }], arial, {
+    maxWidthEm: 3,
+  });
+  const single = await buildTextRun('AAA BBB CCC', arial);
   const hW = wrapped.globalBBox[3];
   const hS = single.globalBBox[3];
   if (hW < hS * 1.5) fail(`T6 Latin wrap regressed hW=${hW.toFixed(3)} hS=${hS.toFixed(3)}`);

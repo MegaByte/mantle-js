@@ -1,0 +1,6 @@
+[
+  {
+    "name": "baseline convolve cost",
+    "file": { "convolveFrag": "probes/filtperf/convolveKernel-baseCost.convolve.frag.glsl" }
+  }
+]

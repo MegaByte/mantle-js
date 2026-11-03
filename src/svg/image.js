@@ -1,6 +1,9 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // svg/image.js — <image> href decoding + per-document preload.
 //
-// Async because in-browser the only way to rasterise an <image> href is
+// Async because in-browser the only way to rasterize an <image> href is
 // via the <img>+<canvas> pair (no synchronous browser API exists).
 // Node / xmldom contexts without a DOM canvas return null (the caller
 // skips the image — graceful degradation).
@@ -8,9 +11,9 @@
 // SVG-content hrefs (data:image/svg+xml,... and *.svg / *.svgz URLs)
 // route to a separate path that returns { isSvg: true, svgText, viewBox }
 // — the importer walks this recursively, mapping the nested viewBox into
-// the outer <image>'s rect, instead of rasterising.
+// the outer <image>'s rect, instead of rasterizing.
 
-import { elementChildren } from './utils.js';
+import { svgElementName, elementChildren } from './utils.js';
 // Gzip decode lives in core/gzip.js (shared with the SVG-in-OT path).
 // Re-exported here for callers importing gunzipBytes from this module.
 import { gunzipBytes } from '../core/gzip.js';
@@ -26,7 +29,6 @@ export function isSvgHref(href) {
   const noQ = lo.replace(/[?#].*$/, '');
   return noQ.endsWith('.svg') || noQ.endsWith('.svgz');
 }
-
 
 /// True iff the bytes start with the gzip magic (0x1f 0x8b). Helpful
 /// when a fetch returned bytes that may or may not be compressed
@@ -44,24 +46,40 @@ export async function decodeSvgzBytes(bytes) {
   return new TextDecoder('utf-8').decode(decompressed);
 }
 
-/// Extract the SVG text from a data URL whose MIME is image/svg+xml.
-/// Supports both base64 and percent-encoded payloads. Returns null on
-/// parse failure.
+/// Percent-decoding that never fails (RFC 3986 leaves a stray "%" literal, as browsers do): each run of %XX
+/// escapes is the UTF-8 bytes it spells, and a "%" not followed by two hex digits stays as written.
+function lenientPercentDecode(body) {
+  return body.replace(/(?:%[0-9a-fA-F]{2})+/g, (run) => {
+    const bytes = new Uint8Array(run.length / 3);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(run.substr(i * 3 + 1, 2), 16);
+    return new TextDecoder('utf-8').decode(bytes);
+  });
+}
+
+/// Base64 payload to bytes: whitespace is ignored, the URL-safe alphabet is accepted, padding is optional.
+function base64Bytes(body) {
+  let t = body.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+  if (/[^A-Za-z0-9+/]/.test(t) || t.length % 4 === 1) return null;
+  if (typeof Buffer !== 'undefined') return new Uint8Array(Buffer.from(t, 'base64'));
+  const bin = atob(t + '='.repeat((4 - (t.length % 4)) % 4));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/// Extract the SVG text from a data URL whose MIME is image/svg+xml (RFC 2397: `data:[<mime>][;<param>]*[;base64],<body>`).
+/// Any parameter is accepted (`;charset=`, `;utf8`, `;name=`), and the body is base64 or percent-encoded text, both read
+/// as UTF-8. Returns null on parse failure. Raster data URLs are never decoded here: the browser reads their bytes.
 export function decodeSvgDataUrl(href) {
   if (!href) return null;
-  const m = /^data:image\/svg\+xml(?:;charset=[^;,]+)?(;base64)?,(.*)$/i.exec(href.trim());
+  const m = /^data:image\/svg\+xml((?:;[^;,]*)*),([\s\S]*)$/i.exec(href.trim());
   if (!m) return null;
-  const isB64 = !!m[1];
-  let body = m[2];
+  const isB64 = m[1].split(';').some((p) => p.trim().toLowerCase() === 'base64');
   if (isB64) {
-    try {
-      if (typeof atob === 'function') return atob(body);
-      // Node fallback.
-      return Buffer.from(body, 'base64').toString('utf8');
-    } catch (e) { return null; }
+    const bytes = base64Bytes(m[2]);
+    return bytes ? new TextDecoder('utf-8').decode(bytes) : null;
   }
-  try { return decodeURIComponent(body); }
-  catch (e) { return null; }
+  return lenientPercentDecode(m[2]);
 }
 
 /// Decode an <image>'s href. Returns one of:
@@ -87,7 +105,9 @@ export async function decodeImageHref(href, opts) {
       try {
         const svgText = await opts.svgTextLoader(href);
         if (typeof svgText === 'string' && svgText.length > 0) return { isSvg: true, svgText };
-      } catch (e) { /* fall through to raster attempt */ }
+      } catch (e) {
+        /* fall through to raster attempt */
+      }
     }
   }
   // Need a DOM. xmldom-parsed docs have no Image global; bail.
@@ -98,41 +118,78 @@ export async function decodeImageHref(href, opts) {
     img.onload = () => {
       const w = img.naturalWidth || img.width;
       const h = img.naturalHeight || img.height;
-      if (!w || !h) { resolve(null); return; }
-      const c = document.createElement('canvas');
-      c.width = w; c.height = h;
-      const ctx = c.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      let data;
-      try { data = ctx.getImageData(0, 0, w, h).data; }
-      catch (e) { resolve(null); return; }  // tainted (cross-origin)
-      resolve({ w, h, rgba: new Uint8Array(data.buffer.slice(0, data.length)) });
+      if (!w || !h) {
+        resolve(null);
+        return;
+      }
+      // The decode runs off the main thread (img.decode()), so the drawImage below does not decode a large raster synchronously (a 421 ms task on a
+      // big photo), and the canvas is CPU-backed (willReadFrequently), so the read-back is a copy and not a GPU round trip.
+      const read = () => {
+        const c = document.createElement('canvas');
+        c.width = w;
+        c.height = h;
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0);
+        let data;
+        try {
+          data = ctx.getImageData(0, 0, w, h).data;
+        } catch (e) {
+          resolve(null);
+          return;
+        } // tainted (cross-origin)
+        resolve({ w, h, rgba: new Uint8Array(data.buffer.slice(0, data.length)) });
+      };
+      if (typeof img.decode === 'function') img.decode().then(read, read);
+      else read();
     };
     img.onerror = () => resolve(null);
     img.src = href;
   });
 }
 
-/// Pre-walk the SVG to find every <image> element and resolve its
-/// raster pixel data OR SVG content. Returns Map<element → decoded>
-/// where `decoded` is either { isSvg, svgText } or { w, h, rgba }.
-/// opts.svgTextLoader (optional) is forwarded to decodeImageHref so
-/// non-data SVG URLs resolve via the caller's fetch.
-export async function preloadImages(root, opts) {
+/// True for an <feImage> whose href is an EXTERNAL raster: not a "#id"
+/// reference to an element, and not SVG (which a filter input would have to
+/// rasterize at a resolution nothing here knows).
+function isExternalRasterFeImage(el) {
+  const href = (el.getAttribute('href') || el.getAttribute('xlink:href') || '').trim();
+  return !!href && href[0] !== '#' && !isSvgHref(href);
+}
+
+/// Pre-walk the SVG to find every <image> element, and every <feImage> with
+/// an external raster href, and resolve its raster pixel data OR SVG content.
+/// Returns Map<element → decoded> where `decoded` is either { isSvg, svgText }
+/// or { w, h, rgba }. opts.svgTextLoader (optional) is forwarded to
+/// decodeImageHref so non-data SVG URLs resolve via the caller's fetch.
+/// `accept(el)`, when given, is asked first and an element it refuses is not
+/// loaded at all.
+export async function preloadImages(root, opts, accept, byHref = new Map()) {
   const list = [];
-  const visit = el => {
-    const tag = (el.tagName || '').toLowerCase();
-    if (tag === 'image') list.push(el);
+  const visit = (el) => {
+    const tag = svgElementName(el);
+    if (
+      (tag === 'image' || (tag === 'feimage' && isExternalRasterFeImage(el))) &&
+      (!accept || accept(el))
+    )
+      list.push(el);
     const ks = elementChildren(el);
     for (let i = 0; i < ks.length; i++) visit(ks[i]);
   };
   visit(root);
   // Decode concurrently — each image is an independent fetch + decode, so
   // serial awaiting stacks N round trips of latency into importSvg.
-  const decoded = await Promise.all(list.map((el) => {
-    const href = el.getAttribute('href') || el.getAttribute('xlink:href') || '';
-    return decodeImageHref(href, opts);
-  }));
+  // ...but each DISTINCT href once: the same image embedded twice is one decode, and the elements share the record, which is
+  // what lets claimImage give them one atlas region. (Elements of different hrefs never share.)
+  const decoded = await Promise.all(
+    list.map((el) => {
+      const href = el.getAttribute('href') || el.getAttribute('xlink:href') || '';
+      let p = byHref.get(href);
+      if (!p) {
+        p = decodeImageHref(href, opts);
+        byHref.set(href, p);
+      }
+      return p;
+    }),
+  );
   const out = new Map();
   for (let i = 0; i < list.length; i++) {
     if (decoded[i]) out.set(list[i], decoded[i]);

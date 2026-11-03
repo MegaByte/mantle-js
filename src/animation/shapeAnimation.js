@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // shapeAnimation.js — extensions to createShapeMorph for Lottie /
 // Rive / state-machine animation drivers.
 //
@@ -9,14 +12,23 @@
 //   - bone-weighted skinning (Rive non-mesh paths)
 //   - 3-pose blend stacks (Rive state-machine transitions)
 //
-// Each entry point is a driver-layer wrapper that owns one or more
-// `createShapeMorph` instances (or one shared curve scratch buffer)
-// and reuses the existing `setT` upload path. The renderer-side
-// kernel (`texSubImage2D` on `bundle.curveTex`) is unchanged.
+// Driven poses rebuild current geometry and CPU query data from semantic curve
+// fields. Timeline pairs retain the ordinary GPU morph path.
 
+import { curvePoseLayout, adoptCurvePose, sampleDrivenPaint } from './currentCurvePose.js';
 import { createShapeMorph, createSpriteMorph } from './shapeMorph.js';
+import { checkedSpriteBounds, ownSpriteRange } from '../core/spriteRange.js';
+import { unwrapBundle } from '../core/unwrapBundle.js';
 // Timeline bracket/ease helpers live in the gl-free core.
-import { timelineBracketAt, timelineEase, updateVisibility } from '../core/morphCore.js';
+import {
+  timelineBracketAt,
+  timelineEase,
+  updateVisibility,
+  arcRecordToCenter,
+  applyArcFlagSteps,
+  restoreArcEndPoses,
+  prepareDrivenArcMorph,
+} from '../core/morphCore.js';
 
 // ────────────────────────────────────────────────────────────────
 // 1) N-key timeline
@@ -37,22 +49,104 @@ import { timelineBracketAt, timelineEase, updateVisibility } from '../core/morph
 //   interp ∈ {'linear', 'hold', 'cubicBezier', 'spatialBezier'}
 //   For 'cubicBezier' the key also carries
 //     `{ outX, outY, inX, inY }` — the temporal-Bezier control
-//     points (Lottie shape).
+//     points (Lottie shape). outX and inX are clamped to [0, 1] (CSS and
+//     Lottie require it; outside it x(t) is not monotone); outY and inY may overshoot.
 //   For 'spatialBezier' see the createSpatialBezierMorph below;
 //   the timeline only stores the marker, the actual sampling lives
 //   in the morph instance.
 //
 // Returns a handle:
 //   { setTime(seconds), duration, currentBundle, dispose() }
-export function createShapeTimeline(gl, bundles, keys) {
+/// PAIR MORPHS ARE SHARED (per GL context): every timeline over the same two pose bundles uses ONE morph of them. A scene that made each of its sprites a
+/// timeline over the same 40 poses had each build its own 31 pair morphs (~4 MB each, per sprite on screen). A timeline holds one reference per pair;
+/// the morph is disposed with its last user. Each user draws its own pose: drawBundle(timeline.bundle, { morphT: timeline.t }) applies it at the draw.
+const _sharedPairs = new WeakMap(); // gl -> WeakMap(source pose -> Map(destination pose -> { morph, refs }))
+/// A timeline's arc options change the morph, so a pair is shared only between timelines that agree on them: a second key under the destination.
+const pairOptionKey = (opts) =>
+  (opts && opts.compat === 'chrome' ? 'c' : '') +
+  (opts && opts.arcRotation === 'shortest' ? 's' : '');
+function acquirePair(gl, a, b, opts) {
+  let byGl = _sharedPairs.get(gl);
+  if (!byGl) _sharedPairs.set(gl, (byGl = new WeakMap()));
+  let byA = byGl.get(a);
+  if (!byA) byGl.set(a, (byA = new Map()));
+  const optKey = pairOptionKey(opts);
+  let byOpt = byA.get(b);
+  if (!byOpt) byA.set(b, (byOpt = new Map()));
+  let e = byOpt.get(optKey);
+  if (!e) {
+    e = {
+      morph: createShapeMorph(
+        gl,
+        a,
+        b,
+        optKey ? { compat: opts.compat, arcRotation: opts.arcRotation } : undefined,
+      ),
+      refs: 0,
+      a,
+      b,
+      optKey,
+    };
+    byOpt.set(optKey, e);
+    // (its draw states are its poses': a renderer's declared reach for the two poses covers the morph -- warmNeeds bundleTags)
+    if (e.morph.bundle)
+      Object.defineProperty(e.morph.bundle, '_reachPoses', {
+        value: [new WeakRef(a), new WeakRef(b)],
+        configurable: true,
+        enumerable: false,
+      });
+    // (and its name, for the debug records -- playBuildWhy, standInWhy, getMemoryStats rows: read when asked, the app may label a pose after the timeline exists)
+    if (e.morph.bundle && !('debugLabel' in e.morph.bundle))
+      Object.defineProperty(e.morph.bundle, 'debugLabel', {
+        get: () => 'pair:' + (a.debugLabel || '?') + '>' + (b.debugLabel || '?'),
+        set(v) {
+          Object.defineProperty(this, 'debugLabel', {
+            value: v,
+            writable: true,
+            configurable: true,
+            enumerable: false,
+          });
+        },
+        configurable: true,
+        enumerable: false,
+      });
+  }
+  e.refs++;
+  return e;
+}
+function releasePair(gl, e) {
+  if (--e.refs > 0) return;
+  const { a, b, optKey } = e;
+  const byA = _sharedPairs.get(gl) && _sharedPairs.get(gl).get(a);
+  const byOpt = byA && byA.get(b);
+  if (byOpt && byOpt.get(optKey) === e) {
+    byOpt.delete(optKey);
+    if (!byOpt.size) byA.delete(b);
+  }
+  try {
+    e.morph.dispose();
+  } catch {
+    /* already gone */
+  }
+}
+
+/**
+ * @param {WebGL2RenderingContext} gl
+ * @param {any[]} bundles the poses
+ * @param {any[]} keys `{ time, bundleIndex, interp }`, sorted by time
+ * @param {{compat?: 'spec'|'chrome', arcRotation?: 'spec'|'shortest'}} [opts] Every bracket's morph takes them (createShapeMorph). Timelines over the same poses share a pair morph only when these agree.
+ */
+export function createShapeTimeline(gl, bundles, keys, opts) {
   if (!gl) throw new Error('createShapeTimeline: gl required');
   if (!Array.isArray(bundles) || bundles.length < 1)
     throw new Error('createShapeTimeline: bundles[] must be non-empty');
   if (!Array.isArray(keys) || keys.length < 1)
     throw new Error('createShapeTimeline: keys[] must be non-empty');
   // Validate keys are time-sorted.
-  for (let i = 1; i < keys.length; i++) {
-    if (keys[i].time < keys[i - 1].time)
+  for (let i = 0; i < keys.length; i++) {
+    if (!Number.isFinite(keys[i].time))
+      throw new Error('createShapeTimeline: key times must be finite numbers');
+    if (i > 0 && keys[i].time < keys[i - 1].time)
       throw new Error('createShapeTimeline: keys must be time-sorted');
   }
   // Validate bundleIndex values reference real bundles.
@@ -65,21 +159,34 @@ export function createShapeTimeline(gl, bundles, keys) {
   // flipbooks cycle the same pose pairs forever, and dispose-and-rebuild on
   // every bracket transition would re-run curve matching + pair-mesh builds
   // each switch. N keys → at most N-1
-  // cached pairs, built once (lazily on first visit, or by the idle prewarm
-  // below) and retuned with setT thereafter.
-  const _pairMorphs = new Map();   // 'lo:hi' → createShapeMorph
-  let curMorph = null;
-  let curSrcIdx = -1, curDstIdx = -1;
+  // pairs, referenced at creation (below) from the context's SHARED pair morphs (see acquirePair) and retuned with setT thereafter.
+  const _pairs = new Map(); // 'lo:hi' → { morph, refs } (one reference held by this timeline)
+  let curMorph = null,
+    curT = 0;
+  let curSrcIdx = -1,
+    curDstIdx = -1;
   let lastTime = NaN;
+  let disposed = false;
   const _morphFor = (loBundle, hiBundle) => {
     const k = loBundle + ':' + hiBundle;
-    let m = _pairMorphs.get(k);
-    if (!m) { m = createShapeMorph(gl, bundles[loBundle], bundles[hiBundle]); _pairMorphs.set(k, m); }
-    return m;
+    let e = _pairs.get(k);
+    if (!e) {
+      e = acquirePair(gl, bundles[loBundle], bundles[hiBundle], opts);
+      _pairs.set(k, e);
+    }
+    return e.morph;
   };
 
   function setTime(time) {
-    if (time === lastTime) return;
+    if (disposed) return;
+    time = +time;
+    if (time !== time) time = keys[0].time; // NaN reads as the first key, as setT(NaN) reads as 0
+    if (time === lastTime) {
+      // (the time is this timeline's, the morph is shared: another timeline may have moved it since, and a draw right after this call must see this pose)
+      const src = curMorph && curMorph.bundle && curMorph.bundle._morphSrc;
+      if (src && src.t !== curT) curMorph.setT(curT);
+      return;
+    }
     lastTime = time;
     // spatialBezier easing returns linear localT here; the morph instance
     // applies its per-vertex tangents.
@@ -87,54 +194,57 @@ export function createShapeTimeline(gl, bundles, keys) {
     const loBundle = keys[iLo].bundleIndex;
     const hiBundle = keys[iHi].bundleIndex;
     // Hot path: same bracket as last frame → just retune setT.
+    // (setT here as well: a timeline drawn without `morphT` -- its only user -- draws the pose of its last setTime)
     if (curMorph && curSrcIdx === loBundle && curDstIdx === hiBundle) {
-      curMorph.setT(timelineEase(keys[iLo], localT));
+      curT = timelineEase(keys[iLo], localT);
+      curMorph.setT(curT);
       return;
     }
     curMorph = _morphFor(loBundle, hiBundle);
     curSrcIdx = loBundle;
     curDstIdx = hiBundle;
-    curMorph.setT(timelineEase(keys[iLo], localT));
+    curT = timelineEase(keys[iLo], localT);
+    curMorph.setT(curT);
   }
 
-  // Idle PREWARM: construct every consecutive bracket pair once, one per idle
-  // tick, so the whole flipbook is ready before playback reaches it. Errors
-  // fall back to lazy construction on first visit.
-  {
-    const pairs = [];
-    const seen = new Set();
-    for (let i = 0; i + 1 < keys.length; i++) {
-      const lo = keys[i].bundleIndex, hi = keys[i + 1].bundleIndex;
-      const k = lo + ':' + hi;
-      if (lo !== hi && !seen.has(k)) { seen.add(k); pairs.push([lo, hi]); }
-    }
-    let pi = 0;
-    const warm = () => {
-      if (pi >= pairs.length) return;
-      const [lo, hi] = pairs[pi++];
-      try { _morphFor(lo, hi); } catch { }
-      if (pi < pairs.length) {
-        if (typeof requestIdleCallback === 'function') requestIdleCallback(warm, { timeout: 500 });
-        else setTimeout(warm, 0);
-      }
-    };
-    if (pairs.length) {
-      if (typeof requestIdleCallback === 'function') requestIdleCallback(warm, { timeout: 500 });
-      else setTimeout(warm, 0);
-    }
+  // every PAIR IS BUILT HERE, like a static bundle's geometry at createBundle: the timeline's content is known at creation, so its pair morphs exist (and are in
+  // the loading call's warm image) before anything draws. Built on first visit, or by an idle prewarm a busy loading page never runs, the pairs past the
+  // first would be new bundles in play with programs never warmed.
+  // Exactly the brackets setTime can reach (timelineBracketAt): every consecutive pair, a hold of one pose too, and the first and last keys held (before
+  // the first key, past the last). The last hold is built here too, or a timeline would build it in play when it reaches its end.
+  try {
+    _morphFor(keys[0].bundleIndex, keys[0].bundleIndex);
+    for (let i = 0; i + 1 < keys.length; i++)
+      _morphFor(keys[i].bundleIndex, keys[i + 1].bundleIndex);
+    _morphFor(keys[keys.length - 1].bundleIndex, keys[keys.length - 1].bundleIndex);
+  } catch (err) {
+    for (const e of _pairs.values()) releasePair(gl, e); // (a pair that cannot be built: the caller gets no timeline to dispose, so the references taken so far go here)
+    throw err;
   }
 
   function dispose() {
-    for (const m of _pairMorphs.values()) { try { m.dispose(); } catch { } }
-    _pairMorphs.clear();
+    if (disposed) return;
+    disposed = true;
+    for (const e of _pairs.values()) releasePair(gl, e); // (through the entry: `bundles` is the caller's array, which it may have changed since)
+    _pairs.clear();
     curMorph = null;
   }
 
   return {
     setTime,
-    get duration() { return duration; },
-    get currentMorph() { return curMorph; },
-    get bundle() { return curMorph ? curMorph.bundle : bundles[keys[0].bundleIndex]; },
+    get duration() {
+      return duration;
+    },
+    get currentMorph() {
+      return curMorph;
+    },
+    get bundle() {
+      return curMorph ? curMorph.bundle : bundles[keys[0].bundleIndex];
+    },
+    /// This timeline's pose on its current pair morph (draw it with drawBundle(bundle, { morphT: t }): the morph is shared), or null before any pair.
+    get t() {
+      return curMorph ? curT : null;
+    },
     dispose,
   };
 }
@@ -145,7 +255,6 @@ export function createShapeTimeline(gl, bundles, keys) {
 //   timelineEase: applies the LO key's departure-side interpolator
 //     (linear / hold / cubicBezier) to localT. spatialBezier returns
 //     linear localT — the morph instance applies its per-vertex tangents.
-
 
 /**
  * N-key timeline over SPRITE poses — the sprite analogue of
@@ -169,8 +278,9 @@ export function createShapeTimeline(gl, bundles, keys) {
  * @param {Array<{bundle:object, sprite:(string|[number,number])}>} refs
  * @param {Array<{time:number, refIndex:number, interp?:string,
  *                outX?:number, outY?:number, inX?:number, inY?:number}>} keys
+ * @param {{compat?: 'spec'|'chrome', arcRotation?: 'spec'|'shortest'}} [opts] Every bracket's morph takes them (createShapeMorph).
  */
-export function createSpriteTimeline(gl, refs, keys) {
+export function createSpriteTimeline(gl, refs, keys, opts) {
   if (!gl) throw new Error('createSpriteTimeline: gl required');
   if (!Array.isArray(refs) || refs.length < 1)
     throw new Error('createSpriteTimeline: refs[] must be non-empty');
@@ -180,8 +290,10 @@ export function createSpriteTimeline(gl, refs, keys) {
   }
   if (!Array.isArray(keys) || keys.length < 1)
     throw new Error('createSpriteTimeline: keys[] must be non-empty');
-  for (let i = 1; i < keys.length; i++) {
-    if (keys[i].time < keys[i - 1].time)
+  for (let i = 0; i < keys.length; i++) {
+    if (!Number.isFinite(keys[i].time))
+      throw new Error('createSpriteTimeline: key times must be finite numbers');
+    if (i > 0 && keys[i].time < keys[i - 1].time)
       throw new Error('createSpriteTimeline: keys must be time-sorted');
   }
   for (const k of keys) {
@@ -190,59 +302,62 @@ export function createSpriteTimeline(gl, refs, keys) {
   }
   const duration = keys[keys.length - 1].time - keys[0].time;
 
-  // Cached morph for the current bracket pair (a ref-pair). Built once per
-  // (lo, hi) pair and kept in `_spritePairs` — the hot path retunes
-  // setT. When lo === hi (before the first / after the last key, or two
-  // keys pointing at the SAME ref) there's nothing to morph: we hold that
-  // single ref via a degenerate self-morph (createSpriteMorph would reject
-  // an overlapping same-bundle pair, so we special-case it to a static
-  // single-sprite draw bundle built once).
-  // Two kinds of active handle:
-  //   • bracketMorph — a createSpriteMorph between two DISTINCT refs.
-  //     Cached per ref-pair in `_spritePairs` for the timeline's life and
-  //     disposed only at dispose(); a bracket change just switches which
-  //     cached pair is live.
-  //   • a hold — a static single-sprite handle (lo === hi: clamp regions,
-  //     or two keys on the same ref). Cached per ref index in `holds` and
-  //     disposed only at dispose().
-  // `current` points at whichever is live; `currentIsHold` says which kind.
   let bracketMorph = null;
-  const _spritePairs = new Map();   // 'lo:hi' → createSpriteMorph, kept until dispose
-  let curLoRef = -1, curHiRef = -1;
+  const _spritePairs = new Map(); // 'lo:hi' → createSpriteMorph, kept until dispose
+  let curLoRef = -1,
+    curHiRef = -1;
   let current = null;
   let lastTime = NaN;
-  const holds = new Map();   // refIndex → sprite-morph handle pinned at t=0
+  const holds = new Map(); // refIndex → its held frame: { bundle: a VIEW of its sheet }
+  let disposed = false;
 
+  // A HELD FRAME IS A VIEW OF ITS SHEET, not a morph: an object that inherits everything from the sheet and names the sprite (_spriteOf), which every
+  // draw and hit entry point resolves to drawSprite(sheet, sprite) / { sprite } on the sheet itself, so nothing is copied and every cache stays the
+  // sheet's. A sprite morph pinned at t = 0 instead would be a bundle per frame forwarding the whole sheet's planes (gigabytes for a sheet of
+  // thousands of frames). `currentMorph` is null on a held frame.
   function buildHold(refIdx) {
     let h = holds.get(refIdx);
     if (h) return h;
-    // createSpriteMorph needs two distinct sprites. Pair the held ref with
-    // any OTHER ref and pin t=0 (= fully the held sprite). With a single
-    // ref total, pair it against a shallow bundle clone (distinct object
-    // identity sidesteps the same-bundle overlap guard) at the same range.
-    const self = refs[refIdx];
-    let other = -1;
-    for (let i = 0; i < refs.length; i++) if (i !== refIdx) { other = i; break; }
-    const dstRef = other >= 0
-      ? refs[other]
-      : { bundle: Object.assign(
-            Object.create(Object.getPrototypeOf(self.bundle) || Object.prototype),
-            self.bundle),
-          sprite: self.sprite };
-    h = createSpriteMorph(gl, self, dstRef);
-    h.setT(0);
+    const r = refs[refIdx],
+      sheet = unwrapBundle(r.bundle);
+    const ok = Array.isArray(r.sprite)
+      ? checkedSpriteBounds(r.sprite, sheet && sheet.numShapes)
+      : typeof r.sprite === 'string' && ownSpriteRange(sheet, r.sprite);
+    if (!sheet || !ok)
+      throw new Error(
+        `createSpriteTimeline: ref ${refIdx} names no sprite of its bundle (${JSON.stringify(r.sprite)})`,
+      );
+    const view = Object.create(sheet);
+    Object.defineProperty(view, '_spriteOf', { value: { sheet, sprite: r.sprite } });
+    h = { bundle: view, sprite: r.sprite, overrides: null, dispose() {} };
     holds.set(refIdx, h);
     return h;
   }
 
+  const pairMorph = (lo, hi) => {
+    const k9 = lo + ':' + hi;
+    let m9 = _spritePairs.get(k9);
+    if (!m9) {
+      m9 = createSpriteMorph(gl, refs[lo], refs[hi], opts);
+      _spritePairs.set(k9, m9);
+    }
+    return m9;
+  };
+  // Pairs are built on first visit, NOT at creation as the shape timeline's pairs are: each is a morph bundle of its own (built at creation, a sheet
+  // of thousands of frames would take tens of GB at defaults in the loading call). Held frames are views and cost nothing.
+
   function setTime(time) {
+    if (disposed) return;
+    time = +time;
+    if (time !== time) time = keys[0].time; // NaN reads as the first key, as setT(NaN) reads as 0
     if (time === lastTime) return;
     lastTime = time;
     const { iLo, iHi, localT } = timelineBracketAt(keys, time);
     const loRef = keys[iLo].refIndex;
     const hiRef = keys[iHi].refIndex;
 
-    if (loRef === hiRef) {
+    // (a 'hold' key shows its own frame until the next key: its bracket's morph would sit at t = 0, which is the held sprite exactly)
+    if (loRef === hiRef || keys[iLo].interp === 'hold') {
       current = buildHold(loRef);
       return;
     }
@@ -253,20 +368,22 @@ export function createSpriteTimeline(gl, refs, keys) {
       // KEPT per pair for the timeline's life (same rationale as the shape
       // timeline: flipbooks revisit the same pairs, so a pair morph is never
       // disposed on a bracket change — only at dispose()).
-      {
-        const k9 = loRef + ':' + hiRef;
-        let m9 = _spritePairs.get(k9);
-        if (!m9) { m9 = createSpriteMorph(gl, refs[loRef], refs[hiRef]); _spritePairs.set(k9, m9); }
-        bracketMorph = m9;
-      }
-      curLoRef = loRef; curHiRef = hiRef;
+      bracketMorph = pairMorph(loRef, hiRef);
+      curLoRef = loRef;
+      curHiRef = hiRef;
     }
     bracketMorph.setT(timelineEase(keys[iLo], localT));
     current = bracketMorph;
   }
 
   function dispose() {
-    for (const m9 of _spritePairs.values()) { try { m9.dispose(); } catch { } }
+    if (disposed) return;
+    disposed = true;
+    for (const m9 of _spritePairs.values()) {
+      try {
+        m9.dispose();
+      } catch {}
+    }
     _spritePairs.clear();
     bracketMorph = null;
     for (const h of holds.values()) h.dispose();
@@ -277,9 +394,20 @@ export function createSpriteTimeline(gl, refs, keys) {
 
   return {
     setTime,
-    get duration() { return duration; },
-    get currentMorph() { return current; },
-    get bundle() { return (current || buildHold(keys[0].refIndex)).bundle; },
+    get duration() {
+      return duration;
+    },
+    get currentMorph() {
+      return current && !current.bundle._spriteOf ? current : null;
+    },
+    get bundle() {
+      return disposed ? null : (current || buildHold(keys[0].refIndex)).bundle;
+    },
+    /// the current frame's sprite when it is a held frame (its `bundle` is then a view of the sheet), else null (a morph between two frames)
+    get sprite() {
+      const c = disposed ? null : current || buildHold(keys[0].refIndex);
+      return c && c.bundle._spriteOf ? c.sprite : null;
+    },
     dispose,
   };
 }
@@ -294,93 +422,90 @@ export function createSpriteTimeline(gl, refs, keys) {
 // from src) and `inTan` (arrival at dst). Both are expressed as
 // 2D offsets in the same em-space as the curve buffer's positions.
 //
-// We store the tangents in two parallel buffers the size of one
-// shape's curve floats (matched-shape only). At setT, for each
-// matched-shape texel pair (srcPos, dstPos) we evaluate
-//   P(t) = (1-t)³·src + 3(1-t)²t·(src+outTan) + 3(1-t)t²·(dst-inTan) + t³·dst
-//
 // `tangents`: { outTan, inTan } — each a Float32Array the same
 // length as the source bundle's curveFloats. Set to zero for any
 // texel that should use a straight line.
-export function createSpatialBezierMorph(gl, srcBundle, dstBundle, tangents) {
-  const morph = createShapeMorph(gl, srcBundle, dstBundle);
-  if (!tangents || !tangents.outTan || !tangents.inTan)
+export function createSpatialBezierMorph(gl, srcBundle, dstBundle, tangents, opts) {
+  if (!tangents?.outTan || !tangents?.inTan)
     throw new Error('createSpatialBezierMorph: tangents.outTan + tangents.inTan required');
-  // Replace the morph's linear lerp with a Bezier sample: read the
-  // matched ranges from `plan`, re-upload the sampled curve plane to
-  // `bundle.curveTex`.
-  const plan = morph.plan;
-  const src  = srcBundle;
-  const dst  = dstBundle;
-  const srcF = extractCurveFloats(src);
-  const dstF = extractCurveFloats(dst);
-  const outTan = tangents.outTan;
-  const inTan  = tangents.inTan;
-  // Sanity-check sizes — must match the source curve plane.
-  if (outTan.length !== srcF.length || inTan.length !== srcF.length)
+  const src = srcBundle,
+    dst = dstBundle;
+  if (!curvePoseLayout(src) || !curvePoseLayout(dst))
+    throw new Error('createSpatialBezierMorph: materialized v3 bundles required');
+  if (
+    tangents.outTan.length !== src.curveFloats.length ||
+    tangents.inTan.length !== src.curveFloats.length
+  )
     throw new Error('createSpatialBezierMorph: tangents must match source curveFloats length');
-  // Scratch for evaluation. Reused across setT calls.
-  let scratch = null;
-  // Pull the curve plane dims out of the morph's bundle (the
-  // texture is _curveW × _curveH; we re-derive from the bundle).
-  function getCurveDims() {
-    const total = srcF.length;
-    const TEX_W = 4096;
-    const texelsPerRow = TEX_W;
-    const floatsPerRow = texelsPerRow * 4;
-    const rows = Math.ceil(total / floatsPerRow);
-    return { w: TEX_W, h: rows };
-  }
-  const { w: cw, h: ch } = getCurveDims();
+  const morph = createShapeMorph(gl, src, dst, opts),
+    plan = morph.plan;
+  const morphSource = morph.bundle._morphSrc;
+  const srcF = morphSource.mergedCurveF32,
+    dstF = morphSource.dstCurveF32;
+  const poseLayout = curvePoseLayout(morph.bundle, srcF);
+  const arcs = new Set(morphSource.arcOffsets || []);
+  const outTan = tangents.outTan;
+  const inTan = tangents.inTan;
+  const scratch = new Float32Array(srcF.length);
 
   function setT(t) {
     t = clamp01(t);
-    // Size scratch to the PADDED curve plane (cw*ch*4); the upload below
-    // covers the full TEX_W×rows region, so an unpadded buffer would
-    // throw INVALID_OPERATION on real WebGL2. scratch.set(srcF) fills
-    // only the leading floats; the zero tail maps to unused texels.
-    if (!scratch) scratch = new Float32Array(cw * ch * 4);
-    // Start scratch = src (baseline at t=0).
-    scratch.set(srcF);
     const omt = 1 - t;
     const k0 = omt * omt * omt;
     const k1 = 3 * omt * omt * t;
     const k2 = 3 * omt * t * t;
     const k3 = t * t * t;
-    for (const m of plan.matched) {
-      // For each float i in [m.srcBegin, m.srcEnd) — pair-treat
-      // consecutive (x, y) floats as a 2D position and apply the
-      // cubic Bezier sample.
-      const sB = m.srcBegin, sE = m.srcEnd;
-      const dB = m.dstBegin;
-      for (let i = sB; i + 1 < sE; i += 2) {
-        const sx = srcF[i],     sy = srcF[i + 1];
-        const dx = dstF[dB + (i - sB)], dy = dstF[dB + (i - sB) + 1];
-        const otx = outTan[i],  oty = outTan[i + 1];
-        const itx = inTan[i],   ity = inTan[i + 1];
-        // Bezier control points: P0=src, P1=src+outTan, P2=dst-inTan, P3=dst.
-        scratch[i]     = k0 * sx + k1 * (sx + otx) + k2 * (dx - itx) + k3 * dx;
-        scratch[i + 1] = k0 * sy + k1 * (sy + oty) + k2 * (dy - ity) + k3 * dy;
+    const source = morphSource.srcEpCurveF32 || srcF,
+      target = morphSource.dstEpCurveF32 || dstF;
+    scratch.set(source);
+    for (const match of plan.matched)
+      for (const record of poseLayout.rows[match.srcIdx]) {
+        const { h, d, type } = record,
+          arc = arcs.has(h);
+        if (type === 3 && !arc) continue;
+        const count = arc ? 4 : type === 0 ? 4 : type === 1 ? 6 : 8;
+        for (let k = 0; k < count; k++) {
+          const slot = d + k,
+            tangentSlot = arc ? h + 12 + k : slot;
+          const p0 = source[slot],
+            p3 = target[slot];
+          scratch[slot] =
+            k0 * p0 + k1 * (p0 + outTan[tangentSlot]) + k2 * (p3 - inTan[tangentSlot]) + k3 * p3;
+        }
+        if (arc)
+          for (const k of [8, 9, 10]) scratch[h + k] = source[h + k] * omt + target[h + k] * t;
       }
+    applyArcFlagSteps(scratch, morphSource.arcFlagSteps, t);
+    for (const h of arcs) {
+      const startX = scratch[h + 4],
+        startY = scratch[h + 5],
+        endX = scratch[h + 6],
+        endY = scratch[h + 7];
+      arcRecordToCenter(scratch, h);
+      scratch[h + 12] = startX;
+      scratch[h + 13] = startY;
+      scratch[h + 14] = endX;
+      scratch[h + 15] = endY;
     }
-    // Direct GL upload.
-    const tex = morph.bundle.curveTex;
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, cw, ch,
-                     gl.RGBA, gl.FLOAT, scratch);
-    gl.bindTexture(gl.TEXTURE_2D, null);
-    // Drive src-only fade-out / dst-only fade-in. This wrapper replaces
-    // the morph's setT wholesale, so without this a non-matched-topology
-    // crossfade would freeze at the t=0 state.
-    updateVisibility(morph.overrides, plan, t);
+    restoreArcEndPoses(scratch, morphSource.arcEndPoseRanges, t, srcF, dstF);
+    sampleDrivenPaint(gl, morph, morphSource, t);
+    adoptCurvePose(gl, morph.bundle, scratch, poseLayout);
   }
 
   return {
-    get bundle()    { return morph.bundle; },
-    get plan()      { return morph.plan; },
-    get overrides() { return morph.overrides; },
+    get bundle() {
+      return morph.bundle;
+    },
+    get plan() {
+      return morph.plan;
+    },
+    get overrides() {
+      return morph.overrides;
+    },
     setT,
-    dispose() { morph.dispose(); },
+    dispose() {
+      morph.dispose();
+    },
   };
 }
 
@@ -400,78 +525,79 @@ export function createSpatialBezierMorph(gl, srcBundle, dstBundle, tangents) {
 //     vertexDeltas is a Float32Array the same length as
 //     baseBundle.curveFloats, containing dst - base for the
 //     animated texels (zero everywhere the path doesn't move).
-//
-// At setTime(seconds) we pick the bracketing delta pair and
-// evaluate `cur = base + lerp(deltaLo, deltaHi, localT)` into a
-// scratch buffer and upload.
+
 export function createPathDeltaMorph(gl, baseBundle, deltas) {
   if (!gl) throw new Error('createPathDeltaMorph: gl required');
   if (!baseBundle) throw new Error('createPathDeltaMorph: baseBundle required');
   if (!Array.isArray(deltas) || deltas.length < 1)
     throw new Error('createPathDeltaMorph: deltas[] required');
-  const baseF = extractCurveFloats(baseBundle);
+  const baseF = extractCurveFloats(baseBundle).slice();
+  const poseLayout = curvePoseLayout(baseBundle, baseF);
+  if (!poseLayout) throw new Error('createPathDeltaMorph: materialized v3 bundle required');
   for (const d of deltas) {
+    if (!d || !Number.isFinite(d.time))
+      throw new Error('createPathDeltaMorph: delta times must be finite numbers');
     if (!d.vertexDeltas || d.vertexDeltas.length !== baseF.length)
-      throw new Error('createPathDeltaMorph: each delta.vertexDeltas must match baseBundle.curveFloats length');
+      throw new Error(
+        'createPathDeltaMorph: each delta.vertexDeltas must match baseBundle.curveFloats length',
+      );
   }
-  // Build the GL bundle from the base — we reuse its curveTex as
-  // the upload target.
-  // Sort deltas by time defensively.
+
   const sorted = deltas.slice().sort((a, b) => a.time - b.time);
   const duration = sorted[sorted.length - 1].time - sorted[0].time;
-  // Curve plane dims.
-  const TEX_W = 4096;
-  const floatsPerRow = TEX_W * 4;
-  const rows = Math.ceil(baseF.length / floatsPerRow);
-  let scratch = null;
-  let lastTime = NaN;
+  const scratch = baseF.slice();
+  let lastTime = NaN,
+    disposed = false;
 
   function setTime(time) {
+    if (disposed) return;
+    time = +time;
+    if (time !== time) time = sorted[0].time; // NaN reads as the first key, as in createShapeTimeline
     if (time === lastTime) return;
     lastTime = time;
     // Find the bracketing pair.
-    let iLo = 0, iHi = 0, localT = 0;
-    if (time <= sorted[0].time) { iLo = iHi = 0; localT = 0; }
-    else if (time >= sorted[sorted.length - 1].time) {
-      iLo = iHi = sorted.length - 1; localT = 1;
+    let iLo = 0,
+      iHi = 0,
+      localT = 0;
+    if (time <= sorted[0].time) {
+      iLo = iHi = 0;
+      localT = 0;
+    } else if (time >= sorted[sorted.length - 1].time) {
+      iLo = iHi = sorted.length - 1;
+      localT = 1;
     } else {
-      let lo = 0, hi = sorted.length - 1;
+      let lo = 0,
+        hi = sorted.length - 1;
       while (lo < hi - 1) {
         const mid = (lo + hi) >> 1;
-        if (sorted[mid].time <= time) lo = mid; else hi = mid;
+        if (sorted[mid].time <= time) lo = mid;
+        else hi = mid;
       }
-      iLo = lo; iHi = hi;
+      iLo = lo;
+      iHi = hi;
       const dt = sorted[hi].time - sorted[lo].time;
       localT = dt > 0 ? (time - sorted[lo].time) / dt : 0;
     }
-    // Pad to the full TEX_W×rows plane the upload covers (an unpadded
-    // buffer throws INVALID_OPERATION on real WebGL2); the loop below
-    // writes only the leading baseF.length floats, tail stays zero.
-    if (!scratch) scratch = new Float32Array(floatsPerRow * rows);
-    const dLo = sorted[iLo].vertexDeltas;
-    const dHi = sorted[iHi].vertexDeltas;
-    const omt = 1 - localT;
-    for (let i = 0; i < baseF.length; i++) {
-      scratch[i] = baseF[i] + dLo[i] * omt + dHi[i] * localT;
-    }
-    // Upload.
-    const tex = baseBundle.curveTex;
-    if (!tex) return;   // bundle wasn't materialized to GL yet
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, TEX_W, rows,
-                     gl.RGBA, gl.FLOAT, scratch);
-    gl.bindTexture(gl.TEXTURE_2D, null);
+    const dLo = sorted[iLo].vertexDeltas,
+      dHi = sorted[iHi].vertexDeltas;
+    for (const i of poseLayout.coordinates)
+      scratch[i] = baseF[i] + dLo[i] * (1 - localT) + dHi[i] * localT;
+    adoptCurvePose(gl, baseBundle, scratch, poseLayout);
   }
 
   function dispose() {
-    // We don't own the bundle (caller created it). Drop scratch.
-    scratch = null;
+    disposed = true;
   }
 
   return {
-    get bundle() { return baseBundle; },
-    get duration() { return duration; },
-    setTime, dispose,
+    get bundle() {
+      return baseBundle;
+    },
+    get duration() {
+      return duration;
+    },
+    setTime,
+    dispose,
   };
 }
 
@@ -483,9 +609,6 @@ export function createPathDeltaMorph(gl, baseBundle, deltas) {
 // texel pair (x, y) is associated with one or more bones via a
 // weights table:
 //   weights[i] = [{ boneId, weight }, ...]   for vertex i
-//
-// At setBoneMatrices(matrices), we rewrite curve texels:
-//   newPos = Σ w_b · (M_b · restPos)   over each (boneId=b, weight=w_b)
 //
 // Matrix layout: each 2D affine is [m00, m01, m10, m11, tx, ty]
 // (6 floats per bone, row-major 2×2 + translate).
@@ -500,58 +623,92 @@ export function createSkinnedMorph(gl, baseBundle, boneWeights) {
   if (!baseBundle) throw new Error('createSkinnedMorph: baseBundle required');
   if (!Array.isArray(boneWeights))
     throw new Error('createSkinnedMorph: boneWeights must be an array');
-  const baseF = extractCurveFloats(baseBundle);
+  const baseF = extractCurveFloats(baseBundle).slice();
+  const poseLayout = curvePoseLayout(baseBundle, baseF);
+  if (!poseLayout) throw new Error('createSkinnedMorph: materialized v3 bundle required');
   const nVerts = baseF.length >>> 1;
   if (boneWeights.length !== nVerts)
-    throw new Error(`createSkinnedMorph: boneWeights.length ${boneWeights.length} must equal vertex count ${nVerts}`);
-  const TEX_W = 4096;
-  const floatsPerRow = TEX_W * 4;
-  const rows = Math.ceil(baseF.length / floatsPerRow);
-  let scratch = null;
+    throw new Error(
+      `createSkinnedMorph: boneWeights.length ${boneWeights.length} must equal vertex count ${nVerts}`,
+    );
+  const scratch = baseF.slice();
+  const positions = poseLayout.rows.flatMap((rs) =>
+    rs.flatMap(({ d, type }) =>
+      type === 3
+        ? []
+        : Array.from({ length: type === 0 ? 2 : type === 1 ? 3 : 4 }, (_, i) => (d + i * 2) / 2),
+    ),
+  );
 
   function setBoneMatrices(matrices) {
     // matrices: flat Float32Array of (numBones × 6) — [m00,m01,m10,m11,tx,ty] per bone.
     if (!matrices) return;
-    // Pad to the full TEX_W×rows plane the upload covers (unpadded would
-    // throw INVALID_OPERATION on real WebGL2); set(baseF) fills only the
-    // leading floats, tail stays zero.
-    if (!scratch) scratch = new Float32Array(floatsPerRow * rows);
     scratch.set(baseF);
-    for (let v = 0; v < nVerts; v++) {
+    const arcTransforms = new Map();
+    for (const records of poseLayout.rows)
+      for (const { h, d, type } of records)
+        if (type === 3) {
+          const ws = boneWeights[d / 2] || [];
+          // An ellipse has one affine frame. Independent endpoint frames would no
+          // longer describe an ellipse and require a different authoring primitive.
+          for (const slot of [d + 8, d + 10]) {
+            const other = boneWeights[slot / 2];
+            if (other?.length && JSON.stringify(other) !== JSON.stringify(ws))
+              throw new Error(
+                'createSkinnedMorph: arc endpoints must share the center bone weights',
+              );
+          }
+          if (!ws.length) continue;
+          const m = [0, 0, 0, 0, 0, 0];
+          for (const { boneId, weight } of ws) {
+            const i = boneId * 6;
+            m[0] += weight * matrices[i];
+            m[1] += weight * matrices[i + 2];
+            m[2] += weight * matrices[i + 1];
+            m[3] += weight * matrices[i + 3];
+            m[4] += weight * matrices[i + 4];
+            m[5] += weight * matrices[i + 5];
+          }
+          arcTransforms.set(h, m);
+        }
+    for (const v of positions) {
       const ws = boneWeights[v];
-      if (!ws || ws.length === 0) continue;   // leave at rest
+      if (!ws || ws.length === 0) continue; // leave at rest
       const restX = baseF[v * 2];
       const restY = baseF[v * 2 + 1];
-      let outX = 0, outY = 0;
+      let outX = 0,
+        outY = 0;
       for (let k = 0; k < ws.length; k++) {
         const { boneId, weight } = ws[k];
         const off = boneId * 6;
-        const m00 = matrices[off],     m01 = matrices[off + 1];
-        const m10 = matrices[off + 2], m11 = matrices[off + 3];
-        const tx  = matrices[off + 4], ty  = matrices[off + 5];
+        const m00 = matrices[off],
+          m01 = matrices[off + 1];
+        const m10 = matrices[off + 2],
+          m11 = matrices[off + 3];
+        const tx = matrices[off + 4],
+          ty = matrices[off + 5];
         const wx = m00 * restX + m01 * restY + tx;
         const wy = m10 * restX + m11 * restY + ty;
         outX += weight * wx;
         outY += weight * wy;
       }
-      scratch[v * 2]     = outX;
+      scratch[v * 2] = outX;
       scratch[v * 2 + 1] = outY;
     }
-    // Upload.
-    const tex = baseBundle.curveTex;
-    if (!tex) return;
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, TEX_W, rows,
-                     gl.RGBA, gl.FLOAT, scratch);
-    gl.bindTexture(gl.TEXTURE_2D, null);
+    adoptCurvePose(gl, baseBundle, scratch, poseLayout, arcTransforms);
   }
 
-  function dispose() { scratch = null; }
+  function dispose() {}
 
   return {
-    get bundle() { return baseBundle; },
-    get numVertices() { return nVerts; },
-    setBoneMatrices, dispose,
+    get bundle() {
+      return baseBundle;
+    },
+    get numVertices() {
+      return nVerts;
+    },
+    setBoneMatrices,
+    dispose,
   };
 }
 
@@ -567,121 +724,188 @@ export function createSkinnedMorph(gl, baseBundle, boneWeights) {
 //
 //   final = baseA + lerp(baseA→baseB, midT) + lerp(midResult→baseC, outT)
 //
-// In practice 2 levels of nesting is enough for shipped Rive
-// content; deeper nesting either snaps to the deepest target or
-// accepts visual popping (matching the Rive runtime's own
-// behavior). We expose a 3-pose blend explicitly.
-//
 // `bundles`: array of N bundles (named).
 // State: poseA / poseB / poseC indices + tAB / tBC weights.
 //   At rest: poseA = current, poseB = poseA, tAB = 0.
 //   Transition start: set poseB = target, tAB animates 0→1.
 //   Pre-empted transition: poseC = new target, tBC animates 0→1.
 //   When tBC hits 1, demote: poseA = poseC, poseB = poseC, tAB = 0.
-export function createPoseStack(gl, bundles) {
+export function createPoseStack(gl, bundles, opts) {
   if (!gl) throw new Error('createPoseStack: gl required');
   if (!Array.isArray(bundles) || bundles.length < 1)
     throw new Error('createPoseStack: bundles[] required');
-  let poseA = 0, poseB = 0, poseC = 0;
-  let tAB = 0, tBC = 0;
+  if (bundles.some((b) => !curvePoseLayout(b)))
+    throw new Error('createPoseStack: materialized v3 bundles required');
+  let poseA = 0,
+    poseB = 0,
+    poseC = 0;
+  let tAB = 0,
+    tBC = 0;
   // Cached morphs.
-  let morphAB = null, morphBC = null;
-  let cachedABKey = '', cachedBCKey = '';
+  let morphAB = null,
+    morphBC = null;
+  let cachedABKey = '';
+  let currentMorph = null;
+  let disposed = false;
+  const drivenSources = new WeakMap();
+  let drivenPairKey = '';
+  let drivenAB = null,
+    drivenABKey = '';
 
-  function ensureMorph(slot, srcIdx, dstIdx) {
-    const key = `${srcIdx}|${dstIdx}`;
-    if (slot === 'AB') {
-      if (cachedABKey !== key) {
-        if (morphAB) morphAB.dispose();
-        morphAB = createShapeMorph(gl, bundles[srcIdx], bundles[dstIdx]);
-        cachedABKey = key;
-      }
-      return morphAB;
-    } else {
-      if (cachedBCKey !== key) {
-        if (morphBC) morphBC.dispose();
-        morphBC = createShapeMorph(gl, bundles[srcIdx], bundles[dstIdx]);
-        cachedBCKey = key;
-      }
-      return morphBC;
+  const rememberSource = (m) => {
+    let source = drivenSources.get(m);
+    if (!source) {
+      source = m.bundle._morphSrc;
+      if (source) drivenSources.set(m, source);
     }
+    return source;
+  };
+
+  function ensureAB(srcIdx, dstIdx) {
+    const key = srcIdx + ':' + dstIdx;
+    if (cachedABKey !== key) {
+      if (morphAB) morphAB.dispose();
+      morphAB = createShapeMorph(gl, bundles[srcIdx], bundles[dstIdx], opts);
+      cachedABKey = key;
+    }
+    return morphAB;
   }
 
   // setState applies the blend math and uploads to GL via the
   // outermost morph (morphBC if it exists, else morphAB).
-  function setState({ a = poseA, b = poseB, c = poseC, tAB: nTAB = tAB, tBC: nTBC = tBC }) {
-    poseA = a; poseB = b; poseC = c;
-    tAB = clamp01(nTAB); tBC = clamp01(nTBC);
+  function setState({ a = poseA, b = poseB, c = poseC, tAB: nTAB = tAB, tBC: nTBC = tBC } = {}) {
+    if (disposed) return;
+    // Validate before committing anything: a rejected index must leave the previous state usable.
+    for (const [name, idx] of [
+      ['a', a],
+      ['b', b],
+      ['c', c],
+    ]) {
+      if (!(Number.isInteger(idx) && idx >= 0 && idx < bundles.length))
+        throw new Error(
+          `createPoseStack: pose index ${name} = ${idx} out of range [0, ${bundles.length})`,
+        );
+    }
+    poseA = a;
+    poseB = b;
+    poseC = c;
+    tAB = clamp01(nTAB);
+    tBC = clamp01(nTBC);
     // 2-level fast path: if tBC == 0 (no preempting transition),
     // just use morphAB with t=tAB. A pre-empting transition that
     // re-targets the in-flight destination (poseC === poseB) composes:
     //   lerp(lerp(A,B,tAB), B, tBC) = lerp(A, B, tAB + tBC·(1−tAB))
     // — ignoring tBC here popped the blend backwards.
     if (tBC === 0 || poseC === poseB) {
-      const m = ensureMorph('AB', poseA, poseB);
+      const m = ensureAB(poseA, poseB);
+      currentMorph = m;
+      const source = rememberSource(m);
+      if (source) m.bundle._morphSrc = source;
       m.setT(tBC > 0 && poseC === poseB ? tAB + tBC * (1 - tAB) : tAB);
       return;
     }
-    // Real 3-pose blend. Each morph's bundle is independent, so we can't
-    // compose them at the GL level; instead:
-    //   1. Compute A↔B blended curveFloats into a CPU scratch.
-    //   2. Lerp that scratch toward C's curveFloats by tBC.
-    //   3. Upload into the morphBC bundle's curveTex.
-    const baseAF = extractCurveFloats(bundles[poseA]);
-    const baseBF = extractCurveFloats(bundles[poseB]);
-    const baseCF = extractCurveFloats(bundles[poseC]);
-    // Pick smallest curveFloats length so we don't read past
-    // either source. Matched-topology assumption — for mismatched
-    // counts, fall back to morphAB only (visibility fade handles
-    // the rest).
-    const n = Math.min(baseAF.length, baseBF.length, baseCF.length);
-    const TEX_W = 4096;
-    const rows = Math.ceil(n / (TEX_W * 4));
-    const padded = TEX_W * rows * 4;
-    // Size to the full plane the upload covers (an unpadded source view
-    // throws INVALID_OPERATION on real WebGL2); leading n floats are the
-    // blended pose, texels past n are unused capacity padding.
-    if (!_stackScratch || _stackScratch.length < padded)
-      _stackScratch = new Float32Array(padded);
-    const ab1 = 1 - tAB, bc1 = 1 - tBC;
-    for (let i = 0; i < n; i++) {
-      const ab = baseAF[i] * ab1 + baseBF[i] * tAB;
-      _stackScratch[i] = ab * bc1 + baseCF[i] * tBC;
+
+    const abKey = poseA + ':' + poseB;
+    if (!drivenAB || drivenABKey !== abKey) {
+      if (drivenAB) drivenAB.dispose();
+      drivenAB = createShapeMorph(gl, bundles[poseA], bundles[poseB], opts);
+      drivenABKey = abKey;
     }
-    // Use morphBC's bundle as the upload target (its sections / bands /
-    // curveGeom cover the C pose, the visually dominant one when tBC>0).
-    const m = ensureMorph('BC', poseB, poseC);
-    const tex = m.bundle.curveTex;
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, TEX_W, rows,
-                     gl.RGBA, gl.FLOAT, _stackScratch.subarray(0, padded));
-    gl.bindTexture(gl.TEXTURE_2D, null);
+    const ab = drivenAB,
+      abSource = rememberSource(ab);
+    const pose = sampleDrivenPaint(gl, ab, abSource, tAB);
+    const abLayout = curvePoseLayout({ ...ab.bundle, curveRangesByShape: pose.ranges }, pose.curve);
+    adoptCurvePose(gl, ab.bundle, pose.curve, abLayout);
+    const key = poseA + ':' + poseB + ':' + poseC;
+    if (!morphBC || drivenPairKey !== key) {
+      if (morphBC) morphBC.dispose();
+      morphBC = createShapeMorph(gl, ab.bundle, bundles[poseC], opts);
+      drivenSources.set(morphBC, morphBC.bundle._morphSrc);
+      drivenPairKey = key;
+    }
+    const bcSource = drivenSources.get(morphBC),
+      src = ab.bundle;
+    bcSource.mergedCurveF32.set(src.curveFloats);
+    const stride = bcSource.metaStride,
+      visibility = ab.overrides.packedBuffer;
+    for (let row = 0; row < src.numShapes; row++) {
+      const o = row * stride;
+      bcSource.mergedMetaF32.set(src.metaFloats.subarray(o, o + stride), o);
+      const vis = visibility ? visibility[row * 24 + 6] : 1;
+      bcSource.mergedMetaF32[o + 7] *= vis;
+      bcSource.mergedMetaF32[o + 11] *= vis;
+      const fid = Math.round(src.metaFloats[o + 32]);
+      const own =
+        (src._drivenFilterOpacities?.get(row) ??
+          (fid > 0 ? 1 - src.lastFilterFloats[(fid - 1) * 24 + 23] : 1)) * vis;
+      const pair = bcSource.filterOpacityPairs.get(row);
+      if (pair) pair[0] = own;
+      else bcSource.filterOpacityPairs.set(row, [own, own]);
+    }
+    if (src.gradientFloats && bcSource.gradientParams)
+      bcSource.gradientParams.set(src.gradientFloats);
+    if (src.gradientStopsBytes && bcSource.gradientStops)
+      bcSource.gradientStops.set(src.gradientStopsBytes);
+    const arc = prepareDrivenArcMorph(
+      src,
+      morphBC.plan,
+      4096,
+      bcSource.mergedCurveF32,
+      bcSource.dstCurveF32,
+      false,
+      opts?.compat === 'chrome',
+      opts?.arcRotation === 'shortest',
+    );
+    bcSource.srcEpCurveF32 = arc.srcEp;
+    bcSource.dstEpCurveF32 = arc.dstEp;
+    bcSource.arcOffsets = arc.arcs;
+    bcSource.arcEndPoseRanges = arc.endPoseRanges || null;
+    bcSource.arcFlagSteps = arc.flagSteps || null;
+    const current = sampleDrivenPaint(gl, morphBC, bcSource, tBC);
+    const layout = curvePoseLayout(
+      { ...morphBC.bundle, curveRangesByShape: current.ranges },
+      current.curve,
+    );
+    adoptCurvePose(gl, morphBC.bundle, current.curve, layout);
+    currentMorph = morphBC;
   }
-  let _stackScratch = null;
 
   function bundle() {
-    // Outermost active morph's bundle is the renderable; falls
-    // back to morphAB and then to bundles[poseA].
-    if (tBC > 0 && morphBC) return morphBC.bundle;
-    if (morphAB) return morphAB.bundle;
-    return bundles[poseA];
+    return currentMorph ? currentMorph.bundle : bundles[poseA];
   }
 
   function dispose() {
+    disposed = true;
+    if (drivenAB) drivenAB.dispose();
+    drivenAB = null;
     if (morphAB) morphAB.dispose();
     if (morphBC) morphBC.dispose();
-    morphAB = morphBC = null;
-    _stackScratch = null;
+    morphAB = morphBC = currentMorph = null;
+    cachedABKey = '';
+    drivenABKey = '';
+    drivenPairKey = '';
   }
 
   return {
     setState,
-    get poseA() { return poseA; },
-    get poseB() { return poseB; },
-    get poseC() { return poseC; },
-    get tAB()   { return tAB; },
-    get tBC()   { return tBC; },
-    get bundle(){ return bundle(); },
+    get poseA() {
+      return poseA;
+    },
+    get poseB() {
+      return poseB;
+    },
+    get poseC() {
+      return poseC;
+    },
+    get tAB() {
+      return tAB;
+    },
+    get tBC() {
+      return tBC;
+    },
+    get bundle() {
+      return bundle();
+    },
     dispose,
   };
 }
@@ -697,7 +921,11 @@ function extractCurveFloats(bundle) {
   return new Float32Array(0);
 }
 
-function clamp01(x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
+/// The morph parameter as a number in [0, 1]: a numeric string coerces, NaN reads as 0, +-Infinity clamp.
+function clamp01(x) {
+  x = +x;
+  return x > 1 ? 1 : x > 0 ? x : 0;
+}
 
 // Internal surface for the no-WebGL fallback: the pure-CPU timeline
 // bracket + easing helpers. Not public package API.

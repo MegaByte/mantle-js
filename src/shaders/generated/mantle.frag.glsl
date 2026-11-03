@@ -1,5 +1,10 @@
 #version 300 es
-precision highp float; precision highp int; precision highp sampler2D;
+
+precision highp float;
+#ifndef MANTLE_NO_FILTER
+uniform float uFilterCoverageScale;
+#endif
+ precision highp int; precision highp sampler2D;
 uniform sampler2D uCurveData;
 uniform sampler2D uBandData;
 uniform sampler2D uMetaTex;
@@ -10,12 +15,15 @@ const int MT_STROKE       = 2;
 const int MT_STROKE_PARAMS = 3;
 const int MT_GLYPH_BAND   = 4;
 const int MT_SOLID        = 5;
+
 const int MT_CAP_JOIN     = 6;
 const int MT_PAINT_ID     = 7;
 const int MT_FILTER_BLEND = 8;
 const int MT_IMAGE_RECT   = 9;
 const int MT_ATLAS        = 10;
 const int MT_PRIM         = 11;
+
+const int FS_STROKE_LOCAL = 4;
 
 const int FT_R0   = 0;
 const int FT_R1   = 1;
@@ -37,6 +45,22 @@ const int DASH_HDR = 0;
 
 const int MRL_ROW = 0;
 
+ivec2 metaAt(int c, int r)   { return ivec2(c + 12 * (r >> 12), r & 4095); }
+ivec2 gradAt(int c, int r)   { return ivec2(c + 4 * (r >> 12), r & 4095); }
+ivec2 dashAt(int c, int r)   { return ivec2(c + 16 * (r >> 12), r & 4095); }
+ivec2 filterAt(int c, int r) { return ivec2(c + 6 * (r >> 12), r & 4095); }
+ivec2 ovAt(int c, int r)     { return ivec2(c + 6 * (r >> 12), r & 4095); }
+ivec2 mrlAt(int c, int r)    { return ivec2(c + 2 * (r >> 12), r & 4095); }
+
+int metaRowsOf(ivec2 sz) { return sz.y * (sz.x / 12); }
+
+float strokeWidthMultiplier(int flags, vec2 footprint) {
+  bool h = (flags & (1 << 13)) != 0, v = (flags & (1 << 14)) != 0;
+  if (h && !v) return footprint.x;
+  if (v && !h) return footprint.y;
+  return (flags & (1 | (1 << 13) | (1 << 14))) != 0 ? 0.5 * (footprint.x + footprint.y) : 1.0;
+}
+
 uniform sampler2D uDashTex;
 #ifndef MANTLE_NO_GRADIENT
 uniform sampler2D uGradientTex;
@@ -44,6 +68,8 @@ uniform sampler2D uGradientStops;
 
 #endif
 #ifndef MANTLE_NO_IMAGE
+uniform sampler2D uSecondaryImageTex;
+uniform vec2 uSecondaryImageAtlasSize;
 uniform sampler2D uImageTex;
 uniform vec2      uImageAtlasSize;
 #endif
@@ -52,18 +78,22 @@ uniform sampler2D uFilterTex;
 #endif
 uniform vec4 uGlobalBBox;
 
+uniform vec2 uCanvasAR;
+uniform mat3 uWorldM;
+uniform int uHasWorldM;
+
 #if !defined(MANTLE_NO_CLIP) || !defined(MANTLE_NO_MASK)
 uniform sampler2D uOverrideTex;
 uniform int       uHasOverrides;
 #endif
 
-#ifndef MANTLE_NO_MASK
+#if !defined(MANTLE_NO_MASK) || !defined(MANTLE_NO_PATTERN)
 uniform highp sampler2DArray uMaskRTArray;
 uniform highp isampler2D uMaskRowToLayerTex;
 uniform int uHasOffscreenMask;
+uniform int uHasPatternGroups;
 #endif
 uniform vec2 uViewportSize;
-
 uniform vec2 uFragOrigin;
 
 #ifndef MANTLE_NO_EXTCLIP
@@ -93,12 +123,18 @@ uniform int uPaletteSize;
 
 uniform int uHasOccupancy;
 
-#ifdef MANTLE_LB_COV
+#ifdef MANTLE_LB_FILL_COV
+  #define MANTLE_ANY_COV_TEX
+#endif
+#ifdef MANTLE_ANY_COV_TEX
+#ifdef MANTLE_LB_FILL_COV
 uniform sampler2D uLBCovTex;
-uniform sampler2D uStrokeCovTex;
+#endif
 
 uniform vec2 uLBCovTexSize;
+#endif
 
+#ifdef MANTLE_COMPOSED
 uniform vec4 uLBShapeBBox;
 uniform vec4 uLBFill;
 uniform vec4 uLBStroke;
@@ -106,6 +142,7 @@ uniform vec4 uLBImageRect;
 #endif
 flat in int vInst;
 in vec2 vEmCoord;
+flat in vec4 vAffineFootprint;
 in vec4 vOverrideTint;
 #ifdef MANTLE_INSTANCED
 in vec4 vInstBias;
@@ -117,19 +154,16 @@ in vec4 vOverrideStroke;
 in float vOverrideStrokeWidth;
 out vec4 fragColor;
 
+uniform int uStrokeExactAa;
+
 #ifndef MANTLE_NO_FILTER
 
-vec4 applyFilter(int filterId, vec4 c) {
-  if (filterId <= 0) return c;
-  int row = filterId - 1;
-  vec4 meta = texelFetch(uFilterTex, ivec2(FT_META, row), 0);
-  int kind = int(meta.x + 0.5);
-  if (kind >= 2) return c;
-  vec4 r0 = texelFetch(uFilterTex, ivec2(FT_R0, row), 0);
-  vec4 r1 = texelFetch(uFilterTex, ivec2(FT_R1, row), 0);
-  vec4 r2 = texelFetch(uFilterTex, ivec2(FT_R2, row), 0);
-  vec4 r3 = texelFetch(uFilterTex, ivec2(FT_R3, row), 0);
-  vec4 off = texelFetch(uFilterTex, ivec2(FT_OFF, row), 0);
+vec4 applyFilter(int row, vec4 c) {
+  vec4 r0 = texelFetch(uFilterTex, filterAt(FT_R0, row), 0);
+  vec4 r1 = texelFetch(uFilterTex, filterAt(FT_R1, row), 0);
+  vec4 r2 = texelFetch(uFilterTex, filterAt(FT_R2, row), 0);
+  vec4 r3 = texelFetch(uFilterTex, filterAt(FT_R3, row), 0);
+  vec4 off = texelFetch(uFilterTex, filterAt(FT_OFF, row), 0);
   vec4 o;
   o.r = dot(r0, c) + off.x;
   o.g = dot(r1, c) + off.y;
@@ -140,14 +174,30 @@ vec4 applyFilter(int filterId, vec4 c) {
 
 vec4 applyFilterPre(int filterId, vec4 pre) {
   if (filterId <= 0) return pre;
+  int row = filterId - 1;
+  if (int(texelFetch(uFilterTex, filterAt(FT_META, row), 0).x + 0.5) >= 2) return pre;
   float a = pre.a;
   vec3 rgb = a > 0.0 ? pre.rgb / a : pre.rgb;
-  vec4 outU = applyFilter(filterId, vec4(rgb, a));
+  vec4 outU = applyFilter(row, vec4(rgb, a));
   return vec4(outU.rgb * outU.a, outU.a);
 }
 #endif
 
 #ifndef MANTLE_NO_GRADIENT
+
+#ifdef GRAD_STOPS_COLR
+uniform int uStopsChrome;
+vec3 stopsToLinear(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), greaterThan(c, vec3(0.04045))); }
+vec3 stopsToSrgb(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, greaterThan(c, vec3(0.0031308))); }
+vec4 stopsMix(vec4 a, vec4 b, float k) {
+  if (uStopsChrome != 0) return mix(a, b, k);
+  vec4 m = mix(vec4(stopsToLinear(a.rgb) * a.a, a.a), vec4(stopsToLinear(b.rgb) * b.a, b.a), k);
+  return vec4(m.a > 0.0 ? stopsToSrgb(clamp(m.rgb / m.a, 0.0, 1.0)) : vec3(0.0), m.a);
+}
+#else
+#define stopsMix mix
+#endif
+
 float applyExtend(float t, int mode) {
   if (mode == 1) {
     return fract(t);
@@ -159,68 +209,72 @@ float applyExtend(float t, int mode) {
   return clamp(t, 0.0, 1.0);
 }
 
+ivec2 gradStopTexel(int i) { return ivec2(i & 2047, i >> 11); }
+
+float gradStopOffset(vec4 b) { return b.x + b.y * (1.0 / 255.0) + b.z * (1.0 / 65025.0); }
+
 vec4 sampleStopsRaw(float t, int stopsOffset, int stopsCount) {
   if (stopsCount == 0) return vec4(0.0);
   bool oneTexel = stopsCount < 0;
   int count = abs(stopsCount);
   int base = stopsOffset;
   if (count == 1) {
-    vec4 c = texelFetch(uGradientStops, ivec2(base, 0), 0);
+    vec4 c = texelFetch(uGradientStops, gradStopTexel(base), 0);
     return oneTexel ? vec4(c.rgb, 1.0) : c;
   }
   int lo = 0, hi = count - 1;
-  for (int it = 0; it < 9; it++) {
+
+  vec4 hiT = texelFetch(uGradientStops, gradStopTexel(base + (oneTexel ? hi : hi * 2 + 1)), 0);
+  vec4 prvT = hiT;
+  for (int it = 0; it < 16; it++) {
     if (lo >= hi) break;
     int mid = (lo + hi) >> 1;
-    float mo = oneTexel
-      ? texelFetch(uGradientStops, ivec2(base + mid, 0), 0).a
-      : texelFetch(uGradientStops, ivec2(base + mid * 2 + 1, 0), 0).x;
-    if (mo < t) lo = mid + 1; else hi = mid;
+    vec4 mT = texelFetch(uGradientStops, gradStopTexel(base + (oneTexel ? mid : mid * 2 + 1)), 0);
+    float mo = oneTexel ? mT.a : gradStopOffset(mT);
+    if (mo < t) { lo = mid + 1; prvT = mT; } else { hi = mid; hiT = mT; }
   }
-  vec4 curC = texelFetch(uGradientStops, ivec2(base + (oneTexel ? lo : lo * 2), 0), 0);
+
+  vec4 curC  = oneTexel ? hiT  : texelFetch(uGradientStops, gradStopTexel(base + lo * 2), 0);
+  vec4 prevC = oneTexel ? prvT : texelFetch(uGradientStops, gradStopTexel(base + max(lo - 1, 0) * 2), 0);
   vec4 cur = oneTexel ? vec4(curC.rgb, 1.0) : curC;
-  float curOff = oneTexel ? curC.a
-                          : texelFetch(uGradientStops, ivec2(base + lo * 2 + 1, 0), 0).x;
+  float curOff = oneTexel ? hiT.a : gradStopOffset(hiT);
   if (lo == 0) return cur;
   if (curOff < t) return cur;
-  vec4 prevC = texelFetch(uGradientStops, ivec2(base + (oneTexel ? (lo - 1) : (lo - 1) * 2), 0), 0);
   vec4 prev = oneTexel ? vec4(prevC.rgb, 1.0) : prevC;
-  float prevOff = oneTexel ? prevC.a
-                           : texelFetch(uGradientStops, ivec2(base + (lo - 1) * 2 + 1, 0), 0).x;
+  float prevOff = oneTexel ? prvT.a : gradStopOffset(prvT);
   float span = max(curOff - prevOff, 1e-6);
   float k = (t - prevOff) / span;
-  return mix(prev, cur, k);
+  return stopsMix(prev, cur, k);
 }
 
-vec4 sampleStops(float t, int stopsOffset, int stopsCount, int mode) {
+float stopsFootprintTail(float s, float A, float B) {
+  if (s <= 0.0) return 0.0;
+  if (s >= A + B) return 1.0;
+  if (B <= 0.0) return s / A;
+  if (s <= B) return s * s / (2.0 * A * B);
+  if (s <= A) return (s - 0.5 * B) / A;
+  float r = A + B - s;
+  return 1.0 - r * r / (2.0 * A * B);
+}
+
+vec4 sampleStops(float t, int stopsOffset, int stopsCount, int mode, vec2 dt) {
   if (stopsCount == 0) return vec4(0.0);
-  if (mode == 0) {
-
-    return sampleStopsRaw(clamp(t, 0.0, 1.0), stopsOffset, stopsCount);
-  }
-
   float u = applyExtend(t, mode);
-  float fw = fwidth(u);
-
-  if (fw <= 0.0 || fw > 0.25) return sampleStopsRaw(u, stopsOffset, stopsCount);
-  float halfW = 0.5 * fw;
-
-  float dEdge = min(u, 1.0 - u);
-  if (dEdge >= halfW) return sampleStopsRaw(u, stopsOffset, stopsCount);
-
   vec4 here = sampleStopsRaw(u, stopsOffset, stopsCount);
-  vec4 there;
-  if (mode == 1) {
 
-    float uOther = (u < 0.5) ? 1.0 : 0.0;
-    there = sampleStopsRaw(uOther, stopsOffset, stopsCount);
-  } else {
+  if (mode != 1) return here;
 
-    return here;
-  }
+  float A = max(abs(dt.x), abs(dt.y)), B = min(abs(dt.x), abs(dt.y)), fw = A + B;
 
-  float k = 0.5 + 0.5 * (dEdge / halfW);
-  return mix(there, here, k);
+  if (fw <= 0.0 || fw > 0.25) return here;
+  float dEdge = min(u, 1.0 - u);
+  float s = 0.5 * fw - dEdge;
+  if (s <= 0.0) return here;
+  float far = stopsFootprintTail(s, A, B);
+
+  float uOther = (u < 0.5) ? 1.0 - s / 3.0 : s / 3.0;
+  vec4 there = sampleStopsRaw(uOther, stopsOffset, stopsCount);
+  return stopsMix(here, there, far);
 }
 #endif
 
@@ -233,12 +287,85 @@ int gradientSpreadToExtend(int spread) {
 
 #ifndef MANTLE_NO_GRADIENT
 
-vec4 sampleGradient(int gid, vec2 emCoord, vec4 shapeBB) {
+float gradientT(vec2 gpos, int gType, vec4 g0, vec4 g3, out bool ok, out bool cone, out float disc) {
+  ok = true; cone = false; disc = 1.0;
+  if (gType == 0) {
+    vec2 p1 = g3.xy;
+    vec2 p2 = g3.zw;
+    vec2 d = p2 - p1;
+    float dd = dot(d, d);
+    return dot(gpos - p1, d) / dd;
+  }
+  vec2 c = g3.xy;
+  float r = g3.z;
+  float fxFrac = g3.w;
+  float fyFrac = g0.w;
+
+  vec2 frac = vec2(fxFrac, fyFrac);
+  float invR = 1.0 / r;
+  vec2 d = (gpos - c) * invR - frac;
+  vec2 cf = -frac;
+
+  float frHalf = g0.y - floor(g0.y + 0.5);
+  if (frHalf > 0.0) {
+
+    float fq = 2.0 * frHalf;
+    float fr = fq / (1.0 - fq);
+    float dr = 1.0 - fr;
+    float qa = dot(cf, cf) - dr * dr;
+    float qb = dot(d, cf) + fr * dr;
+    float qc = dot(d, d) - fr * fr;
+    float qd = qb * qb - qa * qc;
+    disc = 4.0 * qd;
+    cone = qa > 0.0;
+
+    if (dr == 0.0 && qa == 0.0 && qb == 0.0) return qc < 0.0 ? 0.0 : 1.0;
+    if (qd < 0.0) {
+
+      if (!cone) { ok = false; return 0.0; }
+      float te = qb / qa;
+      if (!(fr + te * dr >= 0.0)) { ok = false; return 0.0; }
+      return te;
+    }
+    float sq = sqrt(qd);
+    float m = qb + (qb >= 0.0 ? sq : -sq);
+    float t1 = m != 0.0 ? qc / m : 0.0;
+    bool ok1 = m != 0.0 && fr + t1 * dr >= 0.0;
+    float t2 = 0.0;
+
+    bool ok2 = m != 0.0 && abs(qa) > 1.0e-6 * (dot(cf, cf) + dr * dr) && abs(qa) * 1.0e12 > abs(m);
+    if (ok2) { t2 = m / qa; ok2 = fr + t2 * dr >= 0.0; }
+    if (!ok1 && !ok2) { ok = false; return 0.0; }
+    if (ok1 && ok2) return max(t1, t2);
+    return ok1 ? t1 : t2;
+  }
+  float A = dot(d, d);
+  float B = 2.0 * dot(cf, d);
+  float C = dot(cf, cf) - 1.0;
+  disc = B * B - 4.0 * A * C;
+  if (C > 0.0) {
+
+    cone = true;
+    float tc = (0.5 * B + 0.5 * sqrt(max(disc, 0.0))) / C;
+    if (!(tc >= 0.0)) { ok = false; return 0.0; }
+    return tc;
+  }
+  if (C == 0.0) {
+    cone = true; disc = B;
+    return B > 0.0 ? A / B : 0.0;
+  }
+  if (A == 0.0) return 0.0;
+  if (disc < 0.0) { ok = false; return 0.0; }
+
+  return (2.0 * A) / (B + sqrt(disc));
+}
+
+vec4 sampleGradient(int gid, vec2 emCoord, vec4 shapeBB, vec2 emDx, vec2 emDy) {
   int row = gid - 1;
-  vec4 g0 = texelFetch(uGradientTex, ivec2(GR_G0, row), 0);
-  vec4 g1 = texelFetch(uGradientTex, ivec2(GR_G1, row), 0);
-  vec4 g2 = texelFetch(uGradientTex, ivec2(GR_G2, row), 0);
-  vec4 g3 = texelFetch(uGradientTex, ivec2(GR_G3, row), 0);
+  vec4 g0 = texelFetch(uGradientTex, gradAt(GR_G0, row), 0);
+  vec4 g1 = texelFetch(uGradientTex, gradAt(GR_G1, row), 0);
+  vec4 g2 = texelFetch(uGradientTex, gradAt(GR_G2, row), 0);
+  vec4 g3 = texelFetch(uGradientTex, gradAt(GR_G3, row), 0);
   int gType = int(g0.x + 0.5);
   int spread = int(g0.y + 0.5);
   float unitsFlag = g0.z;
@@ -246,61 +373,98 @@ vec4 sampleGradient(int gid, vec2 emCoord, vec4 shapeBB) {
   int stopsOffset = int(g2.z + 0.5);
 
   int stopsCount  = int(g2.w >= 0.0 ? g2.w + 0.5 : g2.w - 0.5);
-  vec2 gp = emCoord;
+  if ((gType == 0 && all(equal(g3.xy, g3.zw))) || (gType != 0 && g3.z == 0.0))
+    return sampleStopsRaw(2.0, stopsOffset, stopsCount);
+  vec2 gp = emCoord, gdx = emDx, gdy = emDy;
   if (unitsFlag > 0.5) {
     vec2 bboxMin = shapeBB.xy;
-    vec2 bboxSize = max(shapeBB.zw - bboxMin, vec2(1e-6));
+
+    vec2 bboxSize = shapeBB.zw - bboxMin;
+    bboxSize = vec2(bboxSize.x > 0.0 ? bboxSize.x : 1.0, bboxSize.y > 0.0 ? bboxSize.y : 1.0);
     gp = (emCoord - bboxMin) / bboxSize;
+    gdx = emDx / bboxSize; gdy = emDy / bboxSize;
   }
   float ax = g1.x, ay = g1.y, bx = g1.z, by = g1.w;
   float ex = g2.x, ey = g2.y;
   vec2 gpos = vec2(ax * gp.x + bx * gp.y + ex,
                    ay * gp.x + by * gp.y + ey);
-  float t;
-  if (gType == 0) {
-    vec2 p1 = g3.xy;
-    vec2 p2 = g3.zw;
-    vec2 d = p2 - p1;
-    float dd = max(dot(d, d), 1e-12);
-    t = dot(gpos - p1, d) / dd;
-  } else {
-    vec2 c = g3.xy;
-    float r = g3.z;
-    float fxFrac = g3.w;
-    float fyFrac = g0.w;
-    vec2 f = c + vec2(fxFrac, fyFrac) * r;
-    vec2 d = gpos - f;
-    vec2 cf = c - f;
-    float A = dot(d, d);
-    float B = 2.0 * dot(cf, d);
-    float C = dot(cf, cf) - r * r;
-    float disc = B * B - 4.0 * A * C;
-    if (disc < 0.0 || A < 1e-12) return vec4(0);
-    float tParam = (B + sqrt(disc)) / (2.0 * A);
-    t = 1.0 / tParam;
+  bool ok, cone; float disc;
+  float t = gradientT(gpos, gType, g0, g3, ok, cone, disc);
+  if (!ok) return vec4(0);
+  int mode = gradientSpreadToExtend(spread);
+
+  if (gType != 0 && mode == 1 && t < 0.5 && g0.y == floor(g0.y + 0.5)) mode = 0;
+
+  vec2 dt = vec2(0.0);
+  float coneCov = 1.0;
+  if (mode == 1 || cone) {
+    bool okX, okY, cX, cY; float dX, dY;
+    float tX = gradientT(gpos + vec2(ax * gdx.x + bx * gdx.y, ay * gdx.x + by * gdx.y), gType, g0, g3, okX, cX, dX);
+    float tY = gradientT(gpos + vec2(ax * gdy.x + bx * gdy.y, ay * gdy.x + by * gdy.y), gType, g0, g3, okY, cY, dY);
+    if (mode == 1) dt = vec2(okX ? tX - t : 0.0, okY ? tY - t : 0.0);
+    if (cone) {
+      float sa = abs(dX - disc), sb = abs(dY - disc);
+      float SA = max(sa, sb), SB = min(sa, sb);
+      coneCov = (SA > 0.0) ? stopsFootprintTail(disc + 0.5 * (SA + SB), SA, SB) : (disc >= 0.0 ? 1.0 : 0.0);
+    }
   }
-  return sampleStops(t, stopsOffset, stopsCount, gradientSpreadToExtend(spread));
+  if (coneCov <= 0.0) return vec4(0);
+  vec4 c = sampleStops(t, stopsOffset, stopsCount, mode, dt);
+  return vec4(c.rgb, c.a * coneCov);
 }
 #endif
 
 #ifndef MANTLE_NO_IMAGE
-vec4 sampleChildImage(vec2 tileEm, vec4 imageRect, vec4 atlasSlot) {
-  float u = (tileEm.x - imageRect.x) / max(imageRect.z, 1e-6);
-  float v = (tileEm.y - imageRect.y) / max(imageRect.w, 1e-6);
-  if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0) return vec4(0);
-  float atlasU = (u * atlasSlot.y) / max(uImageAtlasSize.x, 1.0);
-  float atlasV = (atlasSlot.x + v * atlasSlot.z) / max(uImageAtlasSize.y, 1.0);
-  if ((int(atlasSlot.w + 0.5) & 4) != 0) {
 
-    atlasU = (floor(atlasU * uImageAtlasSize.x) + 0.5) / max(uImageAtlasSize.x, 1.0);
-    atlasV = (floor(atlasV * uImageAtlasSize.y) + 0.5) / max(uImageAtlasSize.y, 1.0);
+void imageLocalCoordinates(int mapId, inout vec2 pos, inout vec2 dx, inout vec2 dy) {
+#ifndef MANTLE_NO_GRADIENT
+  if (mapId > 0) {
+    vec4 m = texelFetch(uGradientTex, gradAt(GR_G1, mapId - 1), 0);
+    vec2 t = texelFetch(uGradientTex, gradAt(GR_G2, mapId - 1), 0).xy;
+    mat2 linear = mat2(m.xy, m.zw);
+    pos = linear * pos + t; dx = linear * dx; dy = linear * dy;
   }
-  return texture(uImageTex, vec2(atlasU, atlasV));
+#endif
 }
 
-vec4 sampleTopLevelImage(vec2 emPos, vec4 imageRect, vec4 atlasSlot) {
-  float u = (emPos.x - imageRect.x) / max(imageRect.z, 1e-6);
-  float v = (emPos.y - imageRect.y) / max(imageRect.w, 1e-6);
+vec4 imageTexelStraight(vec4 t) {
+  return vec4(t.a > 0.0 ? min(t.rgb / t.a, vec3(1.0)) : vec3(0.0), t.a);
+}
+
+vec4 sampleChildImage(vec2 tileEm, vec4 imageRect, vec4 atlasSlot, vec2 tileDx, vec2 tileDy) {
+  bool secondary = (int(atlasSlot.w + 0.5) & 8) != 0;
+  vec2 atlasSize = secondary ? uSecondaryImageAtlasSize : uImageAtlasSize;
+
+  vec2 rs = max(imageRect.zw, vec2(1e-30));
+  float u = (tileEm.x - imageRect.x) / rs.x;
+  float v = (tileEm.y - imageRect.y) / rs.y;
+  int kind = int(atlasSlot.w + 0.5) & 3;
+  if (kind == 1) { u = fract(u); v = fract(v); }
+  else if (kind == 3) {
+    u = 1.0 - abs(fract(u * 0.5) - 0.5) * 2.0;
+    v = 1.0 - abs(fract(v * 0.5) - 0.5) * 2.0;
+  } else if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0) return vec4(0);
+  float atlasU = clamp(u * atlasSlot.y, 0.5, max(0.5, atlasSlot.y - 0.5)) / max(atlasSize.x, 1.0);
+  float atlasV = clamp(atlasSlot.x + v * atlasSlot.z, atlasSlot.x + 0.5,
+    atlasSlot.x + max(0.5, atlasSlot.z - 0.5)) / max(atlasSize.y, 1.0);
+  if ((int(atlasSlot.w + 0.5) & 4) != 0) {
+
+    atlasU = (floor(atlasU * atlasSize.x) + 0.5) / max(atlasSize.x, 1.0);
+    atlasV = (floor(atlasV * atlasSize.y) + 0.5) / max(atlasSize.y, 1.0);
+  }
+  vec2 aScale = atlasSlot.yz / (rs * max(atlasSize, vec2(1.0)));
+  return imageTexelStraight(secondary ? textureGrad(uSecondaryImageTex, vec2(atlasU, atlasV), tileDx * aScale, tileDy * aScale) : textureGrad(uImageTex, vec2(atlasU, atlasV), tileDx * aScale, tileDy * aScale));}
+
+vec4 sampleTopLevelImage(vec2 emPos, vec4 imageRect, vec4 atlasSlot, vec2 emDx, vec2 emDy) {
+  bool secondary = (int(atlasSlot.w + 0.5) & 8) != 0;
+  vec2 atlasSize = secondary ? uSecondaryImageAtlasSize : uImageAtlasSize;
+
+  vec2 rs = max(imageRect.zw, vec2(1e-30));
+  float u = (emPos.x - imageRect.x) / rs.x;
+  float v = (emPos.y - imageRect.y) / rs.y;
+  vec2 uvDx = emDx / rs, uvDy = emDy / rs;
+
+  vec2 uvPx = abs(uvDx) + abs(uvDy);
   int kind = int(atlasSlot.w + 0.5) & 3;
   if (kind == 1) {
 
@@ -308,23 +472,39 @@ vec4 sampleTopLevelImage(vec2 emPos, vec4 imageRect, vec4 atlasSlot) {
     v = fract(v); if (v < 0.0) v += 1.0;
   } else if (kind == 3) {
 
-    u = abs(fract(u * 0.5) - 0.5) * 2.0;
-    v = abs(fract(v * 0.5) - 0.5) * 2.0;
+    u = 1.0 - abs(fract(u * 0.5) - 0.5) * 2.0;
+    v = 1.0 - abs(fract(v * 0.5) - 0.5) * 2.0;
   } else {
 
-    if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0) return vec4(0);
+    vec2 slack = 2.0 * uvPx;
+    if (u < -slack.x || u > 1.0 + slack.x || v < -slack.y || v > 1.0 + slack.y) return vec4(0);
+    u = clamp(u, 0.0, 1.0);
+    v = clamp(v, 0.0, 1.0);
   }
-  float atlasU = (u * atlasSlot.y) / max(uImageAtlasSize.x, 1.0);
-  float atlasV = (atlasSlot.x + v * atlasSlot.z) / max(uImageAtlasSize.y, 1.0);
+  float atlasU = clamp(u * atlasSlot.y, 0.5, max(0.5, atlasSlot.y - 0.5)) / max(atlasSize.x, 1.0);
+  float atlasV = clamp(atlasSlot.x + v * atlasSlot.z, atlasSlot.x + 0.5,
+    atlasSlot.x + max(0.5, atlasSlot.z - 0.5)) / max(atlasSize.y, 1.0);
   if ((int(atlasSlot.w + 0.5) & 4) != 0) {
-    atlasU = (floor(atlasU * uImageAtlasSize.x) + 0.5) / max(uImageAtlasSize.x, 1.0);
-    atlasV = (floor(atlasV * uImageAtlasSize.y) + 0.5) / max(uImageAtlasSize.y, 1.0);
+    atlasU = (floor(atlasU * atlasSize.x) + 0.5) / max(atlasSize.x, 1.0);
+    atlasV = (floor(atlasV * atlasSize.y) + 0.5) / max(atlasSize.y, 1.0);
   }
-  return texture(uImageTex, vec2(atlasU, atlasV));
+  vec2 aScale = atlasSlot.yz / max(atlasSize, vec2(1.0));
+  return imageTexelStraight(secondary ? textureGrad(uSecondaryImageTex, vec2(atlasU, atlasV), uvDx * aScale, uvDy * aScale) : textureGrad(uImageTex, vec2(atlasU, atlasV), uvDx * aScale, uvDy * aScale));}
+
+vec4 sampleMappedChildImage(vec2 pos, vec4 rect, vec4 atlas, vec2 dx, vec2 dy, int mapId) {
+  imageLocalCoordinates(mapId, pos, dx, dy);
+  return sampleChildImage(pos, rect, atlas, dx, dy);
 }
+vec4 sampleMappedTopLevelImage(vec2 pos, vec4 rect, vec4 atlas, vec2 dx, vec2 dy, int mapId) {
+  imageLocalCoordinates(mapId, pos, dx, dy);
+  return sampleTopLevelImage(pos, rect, atlas, dx, dy);
+}
+
 #endif
 
+#ifndef SLUG_NEWTON
 #define SLUG_NEWTON 5
+#endif
 #define SEG_LINE 0u
 #define SEG_QUAD 1u
 #define SEG_CUBIC 2u
@@ -362,200 +542,866 @@ float slugCubicArcLen(vec4 cx, vec4 cy, float t) {
   return t * sum;
 }
 
-bool dashCovered(int dashId, float dist) {
-  if (dashId <= 0) return true;
-  int row = dashId - 1;
-  vec4 hdr = texelFetch(uDashTex, ivec2(DASH_HDR, row), 0);
-  float cycleLen = hdr.r;
-  int   count    = int(hdr.g + 0.5);
-  float offset   = hdr.b;
-  if (cycleLen <= 0.0 || count <= 0) return true;
-  float d = mod(dist + offset, cycleLen);
+vec3 seSide(vec2 q, vec2 t, float halfW) {
+  vec2 pn = vec2(-t.y, t.x);
+  float s = dot(q, pn);
+  return vec3(s < 0.0 ? -pn : pn, abs(s) - halfW);
+}
+
+vec4 seSlab(vec2 q, vec2 t, float halfW, float reach) {
+  vec3 s = seSide(q, t, halfW);
+  return vec4(s, -s.z - 2.0 * halfW > -reach ? 9.0 : 1.0);
+}
+
+float seKappa(vec2 d1, vec2 d2, float err) {
+  float l2 = dot(d1, d1);
+  float c = d1.x * d2.y - d1.y * d2.x;
+  if (!(l2 > 0.0) || abs(c) <= err) return 0.0;
+  vec2 t = d1 * inversesqrt(l2);
+  return (t.x * d2.y - t.y * d2.x) / l2;
+}
+
+float seKappaErr(float m, vec2 d1, vec2 d2) { return 16.0 * 1.1920929e-7 * m * (length(d1) + length(d2)); }
+
+void seAnd(inout vec4 P, inout vec4 Q, vec2 n, float e, float reach) {
+#ifdef MANTLE_STROKE_EXACT
+  if (!(dot(n, n) > 0.5) || e <= -reach) return;
+  if (P.w == 0.0) { P = vec4(n, e, 1.0); Q = vec4(0.0); }
+  else if (P.w == 1.0) {
+    if (e > P.z) { Q = vec4(P.xyz, 0.0); P = vec4(n, e, 2.0); } else { Q = vec4(n, e, 0.0); P = vec4(P.xyz, 2.0); }
+  } else if (P.w == 2.0) {
+    if (e > P.z) { Q = vec4(P.xyz, 0.0); P = vec4(n, e, 2.0); } else if (e > Q.z) Q = vec4(n, e, 0.0);
+  } else if (P.w == 9.0) {
+    if (!(dot(Q.xy, Q.xy) > 0.5) || e > Q.z) Q = vec4(n, e, 0.0);
+  } else if (e > P.z) { Q = vec4(P.xyz, 0.0); P = vec4(n, e, 2.0); }
+#endif
+}
+void seAnd(inout vec4 P, inout vec4 Q, vec3 ne, float reach) { seAnd(P, Q, ne.xy, ne.z, reach); }
+
+void seOr(inout vec4 P, inout vec4 Q, vec2 n, float e, float reach) {
+#ifdef MANTLE_STROKE_EXACT
+  if ((P.w == 1.0 || (P.w == 9.0 && !(dot(Q.xy, Q.xy) > 0.5))) && dot(n, n) > 0.5 && e >= P.z && e < reach) {
+    Q = vec4(n, e, 0.0); P = vec4(P.xyz, 3.0);
+  }
+#endif
+}
+
+void seDisc(out vec4 P, out vec4 Q, vec2 q, vec2 u, float halfW) {
+#ifdef MANTLE_STROKE_EXACT
+  float r = length(q);
+  if (r > 0.0) { P = vec4(q / r, r - halfW, 4.0); Q = vec4(u, dot(q, u), 0.0); }
+  else { P = vec4(0.0); Q = vec4(0.0); }
+#else
+  P = vec4(0.0); Q = vec4(0.0);
+#endif
+}
+
+vec2 seArcN(vec2 q, vec2 tan, float kappa) {
+  vec2 L = vec2(-tan.y, tan.x);
+  if (kappa == 0.0) return dot(q, L) < 0.0 ? -L : L;
+  vec2 w = kappa * q - L;
+  float lw = length(w);
+  return lw > 0.0 ? (kappa * dot(q, q) - 2.0 * dot(q, L) < 0.0 ? -w : w) / lw : vec2(0.0);
+}
+
+const int DASH_MAX_ENTRIES = 60;
+float strokeDashScale = 1.0;
+float strokeDashCycleG = 0.0, strokeDashOnG = 0.0;
+float dashValue(int row, int k) {
+  vec4 texel = texelFetch(uDashTex, dashAt(1 + (k >> 2), row), 0);
+  int c = k & 3;
+  return (c == 0) ? texel.x : (c == 1) ? texel.y : (c == 2) ? texel.z : texel.w;
+}
+
+float strokeSeamL = 0.0;
+bool strokeSeamFirst = false, strokeSeamLast = false;
+bool strokeSeamMergeLo = false, strokeSeamMergeHi = false;
+float strokeSeamTol = 0.0;
+void strokeSeamSet(float hy, float hz) {
+  strokeSeamFirst = hy < 0.0;
+  strokeSeamLast = hz < 0.0;
+  strokeSeamL = strokeSeamFirst ? -hy : (strokeSeamLast ? -hz : 0.0);
+  strokeSeamMergeLo = false;
+  strokeSeamMergeHi = false;
+  strokeSeamTol = 0.0;
+}
+
+bool strokeSeamOn(int row, int count, float cycleLen, float d, bool after, float tol) {
+  if (after) { if (d >= cycleLen - tol) d -= cycleLen; }
+  else if (d <= tol) d += cycleLen;
   float accum = 0.0;
-  for (int k = 0; k < 32; k++) {
+  bool on = false;
+  for (int k = 0; k < DASH_MAX_ENTRIES; k++) {
     if (k >= count) break;
-    int texelIdx = 1 + (k >> 2);
-    int compIdx  = k & 3;
-    vec4 texel = texelFetch(uDashTex, ivec2(texelIdx, row), 0);
-    float v = (compIdx == 0) ? texel.x : (compIdx == 1) ? texel.y : (compIdx == 2) ? texel.z : texel.w;
-    if (d < accum + v) return (k & 1) == 0;
+    float v = dashValue(row, k) * strokeDashScale;
+    if ((k & 1) == 0 && v > 0.0) {
+      if (after ? (d >= accum - tol && d < accum + v - tol) : (d > accum + tol && d <= accum + v + tol)) on = true;
+    }
     accum += v;
   }
-  return true;
+  return on;
+}
+
+void strokeSeamResolve(int dashId, float seR, inout bool freeStart, inout bool freeEnd) {
+  if (dashId <= 0 || !(strokeSeamL > 0.0)) return;
+  int row = dashId - 1;
+  vec4 hdr = texelFetch(uDashTex, dashAt(DASH_HDR, row), 0);
+  float cycleLen = hdr.r * strokeDashScale;
+  int   count    = int(hdr.g + 0.5);
+  float offset   = hdr.b * strokeDashScale;
+  if (cycleLen <= 0.0 || count <= 0 || 2.0 * cycleLen < 1.41421356 * seR) return;
+  strokeSeamTol = min(2.4e-6 * (strokeSeamL + abs(offset) + cycleLen), 1e-3 * cycleLen);
+  bool onStart = strokeSeamOn(row, count, cycleLen, mod(offset, cycleLen), true, 0.0);
+  bool onEnd = strokeSeamOn(row, count, cycleLen, mod(strokeSeamL + offset, cycleLen), false, strokeSeamTol);
+  bool merged = onStart && onEnd;
+  if (strokeSeamFirst) { if (merged) strokeSeamMergeLo = true; else freeStart = true; }
+  if (strokeSeamLast) { if (merged) strokeSeamMergeHi = true; else freeEnd = true; }
+}
+
+void dashBoundary(float b, float type, float d, float ds, float dist, float cycleLen, float sLo, float sHi, inout vec3 best,
+                  inout float best2) {
+  float f = b - d;
+  if (f < 0.0) f += cycleLen;
+  for (int r = 0; r < 2; r++) {
+    float sb = ds + (r == 0 ? f : f - cycleLen);
+    float delta = sb - dist;
+    float side = type != 0.0 ? type : (delta >= 0.0 ? -1.0 : 1.0);
+    bool onPath = type == 0.0 ? (sb >= sLo && sb <= sHi)
+                : side < 0.0  ? (sb >= sLo && sb < sHi) : (sb > sLo && sb <= sHi);
+
+    if (onPath && type != 0.0 && ((strokeSeamMergeLo && side < 0.0 && sb <= sLo + strokeSeamTol) || (strokeSeamMergeHi && side > 0.0 && sb >= sHi - strokeSeamTol)
+        || (strokeSeamLast && side < 0.0 && sb >= sHi - strokeSeamTol) || (strokeSeamFirst && side > 0.0 && sb <= sLo + strokeSeamTol))) onPath = false;
+    if (onPath) {
+      if (abs(delta) < best.x) { best2 = best.x; best = vec3(abs(delta), side, type == 0.0 ? 1.0 : 0.0); }
+      else if (abs(delta) < best2) best2 = abs(delta);
+    }
+  }
+}
+
+vec2 dashCapReach(int dashId, float dist, bool zeroDashEmpty) {
+  vec2 r = vec2(1e30);
+  if (dashId <= 0) return r;
+  int row = dashId - 1;
+  vec4 hdr = texelFetch(uDashTex, dashAt(DASH_HDR, row), 0);
+  float cycleLen = hdr.r * strokeDashScale;
+  int   count    = int(hdr.g + 0.5);
+  float offset   = hdr.b * strokeDashScale;
+  if (cycleLen <= 0.0 || count <= 0) return r;
+  float d = mod(dist + offset, cycleLen);
+  float accum = 0.0;
+  for (int k = 0; k < DASH_MAX_ENTRIES; k++) {
+    if (k >= count) break;
+    float v = dashValue(row, k) * strokeDashScale;
+    if ((k & 1) == 0 && (v > 0.0 || !zeroDashEmpty)) {
+      float behind = mod(d - (accum + v), cycleLen);
+      float ahead = mod(accum - d, cycleLen);
+      r = vec2(min(r.x, behind), min(r.y, ahead));
+    }
+    accum += v;
+  }
+  return r;
+}
+
+vec2 dashOut(int dashId, float dist, bool zeroDashEmpty, float sLo, float sHi, out vec2 more) {
+  more = vec2(1e30, 0.0);
+  if (dashId <= 0) return vec2(-1e30, 0.0);
+  int row = dashId - 1;
+  vec4 hdr = texelFetch(uDashTex, dashAt(DASH_HDR, row), 0);
+  float cycleLen = hdr.r * strokeDashScale;
+  int   count    = int(hdr.g + 0.5);
+  float offset   = hdr.b * strokeDashScale;
+  if (cycleLen <= 0.0 || count <= 0) return vec2(-1e30, 0.0);
+  float ds = clamp(dist, sLo, sHi);
+  float d = mod(ds + offset, cycleLen);
+  float accum = 0.0;
+  vec3 best = vec3(1e30, 0.0, 0.0);
+  float best2 = 1e30;
+  int firstCov = -1, prevCov = -1;
+  bool inside = false;
+  strokeDashCycleG = cycleLen;
+  strokeDashOnG = 0.0;
+  for (int k = 0; k < DASH_MAX_ENTRIES; k++) {
+    if (k >= count) break;
+    float v = dashValue(row, k) * strokeDashScale;
+    int cov = (k & 1) == 0 ? 1 : 0;
+    if (cov == 1) strokeDashOnG += v;
+    if (v > 0.0) {
+      if (d >= accum && d < accum + v) inside = cov == 1;
+      if (firstCov < 0) firstCov = cov;
+
+      if (prevCov >= 0 && prevCov != cov) dashBoundary(accum, cov == 1 ? -1.0 : 1.0, d, ds, dist, cycleLen, sLo, sHi, best, best2);
+      prevCov = cov;
+    } else if (cov == 1 && !zeroDashEmpty) {
+      dashBoundary(accum, 0.0, d, ds, dist, cycleLen, sLo, sHi, best, best2);
+    }
+    accum += v;
+  }
+
+  if (firstCov >= 0 && prevCov != firstCov) dashBoundary(0.0, firstCov == 1 ? -1.0 : 1.0, d, ds, dist, cycleLen, sLo, sHi, best, best2);
+
+  if (strokeSeamLast && ds >= sHi) inside = strokeSeamOn(row, count, cycleLen, d, false, strokeSeamTol);
+  more = vec2(best2, best.z);
+  if (best.x >= 1e30) return vec2(inside ? -1e30 : 1e30, 0.0);
+  return vec2(inside ? -best.x : best.x, best.y);
+}
+
+float strokeDashDist(float thisD, inout vec2 g, vec2 tanT, float halfW, int dashId, float pathDist,
+                     int startCap, int endCap, float sLo, float sHi, float seR, inout vec4 eP, inout vec4 eQ) {
+  vec2 more;
+  vec2 os = dashOut(dashId, pathDist, startCap == 0 && endCap == 0, sLo, sHi, more);
+
+  float pxSz = 1.41421356 * seR;
+  if (strokeDashCycleG > 0.0 && 2.0 * strokeDashCycleG < pxSz) {
+    float onLen = strokeDashOnG + ((startCap != 0 ? halfW : 0.0) + (endCap != 0 ? halfW : 0.0));
+    float duty = clamp(onLen / strokeDashCycleG, 0.0, 1.0);
+    if (duty >= 1.0) return thisD;
+    eP = vec4(0.0); eQ = vec4(0.0); g = vec2(0.0);
+    return max(thisD, halfW + pxSz * (0.5 - duty));
+  }
+  float o = os.x;
+  if (o <= -1e29) return thisD;
+  vec2 gp = os.y * tanT;
+  int cap = os.y < 0.0 ? startCap : endCap;
+  if (cap == 1) {
+
+    if (o < 1e29 && o > -seR && dot(g, g) > 0.5) {
+      if (more.x >= halfW + seR) seDisc(eP, eQ, thisD * g + o * gp, more.y > 0.5 ? vec2(0.0) : gp, halfW);
+      else { eP = vec4(0.0); eQ = vec4(0.0); }
+    } else if (o > 0.0) {
+
+      eP = vec4(0.0); eQ = vec4(0.0);
+    }
+    if (o > 0.0) {
+      float r = length(vec2(thisD, o));
+      g = (dot(g, g) > 0.5 && r > 0.0) ? (thisD * g + o * gp) / r : vec2(0.0);
+      thisD = r;
+    }
+  } else {
+    float r = cap == 2 ? o : halfW + o;
+    seAnd(eP, eQ, gp, r - halfW, seR);
+    if (r > thisD) { thisD = r; g = gp; }
+  }
+  return thisD;
 }
 
 float perpDistToArc(vec2 q, vec2 tan, float kappa) {
   vec2 L = vec2(-tan.y, tan.x);
-  if (abs(kappa) < 1e-6) return abs(dot(q, L));
-  float R = 1.0 / kappa;
-  vec2 CC = R * L;
-  return abs(length(q - CC) - abs(R));
+  if (kappa == 0.0) return abs(dot(q, L));
+  return abs(kappa * dot(q, q) - 2.0 * dot(q, L)) / (length(kappa * q - L) + 1.0);
+}
+
+float strokeArcsReachFactor(float miterLimit) {
+  float ml = max(miterLimit, 1.0);
+  return sqrt(ml * ml + 1.0);
+}
+
+vec2 strokeUnit(vec2 d) { float l = length(d); return l > 0.0 ? d / l : d; }
+
+bool strokeEndCandidate(bool freeStart, bool freeEnd, int startCap, int endCap, int joinStyle, int dashId, int e) {
+  if (dashId > 0 || (freeStart && startCap == 0) || (freeEnd && endCap == 0)) return true;
+  bool joined = joinStyle != 1 && joinStyle != 2;
+  return e == 0 ? (freeStart ? startCap == 2 : joined) : (freeEnd ? endCap == 2 : joined);
 }
 
 float strokeCapsJoinsDash(
     float t, float thisD, vec2 pStart, vec2 pEnd, vec2 dStart, vec2 dEnd,
     bool freeStart, bool freeEnd, int startCap, int endCap,
     int joinStyle, float miterLimit, float halfW,
-    vec2 inTan, vec2 outTan, float startPrevReach, float endNextReach,
-    int dashId, float startDist, float arcLenAtT, vec4 curv, float minDIn) {
+    vec2 inTan, vec2 outTan,
+    int dashId, float startDist, float arcLenAtT, vec4 curv, float minDIn,
+    inout vec2 gradIO, vec2 tanT, float dashEnd, float seR, out vec4 eP, out vec4 eQ) {
   bool drop = false;
-  if (t < 1e-4) {
-    if (freeStart) {
-      if (startCap == 0) {
+  bool roundEnd = false;
+  vec2 latV = vec2(0.0);
 
-        float tL0 = max(length(dStart), 1e-12);
-        float aOut = dot(-pStart, -(dStart / tL0));
+  eP = (dot(gradIO, gradIO) > 0.5) ? vec4(gradIO, thisD - halfW, -thisD - halfW > -seR ? 9.0 : 1.0) : vec4(0.0);
+  eQ = vec4(0.0);
+
+  if (t < 1e-4 || t > 1.0 - 1e-4) {
+    bool atS = t < 1e-4;
+    vec2 ep = atS ? pStart : pEnd;
+    vec2 tOwn = strokeUnit(atS ? dStart : dEnd);
+    vec2 uOwn = atS ? -tOwn : tOwn;
+    vec2 tOth = atS ? inTan : outTan;
+    vec2 uOth = atS ? inTan : -outTan;
+    vec2 din = atS ? inTan : tOwn, dout = atS ? tOwn : outTan;
+    bool freeV = atS ? freeStart : freeEnd;
+    int capV = atS ? startCap : endCap;
+    float kOwn = atS ? curv.x : curv.y, kOth = atS ? curv.z : curv.w;
+    bool outWedge = atS ? dot(-ep, inTan) < 0.0 : dot(-ep, outTan) > 0.0;
+    if (freeV) {
+
+      eP = seSlab(-ep, tOwn, halfW, seR); eQ = vec4(0.0);
+      float aR = dot(-ep, uOwn);
+      roundEnd = capV == 1;
+      if (roundEnd) latV = ep - tOwn * dot(ep, tOwn);
+      if (capV == 0) seAnd(eP, eQ, uOwn, aR, seR);
+      else if (capV == 2) { if (aR >= 0.0) seAnd(eP, eQ, uOwn, aR - halfW, seR); }
+      else seDisc(eP, eQ, -ep, uOwn, halfW);
+      if (capV == 0) {
+
+        float aOut = dot(-ep, uOwn);
         thisD = max(thisD, halfW + aOut);
       }
-      else if (startCap == 2) {
-        float tL = max(length(dStart), 1e-12);
-        vec2 segTan = dStart / tL;
-        vec2 ep = pStart;
-        float a = dot(-ep, -segTan);
-        if (a < 0.0 || a > halfW) drop = true;
-        else { float perp = length(-ep - (-segTan) * a); thisD = min(thisD, perp); }
-      }
-    } else if (joinStyle == 0 || joinStyle == 3) {
-      float tL = max(length(dStart), 1e-12);
-      vec2 segTan = dStart / tL;
-      vec2 epStart = pStart;
-      if (startPrevReach < 1e8 && dot(-epStart, inTan) < 0.0) drop = true;
-      float c = dot(-segTan, inTan);
+      else if (capV == 2) {
 
-      float sinHalf = sqrt(max(0.5 * (1.0 - c), 1e-9));
-      float miterLen = halfW / max(sinHalf, 1e-6);
+        float a = dot(-ep, uOwn);
+        if (a >= 0.0) { float perp = length(-ep - uOwn * a); thisD = min(thisD, max(perp, a)); }
+      }
+    } else if ((joinStyle == 0 || joinStyle == 3 || joinStyle == 4) && outWedge) {
+
+      float aJ = dot(-ep, uOwn);
+      if (aJ > 0.0) thisD = max(thisD, halfW + aJ);
+      eP = seSlab(-ep, tOwn, halfW, seR); eQ = vec4(0.0);
+      if (aJ > 0.0) seAnd(eP, eQ, uOwn, aJ, seR);
+    } else if (joinStyle == 0 || joinStyle == 3) {
+      float c = dot(uOwn, uOth);
+
+      float sinHalf = 0.5 * length(uOwn - uOth);
+      float miterLen = halfW / max(sinHalf, 1.17549435e-38);
       float maxMiter = halfW * miterLimit;
-      if (joinStyle == 3) miterLen = min(miterLen, maxMiter);
-      else if (miterLen > maxMiter) miterLen = -1.0;
-      if (miterLen >= 0.0 && miterLen <= maxMiter) {
-        vec2 ep = pStart;
-        vec2 along = -segTan;
-        float a = dot(-ep, along);
-        if (a >= 0.0 && a <= miterLen) {
-          float perpThis  = length(-ep - along * a);
-          vec2  nIn       = vec2(-inTan.y, inTan.x);
-          float perpOther = abs(dot(-ep, nIn));
-          thisD = min(thisD, max(perpThis, perpOther));
-        }
+      float mlClip = halfW * max(miterLimit, 1.0);
+      bool fits = miterLen <= maxMiter;
+      vec2 along = uOwn;
+      float a = dot(-ep, along);
+
+      float cosHalfJ = sqrt(max(0.5 * (1.0 + c), 0.0));
+      float perpThis  = length(-ep - along * a);
+      vec2  nOth      = vec2(-tOth.y, tOth.x);
+      float perpOther = abs(dot(-ep, nOth));
+
+      eP = vec4(0.0); eQ = vec4(0.0);
+      seAnd(eP, eQ, seSide(-ep, tOwn, halfW), seR); seAnd(eP, eQ, seSide(-ep, tOth, halfW), seR);
+
+      if (joinStyle == 0 && !fits) {
+        float cr = din.x * dout.y - din.y * dout.x;
+        float sd = (cr >= 0.0) ? 1.0 : -1.0;
+        vec2 nA = sd * vec2(din.y, -din.x), nB = sd * vec2(dout.y, -dout.x);
+        vec2 nb = nA + nB; float bl = length(nb);
+        if (bl > 1e-4) { vec2 bis = nb / bl; seAnd(eP, eQ, bis, dot(-ep, bis) - halfW * dot(nA, bis), seR);
+          thisD = max(thisD, halfW + dot(-ep, bis) - halfW * dot(nA, bis)); }
+        else { seAnd(eP, eQ, uOwn, dot(-ep, uOwn), seR); thisD = max(thisD, halfW + dot(-ep, uOwn)); }
+      }
+      float capAlong = fits ? miterLen * cosHalfJ : 0.0;
+      if (a >= 0.0 && a <= capAlong) {
+        thisD = min(thisD, max(perpThis, perpOther));
+      } else if (joinStyle == 3 && !fits) {
+
+        vec2 tipDir = din - dout;
+        float tipLen = length(tipDir);
+        float dClip = max(perpThis, perpOther);
+        if (tipLen > 1e-4) { dClip = max(dClip, halfW + dot(-ep, tipDir) / tipLen - mlClip);
+          seAnd(eP, eQ, tipDir / tipLen, dot(-ep, tipDir) / tipLen - mlClip, seR); }
+
+        dClip = max(dClip, halfW + length(-ep) - halfW * strokeArcsReachFactor(miterLimit));
+        if (length(ep) > 0.0) seAnd(eP, eQ, -ep / length(ep), length(ep) - halfW * strokeArcsReachFactor(miterLimit), seR);
+        thisD = dClip;
       }
     } else if (joinStyle == 4) {
 
-      vec2 segTan = dStart / max(length(dStart), 1e-12);
-      vec2 ep = pStart;
-      if (startPrevReach < 1e8 && dot(-ep, inTan) < 0.0) drop = true;
-      float c = dot(-segTan, inTan);
+      float c = dot(uOwn, uOth);
 
-      float sinHalf = sqrt(max(0.5 * (1.0 - c), 1e-9));
-      float miterLen = halfW / max(sinHalf, 1e-6);
-      if (miterLen > halfW * miterLimit) {
+      float sinHalf = 0.5 * length(uOwn - uOth);
+      float miterLen = halfW / max(sinHalf, 1.17549435e-38);
+      bool fits = miterLen <= halfW * miterLimit;
 
-        float cr = inTan.x * segTan.y - inTan.y * segTan.x;
-        float sd = (cr >= 0.0) ? 1.0 : -1.0;
-        vec2 nA = sd * vec2(inTan.y, -inTan.x), nB = sd * vec2(segTan.y, -segTan.x);
-        vec2 nb = nA + nB; float bl = length(nb);
-        if (bl > 1e-4) { vec2 bis = nb / bl;
-          thisD = max(thisD, halfW + dot(-ep, bis) - halfW * dot(nA, bis)); }
-      } else if (dot(-ep, -segTan) >= 0.0) {
-        float perpThis  = perpDistToArc(-ep, segTan, curv.x);
-        float perpOther = perpDistToArc(-ep, inTan, curv.z);
-        thisD = min(thisD, max(perpThis, perpOther));
+      float alongA = dot(-ep, uOwn);
+      float cosHalfA = sqrt(max(0.5 * (1.0 + c), 0.0));
+      float perpThis  = perpDistToArc(-ep, tOwn, kOwn);
+      float perpOther = perpDistToArc(-ep, tOth, kOth);
+
+      eP = vec4(0.0); eQ = vec4(0.0);
+      seAnd(eP, eQ, seArcN(-ep, tOwn, kOwn), perpThis - halfW, seR); seAnd(eP, eQ, seArcN(-ep, tOth, kOth), perpOther - halfW, seR);
+
+      float dArc = max(max(perpThis, perpOther),
+                       halfW + length(-ep) - halfW * strokeArcsReachFactor(miterLimit));
+
+      if (length(ep) > 0.0) seAnd(eP, eQ, -ep / length(ep), length(ep) - halfW * strokeArcsReachFactor(miterLimit), seR);
+      float capAlong = fits ? miterLen * cosHalfA : 0.0;
+      if (alongA >= 0.0 && alongA <= capAlong) {
+        thisD = min(thisD, dArc);
+      } else if (!fits) {
+
+        vec2 tipDir = din - dout;
+        float tipLen = length(tipDir);
+        float dc = dArc;
+        if (tipLen > 1e-4) {
+          dc = max(dc, halfW + dot(-ep, tipDir) / tipLen - halfW * max(miterLimit, 1.0));
+          seAnd(eP, eQ, tipDir / tipLen, dot(-ep, tipDir) / tipLen - halfW * max(miterLimit, 1.0), seR); }
+        thisD = dc;
       }
+
+      if (kOwn != 0.0 || kOth != 0.0) eP = vec4(eP.xyz, min(eP.w, 1.0));
     } else {
-      vec2 ep = pStart;
-      if (dot(-ep, inTan) < 0.0) drop = true;
+
+      bool behindJoin = outWedge;
+      if (behindJoin && (joinStyle == 1 || joinStyle == 2)) {
+        eP = seSlab(-ep, tOwn, halfW, seR); eQ = vec4(0.0);
+        if (dot(-ep, uOwn) > 0.0) seAnd(eP, eQ, uOwn, dot(-ep, uOwn), seR);
+      }
+      if (behindJoin && joinStyle != 1 && joinStyle != 2) drop = true;
+      else if (behindJoin) thisD = dot(-ep, uOwn) > 0.0 ? max(min(thisD, length(ep)), halfW + dot(-ep, uOwn)) : min(thisD, length(ep));
+      else if (joinStyle == 1) {
+
+        vec2 uF = atS ? uOth : uOwn, uS = atS ? uOwn : uOth;
+        vec2 uJ = dot(-ep, uF) <= dot(-ep, uS) ? uF : uS;
+        seDisc(eP, eQ, -ep, uJ, halfW);
+      }
       else if (joinStyle == 2) {
 
-        vec2 tB = dStart / max(length(dStart), 1e-12);
-        float cr = inTan.x * tB.y - inTan.y * tB.x;
+        float cr = din.x * dout.y - din.y * dout.x;
         float sd = (cr >= 0.0) ? 1.0 : -1.0;
-        vec2 nA = sd * vec2(inTan.y, -inTan.x), nB = sd * vec2(tB.y, -tB.x);
+        vec2 nA = sd * vec2(din.y, -din.x), nB = sd * vec2(dout.y, -dout.x);
         vec2 nb = nA + nB; float bl = length(nb);
-        if (bl > 1e-4) { vec2 bis = nb / bl;
+
+        eP = vec4(0.0); eQ = vec4(0.0);
+        seAnd(eP, eQ, seSide(-ep, tOwn, halfW), seR); seAnd(eP, eQ, seSide(-ep, tOth, halfW), seR);
+        if (bl > 1e-4) { vec2 bis = nb / bl; seAnd(eP, eQ, bis, dot(-ep, bis) - halfW * dot(nA, bis), seR);
           thisD = max(thisD, halfW + dot(-ep, bis) - halfW * dot(nA, bis)); }
+        else { seAnd(eP, eQ, uOwn, dot(-ep, uOwn), seR); thisD = max(thisD, halfW + dot(-ep, uOwn)); }
       }
     }
   }
-  if (t > 1.0 - 1e-4) {
-    if (freeEnd) {
-      if (endCap == 0) {
 
-        float tL1 = max(length(dEnd), 1e-12);
-        float aOut = dot(-pEnd, dEnd / tL1);
-        thisD = max(thisD, halfW + aOut);
-      }
-      else if (endCap == 2) {
-        float tL = max(length(dEnd), 1e-12);
-        vec2 segTan = dEnd / tL;
-        vec2 ep = pEnd;
-        float a = dot(-ep, segTan);
-        if (a < 0.0 || a > halfW) drop = true;
-        else { float perp = length(-ep - segTan * a); thisD = min(thisD, perp); }
-      }
-    } else if (joinStyle == 0 || joinStyle == 3) {
-      float tL = max(length(dEnd), 1e-12);
-      vec2 segTan = dEnd / tL;
-      vec2 epEnd = pEnd;
-      if (endNextReach < 1e8 && dot(-epEnd, outTan) > 0.0) drop = true;
-      float c = dot(segTan, -outTan);
+  if (!drop && t > 1e-4 && t < 1.0 - 1e-4) {
+    vec2 cpF = -thisD * gradIO;
+    float endD = -1e30;
+    if (freeStart && startCap == 0) {
+      vec2 sn = strokeUnit(dStart);
+      vec2 qv = -pStart;
+      float aOut = dot(qv, -sn), lat = dot(qv, vec2(-sn.y, sn.x)), kL = curv.x * lat;
+      bool own = aOut <= 0.0 && length(cpF - pStart) <= 2.0 * seR - aOut && length(dStart) * t <= 2.0 * seR - aOut;
+      if (own && abs(lat) <= halfW && kL <= 1.0) endD = halfW + aOut;
 
-      float sinHalf = sqrt(max(0.5 * (1.0 - c), 1e-9));
-      float miterLen = halfW / max(sinHalf, 1e-6);
-      float maxMiter = halfW * miterLimit;
-      if (joinStyle == 3) miterLen = min(miterLen, maxMiter);
-      else if (miterLen > maxMiter) miterLen = -1.0;
-      if (miterLen >= 0.0 && miterLen <= maxMiter) {
-        vec2 ep = pEnd;
-        vec2 along = segTan;
-        float a = dot(-ep, along);
-        if (a >= 0.0 && a <= miterLen) {
-          float perpThis  = length(-ep - along * a);
-          vec2  nOut      = vec2(-outTan.y, outTan.x);
-          float perpOther = abs(dot(-ep, nOut));
-          thisD = min(thisD, max(perpThis, perpOther));
-        }
-      }
-    } else if (joinStyle == 4) {
+      if (own && abs(lat) <= halfW + seR && kL <= 1.0) seAnd(eP, eQ, -sn, aOut, seR);
+    }
+    if (freeEnd && endCap == 0) {
+      vec2 en = strokeUnit(dEnd);
+      vec2 qv = -pEnd;
+      float aOut = dot(qv, en), lat = dot(qv, vec2(-en.y, en.x)), kL = curv.y * lat;
+      bool own = aOut <= 0.0 && length(cpF - pEnd) <= 2.0 * seR - aOut && length(dEnd) * (1.0 - t) <= 2.0 * seR - aOut;
+      if (own && abs(lat) <= halfW && kL <= 1.0) endD = max(endD, halfW + aOut);
+      if (own && abs(lat) <= halfW + seR && kL <= 1.0) seAnd(eP, eQ, en, aOut, seR);
+    }
+    if (endD > thisD) { thisD = endD; gradIO = vec2(0.0); }
 
-      vec2 segTan = dEnd / max(length(dEnd), 1e-12);
-      vec2 ep = pEnd;
-      if (endNextReach < 1e8 && dot(-ep, outTan) > 0.0) drop = true;
-      float c = dot(segTan, -outTan);
-
-      float sinHalf = sqrt(max(0.5 * (1.0 - c), 1e-9));
-      float miterLen = halfW / max(sinHalf, 1e-6);
-      if (miterLen > halfW * miterLimit) {
-        float cr = segTan.x * outTan.y - segTan.y * outTan.x;
-        float sd = (cr >= 0.0) ? 1.0 : -1.0;
-        vec2 nA = sd * vec2(segTan.y, -segTan.x), nB = sd * vec2(outTan.y, -outTan.x);
-        vec2 nb = nA + nB; float bl = length(nb);
-        if (bl > 1e-4) { vec2 bis = nb / bl;
-          thisD = max(thisD, halfW + dot(-ep, bis) - halfW * dot(nA, bis)); }
-      } else if (dot(-ep, segTan) >= 0.0) {
-        float perpThis  = perpDistToArc(-ep, segTan, curv.y);
-        float perpOther = perpDistToArc(-ep, outTan, curv.w);
-        thisD = min(thisD, max(perpThis, perpOther));
-      }
-    } else {
-      vec2 ep = pEnd;
-      if (dot(-ep, outTan) > 0.0) drop = true;
-      else if (joinStyle == 2) {
-
-        vec2 tA = dEnd / max(length(dEnd), 1e-12);
-        float cr = tA.x * outTan.y - tA.y * outTan.x;
-        float sd = (cr >= 0.0) ? 1.0 : -1.0;
-        vec2 nA = sd * vec2(tA.y, -tA.x), nB = sd * vec2(outTan.y, -outTan.x);
-        vec2 nb = nA + nB; float bl = length(nb);
-
-        if (bl > 1e-4) { vec2 bis = nb / bl;
-          thisD = max(thisD, halfW + dot(-ep, bis) - halfW * dot(nA, bis)); }
+    bool atEndU = freeStart || (!freeEnd && t >= 0.5);
+    if ((eP.w == 1.0 || eP.w == 9.0) && (atEndU ? !freeEnd : !freeStart)) {
+      vec2 own = strokeUnit(atEndU ? dEnd : dStart), nbU = atEndU ? outTan : inTan, qU = -(atEndU ? pEnd : pStart);
+      float turn = atEndU ? own.x * nbU.y - own.y * nbU.x : nbU.x * own.y - nbU.y * own.x;
+      if (abs(turn) > 1.0 / 64.0 && dot(qU, vec2(-own.y, own.x)) * turn > 0.0) {
+        vec2 pnU = vec2(-nbU.y, nbU.x) * (turn > 0.0 ? 1.0 : -1.0);
+        seOr(eP, eQ, pnU, dot(qU, pnU) - halfW, seR);
       }
     }
   }
-  if (!drop && dashId > 0) {
-    if (!dashCovered(dashId, startDist + arcLenAtT)) drop = true;
+
+  float dSpill = 1e30;
+  if (dashId > 0 && (t < 1e-4 || t > 1.0 - 1e-4)) {
+    bool atSp = t < 1e-4;
+    vec2 epSp = atSp ? pStart : pEnd;
+    vec2 tSp = strokeUnit(atSp ? dStart : dEnd);
+    int capSp = atSp ? startCap : endCap;
+    float aSp = dot(-epSp, tSp);
+    if (!(atSp ? freeStart : freeEnd) && capSp != 0 && (atSp ? aSp < 0.0 : aSp > 0.0)) {
+      float latSp = length(-epSp - tSp * aSp);
+      vec2 rSp = dashCapReach(dashId, startDist + arcLenAtT + aSp, startCap == 0 && endCap == 0);
+      float oSp = atSp ? rSp.y : rSp.x;
+
+      bool seamHere = (atSp ? strokeSeamMergeLo : strokeSeamMergeHi) && abs(oSp - abs(aSp)) <= strokeSeamTol;
+      if (oSp >= abs(aSp) * 0.999995 && oSp < 1e29 && !seamHere) dSpill = capSp == 2 ? max(latSp, oSp) : length(vec2(latSp, oSp));
+    }
   }
-  if (drop) return minDIn;
+  if (drop) { eP = vec4(0.0); eQ = vec4(0.0); return min(minDIn, dSpill); }
+  if (dashId > 0) {
+
+    float along = t <= 0.0 ? dot(-pStart, strokeUnit(dStart)) : t >= 1.0 ? dot(-pEnd, strokeUnit(dEnd)) : 0.0;
+
+    float dIn = thisD;
+    vec2 gIn = gradIO;
+    if (roundEnd && along != 0.0) {
+      float lat = length(latV);
+      dIn = lat;
+      gradIO = lat > 0.0 ? latV / lat : vec2(0.0);
+    }
+    float dOut = strokeDashDist(dIn, gradIO, tanT, halfW, dashId, startDist + arcLenAtT + along, startCap, endCap,
+                                startDist, dashEnd, seR, eP, eQ);
+    if (dOut == dIn && roundEnd && along != 0.0) gradIO = gIn;
+    else thisD = dOut;
+  }
+
+  if (eP.w == 1.0 && abs(eP.z - (thisD - halfW)) > (1.0 / 1024.0) * seR) { eP = vec4(0.0); eQ = vec4(0.0); }
+  if (dSpill < thisD) { eP = vec4(0.0); eQ = vec4(0.0); gradIO = vec2(0.0); thisD = dSpill; }
   return min(minDIn, thisD);
+}
+
+float d2AtT(vec4 cx, vec4 cy, float t) { float x = evalC(cx, t), y = evalC(cy, t); return x * x + y * y; }
+
+float cdPoly(float c5, float c4, float c3, float c2, float c1, float c0, int lv, float t) {
+  if (lv == 3) return (60.0 * c5 * t + 24.0 * c4) * t + 6.0 * c3;
+  if (lv == 2) return ((20.0 * c5 * t + 12.0 * c4) * t + 6.0 * c3) * t + 2.0 * c2;
+  if (lv == 1) return (((5.0 * c5 * t + 4.0 * c4) * t + 3.0 * c3) * t + 2.0 * c2) * t + c1;
+  return ((((c5 * t + c4) * t + c3) * t + c2) * t + c1) * t + c0;
+}
+
+float cubicClosestDescend2(vec4 cx, vec4 cy, out float tIn) {
+
+  vec4 cm = max(abs(cx), abs(cy));
+  uint cE = min(floatBitsToUint(max(cm.x, max(cm.y, cm.z))) & 0x7F800000u, 0x7E800000u);
+  float cK = cE == 0u ? 1.0 : uintBitsToFloat(0x7F000000u - cE);
+  cx *= cK; cy *= cK;
+
+  float c5 = 3.0 * (cx.x * cx.x + cy.x * cy.x);
+  float c4 = 5.0 * (cx.x * cx.y + cy.x * cy.y);
+  float c3 = 4.0 * (cx.x * cx.z + cy.x * cy.z) + 2.0 * (cx.y * cx.y + cy.y * cy.y);
+  float c2 = 3.0 * (cx.y * cx.z + cy.y * cy.z) + 3.0 * (cx.x * cx.w + cy.x * cy.w);
+  float c1 = (cx.z * cx.z + cy.z * cy.z) + 2.0 * (cx.y * cx.w + cy.y * cy.w);
+  float c0 = cx.w * cx.z + cy.w * cy.z;
+
+  float rts[6];
+  int nr = 0;
+
+  {
+    float A = 60.0 * c5, B = 24.0 * c4, C = 6.0 * c3;
+    float sc = max(abs(A), max(abs(B), abs(C)));
+    if (sc > 0.0) {
+      if (abs(A) <= 1e-12 * sc) {
+        if (abs(B) > 1e-12 * sc) { float r = -C / B; if (r > 0.0 && r < 1.0) rts[nr++] = r; }
+      } else {
+        float dq = B * B - 4.0 * A * C;
+        if (dq >= 0.0) {
+          float sq = sqrt(dq);
+          float q = -0.5 * (B + (B >= 0.0 ? sq : -sq));
+          float r0 = q / A;
+          float r1 = (abs(q) > 0.0) ? C / q : r0;
+          float lo = min(r0, r1), hi = max(r0, r1);
+          if (lo > 0.0 && lo < 1.0) rts[nr++] = lo;
+          if (hi > lo && hi > 0.0 && hi < 1.0) rts[nr++] = hi;
+        }
+      }
+    }
+  }
+
+  for (int lv = 2; lv >= 0; lv--) {
+    float nxt[6];
+    int nn = 0;
+    float lo = 0.0, flo = cdPoly(c5, c4, c3, c2, c1, c0, lv, 0.0);
+    for (int i = 0; i <= 6; i++) {
+      if (i > nr) break;
+      float hi = (i == nr) ? 1.0 : rts[i];
+      float fhi = cdPoly(c5, c4, c3, c2, c1, c0, lv, hi);
+
+      if (flo == 0.0 && lo > 0.0 && nn < 6) nxt[nn++] = lo;
+      if (flo * fhi < 0.0) {
+
+        float a = lo, b = hi, fa = flo;
+        for (int k = 0; k < 24; k++) {
+          float m = 0.5 * (a + b);
+          float fm = cdPoly(c5, c4, c3, c2, c1, c0, lv, m);
+          if (fa * fm <= 0.0) b = m; else { a = m; fa = fm; }
+        }
+        if (nn < 6) nxt[nn++] = 0.5 * (a + b);
+      }
+      lo = hi; flo = fhi;
+    }
+    nr = nn;
+    for (int i = 0; i < 6; i++) rts[i] = nxt[i];
+  }
+
+  float d0 = d2AtT(cx, cy, 0.0), d1 = d2AtT(cx, cy, 1.0);
+  float bt = (d0 <= d1) ? 0.0 : 1.0;
+  float bs = min(d0, d1), bi = 1e30;
+  tIn = -1.0;
+  for (int i = 0; i < 6; i++) {
+    if (i >= nr) break;
+    float tt = clamp(rts[i], 0.0, 1.0);
+    float dd = d2AtT(cx, cy, tt);
+    if (dd < bs) { bs = dd; bt = tt; }
+    if (rts[i] > 0.0 && rts[i] < 1.0 && dd < bi) { bi = dd; tIn = rts[i]; }
+  }
+  return bt;
+}
+float cubicClosestDescend(vec4 cx, vec4 cy) { float tIn; return cubicClosestDescend2(cx, cy, tIn); }
+
+float curveAtan2(float y, float x) {
+  return x == 0.0 ? sign(y) * 1.5707963267948966 : atan(y, x);
+}
+
+vec2 evalArc(float cx, float cy, float rx, float ry, float phi, float th) {
+  float ct=cos(th), st=sin(th), cp=cos(phi), sp=sin(phi);
+  return vec2(cx+cp*rx*ct-sp*ry*st, cy+sp*rx*ct+cp*ry*st);
+}
+float arcDyDtheta(float rx, float ry, float phi, float th) {
+  float ct = cos(th), st = sin(th), cp = cos(phi), sp = sin(phi);
+  return -sp * rx * st + cp * ry * ct;
+}
+float arcDxDtheta(float rx, float ry, float phi, float th) {
+  float ct = cos(th), st = sin(th), cp = cos(phi), sp = sin(phi);
+  return -cp * rx * st - sp * ry * ct;
+}
+const float TWO_PI = 6.28318530717958647692;
+float hlslFmod(float x, float m) { return x - m * trunc(x / m); }
+
+vec2 ellipseFootNearCircle(vec2 ab, vec2 p) {
+  bool xMajor = ab.x >= ab.y;
+  float e0 = xMajor ? ab.x : ab.y, e1 = xMajor ? ab.y : ab.x;
+  float y0 = xMajor ? p.x : p.y, y1 = xMajor ? p.y : p.x;
+  float x0, x1;
+  if (y1 > 0.0) {
+    if (y0 > 0.0) {
+
+      float z0 = y0 / e0, z1 = y1 / e1, g = z0 * z0 + z1 * z1 - 1.0;
+      if (g != 0.0) {
+        float d = (e0 - e1) * (e0 + e1) / (e1 * e1), n0 = z0 + d * z0;
+        float u0 = z1, u1 = g < 0.0 ? 1.0 : length(vec2(n0, z1));
+
+        float u = n0 < d ? u0 : u1;
+        for (int i = 0; i < 64; i++) {
+          float q0 = n0 / (u + d), q1 = z1 / u;
+          float gs = q0 * q0 + q1 * q1 - 1.0;
+          if (gs > 0.0) u0 = u; else if (gs < 0.0) u1 = u; else break;
+
+          float next = u + u * gs / (2.0 * (q0 * q0 * u / (u + d) + q1 * q1));
+          if (next == u) break;
+          if (!(next > u0 && next < u1)) next = .5 * (u0 + u1);
+          if (next == u || next == u0 || next == u1) break;
+          u = next;
+        }
+        x0 = (y0 + d * y0) / (u + d); x1 = y1 / u;
+      } else { x0 = y0; x1 = y1; }
+    } else { x0 = 0.0; x1 = e1; }
+  } else {
+    float num = e0 * y0, den = (e0 - e1) * (e0 + e1);
+    if (num < den) { float xd = num / den; x0 = e0 * xd; x1 = e1 * sqrt(max(1.0 - xd * xd, 0.0)); }
+    else { x0 = e0; x1 = 0.0; }
+  }
+  return xMajor ? vec2(x0, x1) : vec2(x1, x0);
+}
+
+float distToEllipse(vec2 ab, vec2 pIn, out vec2 foot) {
+
+  vec2 sgn = vec2(pIn.x < 0.0 ? -1.0 : 1.0, pIn.y < 0.0 ? -1.0 : 1.0);
+  vec2 p = abs(pIn);
+  bool swap = p.x > p.y;
+  if (swap) { p = p.yx; ab = ab.yx; }
+  float l = ab.y * ab.y - ab.x * ab.x;
+
+  if (l == 0.0) {
+
+    float pm = max(p.x, p.y);
+    vec2 fq = pm > 0.0 ? ab.x * normalize(p / pm) : vec2(ab.x, 0.0);
+    vec2 fo = swap ? fq.yx : fq.xy;
+    foot = sgn * fo;
+    return length(pIn - foot);
+  }
+  if (abs(ab.y - ab.x) < (1.0 / 64.0) * max(ab.x, ab.y)) {
+    vec2 fq = ellipseFootNearCircle(ab, p);
+    vec2 fo = swap ? fq.yx : fq.xy;
+    foot = sgn * fo;
+    return length(pIn - foot);
+  }
+  float m = ab.x * p.x / l; float m2 = m * m;
+  float n = ab.y * p.y / l; float n2 = n * n;
+  float c = (m2 + n2 - 1.0) / 3.0; float c3 = c * c * c;
+  float q = c3 + m2 * n2 * 2.0;
+  float d = c3 + m2 * n2;
+  float g = m + m * n2;
+  float co;
+  if (d < 0.0) {
+    float h = acos(clamp(q / c3, -1.0, 1.0)) / 3.0;
+    float s = cos(h);
+    float t = sin(h) * sqrt(3.0);
+    float rx = sqrt(max(-c * (s + t + 2.0) + m2, 0.0));
+    float ry = sqrt(max(-c * (s - t + 2.0) + m2, 0.0));
+    co = (ry + sign(l) * rx + abs(g) / (rx * ry + 1e-20) - m) / 2.0;
+  } else {
+    float h = 2.0 * m * n * sqrt(d);
+    float s = sign(q + h) * pow(abs(q + h), 1.0 / 3.0);
+    float u = sign(q - h) * pow(abs(q - h), 1.0 / 3.0);
+    float rx = -s - u - c * 4.0 + 2.0 * m2;
+    float ry = (s - u) * sqrt(3.0);
+    float rm = sqrt(rx * rx + ry * ry);
+    co = (ry / sqrt(max(rm - rx, 1e-20)) + 2.0 * g / (rm + 1e-20) - m) / 2.0;
+  }
+  co = clamp(co, 0.0, 1.0);
+  vec2 fq = vec2(ab.x * co, ab.y * sqrt(max(1.0 - co * co, 0.0)));
+  vec2 fo = swap ? fq.yx : fq.xy;
+  foot = sgn * fo;
+  return length(pIn - foot);
+}
+
+bool arcInRange(float t, float tS, float tE) {
+  if (abs(tE - tS) >= TWO_PI) return true;
+  float dur = tE - tS;
+  float d = hlslFmod(t - tS, TWO_PI);
+  if (d < 0.0) d += TWO_PI;
+  if (dur > 0.0) return d < dur;
+  if (d > 0.0) d -= TWO_PI;
+  return d > dur;
+}
+
+float arcFootAngle(vec2 radii, vec2 foot, float tS, float tE, out bool inRange) {
+  if (radii.x != 0.0 && radii.y != 0.0) {
+
+    float fx = foot.x * radii.y, fy = foot.y * radii.x;
+    float t = fx == 0.0 ? (fy == 0.0 ? 0.0 : (fy < 0.0 ? -0.25 * TWO_PI : 0.25 * TWO_PI)) : atan(fy, fx);
+    inRange = arcInRange(t, tS, tE);
+    return t;
+  }
+  if (radii.x == 0.0 && radii.y == 0.0) { inRange = true; return tS; }
+  float a = radii.x != 0.0 ? acos(clamp(foot.x / radii.x, -1.0, 1.0)) : asin(clamp(foot.y / radii.y, -1.0, 1.0));
+  float b = radii.x != 0.0 ? -a : 0.5 * TWO_PI - a;
+  bool ia = arcInRange(a, tS, tE);
+  inRange = ia || arcInRange(b, tS, tE);
+  return ia ? a : b;
+}
+
+float arcClosestFoot(vec2 radii, vec2 p, float tS, float tE,
+                     out vec2 foot, out float angle, out bool inRange) {
+  float distance = distToEllipse(radii, p, foot);
+  angle = arcFootAngle(radii, foot, tS, tE, inRange);
+  if (inRange || min(radii.x, radii.y) == 0.0 || radii.x == radii.y) return distance;
+  bool swapAxes = radii.x < radii.y;
+  float scale = max(radii.x, radii.y), b = min(radii.x, radii.y) / scale;
+  vec2 q = (swapAxes ? p.yx : p) / scale;
+  float delta = (1.0 - b) * (1.0 + b);
+  float A = abs(q.x) / delta, B = b * abs(q.y) / delta;
+  if (A >= 1.0 || B >= 1.0) return distance;
+  vec2 candidate;
+  if (B == 0.0) {
+    candidate = vec2(A * (q.x < 0.0 ? -1.0 : 1.0), -b * sqrt(max(0.0, 1.0 - A * A)));
+  } else if (A == 0.0) {
+    candidate = vec2(0.0, q.y < 0.0 ? b : -b);
+  } else {
+    float a23 = pow(A, 2.0 / 3.0), b23 = pow(B, 2.0 / 3.0);
+    if (a23 + b23 >= 1.0) return distance;
+    float lo = B, hi = b23 / (a23 + b23), v = lo;
+    for (int i = 0; i < 32; i++) {
+      float x = A / (1.0 - v), y = B / v;
+      float f = x * x + y * y - 1.0;
+      if (f == 0.0) break;
+      if (f > 0.0) lo = v; else hi = v;
+      float derivative = 2.0 * (x * x / (1.0 - v) - y * y / v);
+      float next = v - f / derivative;
+      if (next == v) break;
+      if (!(next > lo && next < hi)) next = .5 * (lo + hi);
+      if (next == v || next == lo || next == hi) break;
+      v = next;
+    }
+    candidate = vec2(A / (1.0 - v) * (q.x < 0.0 ? -1.0 : 1.0),
+      -b * B / v * (q.y < 0.0 ? -1.0 : 1.0));
+  }
+  candidate = (swapAxes ? candidate.yx : candidate) * scale;
+  bool candidateInRange;
+  float candidateAngle = arcFootAngle(radii, candidate, tS, tE, candidateInRange);
+  if (candidateInRange) {
+    foot = candidate; angle = candidateAngle; inRange = true;
+    return length(p - candidate);
+  }
+  return distance;
+}
+
+float arcArcLen(vec4 d1, vec4 d2, float t) {
+  float dth = d2.y - d2.x;
+
+  if (d1.z == d1.w) return t * abs(dth) * abs(d1.z);
+  float sum = 0.0;
+  for (int i = 0; i < 16; i++) {
+    float th = d2.x + dth * (t * SLUG_GL16_N[i]);
+    float st = sin(th), ct = cos(th);
+    sum += SLUG_GL16_W[i] * sqrt(d1.z * d1.z * st * st + d1.w * d1.w * ct * ct);
+  }
+  return t * abs(dth) * sum;
+}
+
+float strokeArcAccum(vec2 pc, vec2 radii, float phi, float th0, float th1,
+                     bool freeStart, bool freeEnd,
+                     int startCap, int endCap,
+                     int joinStyle, float miterLimit, float halfW,
+                     vec2 inTan, vec2 outTan,
+                     int dashId, float startDist,
+                     vec4 curv, float minDIn, out vec2 gradOut, float seR, out vec4 edgeP, out vec4 edgeQ) {
+  gradOut = vec2(0.0);
+  float cphi = cos(phi), sphi = sin(phi);
+  vec2 pR = vec2(pc.x * cphi + pc.y * sphi, -pc.x * sphi + pc.y * cphi);
+
+  vec2 ep0 = evalArc(0.0, 0.0, radii.x, radii.y, phi, th0) - pc;
+  vec2 ep1 = evalArc(0.0, 0.0, radii.x, radii.y, phi, th1) - pc;
+  float dE = min(length(ep0), length(ep1));
+  vec2 foot;
+  bool inRange;
+  float tAng;
+  float dEdge = arcClosestFoot(radii, pR, th0, th1, foot, tAng, inRange);
+  if (inRange && dEdge > dE) inRange = false;
+  float arcD = inRange ? min(dEdge, dE) : dE;
+
+  if (inRange && dEdge > 0.0) {
+    vec2 gl2 = (pR - foot) / dEdge;
+    gradOut = vec2(gl2.x * cphi - gl2.y * sphi, gl2.x * sphi + gl2.y * cphi);
+  }
+  float dth = th1 - th0;
+  vec2 dStart = vec2(arcDxDtheta(radii.x, radii.y, phi, th0),
+                     arcDyDtheta(radii.x, radii.y, phi, th0)) * dth;
+  vec2 dEnd   = vec2(arcDxDtheta(radii.x, radii.y, phi, th1),
+                     arcDyDtheta(radii.x, radii.y, phi, th1)) * dth;
+
+  if (radii.x == 0.0 || radii.y == 0.0) { dStart = ep1 - ep0; dEnd = dStart; }
+
+  if (joinStyle != 4) curv = (radii.x == 0.0 || radii.y == 0.0) ? vec4(0.0, 0.0, curv.zw)
+    : vec4(seKappa(dStart, -(ep0 + pc) * dth * dth, 0.0), seKappa(dEnd, -(ep1 + pc) * dth * dth, 0.0), curv.zw);
+  float tArc;
+  if (inRange) {
+    float dd = hlslFmod(tAng - th0, TWO_PI);
+    if (dd < 0.0) dd += TWO_PI;
+    if (dth < 0.0 && dd > 0.0) dd -= TWO_PI;
+    tArc = clamp(dd / dth, 0.0, 1.0);
+  } else {
+    tArc = (length(ep0) <= length(ep1)) ? 0.0 : 1.0;
+  }
+  float arcLenAtT = (dashId > 0)
+    ? arcArcLen(vec4(0.0, 0.0, radii.x, radii.y), vec4(th0, th1, phi, 0.0), tArc) : 0.0;
+
+  float thT = th0 + tArc * dth;
+  vec2 tanT = (dashId > 0) ? strokeUnit(vec2(arcDxDtheta(radii.x, radii.y, phi, thT), arcDyDtheta(radii.x, radii.y, phi, thT)) * dth)
+                           : vec2(0.0);
+  vec2 g = gradOut;
+
+  float tEnd = tArc;
+  if (radii.x == 0.0 || radii.y == 0.0) {
+    vec2 ch = ep1 - ep0;
+    float c2 = dot(ch, ch);
+    if (c2 > 0.0) tEnd = clamp(-dot(ep0, ch) / c2, 0.0, 1.0);
+  }
+  float md = strokeCapsJoinsDash(tEnd, arcD, ep0, ep1, dStart, dEnd,
+                                 freeStart, freeEnd, startCap, endCap,
+                                 joinStyle, miterLimit, halfW, inTan, outTan,
+                                 dashId, startDist, arcLenAtT, curv, minDIn, g, tanT,
+                                 (dashId > 0) ? startDist + arcArcLen(vec4(0.0, 0.0, radii.x, radii.y), vec4(th0, th1, phi, 0.0), 1.0) : 1e30,
+                                 seR, edgeP, edgeQ);
+
+  if (radii.x != 0.0 && radii.y != 0.0) {
+    for (int e = 0; e < 2; e++) {
+      if ((e == 0 && tEnd < 1e-4) || (e == 1 && tEnd > 1.0 - 1e-4)) continue;
+      if (tEnd >= 1e-4 && tEnd <= 1.0 - 1e-4 && !strokeEndCandidate(freeStart, freeEnd, startCap, endCap, joinStyle, dashId, e)) continue;
+      vec2 pE = e == 0 ? ep0 : ep1, uE = e == 0 ? -strokeUnit(dStart) : strokeUnit(dEnd);
+      if (!(dot(-pE, uE) > 0.0) || length(pE) > halfW * (max(miterLimit, 1.0) + 1.0) + seR) continue;
+      if (joinStyle == 4 && !(e == 0 ? freeStart : freeEnd)) continue;
+      vec2 gK = vec2(0.0);
+      vec4 eP2, eQ2;
+      float mdK = strokeCapsJoinsDash(float(e), length(pE), ep0, ep1, dStart, dEnd,
+                                      freeStart, freeEnd, startCap, endCap,
+                                      joinStyle, miterLimit, halfW, inTan, outTan,
+                                      dashId, startDist,
+                                      (dashId > 0 && e == 1) ? arcArcLen(vec4(0.0, 0.0, radii.x, radii.y), vec4(th0, th1, phi, 0.0), 1.0) : 0.0,
+                                      curv, minDIn, gK, strokeUnit(e == 0 ? dStart : dEnd),
+                                      (dashId > 0) ? startDist + arcArcLen(vec4(0.0, 0.0, radii.x, radii.y), vec4(th0, th1, phi, 0.0), 1.0) : 1e30,
+                                      seR, eP2, eQ2);
+      if (mdK < md) { md = mdK; edgeP = eP2; edgeQ = eQ2; g = gK; }
+    }
+  }
+  gradOut = g;
+  if (md >= minDIn) gradOut = vec2(0.0);
+  return md;
 }
 
 float strokeCubicAccum(vec4 p12, vec4 p34,
@@ -565,76 +1411,131 @@ float strokeCubicAccum(vec4 p12, vec4 p34,
                            float halfW,
                            vec2 inTan, vec2 outTan,
                            int dashId, float startDist,
-                           float startPrevReach, float endNextReach,
-                           vec4 curv, float minDIn) {
-  vec4 cx = cubicCoeff(p12.x, p12.z, p34.x, p34.z);
-  vec4 cy = cubicCoeff(p12.y, p12.w, p34.y, p34.w);
-  float bT = 0.0, bS = 1e20;
-  for (int k = 0; k <= 8; k++) {
-    float t = float(k) / 8.0;
-    float pxv = evalC(cx, t);
-    float pyv = evalC(cy, t);
-    float d2 = pxv * pxv + pyv * pyv;
-    if (d2 < bS) { bS = d2; bT = t; }
+                           vec4 curv, float minDIn, out vec2 gradOut, float seR, out vec4 edgeP, out vec4 edgeQ) {
+
+  bool fromEnd = dot(p34.zw, p34.zw) < dot(p12.xy, p12.xy);
+  vec4 q12 = fromEnd ? vec4(p34.zw, p34.xy) : p12;
+  vec4 q34 = fromEnd ? vec4(p12.zw, p12.xy) : p34;
+  vec4 cx = cubicCoeff(q12.x, q12.z, q34.x, q34.z);
+  vec4 cy = cubicCoeff(q12.y, q12.w, q34.y, q34.w);
+  float uIn;
+  float u = cubicClosestDescend2(cx, cy, uIn);
+  float pxv = evalC(cx, u);
+  float pyv = evalC(cy, u);
+  float t = fromEnd ? 1.0 - u : u;
+  float thisD = sqrt(pxv * pxv + pyv * pyv);
+
+  vec2 pEnd = p34.zw;
+
+  vec2 lo4 = min(min(p12.xy, p12.zw), min(p34.xy, p34.zw)), hi4 = max(max(p12.xy, p12.zw), max(p34.xy, p34.zw));
+  float dirMin = 1e-9 * max(hi4.x - lo4.x, hi4.y - lo4.y);
+  vec2 dStart = 3.0 * (p12.zw - p12.xy);
+  if (!(length(dStart) > dirMin)) dStart = p34.xy - p12.zw;
+  if (!(length(dStart) > dirMin)) dStart = p34.zw - p12.xy;
+  vec2 dEnd = 3.0 * (p34.zw - p34.xy);
+  if (!(length(dEnd) > dirMin)) dEnd = p34.xy - p12.zw;
+  if (!(length(dEnd) > dirMin)) dEnd = p34.zw - p12.xy;
+
+  if (joinStyle != 4) {
+    float m = max(max(length(p12.xy), length(p12.zw)), max(length(p34.xy), length(p34.zw)));
+    vec2 a0 = 6.0 * (p12.xy - 2.0 * p12.zw + p34.xy), a1 = 6.0 * (p12.zw - 2.0 * p34.xy + p34.zw);
+    curv = vec4(seKappa(dStart, a0, seKappaErr(m, dStart, a0)), seKappa(dEnd, a1, seKappaErr(m, dEnd, a1)), curv.zw);
   }
-  float startVelSq = cx.z * cx.z + cy.z * cy.z;
-  float endVelX = cx.z + 2.0 * cx.y + 3.0 * cx.x;
-  float endVelY = cy.z + 2.0 * cy.y + 3.0 * cy.x;
-  float endVelSq = endVelX * endVelX + endVelY * endVelY;
-  if (startVelSq < 1e-9 || endVelSq < 1e-9) {
-    for (int kx = 0; kx < 8; kx++) {
-      float t = (2.0 * float(kx) + 1.0) / 16.0;
-      float pxv = evalC(cx, t);
-      float pyv = evalC(cy, t);
-      float d2 = pxv * pxv + pyv * pyv;
-      if (d2 < bS) { bS = d2; bT = t; }
+
+  vec2 g = (t >= 1e-4 && t <= 1.0 - 1e-4 && thisD > 0.0)
+            ? (vec2(-pxv, -pyv) / thisD) : vec2(0.0);
+
+  float arcLenAtT = (dashId > 0)
+    ? slugCubicArcLen(cubicCoeff(p12.x, p12.z, p34.x, p34.z), cubicCoeff(p12.y, p12.w, p34.y, p34.w), clamp(t, 0.0, 1.0))
+    : 0.0;
+
+  vec2 tanT = vec2(0.0);
+  if (dashId > 0) {
+    float tc = clamp(t, 0.0, 1.0);
+    tanT = strokeUnit(vec2(evalCD(cubicCoeff(p12.x, p12.z, p34.x, p34.z), tc), evalCD(cubicCoeff(p12.y, p12.w, p34.y, p34.w), tc)));
+    if (dot(tanT, tanT) == 0.0) tanT = strokeUnit(tc < 0.5 ? dStart : dEnd);
+  }
+  float cT1 = 0.0, cT2 = 0.0, cD1 = 0.0, cD2 = 0.0, cU1 = 0.0, cU2 = 0.0;
+  vec2 cQ1 = vec2(0.0), cQ2 = vec2(0.0), cG1 = vec2(0.0), cG2 = vec2(0.0);
+  int nC = 1;
+  if ((t < 1e-4 || t > 1.0 - 1e-4) && uIn >= 0.0) {
+    vec2 qIn = vec2(evalC(cx, uIn), evalC(cy, uIn));
+    float dIn = length(qIn);
+    if (dIn > 0.0 && dIn < halfW + seR) { nC = 2; cT1 = fromEnd ? 1.0 - uIn : uIn; cD1 = dIn; cQ1 = qIn; cG1 = -qIn / dIn; cU1 = uIn; }
+  } else if (t >= 1e-4 && t <= 1.0 - 1e-4) {
+    for (int e = 0; e < 2; e++) {
+      if (!strokeEndCandidate(freeStart, freeEnd, startCap, endCap, joinStyle, dashId, e)) continue;
+      vec2 pE = e == 0 ? p12.xy : pEnd, uE = e == 0 ? -strokeUnit(dStart) : strokeUnit(dEnd);
+      if (!(dot(-pE, uE) > 0.0) || length(pE) > halfW * (max(miterLimit, 1.0) + 1.0) + seR) continue;
+      float tE = float(e);
+      if (nC == 1) { cT1 = tE; cD1 = length(pE); cQ1 = pE; cU1 = fromEnd ? 1.0 - tE : tE; }
+      else { cT2 = tE; cD2 = length(pE); cQ2 = pE; cU2 = fromEnd ? 1.0 - tE : tE; }
+      nC++;
     }
   }
-  float t = bT;
-  for (int j = 0; j < 3; j++) {
-    float pxv = evalC(cx, t);
-    float pyv = evalC(cy, t);
-    float dxv = evalCD(cx, t);
-    float dyv = evalCD(cy, t);
-    float f = pxv * dxv + pyv * dyv;
-    float ddxv = 6.0 * cx.x * t + 2.0 * cx.y;
-    float ddyv = 6.0 * cy.x * t + 2.0 * cy.y;
-    float df = dxv * dxv + dyv * dyv + pxv * ddxv + pyv * ddyv;
-    if (abs(df) < 1e-9) break;
-    t = clamp(t - f / df, 0.0, 1.0);
+  if (t < 1e-4 || t > 1.0 - 1e-4) {
+
+    float tE = t < 1e-4 ? 1.0 : 0.0;
+    vec2 pE = tE == 0.0 ? p12.xy : pEnd, uE = tE == 0.0 ? -strokeUnit(dStart) : strokeUnit(dEnd);
+
+    if (dot(-pE, uE) > 0.0 && length(pE) <= halfW * (max(miterLimit, 1.0) + 1.0) + seR && (joinStyle != 4 || (tE == 0.0 ? freeStart : freeEnd))) {
+      if (nC == 1) { cT1 = tE; cD1 = length(pE); cQ1 = pE; cU1 = fromEnd ? 1.0 - tE : tE; }
+      else { cT2 = tE; cD2 = length(pE); cQ2 = pE; cU2 = fromEnd ? 1.0 - tE : tE; }
+      nC++;
+    }
   }
-  float pxv = evalC(cx, t);
-  float pyv = evalC(cy, t);
-  float thisD = sqrt(pxv * pxv + pyv * pyv);
-  vec2 pEnd = vec2(cx.x + cx.y + cx.z + cx.w, cy.x + cy.y + cy.z + cy.w);
-  vec2 dStart = vec2(evalCD(cx, 0.0), evalCD(cy, 0.0));
-  vec2 dEnd   = vec2(evalCD(cx, 1.0), evalCD(cy, 1.0));
-  float arcLenAtT = (dashId > 0) ? slugCubicArcLen(cx, cy, clamp(t, 0.0, 1.0)) : 0.0;
-  return strokeCapsJoinsDash(t, thisD, vec2(cx.w, cy.w), pEnd, dStart, dEnd,
-                             freeStart, freeEnd, startCap, endCap,
-                             joinStyle, miterLimit, halfW, inTan, outTan,
-                             startPrevReach, endNextReach, dashId, startDist,
-                             arcLenAtT, curv, minDIn);
+  float md = 1e30;
+  float t0 = t, d0 = thisD;
+  vec2 g0 = g;
+  for (int k = 0; k < nC; k++) {
+    float tK = k == 0 ? t0 : (k == 1 ? cT1 : cT2), dK = k == 0 ? d0 : (k == 1 ? cD1 : cD2);
+    vec2 gK = k == 0 ? g0 : (k == 1 ? cG1 : cG2);
+    bool endK = k > 0 && (tK == 0.0 || tK == 1.0);
+    float aK = k == 0 ? arcLenAtT : ((dashId > 0) ? slugCubicArcLen(cubicCoeff(p12.x, p12.z, p34.x, p34.z), cubicCoeff(p12.y, p12.w, p34.y, p34.w), tK) : 0.0);
+    vec2 tanK = tanT;
+    if (k > 0) {
+      tanK = vec2(0.0);
+      if (dashId > 0) { tanK = endK ? strokeUnit(tK < 0.5 ? dStart : dEnd) : strokeUnit(vec2(evalCD(cubicCoeff(p12.x, p12.z, p34.x, p34.z), tK), evalCD(cubicCoeff(p12.y, p12.w, p34.y, p34.w), tK))); if (dot(tanK, tanK) == 0.0) tanK = strokeUnit(tK < 0.5 ? dStart : dEnd); }
+    }
+    vec4 eP2, eQ2;
+    float mdK = strokeCapsJoinsDash(tK, dK, p12.xy, pEnd, dStart, dEnd,
+                                    freeStart, freeEnd, startCap, endCap,
+                                    joinStyle, miterLimit, halfW, inTan, outTan,
+                                    dashId, startDist,
+                                    aK, curv, minDIn, gK, tanK,
+                                    (dashId > 0) ? startDist + slugCubicArcLen(cubicCoeff(p12.x, p12.z, p34.x, p34.z), cubicCoeff(p12.y, p12.w, p34.y, p34.w), 1.0) : 1e30,
+                                    seR, eP2, eQ2);
+    if (k == 0 || mdK < md) {
+      md = mdK; edgeP = eP2; edgeQ = eQ2; g = gK;
+      if (k > 0) { u = k == 1 ? cU1 : cU2; pxv = (k == 1 ? cQ1 : cQ2).x; pyv = (k == 1 ? cQ1 : cQ2).y; t = tK; thisD = dK; }
+    }
+  }
+  gradOut = g;
+  return md;
 }
 
 float quadArcLen(vec2 p1, vec2 p2, vec2 p3, float t) {
   vec2 A = p1 - 2.0 * p2 + p3;
   vec2 B = p2 - p1;
+
+  float lengthScale = max(max(abs(A.x), abs(A.y)), max(abs(B.x), abs(B.y)));
+  if (!(lengthScale > 0.0)) return 0.0;
+  A /= lengthScale; B /= lengthScale;
   float Aq = dot(A, A), Bq = 2.0 * dot(A, B), Cq = dot(B, B);
-  if (Aq < 1e-12) return length(p3 - p1) * t;
+  if (Aq <= 1e-12 * Cq) return length((p3 - p1) / lengthScale) * lengthScale * t;
   float sqrtA = sqrt(Aq), disc = 4.0 * Aq * Cq - Bq * Bq;
   float ut = max(Aq * t * t + Bq * t + Cq, 0.0), sut = sqrt(ut);
   float argt = 2.0 * sqrtA * sut + 2.0 * Aq * t + Bq;
   float Ft = 2.0 * (((2.0 * Aq * t + Bq) * sut) / (4.0 * Aq)
-           + ((argt > 1e-12) ? (disc / (8.0 * Aq * sqrtA)) * log(argt) : 0.0));
+           + ((argt > 1e-12 * (2.0 * sqrtA * sut + abs(2.0 * Aq * t + Bq))) ? (disc / (8.0 * Aq * sqrtA)) * log(argt) : 0.0));
   float su0 = sqrt(max(Cq, 0.0));
   float arg0 = 2.0 * sqrtA * su0 + Bq;
   float F0 = 2.0 * ((Bq * su0) / (4.0 * Aq)
-           + ((arg0 > 1e-12) ? (disc / (8.0 * Aq * sqrtA)) * log(arg0) : 0.0));
-  return Ft - F0;
+           + ((arg0 > 1e-12 * (2.0 * sqrtA * su0 + abs(Bq))) ? (disc / (8.0 * Aq * sqrtA)) * log(arg0) : 0.0));
+  return (Ft - F0) * lengthScale;
 }
 
-float quadClosestT(vec2 A, vec2 B, vec2 C) {
+float quadClosestT2(vec2 A, vec2 B, vec2 C, out float tIn) {
   float a3 = 2.0 * dot(A, A);
   float a2 = 3.0 * dot(A, B);
   float a1 = dot(B, B) + 2.0 * dot(A, C);
@@ -681,16 +1582,19 @@ float quadClosestT(vec2 A, vec2 B, vec2 C) {
     float df = (3.0 * a3 * t0 + 2.0 * a2) * t0 + a1;
     if (abs(df) > 1e-30) cand[i] = t0 - ft / df;
   }
-  float bt = 0.0, bs = 1e30;
+  float bt = 0.0, bs = 1e30, bi = 1e30;
+  tIn = -1.0;
   for (int i = 0; i < 5; i++) {
     if (i >= n) break;
     float tt = clamp(cand[i], 0.0, 1.0);
     vec2 qv = (A * tt + B) * tt + C;
     float d2 = dot(qv, qv);
     if (d2 < bs) { bs = d2; bt = tt; }
+    if (i >= 2 && cand[i] > 0.0 && cand[i] < 1.0 && d2 < bi) { bi = d2; tIn = cand[i]; }
   }
   return bt;
 }
+float quadClosestT(vec2 A, vec2 B, vec2 C) { float tIn; return quadClosestT2(A, B, C, tIn); }
 
 float strokeQuadAccum(vec4 p12, vec2 p3,
                       bool freeStart, bool freeEnd,
@@ -698,32 +1602,106 @@ float strokeQuadAccum(vec4 p12, vec2 p3,
                       int joinStyle, float miterLimit, float halfW,
                       vec2 inTan, vec2 outTan,
                       int dashId, float startDist,
-                      float startPrevReach, float endNextReach,
-                      vec4 curv, float minDIn) {
+                      vec4 curv, float minDIn, out vec2 gradOut, float seR, out vec4 edgeP, out vec4 edgeQ) {
   vec2 p1 = p12.xy, p2 = p12.zw;
+
+  bool fromEnd = dot(p3, p3) < dot(p1, p1);
+  vec2 s0 = fromEnd ? p3 : p1;
   vec2 A = p1 - 2.0 * p2 + p3;
-  vec2 B = 2.0 * (p2 - p1);
-  vec2 C = p1;
-  float t = quadClosestT(A, B, C);
-  vec2 q = (A * t + B) * t + C;
+  vec2 B = 2.0 * (p2 - s0);
+  float uIn;
+  float u = quadClosestT2(A, B, s0, uIn);
+  vec2 q = (A * u + B) * u + s0;
+  float t = fromEnd ? 1.0 - u : u;
   float thisD = length(q);
-  vec2 dStart = B;
-  if (dot(dStart, dStart) < 1e-18) dStart = p3 - p1;
-  vec2 dEnd = 2.0 * A + B;
-  if (dot(dEnd, dEnd) < 1e-18) dEnd = p3 - p1;
+
+  vec2 lo3 = min(min(p1, p2), p3), hi3 = max(max(p1, p2), p3);
+  float dirMin = 1e-9 * max(hi3.x - lo3.x, hi3.y - lo3.y);
+
+  vec2 dStart = 2.0 * (p2 - p1);
+  if (!(length(dStart) > dirMin)) dStart = p3 - p1;
+
+  vec2 dEnd = 2.0 * (p3 - p2);
+  if (!(length(dEnd) > dirMin)) dEnd = p3 - p1;
+
+  if (joinStyle != 4) {
+    float m = max(max(length(p1), length(p2)), length(p3));
+    curv = vec4(seKappa(dStart, 2.0 * A, seKappaErr(m, dStart, 2.0 * A)), seKappa(dEnd, 2.0 * A, seKappaErr(m, dEnd, 2.0 * A)), curv.zw);
+  }
+
+  vec2 g = (t >= 1e-4 && t <= 1.0 - 1e-4 && thisD > 0.0) ? (-q / thisD) : vec2(0.0);
   float arcLenAtT = (dashId > 0) ? quadArcLen(p1, p2, p3, clamp(t, 0.0, 1.0)) : 0.0;
-  return strokeCapsJoinsDash(t, thisD, p1, p3, dStart, dEnd,
-                             freeStart, freeEnd, startCap, endCap,
-                             joinStyle, miterLimit, halfW, inTan, outTan,
-                             startPrevReach, endNextReach, dashId, startDist,
-                             arcLenAtT, curv, minDIn);
+
+  vec2 tanT = vec2(0.0);
+  if (dashId > 0) {
+    float tc = clamp(t, 0.0, 1.0);
+    tanT = strokeUnit(mix(p2 - p1, p3 - p2, tc));
+    if (dot(tanT, tanT) == 0.0) tanT = strokeUnit(p3 - p1);
+  }
+  float cT1 = 0.0, cT2 = 0.0, cD1 = 0.0, cD2 = 0.0, cU1 = 0.0, cU2 = 0.0;
+  vec2 cQ1 = vec2(0.0), cQ2 = vec2(0.0), cG1 = vec2(0.0), cG2 = vec2(0.0);
+  int nC = 1;
+  if ((t < 1e-4 || t > 1.0 - 1e-4) && uIn >= 0.0) {
+    vec2 qIn = (A * uIn + B) * uIn + s0;
+    float dIn = length(qIn);
+    if (dIn > 0.0 && dIn < halfW + seR) { nC = 2; cT1 = fromEnd ? 1.0 - uIn : uIn; cD1 = dIn; cQ1 = qIn; cG1 = -qIn / dIn; cU1 = uIn; }
+  } else if (t >= 1e-4 && t <= 1.0 - 1e-4) {
+    for (int e = 0; e < 2; e++) {
+      if (!strokeEndCandidate(freeStart, freeEnd, startCap, endCap, joinStyle, dashId, e)) continue;
+      vec2 pE = e == 0 ? p1 : p3, uE = e == 0 ? -strokeUnit(dStart) : strokeUnit(dEnd);
+      if (!(dot(-pE, uE) > 0.0) || length(pE) > halfW * (max(miterLimit, 1.0) + 1.0) + seR) continue;
+      float tE = float(e);
+      if (nC == 1) { cT1 = tE; cD1 = length(pE); cQ1 = pE; cU1 = fromEnd ? 1.0 - tE : tE; }
+      else { cT2 = tE; cD2 = length(pE); cQ2 = pE; cU2 = fromEnd ? 1.0 - tE : tE; }
+      nC++;
+    }
+  }
+  if (t < 1e-4 || t > 1.0 - 1e-4) {
+
+    float tE = t < 1e-4 ? 1.0 : 0.0;
+    vec2 pE = tE == 0.0 ? p1 : p3, uE = tE == 0.0 ? -strokeUnit(dStart) : strokeUnit(dEnd);
+
+    if (dot(-pE, uE) > 0.0 && length(pE) <= halfW * (max(miterLimit, 1.0) + 1.0) + seR && (joinStyle != 4 || (tE == 0.0 ? freeStart : freeEnd))) {
+      if (nC == 1) { cT1 = tE; cD1 = length(pE); cQ1 = pE; cU1 = fromEnd ? 1.0 - tE : tE; }
+      else { cT2 = tE; cD2 = length(pE); cQ2 = pE; cU2 = fromEnd ? 1.0 - tE : tE; }
+      nC++;
+    }
+  }
+  float md = 1e30;
+  float t0 = t, d0 = thisD;
+  vec2 g0 = g;
+  for (int k = 0; k < nC; k++) {
+    float tK = k == 0 ? t0 : (k == 1 ? cT1 : cT2), dK = k == 0 ? d0 : (k == 1 ? cD1 : cD2);
+    vec2 gK = k == 0 ? g0 : (k == 1 ? cG1 : cG2);
+    bool endK = k > 0 && (tK == 0.0 || tK == 1.0);
+    float aK = k == 0 ? arcLenAtT : ((dashId > 0) ? quadArcLen(p1, p2, p3, tK) : 0.0);
+    vec2 tanK = tanT;
+    if (k > 0) {
+      tanK = vec2(0.0);
+      if (dashId > 0) { tanK = endK ? strokeUnit(mix(p2 - p1, p3 - p2, tK)) : strokeUnit(mix(p2 - p1, p3 - p2, tK)); if (dot(tanK, tanK) == 0.0) tanK = strokeUnit(tK < 0.5 ? dStart : dEnd); }
+    }
+    vec4 eP2, eQ2;
+    float mdK = strokeCapsJoinsDash(tK, dK, p1, p3, dStart, dEnd,
+                                    freeStart, freeEnd, startCap, endCap,
+                                    joinStyle, miterLimit, halfW, inTan, outTan,
+                                    dashId, startDist,
+                                    aK, curv, minDIn, gK, tanK,
+                                    (dashId > 0) ? startDist + quadArcLen(p1, p2, p3, 1.0) : 1e30,
+                                    seR, eP2, eQ2);
+    if (k == 0 || mdK < md) {
+      md = mdK; edgeP = eP2; edgeQ = eQ2; g = gK;
+      if (k > 0) { u = k == 1 ? cU1 : cU2; q = k == 1 ? cQ1 : cQ2; t = tK; thisD = dK; }
+    }
+  }
+  gradOut = g;
+  return md;
 }
 
 vec4 texFetch(ivec2 xy) { xy.y += xy.x >> 12; xy.x &= 4095; return texelFetch(uCurveData, xy, 0); }
 vec4 bFetch(ivec2 xy) { return texelFetch(uBandData, xy, 0); }
 
-void arcSample(vec4 d1, float cp, float sp, float th, out vec2 p, out float dx, out float dy) {
-  float ct = cos(th), st = sin(th);
+void arcPoint(vec4 d1, float cp, float sp, vec2 cs, out vec2 p, out float dx, out float dy) {
+  float ct = cs.x, st = cs.y;
   float ax = cp * d1.z, bx = sp * d1.w;
   float ay = sp * d1.z, by = cp * d1.w;
   p  = vec2(d1.x + ax * ct - bx * st,
@@ -731,348 +1709,804 @@ void arcSample(vec4 d1, float cp, float sp, float th, out vec2 p, out float dx, 
   dx = -ax * st - bx * ct;
   dy = -ay * st + by * ct;
 }
+void arcSample(vec4 d1, float cp, float sp, float th, out vec2 p, out float dx, out float dy) {
+  arcPoint(d1, cp, sp, vec2(cos(th), sin(th)), p, dx, dy);
+}
+
+float arcRayUlpV(vec4 d1) { return 1.2e-7 * (abs(d1.x) + abs(d1.z) + abs(d1.w)); }
+
+float arcPieceCross(float ta, float ua, float tb, float ub, float dir) {
+  bool aNeg = ua < 0.0, bNeg = ub < 0.0;
+  if (aNeg == bNeg) return 0.0;
+  return ((dir > 0.0) ? bNeg : aNeg) ? 2.0 : 1.0;
+}
+
+vec3 arcRayCrossings(float lo, float hi, float dir, float A, float B, float C, float uLo, float uHi,
+                     bool aa, out vec4 piece, out vec3 aux) {
+  piece = vec4(lo, uLo, hi, uHi); aux = vec3(0.0, uLo, uHi);
+  float rs = max(abs(A), abs(B));
+  float Rlen = rs > 0.0 ? rs * length(vec2(A, B) / rs) : 0.0;
+  if (!(Rlen > 0.0)) return vec3(0.0);
+
+  bool nLo = uLo < 0.0;
+  if (nLo == (uHi < 0.0) && nLo == (Rlen - C < 0.0) && nLo == (-Rlen - C < 0.0)) return vec3(0.0);
+
+  float ang = (B == 0.0) ? (A >= 0.0 ? 0.0 : 0.5 * TWO_PI) : curveAtan2(B, A);
+  aux.x = ang;
+
+  float k0 = ceil((lo - ang) / (0.5 * TWO_PI)), k1 = k0 + 1.0;
+  float e0 = ang + k0 * (0.5 * TWO_PI), e1 = ang + k1 * (0.5 * TWO_PI);
+  bool in0 = e0 > lo && e0 < hi, in1 = e1 > lo && e1 < hi;
+  float t1 = in0 ? e0 : lo, u1 = in0 ? (((mod(k0, 2.0) < 0.5) ? Rlen : -Rlen) - C) : uLo;
+  float t2 = in1 ? e1 : hi, u2 = in1 ? (((mod(k1, 2.0) < 0.5) ? Rlen : -Rlen) - C) : uHi;
+  piece = vec4(t1, u1, t2, u2);
+  vec3 cr = vec3(arcPieceCross(lo, uLo, t1, u1, dir),
+                 arcPieceCross(t1, u1, t2, u2, dir),
+                 arcPieceCross(t2, u2, hi, uHi, dir));
+
+  if (aa && abs(C / Rlen) >= 0.99999) {
+    float nearU = ((C > 0.0) ? Rlen : -Rlen) - C;
+    if (cr.x > 0.0 && cr.y > 0.0 && u1 == nearU) { cr.x = 0.0; cr.y = 0.0; }
+    else if (cr.y > 0.0 && cr.z > 0.0 && u2 == nearU) { cr.y = 0.0; cr.z = 0.0; }
+
+    else if (uLo == nearU && uHi == nearU) {
+      if (cr.y > 0.0 && cr.z > 0.0) { cr.y = 0.0; cr.z = 0.0; }
+      else if (cr.x > 0.0 && cr.y > 0.0) { cr.x = 0.0; cr.y = 0.0; }
+    }
+  }
+  return cr;
+}
+
+float arcPieceRoot(float ta, float tb, float ub, float ang, float b2) {
+  float t = (ub < 0.0) ? (ang + b2) : (ang - b2);
+  float mid = 0.5 * (ta + tb);
+  t += TWO_PI * floor((mid - t) / TWO_PI + 0.5);
+  return clamp(t, ta, tb);
+}
+vec3 arcRayRoots(float lo, float hi, float A, float B, float C, vec4 piece, vec3 aux) {
+  float rs = max(abs(A), abs(B));
+  float Rlen = rs > 0.0 ? rs * length(vec2(A, B) / rs) : 0.0;
+  float b2 = acos(clamp(C / Rlen, -1.0, 1.0));
+  return vec3(arcPieceRoot(lo, piece.x, piece.y, aux.x, b2),
+              arcPieceRoot(piece.x, piece.z, piece.w, aux.x, b2),
+              arcPieceRoot(piece.z, hi, aux.z, aux.x, b2));
+}
+
+vec3 arcSweep(vec4 d2) {
+  float lo = min(d2.x, d2.y);
+  return vec3(lo, min(max(d2.x, d2.y), lo + TWO_PI), (d2.y >= d2.x) ? 1.0 : -1.0);
+}
+
+void arcEndsLoHi(vec4 e, float dir, out vec2 pLo, out vec2 pHi) {
+  pLo = (dir > 0.0) ? e.xy : e.zw;
+  pHi = (dir > 0.0) ? e.zw : e.xy;
+}
+
+vec2 bandBoxSize(vec4 bb) {
+  vec2 e = bb.zw - bb.xy;
+  return vec2(e.x > 0.0 ? e.x : (e.y > 0.0 ? e.y : 1.0), e.y > 0.0 ? e.y : (e.x > 0.0 ? e.x : 1.0));
+}
 ivec2 bLoc(ivec2 gl, int off) { ivec2 l=ivec2(gl.x+off, gl.y); l.y+=l.x>>12; l.x&=4095; return l; }
 
-vec2 bandEntry(ivec2 gl, int arrIdx, int eIdx) {
-  vec4 t = bFetch(bLoc(gl, arrIdx + (eIdx >> 1)));
-  return (eIdx & 1) == 0 ? t.xy : t.zw;
+uniform int uStrokeGates;
+
+int texLin(ivec2 xy) { return (xy.y << 12) + xy.x; }
+vec4 bFetchL(int i) { return texelFetch(uBandData, ivec2(i & 4095, i >> 12), 0); }
+vec4 cFetchL(int i) { return texelFetch(uCurveData, ivec2(i & 4095, i >> 12), 0); }
+
+bool bandHasRayLanes(vec4 hdr1) { return (int(hdr1.y) & 1) != 0; }
+
+bool fillRayReject(vec4 hdr1) { return bandHasRayLanes(hdr1); }
+
+bool rayLaneMiss(vec4 e, float r) { return e.w - r < 0.0 || e.z - r >= 0.0; }
+
+bool strokeHullOutOfReach(vec2 lo, vec2 hi, float reach) {
+  vec2 dv = max(max(lo, -hi), vec2(0.0));
+  return dot(dv, dv) > reach * reach;
 }
 
-ivec2 segLocXY(float loc) { int L = int(loc); return ivec2(L & 4095, L >> 12); }
-
-vec2 evalArc(float cx, float cy, float rx, float ry, float phi, float th) {
-  float ct=cos(th), st=sin(th), cp=cos(phi), sp=sin(phi);
-  return vec2(cx+cp*rx*ct-sp*ry*st, cy+sp*rx*ct+cp*ry*st);
+bool strokeCubicPieceOut(vec2 a, vec2 b, vec2 c, vec2 d, float reach) {
+  vec2 ch = d - a;
+  float len = length(ch);
+  vec2 u = len > 0.0 ? ch / len : vec2(1.0, 0.0);
+  vec2 v = vec2(-u.y, u.x);
+  vec4 su = vec4(dot(a, u), dot(b, u), dot(c, u), dot(d, u));
+  vec4 sv = vec4(dot(a, v), dot(b, v), dot(c, v), dot(d, v));
+  float lu = min(min(su.x, su.y), min(su.z, su.w)), hu = max(max(su.x, su.y), max(su.z, su.w));
+  float lv = min(min(sv.x, sv.y), min(sv.z, sv.w)), hv = max(max(sv.x, sv.y), max(sv.z, sv.w));
+  vec2 g = vec2(max(max(lu, -hu), 0.0), max(max(lv, -hv), 0.0));
+  vec4 ab = abs(vec4(a, b)), cd = abs(vec4(c, d));
+  float r = reach * 1.0001 + 4e-6 * max(max(max(ab.x, ab.y), max(ab.z, ab.w)), max(max(cd.x, cd.y), max(cd.z, cd.w)));
+  return dot(g, g) > r * r;
 }
-float arcDyDtheta(float rx, float ry, float phi, float th) {
-  float ct = cos(th), st = sin(th), cp = cos(phi), sp = sin(phi);
-  return -sp * rx * st + cp * ry * ct;
-}
-float arcDxDtheta(float rx, float ry, float phi, float th) {
-  float ct = cos(th), st = sin(th), cp = cos(phi), sp = sin(phi);
-  return -cp * rx * st - sp * ry * ct;
-}
-const float TWO_PI = 6.28318530717958647692;
-float hlslFmod(float x, float m) { return x - m * trunc(x / m); }
 
-float distToEllipse(vec2 ab, vec2 pIn, out vec2 foot) {
-  vec2 sgn = sign(pIn);
-  vec2 p = abs(pIn);
-  bool swap = p.x > p.y;
-  if (swap) { p = p.yx; ab = ab.yx; }
-  float l = ab.y * ab.y - ab.x * ab.x;
+void strokeCubicSplit(inout vec2 a, inout vec2 b, inout vec2 c, inout vec2 d, out vec2 ra, out vec2 rb, out vec2 rc) {
+  vec2 ab = 0.5 * (a + b), bc = 0.5 * (b + c), cd = 0.5 * (c + d);
+  vec2 abc = 0.5 * (ab + bc), bcd = 0.5 * (bc + cd);
+  vec2 m = 0.5 * (abc + bcd);
+  ra = m; rb = bcd; rc = cd;
+  b = ab; c = abc; d = m;
+}
+bool strokeCubicOutOfReach(vec4 p12, vec4 p34, float reach) {
+  vec2 a = p12.xy, b = p12.zw, c = p34.xy, d = p34.zw;
+  vec2 ra, rb, rc;
+  strokeCubicSplit(a, b, c, d, ra, rb, rc);
+  vec2 rd = p34.zw;
+  vec2 qa, qb, qc;
+  strokeCubicSplit(a, b, c, d, qa, qb, qc);
+  vec2 qd = ra;
+  if (!strokeCubicPieceOut(a, b, c, d, reach)) return false;
+  if (!strokeCubicPieceOut(qa, qb, qc, qd, reach)) return false;
+  strokeCubicSplit(ra, rb, rc, rd, qa, qb, qc);
+  if (!strokeCubicPieceOut(ra, rb, rc, rd, reach)) return false;
+  return strokeCubicPieceOut(qa, qb, qc, p34.zw, reach);
+}
 
-  if (abs(l) < 1e-9 * max(ab.x * ab.x, ab.y * ab.y)) {
-    vec2 fq = ab.x * normalize(p + vec2(1e-20));
-    vec2 fo = swap ? fq.yx : fq.xy;
-    foot = sgn * fo;
-    return length(pIn - foot);
+bool strokeQuadOutOfReach(vec2 a, vec2 b, vec2 c, float reach) {
+  vec2 m1 = 0.5 * (a + b), m2 = 0.5 * (b + c), m = 0.5 * (m1 + m2);
+  return strokeCubicPieceOut(a, m1, m1, m, reach) && strokeCubicPieceOut(m, m2, m2, c, reach);
+}
+
+vec2 strokeFrameMul(vec4 N, vec2 v) { return vec2(N.x * v.x + N.z * v.y, N.y * v.x + N.w * v.y); }
+vec2 strokeFrameMulT(vec4 N, vec2 v) { return vec2(N.x * v.x + N.y * v.y, N.z * v.x + N.w * v.y); }
+
+vec2 strokeFrameDir(vec4 N, vec2 t) { return strokeUnit(strokeFrameMul(N, t)); }
+
+void strokeFrameArc(vec4 N, inout vec4 d1, inout vec4 d2) {
+  float cp = cos(d2.z), sp = sin(d2.z);
+  vec2 c0 = strokeFrameMul(N, vec2(cp, sp)) * d1.z;
+  vec2 c1 = strokeFrameMul(N, vec2(-sp, cp)) * d1.w;
+  float E = 0.5 * (c0.x + c1.y), F = 0.5 * (c0.x - c1.y), G = 0.5 * (c0.y + c1.x), H = 0.5 * (c0.y - c1.x);
+  float Q = length(vec2(E, H)), R = length(vec2(F, G));
+
+  float a1 = R > 0.0 ? curveAtan2(G, F) : 0.0, a2 = Q > 0.0 ? curveAtan2(H, E) : 0.0;
+  float theta = 0.5 * (a2 - a1), sy = Q - R;
+  float sgn = sy < 0.0 ? -1.0 : 1.0;
+  d1 = vec4(strokeFrameMul(N, d1.xy), Q + R, abs(sy));
+  d2 = vec4(sgn * (d2.x + theta), sgn * (d2.y + theta), 0.5 * (a2 + a1), d2.w);
+}
+
+float seDocKey(vec4 P, vec4 Q, vec4 N, float fallback) {
+  if (P.w == 0.0) return fallback;
+  float k1 = P.z / length(strokeFrameMulT(N, P.xy));
+  if (P.w == 9.0 && dot(Q.xy, Q.xy) > 0.5) return max(k1, Q.z / length(strokeFrameMulT(N, Q.xy)));
+  if (P.w == 1.0 || P.w == 4.0 || P.w >= 5.0) return k1;
+  float k2 = Q.z / length(strokeFrameMulT(N, Q.xy));
+  return P.w == 2.0 ? max(k1, k2) : min(k1, k2);
+}
+
+float strokeAaReachEm(float halfW, vec2 ePx) {
+  return max(0.25 * (ePx.x + ePx.y) - halfW, 0.0) + 0.5 * length(ePx);
+}
+
+float strokeRampSatD(float halfWVis, float pxSize) {
+  float p = max(pxSize, 1e-30);
+  return halfWVis - 0.501 * p - 1e-6 * halfWVis;
+}
+
+void seJoinRecord(vec2 q, vec2 din, vec2 dout, bool ownIn, int joinStyle, float miterLimit, float halfW, float reach,
+                  out vec4 P, out vec4 Q) {
+  P = vec4(0.0); Q = vec4(0.0);
+#ifdef MANTLE_STROKE_EXACT
+
+  if (joinStyle == 1) { seDisc(P, Q, q, ownIn ? din : -dout, halfW); return; }
+
+  float cr = din.x * dout.y - din.y * dout.x, sd = cr >= 0.0 ? 1.0 : -1.0;
+  vec2 nA = sd * vec2(din.y, -din.x), nB = sd * vec2(dout.y, -dout.x);
+  seAnd(P, Q, nA, dot(q, nA) - halfW, reach); seAnd(P, Q, nB, dot(q, nB) - halfW, reach);
+  float sinHalf = 0.5 * length(din + dout);
+  bool fits = halfW / max(sinHalf, 1.17549435e-38) <= halfW * miterLimit;
+  if (joinStyle == 2 || (joinStyle == 0 && !fits)) {
+    vec2 nb = nA + nB;
+    float bl = length(nb);
+    if (bl > 1e-4) { vec2 bis = nb / bl; seAnd(P, Q, bis, dot(q, bis) - halfW * dot(nA, bis), reach); }
+  } else if ((joinStyle == 3 || joinStyle == 4) && !fits) {
+    vec2 tipDir = din - dout;
+    float tipLen = length(tipDir);
+    if (tipLen > 1e-4) seAnd(P, Q, tipDir / tipLen, dot(q, tipDir) / tipLen - halfW * max(miterLimit, 1.0), reach);
   }
-  float m = ab.x * p.x / l; float m2 = m * m;
-  float n = ab.y * p.y / l; float n2 = n * n;
-  float c = (m2 + n2 - 1.0) / 3.0; float c3 = c * c * c;
-  float q = c3 + m2 * n2 * 2.0;
-  float d = c3 + m2 * n2;
-  float g = m + m * n2;
-  float co;
-  if (d < 0.0) {
-    float h = acos(clamp(q / c3, -1.0, 1.0)) / 3.0;
-    float s = cos(h);
-    float t = sin(h) * sqrt(3.0);
-    float rx = sqrt(max(-c * (s + t + 2.0) + m2, 0.0));
-    float ry = sqrt(max(-c * (s - t + 2.0) + m2, 0.0));
-    co = (ry + sign(l) * rx + abs(g) / (rx * ry + 1e-20) - m) / 2.0;
-  } else {
-    float h = 2.0 * m * n * sqrt(d);
-    float s = sign(q + h) * pow(abs(q + h), 1.0 / 3.0);
-    float u = sign(q - h) * pow(abs(q - h), 1.0 / 3.0);
-    float rx = -s - u - c * 4.0 + 2.0 * m2;
-    float ry = (s - u) * sqrt(3.0);
-    float rm = sqrt(rx * rx + ry * ry);
-    co = (ry / sqrt(max(rm - rx, 1e-20)) + 2.0 * g / (rm + 1e-20) - m) / 2.0;
-  }
-  co = clamp(co, 0.0, 1.0);
-  vec2 fq = vec2(ab.x * co, ab.y * sqrt(max(1.0 - co * co, 0.0)));
-  vec2 fo = swap ? fq.yx : fq.xy;
-  foot = sgn * fo;
-  return length(pIn - foot);
+#endif
 }
 
-bool arcInRange(float t, float tS, float tE) {
-  if (abs(tE - tS) >= TWO_PI) return true;
-  float dur = tE - tS;
-  float d = hlslFmod(t - tS, TWO_PI);
-  if (d < 0.0) d += TWO_PI;
-  if (dur > 0.0) return d < dur;
-  if (d > 0.0) d -= TWO_PI;
-  return d > dur;
-}
-
-float arcArcLen(vec4 d1, vec4 d2, float t) {
-  float dth = d2.y - d2.x;
-  float sum = 0.0;
-  for (int i = 0; i < 16; i++) {
-    float th = d2.x + dth * (t * SLUG_GL16_N[i]);
-    float st = sin(th), ct = cos(th);
-    sum += SLUG_GL16_W[i] * sqrt(d1.z * d1.z * st * st + d1.w * d1.w * ct * ct);
-  }
-  return t * abs(dth) * sum;
+bool seNearOuterJoin(vec2 q, vec2 din, vec2 dout, vec2 own, vec2 uOut, vec2 cpV, float reach) {
+  float cr = din.x * dout.y - din.y * dout.x;
+  if (cr == 0.0 || dot(q, uOut) <= -reach || length(cpV) > 2.0 * reach + max(-dot(q, uOut), 0.0)) return false;
+  vec2 nOwn = (cr >= 0.0 ? 1.0 : -1.0) * vec2(own.y, -own.x);
+  return dot(q, nOwn) > 0.0;
 }
 
 float strokeBandAccum(ivec2 gl, int hdrSlot,
                           vec2 c, float halfW,
                           int startCap, int endCap,
                           int joinStyle, float miterLimit,
-                          int dashId, float minDIn) {
-  vec4 cnts = bFetch(bLoc(gl, hdrSlot));
+                          int dashId, float minDIn, out vec2 gradOut, float satD, float aaEm,
+                          vec4 N, bool framed, out vec4 edgeP, out vec4 edgeQ) {
+  gradOut = vec2(0.0);
+
+  edgeP = vec4(0.0); edgeQ = vec4(0.0);
+
+  int hdrL = texLin(gl) + hdrSlot;
+  vec4 cnts = bFetchL(hdrL);
   int nLine  = int(cnts.x);
   int nQuad  = int(cnts.y);
   int nCubic = int(cnts.z);
   int nArc   = int(cnts.w);
-  int arrIdx = int(bFetch(bLoc(gl, hdrSlot + 1)).x);
-  int hOff = 0;
+  vec4 hdr1 = bFetchL(hdrL + 1);
+  int hE = texLin(gl) + int(hdr1.x);
+
+  bool farGate = uStrokeGates != 0 && !bandHasRayLanes(hdr1);
   float minD = minDIn;
 
-  float sBreak = c.x - halfW;
-  for (int i = 0; i < 1024; i++) {
-    if (i >= nLine) break;
-    vec2 segRaw = bandEntry(gl, arrIdx, hOff + i);
+  float _ml = max(miterLimit, 1.0);
+  float _reach = halfW * max((joinStyle == 0 ? _ml
+                              : (joinStyle == 3 || joinStyle == 4) ? sqrt(_ml * _ml + 1.0) : 1.0),
+                             (startCap == 2 || endCap == 2) ? 1.41421356 : 1.0) + aaEm;
+
+  float sBreak = c.x - halfW - aaEm;
+  float sFar = c.x + _reach;
+
+  float bestKey = 1e30;
+
+  float kMaxN = length(vec2(0.5 * (N.x + N.w), 0.5 * (N.y - N.z))) + length(vec2(0.5 * (N.x - N.w), 0.5 * (N.y + N.z)));
+
+  float minD2 = 1e20, winD = 1e20;
+  vec2 secN = vec2(0.0); float secE = 1e20;
+#ifndef MANTLE_NO_LINE
+  for (int i = 0; i < nLine; i++) {
+    vec4 segRaw = bFetchL(hE + i);
     if (segRaw.y < sBreak) break;
-    ivec2 sL = segLocXY(segRaw.x);
-    vec4 hdr = texFetch(sL);
-    if (uint(hdr.x) >= 4u) continue;
+
+    if (farGate && segRaw.z > sFar) continue;
+    int sL = int(segRaw.x);
+    vec4 hdr = cFetchL(sL);
+    if ((uint(hdr.x) & 4u) != 0u) continue;
     bool freeStart = hdr.y > 0.5;
     bool freeEnd   = hdr.z > 0.5;
-    ivec2 dL = ivec2(sL.x + 1, sL.y);
-    vec4 pts = texFetch(dL);
+    strokeSeamSet(hdr.y, hdr.z);
+    strokeSeamResolve(dashId, aaEm, freeStart, freeEnd);
+    vec4 pts = cFetchL(sL + 1);
 
-    vec4 jn = texFetch(ivec2(dL.x + 1, dL.y));
+    vec4 jn = (freeStart && freeEnd) ? vec4(0.0) : cFetchL(sL + 2);
     vec2 inTan  = jn.xy;
     vec2 outTan = jn.zw;
     vec2 a = pts.xy;
     vec2 b = pts.zw;
+
+    vec2 cq = c;
+    if (framed) {
+      a = strokeFrameMul(N, a - c); b = strokeFrameMul(N, b - c); cq = vec2(0.0);
+      inTan = strokeFrameDir(N, inTan); outTan = strokeFrameDir(N, outTan);
+    }
     vec2 ab = b - a;
-    float abLen2 = max(dot(ab, ab), 1e-20);
+
+    float abLen2 = dot(ab, ab);
+
+    if (abLen2 == 0.0 && freeStart && freeEnd && startCap == 0 && endCap == 0) continue;
     float abLen = sqrt(abLen2);
-    float tRaw = dot(c - a, ab) / abLen2;
-    vec2 segTan = ab / abLen;
+    float tRaw = abLen2 > 0.0 ? dot(cq - a, ab) / abLen2 : 0.0;
+    vec2 segTan = abLen > 0.0 ? ab / abLen : ab;
     bool drop = false;
 
     float thisD = -1.0;
+
+    vec4 sP = vec4(0.0), sQ = vec4(0.0);
+    bool joinRec = false;
     if (tRaw < 0.0) {
       if (freeStart) {
+        sP = seSlab(cq - a, segTan, halfW, aaEm);
+        float aR = dot(cq - a, -segTan);
+        if (startCap == 0) seAnd(sP, sQ, -segTan, aR, aaEm);
+        else if (startCap == 2) seAnd(sP, sQ, -segTan, aR - halfW, aaEm);
+        else seDisc(sP, sQ, cq - a, -segTan, halfW);
         if (startCap == 0) {
 
-          thisD = max(length(c - a), halfW + dot(c - a, -segTan));
+          thisD = max(length(cq - a), halfW + dot(cq - a, -segTan));
         }
         else if (startCap == 2) {
 
-          float along = dot(c - a, -segTan);
-          if (along < 0.0 || along > halfW) drop = true;
-          else thisD = length((c - a) + segTan * along);
+          float along = dot(cq - a, -segTan);
+          thisD = max(length((cq - a) + segTan * along), along);
         }
 
       } else {
 
-        bool ourTerritory = dot(c - a, inTan) >= 0.0;
-        if (ourTerritory && joinStyle == 2) {
+        bool ourTerritory = dot(cq - a, inTan) >= 0.0;
+        if (!ourTerritory) {
+          thisD = max(length(cq - a), halfW + dot(cq - a, -segTan));
+          sP = seSlab(cq - a, segTan, halfW, aaEm);
+          seAnd(sP, sQ, -segTan, dot(cq - a, -segTan), aaEm);
+        } else {
+          float cosBetween = dot(-segTan, inTan);
+          float sinHalf = 0.5 * length(segTan + inTan);
+          float miterLen = halfW / max(sinHalf, 1.17549435e-38);
 
-          float cr = inTan.x * segTan.y - inTan.y * segTan.x;
-          float sd = (cr >= 0.0) ? 1.0 : -1.0;
-          vec2 nA = sd * vec2(inTan.y, -inTan.x), nB = sd * vec2(segTan.y, -segTan.x);
-          vec2 nb = nA + nB; float bl = length(nb);
-          if (bl > 1e-4) { vec2 bis = nb / bl;
-            thisD = max(length(c - a), halfW + dot(c - a, bis) - halfW * dot(nA, bis)); }
-        }
-        if (ourTerritory) {
-          float along = dot(c - a, -segTan);
+          if (joinStyle == 1) seDisc(sP, sQ, cq - a, dot(cq - a, inTan) <= dot(cq - a, -segTan) ? inTan : -segTan, halfW);
+          else { seAnd(sP, sQ, seSide(cq - a, segTan, halfW), aaEm); seAnd(sP, sQ, seSide(cq - a, inTan, halfW), aaEm); }
+
+          bool bevelHere = joinStyle == 2 || (joinStyle == 0 && !(miterLen <= halfW * miterLimit));
+          if (bevelHere) {
+
+            float cr = inTan.x * segTan.y - inTan.y * segTan.x;
+            float sd = (cr >= 0.0) ? 1.0 : -1.0;
+            vec2 nA = sd * vec2(inTan.y, -inTan.x), nB = sd * vec2(segTan.y, -segTan.x);
+            vec2 nb = nA + nB; float bl = length(nb);
+            if (bl > 1e-4) { vec2 bis = nb / bl;
+              thisD = max(length(cq - a), halfW + dot(cq - a, bis) - halfW * dot(nA, bis));
+              seAnd(sP, sQ, bis, dot(cq - a, bis) - halfW * dot(nA, bis), aaEm); }
+            else {
+              thisD = max(length(cq - a), halfW + dot(cq - a, -segTan));
+              seAnd(sP, sQ, -segTan, dot(cq - a, -segTan), aaEm); }
+          }
+          float along = dot(cq - a, -segTan);
           float capAlong = 0.0;
 
-          if (joinStyle == 0 || joinStyle == 4) {
+          if (joinStyle == 0 || joinStyle == 3 || joinStyle == 4) {
 
-            float cosBetween = dot(-segTan, inTan);
-            float sinHalf = sqrt(max(0.5 * (1.0 - cosBetween), 1e-9));
-            float miterLen = halfW / max(sinHalf, 1e-6);
-            if (miterLen <= halfW * miterLimit) capAlong = miterLen;
+            float cosHalf = sqrt(max(0.5 * (1.0 + cosBetween), 0.0));
+            if (miterLen <= halfW * miterLimit) capAlong = miterLen * cosHalf;
           }
           if (along <= capAlong) {
-            float perpThis = length((c - a) + segTan * along);
+            float perpThis = length((cq - a) + segTan * along);
 
             vec2 nIn = vec2(-inTan.y, inTan.x);
-            float perpOther = abs(dot(c - a, nIn));
+            float perpOther = abs(dot(cq - a, nIn));
 
             thisD = max(perpThis, perpOther);
+          } else if ((joinStyle == 3 || joinStyle == 4) && !(miterLen <= halfW * miterLimit)) {
+
+            float perpThis = length((cq - a) + segTan * along);
+            float perpOther = abs(dot(cq - a, vec2(-inTan.y, inTan.x)));
+            vec2 tipDir = inTan - segTan;
+            float tipLen = length(tipDir);
+            thisD = max(perpThis, perpOther);
+            if (tipLen > 1e-4)
+              thisD = max(thisD, halfW + dot(cq - a, tipDir) / tipLen - halfW * _ml);
+            if (tipLen > 1e-4) seAnd(sP, sQ, tipDir / tipLen, dot(cq - a, tipDir) / tipLen - halfW * _ml, aaEm);
           }
         }
       }
     }
     if (tRaw > 1.0) {
       if (freeEnd) {
+        sP = seSlab(cq - b, segTan, halfW, aaEm);
+        float aR = dot(cq - b, segTan);
+        if (endCap == 0) seAnd(sP, sQ, segTan, aR, aaEm);
+        else if (endCap == 2) seAnd(sP, sQ, segTan, aR - halfW, aaEm);
+        else seDisc(sP, sQ, cq - b, segTan, halfW);
         if (endCap == 0) {
 
-          thisD = max(length(c - b), halfW + dot(c - b, segTan));
+          thisD = max(length(cq - b), halfW + dot(cq - b, segTan));
         }
         else if (endCap == 2) {
-          float along = dot(c - b, segTan);
-          if (along < 0.0 || along > halfW) drop = true;
-          else thisD = length((c - b) - segTan * along);
+
+          float along = dot(cq - b, segTan);
+          thisD = max(length((cq - b) - segTan * along), along);
         }
       } else {
-        bool ourTerritory = dot(c - b, -outTan) >= 0.0;
-        if (ourTerritory && joinStyle == 2) {
 
-          float cr = segTan.x * outTan.y - segTan.y * outTan.x;
-          float sd = (cr >= 0.0) ? 1.0 : -1.0;
-          vec2 nA = sd * vec2(segTan.y, -segTan.x), nB = sd * vec2(outTan.y, -outTan.x);
-          vec2 nb = nA + nB; float bl = length(nb);
-          if (bl > 1e-4) { vec2 bis = nb / bl;
-            thisD = max(length(c - b), halfW + dot(c - b, bis) - halfW * dot(nA, bis)); }
-        }
-        if (ourTerritory) {
-          float along = dot(c - b, segTan);
+        bool ourTerritory = dot(cq - b, -outTan) >= 0.0;
+        if (!ourTerritory) {
+          thisD = max(length(cq - b), halfW + dot(cq - b, segTan));
+          sP = seSlab(cq - b, segTan, halfW, aaEm);
+          seAnd(sP, sQ, segTan, dot(cq - b, segTan), aaEm);
+        } else {
+
+          float cosBetween = dot(segTan, -outTan);
+          float sinHalf = 0.5 * length(segTan + outTan);
+          float miterLen = halfW / max(sinHalf, 1.17549435e-38);
+          if (joinStyle == 1) seDisc(sP, sQ, cq - b, dot(cq - b, segTan) <= dot(cq - b, -outTan) ? segTan : -outTan, halfW);
+          else { seAnd(sP, sQ, seSide(cq - b, segTan, halfW), aaEm); seAnd(sP, sQ, seSide(cq - b, outTan, halfW), aaEm); }
+          bool bevelHere = joinStyle == 2 || (joinStyle == 0 && !(miterLen <= halfW * miterLimit));
+          if (bevelHere) {
+
+            float cr = segTan.x * outTan.y - segTan.y * outTan.x;
+            float sd = (cr >= 0.0) ? 1.0 : -1.0;
+            vec2 nA = sd * vec2(segTan.y, -segTan.x), nB = sd * vec2(outTan.y, -outTan.x);
+            vec2 nb = nA + nB; float bl = length(nb);
+            if (bl > 1e-4) { vec2 bis = nb / bl;
+              thisD = max(length(cq - b), halfW + dot(cq - b, bis) - halfW * dot(nA, bis));
+              seAnd(sP, sQ, bis, dot(cq - b, bis) - halfW * dot(nA, bis), aaEm); }
+            else {
+              thisD = max(length(cq - b), halfW + dot(cq - b, segTan));
+              seAnd(sP, sQ, segTan, dot(cq - b, segTan), aaEm); }
+          }
+          float along = dot(cq - b, segTan);
           float capAlong = 0.0;
 
-          if (joinStyle == 0 || joinStyle == 4) {
+          if (joinStyle == 0 || joinStyle == 3 || joinStyle == 4) {
 
-            float cosBetween = dot(segTan, -outTan);
-            float sinHalf = sqrt(max(0.5 * (1.0 - cosBetween), 1e-9));
-            float miterLen = halfW / max(sinHalf, 1e-6);
-            if (miterLen <= halfW * miterLimit) capAlong = miterLen;
+            float cosHalf = sqrt(max(0.5 * (1.0 + cosBetween), 0.0));
+            if (miterLen <= halfW * miterLimit) capAlong = miterLen * cosHalf;
           }
           if (along <= capAlong) {
-            float perpThis = length((c - b) - segTan * along);
+            float perpThis = length((cq - b) - segTan * along);
             vec2 nOut = vec2(-outTan.y, outTan.x);
-            float perpOther = abs(dot(c - b, nOut));
+            float perpOther = abs(dot(cq - b, nOut));
             thisD = max(perpThis, perpOther);
+          } else if ((joinStyle == 3 || joinStyle == 4) && !(miterLen <= halfW * miterLimit)) {
+
+            float perpThis = length((cq - b) - segTan * along);
+            float perpOther = abs(dot(cq - b, vec2(-outTan.y, outTan.x)));
+            vec2 tipDir = segTan - outTan;
+            float tipLen = length(tipDir);
+            thisD = max(perpThis, perpOther);
+            if (tipLen > 1e-4)
+              thisD = max(thisD, halfW + dot(cq - b, tipDir) / tipLen - halfW * _ml);
+            if (tipLen > 1e-4) seAnd(sP, sQ, tipDir / tipLen, dot(cq - b, tipDir) / tipLen - halfW * _ml, aaEm);
           }
         }
       }
     }
-    if (drop) continue;
-    float tC = clamp(tRaw, 0.0, 1.0);
-    if (dashId > 0) {
-      float pathDist = hdr.w + tC * abLen;
-      if (!dashCovered(dashId, pathDist)) continue;
-    }
-    if (thisD < 0.0) {
-      vec2 closestPt = mix(a, b, tC);
-      thisD = length(c - closestPt);
-    }
-    minD = min(minD, thisD);
-  }
-  hOff += nLine;
 
-  for (int i = 0; i < 1024; i++) {
-    if (i >= nQuad) break;
-    vec2 segRaw = bandEntry(gl, arrIdx, hOff + i);
+    float dSpill = 1e30;
+    if (dashId > 0 && ((tRaw < 0.0 && !freeStart && startCap != 0) || (tRaw > 1.0 && !freeEnd && endCap != 0))) {
+      bool atSp = tRaw < 0.0;
+      vec2 vSp = cq - (atSp ? a : b);
+      float aSp = dot(vSp, segTan);
+      float latSp = length(vSp - segTan * aSp);
+      vec2 rSp = dashCapReach(dashId, hdr.w + tRaw * abLen, startCap == 0 && endCap == 0);
+      float oSp = atSp ? rSp.y : rSp.x;
+      bool seamHere = (atSp ? strokeSeamMergeLo : strokeSeamMergeHi) && abs(oSp - abs(aSp)) <= strokeSeamTol;
+      if (oSp >= abs(aSp) * 0.999995 && oSp < 1e29 && !seamHere) dSpill = (atSp ? startCap : endCap) == 2 ? max(latSp, oSp) : length(vec2(latSp, oSp));
+    }
+    if (drop) {
+      if (dSpill < minD) {
+        minD2 = minD; minD = dSpill; gradOut = vec2(0.0);
+        if (!framed) { edgeP = vec4(0.0); edgeQ = vec4(0.0); winD = dSpill; }
+        else {
+          float key = seDocKey(vec4(0.0), vec4(0.0), N, dSpill > halfW ? dSpill - halfW : (dSpill - halfW) / kMaxN);
+          if (key < bestKey) { bestKey = key; edgeP = vec4(0.0); edgeQ = vec4(0.0); winD = dSpill; }
+        }
+      }
+      continue;
+    }
+    float tC = clamp(tRaw, 0.0, 1.0);
+
+    bool bodyHit = thisD < 0.0;
+    vec2 bodyG = vec2(0.0);
+    if (bodyHit) {
+      vec2 closestPt = mix(a, b, tC);
+      vec2 g = cq - closestPt;
+      thisD = length(g);
+
+      bodyG = thisD > 0.0 ? g / thisD : g;
+
+      if (sP.w == 0.0) sP = thisD > 0.0 ? vec4(bodyG, thisD - halfW, -thisD - halfW > -aaEm ? 9.0 : 1.0)
+                                        : seSlab(cq - a, segTan, halfW, aaEm);
+
+      float endD = -1.0;
+      if (freeStart && startCap == 0) endD = halfW + dot(cq - a, -segTan);
+      if (freeEnd && endCap == 0) endD = max(endD, halfW + dot(cq - b, segTan));
+
+      if (freeStart && startCap == 0) seAnd(sP, sQ, -segTan, dot(cq - a, -segTan), aaEm);
+      if (freeEnd && endCap == 0) seAnd(sP, sQ, segTan, dot(cq - b, segTan), aaEm);
+      if (endD > thisD) { thisD = endD; bodyHit = false; }
+
+      bool atEndU = freeStart || (!freeEnd && tRaw >= 0.5);
+
+      if (dashId == 0 && !framed && (sP.w == 1.0 || sP.w == 9.0) && (atEndU ? !freeEnd : !freeStart)) {
+        vec2 qJ = cq - (atEndU ? b : a), dIn = atEndU ? segTan : inTan, dOut = atEndU ? outTan : segTan;
+        joinRec = seNearOuterJoin(qJ, dIn, dOut, segTan, atEndU ? segTan : -segTan, mix(a, b, tC) - (atEndU ? b : a), aaEm);
+        if (joinRec) seJoinRecord(qJ, dIn, dOut, atEndU, joinStyle, miterLimit, halfW, aaEm, sP, sQ);
+      }
+      if ((sP.w == 1.0 || sP.w == 9.0) && (atEndU ? !freeEnd : !freeStart)) {
+        vec2 nbU = atEndU ? outTan : inTan, qU = cq - (atEndU ? b : a);
+        float turn = atEndU ? segTan.x * nbU.y - segTan.y * nbU.x : nbU.x * segTan.y - nbU.y * segTan.x;
+        if (abs(turn) > 1.0 / 64.0 && dot(qU, vec2(-segTan.y, segTan.x)) * turn > 0.0) {
+          vec2 pnU = vec2(-nbU.y, nbU.x) * (turn > 0.0 ? 1.0 : -1.0);
+          seOr(sP, sQ, pnU, dot(qU, pnU) - halfW, aaEm);
+        }
+      }
+
+      bool capEndU = tRaw >= 0.5;
+      vec2 qC = cq - (capEndU ? b : a), uC = capEndU ? segTan : -segTan;
+      if (dashId == 0 && !framed && (sP.w <= 1.0 || sP.w == 9.0) && !joinRec && (capEndU ? freeEnd && endCap == 1 : freeStart && startCap == 1)
+          && dot(qC, uC) > -aaEm)
+        seDisc(sP, sQ, qC, uC, halfW);
+    }
+
+    if (dashId > 0) {
+      vec2 gD = bodyHit ? bodyG : vec2(0.0);
+
+      float dIn = thisD;
+      vec2 gIn = gD;
+      bool roundEnd = (tRaw < 0.0 && freeStart && startCap == 1) || (tRaw > 1.0 && freeEnd && endCap == 1);
+      if (roundEnd) {
+        vec2 latV = (tRaw < 0.0 ? a : b) - cq;
+        latV -= segTan * dot(latV, segTan);
+        float lat = length(latV);
+        dIn = lat;
+        gD = lat > 0.0 ? latV / lat : vec2(0.0);
+      }
+      float dOut = strokeDashDist(dIn, gD, segTan, halfW, dashId, hdr.w + tRaw * abLen, startCap, endCap,
+                                  hdr.w, hdr.w + abLen, aaEm, sP, sQ);
+      if (dOut == dIn && roundEnd) gD = gIn;
+      else thisD = dOut;
+      bodyG = gD; bodyHit = dot(gD, gD) > 0.5;
+    }
+    if (dSpill < thisD) { thisD = dSpill; sP = vec4(0.0); sQ = vec4(0.0); bodyG = vec2(0.0); bodyHit = false; joinRec = false; }
+
+    if (sP.w == 1.0 && !joinRec && abs(sP.z - (thisD - halfW)) > (1.0 / 1024.0) * aaEm) { sP = vec4(0.0); sQ = vec4(0.0); }
+    if (thisD < minD) { if (edgeP.w == 1.0) { secN = edgeP.xy; secE = edgeP.z; } else secE = 1e20; minD2 = minD; minD = thisD; gradOut = bodyHit ? bodyG : vec2(0.0); if (!framed) { edgeP = sP; edgeQ = sQ; winD = thisD; } }
+    else { if (thisD < minD2) { if (sP.w == 1.0) { secN = sP.xy; secE = sP.z; } else secE = 1e20; } minD2 = min(minD2, thisD); }
+    if (framed) {
+      float key = seDocKey(sP, sQ, N, thisD > halfW ? thisD - halfW : (thisD - halfW) / kMaxN);
+      if (key < bestKey) { bestKey = key; edgeP = sP; edgeQ = sQ; winD = thisD; }
+    }
+    if (uStrokeGates != 0 && minD <= satD) { edgeP = sP; edgeQ = sQ; return minD; }
+  }
+#endif
+  hE += nLine;
+
+#ifndef MANTLE_NO_QUAD
+  for (int i = 0; i < nQuad; i++) {
+    vec4 segRaw = bFetchL(hE + i);
     if (segRaw.y < sBreak) break;
-    ivec2 sL = segLocXY(segRaw.x);
-    vec4 hdr = texFetch(sL);
-    if (uint(hdr.x) >= 4u) continue;
+
+    if (farGate && segRaw.z > sFar) continue;
+
+    int sL = int(segRaw.x);
+    vec4 p12 = cFetchL(sL + 1) - vec4(c, c);
+    vec4 q3t = cFetchL(sL + 2);
+    vec2 q3  = q3t.xy - c;
+    if (framed) { p12 = vec4(strokeFrameMul(N, p12.xy), strokeFrameMul(N, p12.zw)); q3 = strokeFrameMul(N, q3); }
+    if (uStrokeGates != 0 && strokeHullOutOfReach(min(min(p12.xy, p12.zw), q3),
+                             max(max(p12.xy, p12.zw), q3), _reach)) continue;
+    if (uStrokeGates != 0 && strokeQuadOutOfReach(p12.xy, p12.zw, q3, _reach)) continue;
+    vec4 hdr = cFetchL(sL);
+    if ((uint(hdr.x) & 4u) != 0u) continue;
     bool freeStart = hdr.y > 0.5;
     bool freeEnd   = hdr.z > 0.5;
-    ivec2 dL = ivec2(sL.x + 1, sL.y);
-    vec4 p12 = texFetch(dL) - vec4(c, c);
-    vec4 q3t = texFetch(ivec2(dL.x + 1, dL.y));
-    vec2 q3  = q3t.xy - c;
-    vec2 joinReach = q3t.zw;
-    vec4 jn = texFetch(ivec2(dL.x + 2, dL.y));
+    strokeSeamSet(hdr.y, hdr.z);
+    strokeSeamResolve(dashId, aaEm, freeStart, freeEnd);
 
-    vec4 curv = (joinStyle == 4) ? texFetch(ivec2(dL.x + 3, dL.y)) : vec4(0.0);
-    minD = strokeQuadAccum(p12, q3, freeStart, freeEnd,
+    vec4 jn = cFetchL(sL + 3);
+    if (framed) jn = vec4(strokeFrameDir(N, jn.xy), strokeFrameDir(N, jn.zw));
+
+    vec4 curv = (joinStyle == 4) ? cFetchL(sL + 4) : vec4(0.0);
+    vec2 _segGrad = vec2(0.0); vec4 _sP, _sQ;
+    float segD = strokeQuadAccum(p12, q3, freeStart, freeEnd,
                            startCap, endCap,
                            joinStyle, miterLimit, halfW,
                            jn.xy, jn.zw, dashId, hdr.w,
-                           joinReach.x, joinReach.y, curv, minD);
-  }
-  hOff += nQuad;
+                           curv, 1e20, _segGrad, aaEm, _sP, _sQ);
 
-  for (int i = 0; i < 1024; i++) {
-    if (i >= nCubic) break;
-    vec2 segRaw = bandEntry(gl, arrIdx, hOff + i);
+    if (segD < minD) { if (edgeP.w == 1.0) { secN = edgeP.xy; secE = edgeP.z; } else secE = 1e20; minD2 = minD; minD = segD; gradOut = _segGrad; if (!framed) { edgeP = _sP; edgeQ = _sQ; winD = segD; } }
+    else { if (segD < minD2) { if (_sP.w == 1.0) { secN = _sP.xy; secE = _sP.z; } else secE = 1e20; } minD2 = min(minD2, segD); }
+    if (framed) {
+      float key = seDocKey(_sP, _sQ, N, segD > halfW ? segD - halfW : (segD - halfW) / kMaxN);
+      if (key < bestKey) { bestKey = key; edgeP = _sP; edgeQ = _sQ; winD = segD; }
+    }
+    if (uStrokeGates != 0 && minD <= satD) { edgeP = _sP; edgeQ = _sQ; return minD; }
+  }
+#endif
+  hE += nQuad;
+
+#ifndef MANTLE_NO_CUBIC
+  for (int i = 0; i < nCubic; i++) {
+    vec4 segRaw = bFetchL(hE + i);
     if (segRaw.y < sBreak) break;
-    ivec2 sL = segLocXY(segRaw.x);
-    vec4 hdr = texFetch(sL);
-    if (uint(hdr.x) >= 4u) continue;
+
+    if (farGate && segRaw.z > sFar) continue;
+
+    int sL = int(segRaw.x);
+    vec4 p12 = cFetchL(sL + 1) - vec4(c, c);
+    vec4 p34 = cFetchL(sL + 2) - vec4(c, c);
+    if (framed) {
+      p12 = vec4(strokeFrameMul(N, p12.xy), strokeFrameMul(N, p12.zw));
+      p34 = vec4(strokeFrameMul(N, p34.xy), strokeFrameMul(N, p34.zw));
+    }
+    if (uStrokeGates != 0 && strokeHullOutOfReach(min(min(p12.xy, p12.zw), min(p34.xy, p34.zw)),
+                             max(max(p12.xy, p12.zw), max(p34.xy, p34.zw)), _reach)) continue;
+    if (uStrokeGates != 0 && strokeCubicOutOfReach(p12, p34, _reach)) continue;
+    vec4 hdr = cFetchL(sL);
+    if ((uint(hdr.x) & 4u) != 0u) continue;
     bool freeStart = hdr.y > 0.5;
     bool freeEnd   = hdr.z > 0.5;
-    ivec2 dL = ivec2(sL.x + 1, sL.y);
-    vec4 p12 = texFetch(dL) - vec4(c, c);
-    vec4 p34 = texFetch(ivec2(dL.x + 1, dL.y)) - vec4(c, c);
-    vec4 jn = texFetch(ivec2(dL.x + 2, dL.y));
-    vec4 curv = (joinStyle == 4) ? texFetch(ivec2(dL.x + 3, dL.y)) : vec4(0.0);
-    minD = strokeCubicAccum(p12, p34, freeStart, freeEnd,
+    strokeSeamSet(hdr.y, hdr.z);
+    strokeSeamResolve(dashId, aaEm, freeStart, freeEnd);
+    vec4 jn = cFetchL(sL + 3);
+    if (framed) jn = vec4(strokeFrameDir(N, jn.xy), strokeFrameDir(N, jn.zw));
+    vec4 curv = (joinStyle == 4) ? cFetchL(sL + 4) : vec4(0.0);
+    vec2 _segGrad = vec2(0.0); vec4 _sP, _sQ;
+    float segD = strokeCubicAccum(p12, p34, freeStart, freeEnd,
                                 startCap, endCap,
                                 joinStyle, miterLimit, halfW,
                                 jn.xy, jn.zw, dashId, hdr.w,
-                                1e9, 1e9, curv, minD);
-  }
-  hOff += nCubic;
+                                curv, 1e20, _segGrad, aaEm, _sP, _sQ);
 
-  for (int i = 0; i < 1024; i++) {
-    if (i >= nArc) break;
-    vec2 segRaw = bandEntry(gl, arrIdx, hOff + i);
+    if (segD < minD) { if (edgeP.w == 1.0) { secN = edgeP.xy; secE = edgeP.z; } else secE = 1e20; minD2 = minD; minD = segD; gradOut = _segGrad; if (!framed) { edgeP = _sP; edgeQ = _sQ; winD = segD; } }
+    else { if (segD < minD2) { if (_sP.w == 1.0) { secN = _sP.xy; secE = _sP.z; } else secE = 1e20; } minD2 = min(minD2, segD); }
+    if (framed) {
+      float key = seDocKey(_sP, _sQ, N, segD > halfW ? segD - halfW : (segD - halfW) / kMaxN);
+      if (key < bestKey) { bestKey = key; edgeP = _sP; edgeQ = _sQ; winD = segD; }
+    }
+    if (uStrokeGates != 0 && minD <= satD) { edgeP = _sP; edgeQ = _sQ; return minD; }
+  }
+#endif
+  hE += nCubic;
+
+#ifndef MANTLE_NO_ARC
+  for (int i = 0; i < nArc; i++) {
+    vec4 segRaw = bFetchL(hE + i);
     if (segRaw.y < sBreak) break;
-    ivec2 sL = segLocXY(segRaw.x);
-    vec4 hdr = texFetch(sL);
-    if (uint(hdr.x) >= 4u) continue;
+
+    if (farGate && segRaw.z > sFar) continue;
+    int sL = int(segRaw.x);
+    vec4 hdr = cFetchL(sL);
+    if ((uint(hdr.x) & 4u) != 0u) continue;
     bool freeStart = hdr.y > 0.5;
     bool freeEnd   = hdr.z > 0.5;
-    ivec2 dL = ivec2(sL.x + 1, sL.y);
-    vec4 d1 = texFetch(dL);
-    vec4 d2 = texFetch(ivec2(dL.x + 1, dL.y));
-    vec4 jn = texFetch(ivec2(dL.x + 2, dL.y));
-    vec4 curv = (joinStyle == 4) ? texFetch(ivec2(dL.x + 3, dL.y)) : vec4(0.0);
+    strokeSeamSet(hdr.y, hdr.z);
+    strokeSeamResolve(dashId, aaEm, freeStart, freeEnd);
+    vec4 d1 = cFetchL(sL + 1);
+    vec4 d2 = cFetchL(sL + 2);
+    vec4 jn = cFetchL(sL + 4);
+    vec4 curv = (joinStyle == 4) ? cFetchL(sL + 5) : vec4(0.0);
 
-    vec2 pc = c - d1.xy;
+    vec2 cq = c;
+    if (framed) {
+      d1 = vec4(d1.xy - c, d1.zw); strokeFrameArc(N, d1, d2); cq = vec2(0.0);
+      jn = vec4(strokeFrameDir(N, jn.xy), strokeFrameDir(N, jn.zw));
+    }
+
+    vec2 pc = cq - d1.xy;
     float cphi = cos(d2.z), sphi = sin(d2.z);
     vec2 pR = vec2(pc.x*cphi + pc.y*sphi, -pc.x*sphi + pc.y*cphi);
+
+    if (uStrokeGates != 0 && d1.z > 0.0 && d1.w > 0.0) {
+      float nrm = length(pR / d1.zw);
+      if (min(d1.z, d1.w) * abs(nrm - 1.0) > _reach * 1.0001 + 4e-6 * (length(pR) + max(d1.z, d1.w))) continue;
+    }
     vec2 ep0 = evalArc(d1.x, d1.y, d1.z, d1.w, d2.z, d2.x);
     vec2 ep1 = evalArc(d1.x, d1.y, d1.z, d1.w, d2.z, d2.y);
-    float dE = min(length(c - ep0), length(c - ep1));
+    float dE = min(length(cq - ep0), length(cq - ep1));
 
     vec2 foot;
-    float dEdge = distToEllipse(d1.zw, pR, foot);
-    float tAng = atan(foot.y / max(d1.w, 1e-9), foot.x / max(d1.z, 1e-9));
-    bool inRange = arcInRange(tAng, d2.x, d2.y);
+    bool inRange;
+    float tAng;
+    float dEdge = arcClosestFoot(d1.zw, pR, d2.x, d2.y, foot, tAng, inRange);
+    if (inRange && dEdge > dE) inRange = false;
     float arcD = inRange ? min(dEdge, dE) : dE;
+
+    vec2 _arcGrad = vec2(0.0);
+    if (inRange && dEdge > 0.0) {
+      vec2 gl2 = (pR - foot) / dEdge;
+      _arcGrad = vec2(gl2.x * cphi - gl2.y * sphi, gl2.x * sphi + gl2.y * cphi);
+    }
 
     float dth = d2.y - d2.x;
     vec2 dStart = vec2(arcDxDtheta(d1.z, d1.w, d2.z, d2.x), arcDyDtheta(d1.z, d1.w, d2.z, d2.x)) * dth;
     vec2 dEnd   = vec2(arcDxDtheta(d1.z, d1.w, d2.z, d2.y), arcDyDtheta(d1.z, d1.w, d2.z, d2.y)) * dth;
+    if (d1.z == 0.0 || d1.w == 0.0) { dStart = ep1 - ep0; dEnd = dStart; }
     float tArc;
-    if (inRange && dEdge <= dE) {
+    if (inRange) {
       float dd = hlslFmod(tAng - d2.x, TWO_PI);
       if (dd < 0.0) dd += TWO_PI;
       if (dth < 0.0 && dd > 0.0) dd -= TWO_PI;
       tArc = clamp(dd / dth, 0.0, 1.0);
     } else {
-      tArc = (length(c - ep0) <= length(c - ep1)) ? 0.0 : 1.0;
+      tArc = (length(cq - ep0) <= length(cq - ep1)) ? 0.0 : 1.0;
     }
     float arcLenAtT = (dashId > 0) ? arcArcLen(d1, d2, tArc) : 0.0;
-    minD = strokeCapsJoinsDash(tArc, arcD, ep0 - c, ep1 - c, dStart, dEnd,
+
+    float thT = d2.x + tArc * dth;
+    vec2 tanT = (dashId > 0) ? strokeUnit(vec2(arcDxDtheta(d1.z, d1.w, d2.z, thT), arcDyDtheta(d1.z, d1.w, d2.z, thT)) * dth)
+                             : vec2(0.0);
+    vec4 _sP, _sQ;
+    vec2 _bodyG = _arcGrad;
+
+    float tEnd = tArc;
+    if (d1.z == 0.0 || d1.w == 0.0) {
+      vec2 ch = ep1 - ep0;
+      float c2 = dot(ch, ch);
+      if (c2 > 0.0) tEnd = clamp(dot(cq - ep0, ch) / c2, 0.0, 1.0);
+    }
+    float segD = strokeCapsJoinsDash(tEnd, arcD, ep0 - cq, ep1 - cq, dStart, dEnd,
                                freeStart, freeEnd, startCap, endCap,
                                joinStyle, miterLimit, halfW, jn.xy, jn.zw,
-                               1e9, 1e9, dashId, hdr.w, arcLenAtT, curv, minD);
-  }
+                               dashId, hdr.w, arcLenAtT, curv, 1e20, _arcGrad, tanT,
+                               (dashId > 0) ? hdr.w + arcArcLen(d1, d2, 1.0) : 1e30, aaEm, _sP, _sQ);
 
+    if (d1.z != 0.0 && d1.w != 0.0) {
+      for (int e = 0; e < 2; e++) {
+        if ((e == 0 && tEnd < 1e-4) || (e == 1 && tEnd > 1.0 - 1e-4)) continue;
+        if (tEnd >= 1e-4 && tEnd <= 1.0 - 1e-4 && !strokeEndCandidate(freeStart, freeEnd, startCap, endCap, joinStyle, dashId, e)) continue;
+        vec2 pE = (e == 0 ? ep0 : ep1) - cq, uE = e == 0 ? -strokeUnit(dStart) : strokeUnit(dEnd);
+        if (!(dot(-pE, uE) > 0.0) || length(pE) > halfW * (max(miterLimit, 1.0) + 1.0) + aaEm) continue;
+        if (joinStyle == 4 && !(e == 0 ? freeStart : freeEnd)) continue;
+        vec2 gK = vec2(0.0);
+        vec4 eP2, eQ2;
+        float mdK = strokeCapsJoinsDash(float(e), length(pE), ep0 - cq, ep1 - cq, dStart, dEnd,
+                                        freeStart, freeEnd, startCap, endCap,
+                                        joinStyle, miterLimit, halfW, jn.xy, jn.zw,
+                                        dashId, hdr.w, (dashId > 0 && e == 1) ? arcArcLen(d1, d2, 1.0) : 0.0, curv, 1e20, gK,
+                                        strokeUnit(e == 0 ? dStart : dEnd),
+                                        (dashId > 0) ? hdr.w + arcArcLen(d1, d2, 1.0) : 1e30, aaEm, eP2, eQ2);
+        if (mdK < segD) { segD = mdK; _sP = eP2; _sQ = eQ2; _arcGrad = gK; }
+      }
+    }
+
+    if (abs(d1.z - d1.w) <= (1.0 / 1048576.0) * d1.z) {
+      float D = length(pc), delta = min(tArc, 1.0 - tArc) * abs(dth), R = 0.5 * (d1.z + d1.w);
+      vec2 uc = D > 0.0 ? pc / D : vec2(1.0, 0.0);
+      bool inside = D > aaEm && aaEm < D * sin(min(delta, 1.5707963));
+
+      bool ends = dashId == 0 && freeStart && freeEnd && startCap != 2 && endCap != 2
+        && ((startCap == 0 && endCap == 0) || (R >= halfW && TWO_PI - abs(dth) >= 2.0 * asin(halfW / R)));
+      if (ends) {
+        _sP = vec4(uc, segD - halfW, 5.0); _sQ = vec4(R, D, 0.0, 0.0);
+        if (!inside) {
+
+          vec2 ps = ep0 - d1.xy, pe = ep1 - d1.xy, pm = evalArc(0.0, 0.0, d1.z, d1.w, d2.z, 0.5 * (d2.x + d2.y));
+          float as0 = curveAtan2(ps.y, ps.x), s1 = mod(curveAtan2(pe.y, pe.x) - as0, TWO_PI), sm = mod(curveAtan2(pm.y, pm.x) - as0, TWO_PI);
+          bool fwd = sm < s1;
+          int c0 = fwd ? startCap : endCap, c1 = fwd ? endCap : startCap;
+          _sP = vec4(uc, segD - halfW, 5.0 + float(c0) + 2.0 * float(c1));
+          _sQ = vec4(R, D, fwd ? as0 : as0 + s1, fwd ? s1 : TWO_PI - s1);
+        }
+      } else if (inside && (_sP.w == 1.0 || _sP.w == 9.0) && _sP.x == _bodyG.x && _sP.y == _bodyG.y && _sP.z == arcD - halfW) {
+        _sP = vec4(uc, _sP.z, 5.0); _sQ = vec4(R, D, 0.0, 0.0);
+      }
+    }
+    if (segD < minD) { if (edgeP.w == 1.0) { secN = edgeP.xy; secE = edgeP.z; } else secE = 1e20; minD2 = minD; minD = segD; gradOut = _arcGrad; if (!framed) { edgeP = _sP; edgeQ = _sQ; winD = segD; } }
+    else { if (segD < minD2) { if (_sP.w == 1.0) { secN = _sP.xy; secE = _sP.z; } else secE = 1e20; } minD2 = min(minD2, segD); }
+    if (framed) {
+      float key = seDocKey(_sP, _sQ, N, segD > halfW ? segD - halfW : (segD - halfW) / kMaxN);
+      if (key < bestKey) { bestKey = key; edgeP = _sP; edgeQ = _sQ; winD = segD; }
+    }
+    if (uStrokeGates != 0 && minD <= satD) { edgeP = _sP; edgeQ = _sQ; return minD; }
+  }
+#endif
+
+  if (!framed && edgeP.w == 1.0 && secE < aaEm) { edgeQ = vec4(secN, secE, 0.0); edgeP = vec4(edgeP.xyz, 3.0); }
+  float otherD = winD > minD ? minD : minD2;
+  if (edgeP.w == 3.0 && !(otherD <= halfW + edgeQ.z + (1.0 / 256.0) * aaEm)) edgeP = vec4(edgeP.xyz, 1.0);
   return minD;
+}
+
+float strokeWalk(vec2 c, ivec4 GD, vec4 shapeBB, vec4 N, bool framed, inout float halfW,
+                 int startCap, int endCap, int joinStyle, float miterLimit,
+                 int dashId, out vec2 gradOut, float satD, float aaEm, vec2 ePx, bool saturate,
+                 out vec4 edgeP, out vec4 edgeQ) {
+  ivec2 gl = GD.xy;
+  int bandsX = GD.z + 1;
+  int bandsY = GD.w + 1;
+  vec2 bbSize = bandBoxSize(shapeBB);
+  ivec2 bandIdx = clamp(ivec2((c - shapeBB.xy) / bbSize * vec2(bandsX, bandsY)),
+                        ivec2(0), ivec2(bandsX - 1, bandsY - 1));
+  if (framed) {
+    float kMax = length(vec2(0.5 * (N.x + N.w), 0.5 * (N.y - N.z))) + length(vec2(0.5 * (N.x - N.w), 0.5 * (N.y + N.z)));
+    vec2 ePxS = ePx * kMax;
+    satD = saturate ? max(halfW - 0.5 * length(ePxS), 0.0) : -1e20;
+    aaEm = strokeAaReachEm(halfW, ePxS);
+  } else N = vec4(0.0);
+  vec2 g;
+  float d = strokeBandAccum(gl, bandIdx.y * 2, c, halfW, startCap, endCap, joinStyle, miterLimit, dashId, 1e20, g,
+                            satD, aaEm, N, framed, edgeP, edgeQ);
+  if (!framed) { gradOut = g; return d; }
+  float s;
+  if (dot(g, g) > 0.5) { vec2 gd = strokeFrameMulT(N, g); s = length(gd); gradOut = gd / s; }
+  else { s = sqrt(abs(N.x * N.w - N.y * N.z)); gradOut = vec2(0.0); }
+  halfW = halfW / s;
+  return d / s;
 }
 
 float strokeMinDist(vec2 c, ivec4 GD, vec4 shapeBB, float halfW,
                         int startCap, int endCap,
                         int joinStyle, float miterLimit,
-                        int dashId) {
-  ivec2 gl = GD.xy;
-  int bandsX = GD.z + 1;
-  int bandsY = GD.w + 1;
-  vec2 bbSize = max(shapeBB.zw - shapeBB.xy, vec2(1e-6));
-  ivec2 bandIdx = clamp(ivec2((c - shapeBB.xy) / bbSize * vec2(bandsX, bandsY)),
-                        ivec2(0), ivec2(bandsX - 1, bandsY - 1));
-  int hdr = bandIdx.y * 2;
-  return strokeBandAccum(gl, hdr, c, halfW,
-                             startCap, endCap,
-                             joinStyle, miterLimit, dashId, 1e20);
+                        int dashId, out vec2 gradOut, float satD, float aaEm,
+                        out vec4 edgeP, out vec4 edgeQ) {
+  return strokeWalk(c, GD, shapeBB, vec4(0.0), false, halfW, startCap, endCap, joinStyle, miterLimit, dashId, gradOut,
+                    satD, aaEm, vec2(0.0), false, edgeP, edgeQ);
+}
+
+float strokeMinDistLocal(vec2 c, ivec4 GD, vec4 shapeBB, vec4 N, inout float halfW,
+                         int startCap, int endCap, int joinStyle, float miterLimit,
+                         int dashId, out vec2 gradOut, vec2 ePx, bool saturate,
+                         out vec4 edgeP, out vec4 edgeQ) {
+  return strokeWalk(c, GD, shapeBB, N, true, halfW, startCap, endCap, joinStyle, miterLimit, dashId, gradOut,
+                    0.0, 0.0, ePx, saturate, edgeP, edgeQ);
 }
 
 uint calcRootCode2(float y1, float y2, float y3) {
@@ -1086,14 +2520,12 @@ vec4 slugSolveHorizQuad(vec4 p12, vec2 p3) {
   vec2 a = p12.xy - p12.zw * 2.0 + p3;
   vec2 b = p12.xy - p12.zw;
   float ra = 1.0 / a.y;
-  float rb = 0.5 / b.y;
   float d = sqrt(max(b.y * b.y - a.y * p12.y, 0.0));
   float q  = b.y + (b.y >= 0.0 ? d : -d);
   float tBig = q * ra;
-  float tSml = (d > 0.0 && abs(q) > 1e-30) ? p12.y / q : tBig;
+  float tSml = (d > 0.0) ? p12.y / q : tBig;
   float t1 = b.y >= 0.0 ? tSml : tBig;
   float t2 = b.y >= 0.0 ? tBig : tSml;
-  if (abs(a.y) < 1.0/65536.0) { t1 = p12.y * rb; t2 = t1; }
   return vec4((a.x * t1 - b.x * 2.0) * t1 + p12.x,
               (a.x * t2 - b.x * 2.0) * t2 + p12.x,
               t1, t2);
@@ -1103,20 +2535,18 @@ vec4 slugSolveVertQuad(vec4 p12, vec2 p3) {
   vec2 a = p12.xy - p12.zw * 2.0 + p3;
   vec2 b = p12.xy - p12.zw;
   float ra = 1.0 / a.x;
-  float rb = 0.5 / b.x;
   float d = sqrt(max(b.x * b.x - a.x * p12.x, 0.0));
   float q  = b.x + (b.x >= 0.0 ? d : -d);
   float tBig = q * ra;
-  float tSml = (d > 0.0 && abs(q) > 1e-30) ? p12.x / q : tBig;
+  float tSml = (d > 0.0) ? p12.x / q : tBig;
   float t1 = b.x >= 0.0 ? tSml : tBig;
   float t2 = b.x >= 0.0 ? tBig : tSml;
-  if (abs(a.x) < 1.0/65536.0) { t1 = p12.x * rb; t2 = t1; }
   return vec4((a.y * t1 - b.y * 2.0) * t1 + p12.y,
               (a.y * t2 - b.y * 2.0) * t2 + p12.y,
               t1, t2);
 }
-void solveCubicBisect(vec4 p12, vec4 p34, bool vert, out vec3 r, out vec3 t) {
-  r = vec3(1e20); t = vec3(-1.0);
+void solveCubicBisect(vec4 p12, vec4 p34, bool vert, out vec3 r, out vec3 t, out vec3 up) {
+  r = vec3(1e20); t = vec3(-1.0); up = vec3(0.0);
   vec4 cy = cubicCoeff(vert?p12.x:p12.y, vert?p12.z:p12.w, vert?p34.x:p34.y, vert?p34.z:p34.w);
   vec4 cx = cubicCoeff(vert?p12.y:p12.x, vert?p12.w:p12.z, vert?p34.y:p34.x, vert?p34.w:p34.z);
 
@@ -1145,43 +2575,54 @@ void solveCubicBisect(vec4 p12, vec4 p34, bool vert, out vec3 r, out vec3 t) {
     }
   }
 
-  float bds[4];
-  bds[0] = 0.0;
-  int nb = 1;
-  if (split1 > 0.0) { bds[nb] = split1; nb++; }
-  if (split2 > 0.0) { bds[nb] = split2; nb++; }
-  bds[nb] = 1.0; nb++;
+  float yEnd0 = vert ? p12.x : p12.y, yEnd1 = vert ? p34.z : p34.w;
 
-  int slot = 0;
+  float d0 = vert ? p12.z - p12.x : p12.w - p12.y, d1 = vert ? p34.x - p12.z : p34.y - p12.w, d2 = vert ? p34.z - p34.x : p34.w - p34.y;
+  if (d0 == 0.0 || d2 == 0.0) {
+    float tEnd = (d2 == 0.0) ? 1.0 : 0.0;
+    float num = (d2 == 0.0) ? d0 : 2.0 * d1, den = (d2 == 0.0) ? d0 - 2.0 * d1 : 2.0 * d1 - d2;
+    float s = (d0 == d2 || den == 0.0) ? -1.0 : num / den;
+    float keep = -1.0;
+    if (s > 0.0 && s < 1.0) {
+      keep = s;
+      if (split1 > 0.0 && abs(split1 - s) < abs(split1 - tEnd)) keep = split1;
+      else if (split2 > 0.0 && abs(split2 - s) < abs(split2 - tEnd)) keep = split2;
+    }
+    split1 = keep;
+    split2 = -1.0;
+  }
+  float b1 = (split1 > 0.0) ? split1 : 1.0, b2 = (split2 > 0.0) ? split2 : 1.0;
+  float lo = 0.0, yLo = yEnd0;
   for (int i = 0; i < 3; i++) {
-    if (i + 1 >= nb) break;
-    float lo = bds[i], hi = bds[i + 1];
-    float yLo = evalC(cy, lo);
-    float yHi = evalC(cy, hi);
-    bool sLo = yLo > 0.0;
-    bool sHi = yHi > 0.0;
+    if (lo >= 1.0) break;
+    float hi = (i == 0) ? b1 : ((i == 1) ? b2 : 1.0);
 
-    const float EPS = 1e-6;
-    if (abs(yLo) < EPS && abs(yHi) >= EPS) sLo = !sHi;
-    else if (abs(yHi) < EPS && abs(yLo) >= EPS) sHi = !sLo;
-    if (sLo == sHi) continue;
+    float yHi = (hi < 1.0) ? evalC(cy, hi) : yEnd1;
+    bool sHi = yHi >= 0.0;
+    bool sLo = yLo >= 0.0;
+    if (sLo != sHi) {
 
-    float fLo = evalC(cy, lo) - 0.0, fHi = evalC(cy, hi) - 0.0;
-    float sden = fHi - fLo;
-    float xr = (abs(sden) > 1e-12) ? clamp(lo - fLo * (hi - lo) / sden, lo, hi)
-                                   : 0.5 * (lo + hi);
-    for (int k = 0; k < SLUG_NEWTON; k++) {
-      float fy = evalC(cy, xr);
-      float fdy = evalCD(cy, xr);
-      if (abs(fdy) < 1e-12) break;
-      float xn = xr - fy / fdy;
-      xr = clamp(xn, lo, hi);
+      float sden = yHi - yLo;
+      float xr = clamp(lo - yLo * (hi - lo) / sden, lo, hi);
+
+      float bl = lo, bh = hi;
+      bool onEnd = (yHi == 0.0 || yLo == 0.0);
+      if (onEnd) xr = (yHi == 0.0) ? hi : lo;
+      for (int k = 0; k < SLUG_NEWTON; k++) {
+        if (onEnd) break;
+        float fy = evalC(cy, xr);
+        if (fy == 0.0) break;
+        if ((fy >= 0.0) == sLo) bl = xr; else bh = xr;
+        float fdy = evalCD(cy, xr);
+        float xn = (fdy != 0.0) ? xr - fy / fdy : 0.5 * (bl + bh);
+        xr = (xn >= bl && xn <= bh) ? xn : 0.5 * (bl + bh);
+      }
+      float rr = evalC(cx, xr), uu = sHi ? 1.0 : 0.0;
+      if (i == 0) { t.x = xr; r.x = rr; up.x = uu; }
+      else if (i == 1) { t.y = xr; r.y = rr; up.y = uu; }
+      else { t.z = xr; r.z = rr; up.z = uu; }
     }
-    if (slot < 3) {
-      t[slot] = xr;
-      r[slot] = evalC(cx, xr);
-      slot++;
-    }
+    lo = hi; yLo = yHi;
   }
 }
 
@@ -1190,7 +2631,6 @@ float exactBoxCov(vec2 n, float d) {
   float b = min(abs(n.x), abs(n.y));
   float s = 0.5 * (a + b);
   float t = 0.5 * (a - b);
-
   if (d <= -s) return 0.0;
   if (d >=  s) return 1.0;
   float ab = max(2.0 * a * b, 1e-12);
@@ -1231,691 +2671,15 @@ float exactBoxCov2(vec2 n1, float d1, vec2 n2, float d2) {
   return abs(area) * 0.5;
 }
 
-float bparamOf(vec2 p) {
-  if (abs(p.y + 0.5) < 1e-4) return clamp(p.x + 0.5, 0.0, 1.0);
-  if (abs(p.x - 0.5) < 1e-4) return 1.0 + clamp(p.y + 0.5, 0.0, 1.0);
-  if (abs(p.y - 0.5) < 1e-4) return 2.0 + clamp(0.5 - p.x, 0.0, 1.0);
-  return 3.0 + clamp(0.5 - p.y, 0.0, 1.0);
-}
-vec2 cornerOf(int j) {
-  return j == 0 ? vec2(0.5, -0.5) : (j == 1 ? vec2(0.5, 0.5) : (j == 2 ? vec2(-0.5, 0.5) : vec2(-0.5, -0.5)));
-}
-
-bool chainFillSide(vec2 p0, vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
-  float best = 1e30; bool side = true;
-  for (int s = 0; s < 4; s++) {
-    vec2 A = s == 0 ? p0 : (s == 1 ? p1 : (s == 2 ? p2 : p3));
-    vec2 B = s == 0 ? p1 : (s == 1 ? p2 : (s == 2 ? p3 : p4));
-    vec2 d = B - A; float L2 = dot(d, d); if (L2 < 1e-20) continue;
-    float t = clamp(dot(-A, d) / L2, 0.0, 1.0);
-    vec2 c = A + t * d; float dd = dot(c, c);
-    if (dd < best) { best = dd; side = (d.y * A.x - d.x * A.y) >= 0.0; }
-  }
-  return side;
-}
-
-float chainMissCov(vec2 p0, vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
-  float best = 1e30; vec2 bA = vec2(0.0), bd2 = vec2(0.0); bool found = false;
-  for (int s = 0; s < 4; s++) {
-    vec2 A = s == 0 ? p0 : (s == 1 ? p1 : (s == 2 ? p2 : p3));
-    vec2 B = s == 0 ? p1 : (s == 1 ? p2 : (s == 2 ? p3 : p4));
-    vec2 d = B - A; float L2 = dot(d, d); if (L2 < 1e-20) continue;
-    float t = clamp(dot(-A, d) / L2, 0.0, 1.0);
-    vec2 c = A + t * d; float dd = dot(c, c);
-    if (dd < best) { best = dd; bA = A; bd2 = d; found = true; }
-  }
-
-  if (!found || best > 2.0) return -1.0;
-  vec2 nOut = normalize(vec2(bd2.y, -bd2.x));
-  return exactBoxCov(nOut, dot(nOut, bA));
-}
-
-vec2 qAtC(vec2 A, vec2 C, vec2 B, float t) {
-  float u = 1.0 - t;
-  return u * u * A + 2.0 * u * t * C + t * t * B;
-}
-vec2 qTanC(vec2 A, vec2 C, vec2 B, float t) {
-  float u = 1.0 - t;
-  return 2.0 * (u * (C - A) + t * (B - C));
-}
-vec2 qSubCtrlC(vec2 A, vec2 C, vec2 B, float u, float v) {
-  return (1.0 - u) * (1.0 - v) * A + (u * (1.0 - v) + v * (1.0 - u)) * C + (u * v) * B;
-}
-
-float quadArcSide(vec2 A, vec2 C, vec2 B, vec2 p) {
-  vec2 e1 = C - A, e2 = B - A, r = p - A;
-  float det = e1.x * e2.y - e1.y * e2.x;
-  if (abs(det) < 1e-20) return 0.0;
-  float a = (r.x * e2.y - r.y * e2.x) / det;
-  float b = (e1.x * r.y - e1.y * r.x) / det;
-  float u = 0.5 * a + b, v = b;
-  return (u * u - v) * det;
-}
-float conicChainBoxCov(vec2 p0, vec2 c0, vec2 p1, vec2 c1, vec2 p2, float forceInside) {
-  if (forceInside > 1.5) {
-    vec2 lo = min(min(min(p0, c0), min(p1, c1)), p2);
-    vec2 hi = max(max(max(p0, c0), max(p1, c1)), p2);
-    if (hi.x < -0.500001 || lo.x > 0.500001 || hi.y < -0.500001 || lo.y > 0.500001) return 1.0;
-  }
-  vec2 poly[16];
-  vec2 tanAt[16];
-  bool isEntry[16];
-  int n = 0;
-  float corr = 0.0;
-  for (int s = 0; s < 2; s++) {
-    vec2 A = s == 0 ? p0 : p1;
-    vec2 C = s == 0 ? c0 : c1;
-    vec2 B = s == 0 ? p1 : p2;
-    if (dot(B - A, B - A) < 1e-12 && dot(C - A, C - A) < 1e-12) continue;
-    vec2 lo = min(A, min(C, B)), hi = max(A, max(C, B));
-    if (hi.x < -0.500001 || lo.x > 0.500001 || hi.y < -0.500001 || lo.y > 0.500001) continue;
-
-    float ts[10];
-    int m = 0;
-    ts[m++] = 0.0; ts[m++] = 1.0;
-    for (int ax = 0; ax < 2; ax++) {
-      float Aa = ax == 0 ? A.x : A.y, Ca = ax == 0 ? C.x : C.y, Ba = ax == 0 ? B.x : B.y;
-      float qa = Aa - 2.0 * Ca + Ba, qb = 2.0 * (Ca - Aa);
-      for (int li = 0; li < 2; li++) {
-        float qc = Aa - (li == 0 ? -0.5 : 0.5);
-        if (abs(qa) < 1e-14) {
-          if (abs(qb) > 1e-14) { float t = -qc / qb; if (t > 1e-9 && t < 1.0 - 1e-9 && m < 10) ts[m++] = t; }
-        } else {
-          float disc = qb * qb - 4.0 * qa * qc;
-          if (disc >= 0.0) {
-            float sq = sqrt(disc);
-            float qq = -0.5 * (qb + (qb >= 0.0 ? sq : -sq));
-            float r0 = qq / qa, r1 = abs(qq) > 1e-30 ? qc / qq : 1e9;
-            if (r0 > 1e-9 && r0 < 1.0 - 1e-9 && m < 10) ts[m++] = r0;
-            if (r1 > 1e-9 && r1 < 1.0 - 1e-9 && m < 10) ts[m++] = r1;
-          }
-        }
-      }
-    }
-    for (int i = 1; i < 10; i++) {
-      if (i >= m) break;
-      float key = ts[i]; int j = i - 1;
-      for (int k = 0; k < 10; k++) { if (j < 0 || ts[j] <= key) break; ts[j + 1] = ts[j]; j--; }
-      ts[j + 1] = key;
-    }
-    for (int i = 0; i < 9; i++) {
-      if (i + 1 >= m) break;
-      float u = ts[i], v = ts[i + 1];
-      if (v - u < 1e-12) continue;
-      vec2 mid = qAtC(A, C, B, 0.5 * (u + v));
-      if (max(abs(mid.x), abs(mid.y)) > 0.5 + 1e-9) continue;
-      vec2 P0 = qAtC(A, C, B, u), P2 = qAtC(A, C, B, v);
-      vec2 P1 = qSubCtrlC(A, C, B, u, v);
-      corr += (2.0 / 3.0) * ((P1.x - P0.x) * (P2.y - P0.y) - (P1.y - P0.y) * (P2.x - P0.x));
-      bool join = n > 0 && dot(poly[n - 1] - P0, poly[n - 1] - P0) < 1e-18;
-      if (!join && n < 16) { poly[n] = P0; tanAt[n] = qTanC(A, C, B, u); isEntry[n] = true; n++; }
-      if (n < 16) { poly[n] = P2; tanAt[n] = qTanC(A, C, B, v); isEntry[n] = false; n++; }
-    }
-  }
-  if (n < 2) {
-
-    float dA = 1e30, dB = 1e30;
-    { vec2 d = p1 - p0; float L2 = dot(d, d);
-      if (L2 > 1e-20) { vec2 c = p0 + clamp(dot(-p0, d) / L2, 0.0, 1.0) * d; dA = dot(c, c); } }
-    { vec2 d = p2 - p1; float L2 = dot(d, d);
-      if (L2 > 1e-20) { vec2 c = p1 + clamp(dot(-p1, d) / L2, 0.0, 1.0) * d; dB = dot(c, c); } }
-
-    if (forceInside > 1.5) return 1.0;
-    float near2 = min(dA, dB);
-    if (near2 > 1.0) return forceInside > 0.5 ? 1.0 : 0.0;
-    float sd = dA <= dB ? quadArcSide(p0, c0, p1, vec2(0.0)) : quadArcSide(p1, c1, p2, vec2(0.0));
-    if (sd == 0.0) sd = dA <= dB ? quadArcSide(p1, c1, p2, vec2(0.0)) : quadArcSide(p0, c0, p1, vec2(0.0));
-    if (sd != 0.0) return sd < 0.0 ? 1.0 : 0.0;
-    return forceInside > 0.5 ? 1.0 : 0.0;
-  }
-
-  if (max(abs(poly[n - 1].x), abs(poly[n - 1].y)) < 0.5 - 1e-4 && n < 16) {
-    vec2 dn = normalize(tanAt[n - 1]);
-    float tx = abs(dn.x) > 1e-6 ? ((dn.x > 0.0 ? 0.5 : -0.5) - poly[n - 1].x) / dn.x : 1e9;
-    float ty = abs(dn.y) > 1e-6 ? ((dn.y > 0.0 ? 0.5 : -0.5) - poly[n - 1].y) / dn.y : 1e9;
-    poly[n] = poly[n - 1] + dn * min(tx, ty); tanAt[n] = tanAt[n - 1]; isEntry[n] = false; n++;
-  }
-  if (max(abs(poly[0].x), abs(poly[0].y)) < 0.5 - 1e-4 && n < 16) {
-    vec2 dn = normalize(-tanAt[0]);
-    float tx = abs(dn.x) > 1e-6 ? ((dn.x > 0.0 ? 0.5 : -0.5) - poly[0].x) / dn.x : 1e9;
-    float ty = abs(dn.y) > 1e-6 ? ((dn.y > 0.0 ? 0.5 : -0.5) - poly[0].y) / dn.y : 1e9;
-    vec2 E2 = poly[0] + dn * min(tx, ty);
-    for (int i = 15; i >= 1; i--) if (i <= n) { poly[i] = poly[i - 1]; tanAt[i] = tanAt[i - 1]; isEntry[i] = isEntry[i - 1]; }
-
-    poly[0] = E2; isEntry[0] = true; isEntry[1] = false; n++;
-  }
-
-  float area = 0.0;
-  for (int i = 0; i < 16; i++) {
-    if (i >= n) break;
-    int jn = (i + 1 == n) ? 0 : i + 1;
-    vec2 a = poly[i], b = poly[jn];
-    bool gap = (jn == 0) || isEntry[jn];
-    if (!gap) { area += a.x * b.y - a.y * b.x; continue; }
-    vec2 dX = tanAt[i];
-    vec2 leftN = vec2(-dX.y, dX.x);
-    vec2 tCCW;
-    if (abs(a.y + 0.5) < 1e-4 && a.x < 0.5 - 1e-4) tCCW = vec2(1.0, 0.0);
-    else if (abs(a.x - 0.5) < 1e-4 && a.y < 0.5 - 1e-4) tCCW = vec2(0.0, 1.0);
-    else if (abs(a.y - 0.5) < 1e-4 && a.x > -0.5 + 1e-4) tCCW = vec2(-1.0, 0.0);
-    else tCCW = vec2(0.0, -1.0);
-    bool ccw = dot(tCCW, leftN) >= 0.0;
-    float pa = bparamOf(a), pb = bparamOf(b);
-    vec2 prev = a;
-    if (ccw) { float pbW = pb < pa ? pb + 4.0 : pb;
-      for (int j = 0; j < 8; j++) { float cp = float(j + 1);
-        if (cp > pa + 1e-5 && cp < pbW - 1e-5) { vec2 cnr = cornerOf(j - (j / 4) * 4);
-          area += prev.x * cnr.y - prev.y * cnr.x; prev = cnr; } }
-    } else { float pbW = pb > pa ? pb - 4.0 : pb;
-      for (int j = 7; j >= 0; j--) { float cp = float(j + 1) - 4.0;
-        if (cp < pa - 1e-5 && cp > pbW + 1e-5) { vec2 cnr = cornerOf(j - (j / 4) * 4);
-          area += prev.x * cnr.y - prev.y * cnr.x; prev = cnr; } }
-    }
-    area += prev.x * b.y - prev.y * b.x;
-  }
-  return clamp(abs(area + corr) * 0.5, 0.0, 1.0);
-}
-
-float chainBoxCov(vec2 p0, vec2 p1, vec2 p2, vec2 p3, vec2 p4, float forceInside) {
-  vec2 poly[12];
-  int n = 0;
-  vec2 X = vec2(0.0);
-  for (int s = 0; s < 4; s++) {
-    vec2 A = s == 0 ? p0 : (s == 1 ? p1 : (s == 2 ? p2 : p3));
-    vec2 B = s == 0 ? p1 : (s == 1 ? p2 : (s == 2 ? p3 : p4));
-    vec2 d = B - A;
-    if (dot(d, d) < 1e-12) continue;
-    vec2 lo = min(A, B), hi = max(A, B);
-    if (hi.x < -0.500001 || lo.x > 0.500001 || hi.y < -0.500001 || lo.y > 0.500001) continue;
-    float t0 = 0.0, t1 = 1.0; bool ok = true;
-    for (int k = 0; k < 4; k++) {
-      float P = k == 0 ? -d.x : (k == 1 ? d.x : (k == 2 ? -d.y : d.y));
-      float Q = k == 0 ? A.x + 0.5 : (k == 1 ? 0.5 - A.x : (k == 2 ? A.y + 0.5 : 0.5 - A.y));
-      if (abs(P) < 1e-12) { if (Q < 0.0) ok = false; }
-      else { float r = Q / P;
-        if (P < 0.0) { if (r > t1) ok = false; else if (r > t0) t0 = r; }
-        else { if (r < t0) ok = false; else if (r < t1) t1 = r; } }
-    }
-    if (!ok || t1 < t0) continue;
-    vec2 A2 = A + t0 * d, B2 = A + t1 * d;
-    if (n == 0) { poly[0] = A2; n = 1; }
-    else if (dot(poly[n - 1] - A2, poly[n - 1] - A2) > 1e-10 && n < 12) { poly[n] = A2; n++; }
-    if (n < 12) { poly[n] = B2; n++; }
-    X = B2;
-  }
-
-  if (n < 2) {
-    if (forceInside > 1.5) { float mc = chainMissCov(p0, p1, p2, p3, p4);
-      return mc < 0.0 ? 1.0 : mc; }
-    return (forceInside > 0.5 || chainFillSide(p0, p1, p2, p3, p4)) ? 1.0 : 0.0;
-  }
-
-  {
-    vec2 dEnd = poly[n - 1] - poly[n - 2];
-    if (max(abs(poly[n - 1].x), abs(poly[n - 1].y)) < 0.5 - 1e-4 && dot(dEnd, dEnd) > 1e-12 && n < 12) {
-      vec2 dn = normalize(dEnd);
-      float tx = abs(dn.x) > 1e-6 ? ((dn.x > 0.0 ? 0.5 : -0.5) - poly[n - 1].x) / dn.x : 1e9;
-      float ty = abs(dn.y) > 1e-6 ? ((dn.y > 0.0 ? 0.5 : -0.5) - poly[n - 1].y) / dn.y : 1e9;
-      poly[n] = poly[n - 1] + dn * min(tx, ty); n++;
-      X = poly[n - 1];
-    }
-    vec2 dBeg = poly[1] - poly[0];
-    if (max(abs(poly[0].x), abs(poly[0].y)) < 0.5 - 1e-4 && dot(dBeg, dBeg) > 1e-12 && n < 12) {
-      vec2 dn = normalize(-dBeg);
-      float tx = abs(dn.x) > 1e-6 ? ((dn.x > 0.0 ? 0.5 : -0.5) - poly[0].x) / dn.x : 1e9;
-      float ty = abs(dn.y) > 1e-6 ? ((dn.y > 0.0 ? 0.5 : -0.5) - poly[0].y) / dn.y : 1e9;
-      vec2 E2 = poly[0] + dn * min(tx, ty);
-      for (int i = 11; i >= 1; i--) if (i <= n) poly[i] = poly[i - 1];
-      poly[0] = E2; n++;
-    }
-  }
-  vec2 E = poly[0];
-  vec2 dX = poly[n - 1] - poly[n - 2];
-  vec2 leftN = vec2(-dX.y, dX.x);
-  vec2 tCCW;
-  if (abs(X.y + 0.5) < 1e-4 && X.x < 0.5 - 1e-4) tCCW = vec2(1.0, 0.0);
-  else if (abs(X.x - 0.5) < 1e-4 && X.y < 0.5 - 1e-4) tCCW = vec2(0.0, 1.0);
-  else if (abs(X.y - 0.5) < 1e-4 && X.x > -0.5 + 1e-4) tCCW = vec2(-1.0, 0.0);
-  else tCCW = vec2(0.0, -1.0);
-  bool ccw = dot(tCCW, leftN) >= 0.0;
-
-  float pa = bparamOf(X), pb = bparamOf(E);
-  if (ccw) { float pbW = pb < pa ? pb + 4.0 : pb;
-    for (int j = 0; j < 8; j++) { float cp = float(j + 1);
-      if (cp > pa + 1e-5 && cp < pbW - 1e-5 && n < 12) { poly[n] = cornerOf(j - (j / 4) * 4); n++; } }
-  } else { float pbW = pb > pa ? pb - 4.0 : pb;
-    for (int j = 7; j >= 0; j--) { float cp = float(j + 1) - 4.0;
-      if (cp < pa - 1e-5 && cp > pbW + 1e-5 && n < 12) { poly[n] = cornerOf(j - (j / 4) * 4); n++; } }
-  }
-  float area = 0.0;
-  for (int i = 0; i < 12; i++) {
-    if (i >= n) break;
-    vec2 a = poly[i], b = poly[(i + 1 == n) ? 0 : i + 1];
-    area += a.x * b.y - a.y * b.x;
-  }
-  return clamp(abs(area) * 0.5, 0.0, 1.0);
-}
-
-vec2 quadTanPx(vec4 p12, vec2 p3, float t, vec2 px) {
-  vec2 d = 2.0 * ((p12.zw - p12.xy) * (1.0 - t) + (p3 - p12.zw) * t);
-  return d * px;
-}
-vec2 cubicTanPx(vec4 p12, vec4 p34, float t, vec2 px) {
-  float u = 1.0 - t;
-  vec2 d = 3.0 * ((p12.zw - p12.xy) * (u * u) + (p34.xy - p12.zw) * (2.0 * u * t) + (p34.zw - p34.xy) * (t * t));
-  return d * px;
-}
-
-vec3 exLine(vec2 tanPx, vec2 ptPx) {
-  vec2 n = vec2(tanPx.y, -tanPx.x);
-  return vec3(n, dot(n, ptPx));
-}
-
-#ifdef MANTLE_EXACT_EDGE
-#define EX_H(V3) { exNH++; if (exNH == 1) { vec3 _v = (V3); \
-  if (dot(_v.xy, _v.xy) < 1e-18) exOther = true; else { exNrmH = _v.xy; exDH = _v.z; } } }
-#define EX_V(V3) { exNV++; if (exNV == 1) { vec3 _v = (V3); \
-  if (dot(_v.xy, _v.xy) < 1e-18) exOther = true; else { exNrmV = _v.xy; exDV = _v.z; } } }
-#else
-
-#define EX_H(V3) {}
-#define EX_V(V3) {}
-#endif
-
-#ifdef MANTLE_SLOPE_AA
-#define SL_H(RI) { float _r = (RI); if (abs(_r) < abs(slH)) slH = _r; }
-#define SL_V(RI) { float _r = (RI); if (abs(_r) < abs(slV)) slV = _r; }
-#else
-#define SL_H(RI) {}
-#define SL_V(RI) {}
-#endif
-
-vec4 fillLinear(vec2 c, vec2 px, ivec4 GD, vec4 shapeBB, out vec4 exInfo, out vec2 slInfo) {
-
-  ivec2 gl = GD.xy;
-  int bandsX = GD.z + 1;
-  int bandsY = GD.w + 1;
-  vec2 bbSize = max(shapeBB.zw - shapeBB.xy, vec2(1e-6));
-  ivec2 bandIdx = clamp(ivec2((c - shapeBB.xy) / bbSize * vec2(bandsX, bandsY)),
-                        ivec2(0), ivec2(bandsX - 1, bandsY - 1));
-  float xcov = 0.0, ycov = 0.0, xwgt = 0.0, ywgt = 0.0;
-
-#ifdef MANTLE_EXACT_EDGE
-  int exNH = 0, exNV = 0; bool exOther = false;
-  vec2 exNrmH = vec2(0.0), exNrmV = vec2(0.0); float exDH = 0.0, exDV = 0.0;
-#endif
-#ifdef MANTLE_SLOPE_AA
-  float slH = 1e30, slV = 1e30;
-#endif
-
-  float hBreak = c.x * px.x - 0.5;
-  float vBreak = c.y * px.y - 0.5;
-
-  {
-    int hdr = bandIdx.y * 2;
-    vec4 hCnts = bFetch(bLoc(gl, hdr));
-    int hLineN  = int(hCnts.x);
-    int hQuadN  = int(hCnts.y);
-    int hCubicN = int(hCnts.z);
-    int hArcN   = int(hCnts.w);
-    int arrIdx  = int(bFetch(bLoc(gl, hdr + 1)).x);
-    int hOff = 0;
-
-#ifndef MANTLE_NO_LINE
-
-    for (int i = 0; i < 1024; i++) {
-      if (i >= hLineN) break;
-      vec2 segRaw = bandEntry(gl, arrIdx, hOff + i);
-      if (segRaw.y * px.x < hBreak) break;
-      ivec2 sL = segLocXY(segRaw.x);
-      ivec2 dL = ivec2(sL.x + 1, sL.y);
-      vec4 p = texFetch(dL) - vec4(c, c);
-      if (max(p.x, p.z) * px.x < -0.5) continue;
-
-      bool p1Neg = p.y < 0.0;
-      bool p2Neg = p.w < 0.0;
-      if (p1Neg == p2Neg) continue;
-      float dy = p.w - p.y;
-      if (abs(dy) < 1.0 / 65536.0) continue;
-      float t  = -p.y / dy;
-      float rx = mix(p.x, p.z, t);
-      float ri = rx * px.x;
-
-      float sgn = p2Neg ? 1.0 : -1.0;
-      xcov += sgn * clamp(ri + 0.5, 0.0, 1.0); SL_H(ri);
-      xwgt = max(xwgt, clamp(1.0 - abs(ri) * 2.0, 0.0, 1.0));
-      if (abs(ri) < 1.0) {
-        vec2 A = vec2(p.x * px.x, p.y * px.y);
-        vec2 B = vec2(p.z * px.x, p.w * px.y);
-        EX_H(exLine(B - A, A));
-      }
-    }
-#endif
-    hOff += hLineN;
-
-#ifndef MANTLE_NO_QUAD
-
-    for (int i = 0; i < 1024; i++) {
-      if (i >= hQuadN) break;
-      vec2 segRaw = bandEntry(gl, arrIdx, hOff + i);
-      if (segRaw.y * px.x < hBreak) break;
-      ivec2 sL = segLocXY(segRaw.x);
-      ivec2 dL = ivec2(sL.x + 1, sL.y);
-      vec4 p12 = texFetch(dL) - vec4(c, c);
-      vec2 p3  = texFetch(ivec2(dL.x + 1, dL.y)).xy - c;
-      if (max(max(p12.x, p12.z), p3.x) * px.x < -0.5) continue;
-      uint code = calcRootCode2(p12.y, p12.w, p3.y);
-      if (code == 0u) continue;
-      vec4 rt = slugSolveHorizQuad(p12, p3);
-      if ((code & 1u) != 0u && !isinf(rt.x) && rt.x == rt.x) {
-        float ri = rt.x * px.x;
-        xcov += clamp(ri + 0.5, 0.0, 1.0); SL_H(ri);
-
-        if (abs(ri) < 1.0) EX_H(exLine(quadTanPx(p12, p3, rt.z, px), vec2(ri, 0.0)));
-        xwgt = max(xwgt, clamp(1.0 - abs(ri) * 2.0, 0.0, 1.0));
-      }
-      if (code > 1u && !isinf(rt.y) && rt.y == rt.y) {
-        float ri = rt.y * px.x;
-        xcov -= clamp(ri + 0.5, 0.0, 1.0); SL_H(ri);
-        if (abs(ri) < 1.0) EX_H(exLine(quadTanPx(p12, p3, rt.w, px), vec2(ri, 0.0)));
-        xwgt = max(xwgt, clamp(1.0 - abs(ri) * 2.0, 0.0, 1.0));
-      }
-    }
-#endif
-    hOff += hQuadN;
-
-#ifndef MANTLE_NO_CUBIC
-
-    for (int i = 0; i < 1024; i++) {
-      if (i >= hCubicN) break;
-      vec2 segRaw = bandEntry(gl, arrIdx, hOff + i);
-      if (segRaw.y * px.x < hBreak) break;
-      ivec2 sL = segLocXY(segRaw.x);
-      ivec2 dL = ivec2(sL.x + 1, sL.y);
-      vec4 p12 = texFetch(dL) - vec4(c, c);
-      vec4 p34 = texFetch(ivec2(dL.x + 1, dL.y)) - vec4(c, c);
-      if (max(max(p12.x, p12.z), max(p34.x, p34.z)) * px.x < -0.5) continue;
-      vec3 rs, ts;
-      solveCubicBisect(p12, p34, false, rs, ts);
-      vec4 cy = cubicCoeff(p12.y, p12.w, p34.y, p34.w);
-      for (int j = 0; j < 3; j++) {
-        if (ts[j] < 0.0 || ts[j] >= 1.0 || rs[j] >= 1e10 || rs[j] != rs[j]) continue;
-        float ri  = rs[j] * px.x;
-
-        float sgn = (evalCD(cy, ts[j]) < 0.0) ? 1.0 : -1.0;
-        xcov += sgn * clamp(ri + 0.5, 0.0, 1.0); SL_H(ri);
-        if (abs(ri) < 1.0) EX_H(exLine(cubicTanPx(p12, p34, ts[j], px), vec2(ri, 0.0)));
-        xwgt = max(xwgt, clamp(1.0 - abs(ri) * 2.0, 0.0, 1.0));
-      }
-    }
-#endif
-    hOff += hCubicN;
-
-#ifndef MANTLE_NO_ARC
-
-    for (int i = 0; i < 1024; i++) {
-      if (i >= hArcN) break;
-      vec2 segRaw = bandEntry(gl, arrIdx, hOff + i);
-      if (segRaw.y * px.x < hBreak) break;
-      ivec2 sL = segLocXY(segRaw.x);
-      ivec2 dL = ivec2(sL.x + 1, sL.y);
-      vec4 d1 = texFetch(dL), d2 = texFetch(ivec2(dL.x + 1, dL.y));
-      float sp = sin(d2.z), cp = cos(d2.z);
-
-      vec2 pS9, pE9; float s9x, s9y, e9x, e9y;
-      arcSample(d1, cp, sp, d2.x, pS9, s9x, s9y);
-      arcSample(d1, cp, sp, d2.y, pE9, e9x, e9y);
-      float yS9 = pS9.y - c.y, yE9 = pE9.y - c.y;
-      if (abs(yS9) < 1e-3 && abs(yE9) >= 1e-3 && yE9 < 0.0) {
-        float r9 = (pS9.x - c.x) * px.x;
-        xcov += clamp(r9 + 0.5, 0.0, 1.0); SL_H(r9);
-        xwgt = max(xwgt, clamp(1.0 - abs(r9) * 2.0, 0.0, 1.0));
-      }
-      if (abs(yE9) < 1e-3 && abs(yS9) >= 1e-3 && yS9 < 0.0) {
-        float r9 = (pE9.x - c.x) * px.x;
-        xcov -= clamp(r9 + 0.5, 0.0, 1.0); SL_H(r9);
-        xwgt = max(xwgt, clamp(1.0 - abs(r9) * 2.0, 0.0, 1.0));
-      }
-      float A = sp * d1.z, B = cp * d1.w, C = -(d1.y - c.y);
-      float Rlen = sqrt(A * A + B * B);
-      float arcDir = (d2.y >= d2.x) ? 1.0 : -1.0;
-      if (Rlen > 1e-10) {
-        float ratio = C / Rlen;
-        if (abs(ratio) < 0.99999) {
-          float ang = atan(B, A), b2 = acos(clamp(ratio, -1.0, 1.0));
-          float t1 = ang + b2, t2 = ang - b2;
-          if (arcInRange(t1, d2.x, d2.y)) {
-            vec2 p; float ddx, ddy; arcSample(d1, cp, sp, t1, p, ddx, ddy);
-            float ri = (p.x - c.x) * px.x;
-
-            float sgn = arcDir * ((ddy < 0.0) ? 1.0 : -1.0);
-            xcov += sgn * clamp(ri + 0.5, 0.0, 1.0); SL_H(ri);
-            if (abs(ri) < 1.0) EX_H(exLine(vec2(ddx, ddy) * px, vec2(ri, (p.y - c.y) * px.y)));
-            xwgt = max(xwgt, clamp(1.0 - abs(ri) * 2.0, 0.0, 1.0));
-          }
-          if (arcInRange(t2, d2.x, d2.y)) {
-            vec2 p; float ddx, ddy; arcSample(d1, cp, sp, t2, p, ddx, ddy);
-            float ri = (p.x - c.x) * px.x;
-            float sgn = arcDir * ((ddy < 0.0) ? 1.0 : -1.0);
-            xcov += sgn * clamp(ri + 0.5, 0.0, 1.0); SL_H(ri);
-            if (abs(ri) < 1.0) EX_H(exLine(vec2(ddx, ddy) * px, vec2(ri, (p.y - c.y) * px.y)));
-            xwgt = max(xwgt, clamp(1.0 - abs(ri) * 2.0, 0.0, 1.0));
-          }
-        }
-      }
-    }
-#endif
-  }
-
-  {
-    int hdr = bandsY * 2 + bandIdx.x * 2;
-    vec4 vCnts = bFetch(bLoc(gl, hdr));
-    int vLineN  = int(vCnts.x);
-    int vQuadN  = int(vCnts.y);
-    int vCubicN = int(vCnts.z);
-    int vArcN   = int(vCnts.w);
-    int arrIdx  = int(bFetch(bLoc(gl, hdr + 1)).x);
-    int vOff = 0;
-
-#ifndef MANTLE_NO_LINE
-
-    for (int i = 0; i < 1024; i++) {
-      if (i >= vLineN) break;
-      vec2 segRaw = bandEntry(gl, arrIdx, vOff + i);
-      if (segRaw.y * px.y < vBreak) break;
-      ivec2 sL = segLocXY(segRaw.x);
-      ivec2 dL = ivec2(sL.x + 1, sL.y);
-      vec4 p = texFetch(dL) - vec4(c, c);
-      if (max(p.y, p.w) * px.y < -0.5) continue;
-
-      bool p1Neg = p.x < 0.0;
-      bool p2Neg = p.z < 0.0;
-      if (p1Neg == p2Neg) continue;
-      float dx = p.z - p.x;
-      if (abs(dx) < 1.0 / 65536.0) continue;
-      float t  = -p.x / dx;
-      float ry = mix(p.y, p.w, t);
-      float ri = ry * px.y;
-      float sgn = p2Neg ? -1.0 : 1.0;
-      ycov += sgn * clamp(ri + 0.5, 0.0, 1.0); SL_V(ri);
-
-      if (abs(ri) < 1.0) {
-        vec2 A2 = vec2(p.x * px.x, p.y * px.y);
-        vec2 B2 = vec2(p.z * px.x, p.w * px.y);
-        EX_V(exLine(B2 - A2, A2));
-      }
-      ywgt = max(ywgt, clamp(1.0 - abs(ri) * 2.0, 0.0, 1.0));
-    }
-#endif
-    vOff += vLineN;
-
-#ifndef MANTLE_NO_QUAD
-
-    for (int i = 0; i < 1024; i++) {
-      if (i >= vQuadN) break;
-      vec2 segRaw = bandEntry(gl, arrIdx, vOff + i);
-      if (segRaw.y * px.y < vBreak) break;
-      ivec2 sL = segLocXY(segRaw.x);
-      ivec2 dL = ivec2(sL.x + 1, sL.y);
-      vec4 p12 = texFetch(dL) - vec4(c, c);
-      vec2 p3  = texFetch(ivec2(dL.x + 1, dL.y)).xy - c;
-      if (max(max(p12.y, p12.w), p3.y) * px.y < -0.5) continue;
-
-      uint code = calcRootCode2(p12.x, p12.z, p3.x);
-      if (code == 0u) continue;
-      vec4 rt = slugSolveVertQuad(p12, p3);
-      if ((code & 1u) != 0u && !isinf(rt.x) && rt.x == rt.x) {
-        float ri = rt.x * px.y;
-        ycov -= clamp(ri + 0.5, 0.0, 1.0); SL_V(ri);
-        if (abs(ri) < 1.0) EX_V(exLine(quadTanPx(p12, p3, rt.z, px), vec2(0.0, ri)));
-        ywgt = max(ywgt, clamp(1.0 - abs(ri) * 2.0, 0.0, 1.0));
-      }
-      if (code > 1u && !isinf(rt.y) && rt.y == rt.y) {
-        float ri = rt.y * px.y;
-        ycov += clamp(ri + 0.5, 0.0, 1.0); SL_V(ri);
-        if (abs(ri) < 1.0) EX_V(exLine(quadTanPx(p12, p3, rt.w, px), vec2(0.0, ri)));
-        ywgt = max(ywgt, clamp(1.0 - abs(ri) * 2.0, 0.0, 1.0));
-      }
-    }
-#endif
-    vOff += vQuadN;
-
-#ifndef MANTLE_NO_CUBIC
-
-    for (int i = 0; i < 1024; i++) {
-      if (i >= vCubicN) break;
-      vec2 segRaw = bandEntry(gl, arrIdx, vOff + i);
-      if (segRaw.y * px.y < vBreak) break;
-      ivec2 sL = segLocXY(segRaw.x);
-      ivec2 dL = ivec2(sL.x + 1, sL.y);
-      vec4 p12 = texFetch(dL) - vec4(c, c);
-      vec4 p34 = texFetch(ivec2(dL.x + 1, dL.y)) - vec4(c, c);
-      if (max(max(p12.y, p12.w), max(p34.y, p34.w)) * px.y < -0.5) continue;
-      vec3 rs, ts;
-      solveCubicBisect(p12, p34, true, rs, ts);
-      vec4 cx = cubicCoeff(p12.x, p12.z, p34.x, p34.z);
-      for (int j = 0; j < 3; j++) {
-        if (ts[j] < 0.0 || ts[j] >= 1.0 || rs[j] >= 1e10 || rs[j] != rs[j]) continue;
-        float ri  = rs[j] * px.y;
-        float sgn = (evalCD(cx, ts[j]) >= 0.0) ? 1.0 : -1.0;
-        ycov += sgn * clamp(ri + 0.5, 0.0, 1.0); SL_V(ri);
-        if (abs(ri) < 1.0) EX_V(exLine(cubicTanPx(p12, p34, ts[j], px), vec2(0.0, ri)));
-        ywgt = max(ywgt, clamp(1.0 - abs(ri) * 2.0, 0.0, 1.0));
-      }
-    }
-#endif
-    vOff += vCubicN;
-
-#ifndef MANTLE_NO_ARC
-
-    for (int i = 0; i < 1024; i++) {
-      if (i >= vArcN) break;
-      vec2 segRaw = bandEntry(gl, arrIdx, vOff + i);
-      if (segRaw.y * px.y < vBreak) break;
-      ivec2 sL = segLocXY(segRaw.x);
-      ivec2 dL = ivec2(sL.x + 1, sL.y);
-      vec4 d1 = texFetch(dL), d2 = texFetch(ivec2(dL.x + 1, dL.y));
-      float sp = sin(d2.z), cp = cos(d2.z);
-      float A = cp * d1.z, B = -sp * d1.w, C = -(d1.x - c.x);
-      float Rlen = sqrt(A * A + B * B);
-      float arcDir = (d2.y >= d2.x) ? 1.0 : -1.0;
-      if (Rlen > 1e-10) {
-        float ratio = C / Rlen;
-        if (abs(ratio) < 0.99999) {
-
-          float ang = (B == 0.0) ? (A >= 0.0 ? 0.0 : TWO_PI * 0.5) : atan(B, A);
-          float b2 = acos(clamp(ratio, -1.0, 1.0));
-          float t1 = ang + b2, t2 = ang - b2;
-          if (arcInRange(t1, d2.x, d2.y)) {
-            vec2 p; float ddx, ddy; arcSample(d1, cp, sp, t1, p, ddx, ddy);
-            float ri = (p.y - c.y) * px.y;
-            float sgn = arcDir * ((ddx >= 0.0) ? 1.0 : -1.0);
-            ycov += sgn * clamp(ri + 0.5, 0.0, 1.0); SL_V(ri);
-            if (abs(ri) < 1.0) EX_V(exLine(vec2(ddx, ddy) * px, vec2((p.x - c.x) * px.x, ri)));
-            ywgt = max(ywgt, clamp(1.0 - abs(ri) * 2.0, 0.0, 1.0));
-          }
-          if (arcInRange(t2, d2.x, d2.y)) {
-            vec2 p; float ddx, ddy; arcSample(d1, cp, sp, t2, p, ddx, ddy);
-            float ri = (p.y - c.y) * px.y;
-            float sgn = arcDir * ((ddx >= 0.0) ? 1.0 : -1.0);
-            ycov += sgn * clamp(ri + 0.5, 0.0, 1.0); SL_V(ri);
-            if (abs(ri) < 1.0) EX_V(exLine(vec2(ddx, ddy) * px, vec2((p.x - c.x) * px.x, ri)));
-            ywgt = max(ywgt, clamp(1.0 - abs(ri) * 2.0, 0.0, 1.0));
-          }
-        }
-      }
-    }
-#endif
-  }
-
-#ifdef MANTLE_EXACT_EDGE
-  vec2 exNrm = exNrmH; float exD = exDH; float exCode = 0.0;
-  if (exOther || exNH > 1 || exNV > 1) exCode = -1.0;
-  else if (exNH == 1 && exNV == 1) {
-    float l1 = length(exNrmH), l2 = length(exNrmV), pp = l1 * l2;
-    float crs = abs(exNrmH.x * exNrmV.y - exNrmH.y * exNrmV.x);
-    bool same = crs <= 0.174 * pp && abs(abs(exDH) * l2 - abs(exDV) * l1) <= 0.35 * pp;
-    if (!same) exCode = -1.0;
-    else {
-      exCode = 1.0;
-      if (abs(exDV) * l1 < abs(exDH) * l2) { exNrm = exNrmV; exD = exDV; }
-    }
-  } else if (exNH == 1) exCode = 1.0;
-  else if (exNV == 1) { exNrm = exNrmV; exD = exDV; exCode = 1.0; }
-  exInfo = vec4(exNrm, exD, exCode);
-#else
-  exInfo = vec4(0.0);
-#endif
-#ifdef MANTLE_SLOPE_AA
-  slInfo = vec2(slH, slV);
-#else
-  slInfo = vec2(1e30);
-#endif
-  return vec4(xcov, ycov, xwgt, ywgt);
-}
-
-#if defined(MANTLE_GWN) || defined(MANTLE_HARD_MIXED)
-
-#if defined(MANTLE_HARD_TREE) || defined(MANTLE_HARD_MIXED) || (defined(MANTLE_GWN) && !defined(MANTLE_GWN_SDF))
-#define GWN_WINDING_ONLY 1
-#endif
-
-#if !defined(MANTLE_HARD_MIXED) || defined(MANTLE_HARD_TREE)
-
-const float GWN_TAU = 6.283185307179586;
-
-float gwnChord(vec2 p, vec2 A, vec2 B) {
-  vec2 a = A - p, b = B - p;
-  return atan(a.x * b.y - a.y * b.x, dot(a, b)) / GWN_TAU;
-}
-
-struct GwnSdfCand {
-  float dpx;
-
-  float sFill;
-
-  vec2 nf;
-  vec2 tv;
-  float endNear;
-  vec2 V;
-};
-
-float gwnCross(vec2 a, vec2 b) {
-  if ((a.y < 0.0) == (b.y < 0.0)) return 0.0;
-  float dy = b.y - a.y;
-  float t = a.x * dy - a.y * (b.x - a.x);
-  return (t * dy > 0.0) ? sign(dy) : 0.0;
-}
-
-float gwnBoxCov2(vec2 n1, float d1, vec2 n2, float d2) {
+float exactBoxCov3(vec2 n1, float d1, vec2 n2, float d2, vec2 n3, float d3) {
   vec2 poly[8];
   poly[0] = vec2(-0.5, -0.5); poly[1] = vec2(0.5, -0.5);
   poly[2] = vec2(0.5, 0.5);   poly[3] = vec2(-0.5, 0.5);
   poly[4] = vec2(0.0); poly[5] = vec2(0.0); poly[6] = vec2(0.0); poly[7] = vec2(0.0);
   int cnt = 4;
-  for (int pass = 0; pass < 2; pass++) {
-    vec2 n = pass == 0 ? n1 : n2;
-    float d = pass == 0 ? d1 : d2;
+  for (int pass = 0; pass < 3; pass++) {
+    vec2 n = pass == 0 ? n1 : (pass == 1 ? n2 : n3);
+    float d = pass == 0 ? d1 : (pass == 1 ? d2 : d3);
     vec2 tmp[8];
     int m = 0;
     for (int i = 0; i < 8; i++) {
@@ -1939,24 +2703,458 @@ float gwnBoxCov2(vec2 n1, float d1, vec2 n2, float d2) {
   return abs(area) * 0.5;
 }
 
+bool chainFillSide(vec2 p0, vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
+  float best = 1e30; bool side = true;
+  for (int s = 0; s < 4; s++) {
+    vec2 A = s == 0 ? p0 : (s == 1 ? p1 : (s == 2 ? p2 : p3));
+    vec2 B = s == 0 ? p1 : (s == 1 ? p2 : (s == 2 ? p3 : p4));
+    vec2 d = B - A; float L2 = dot(d, d); if (L2 < 1e-20) continue;
+    float t = clamp(dot(-A, d) / L2, 0.0, 1.0);
+    vec2 c = A + t * d; float dd = dot(c, c);
+    if (dd < best) { best = dd; side = (d.y * A.x - d.x * A.y) >= 0.0; }
+  }
+  return side;
+}
+
+float chainMissCov(vec2 p0, vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
+  float best = 1e30; vec2 bA = vec2(0.0), bd2 = vec2(0.0); bool found = false;
+  int bs = -1, firstS = 9, lastS = -1; float bt = 0.0;
+  for (int s = 0; s < 4; s++) {
+    vec2 A = s == 0 ? p0 : (s == 1 ? p1 : (s == 2 ? p2 : p3));
+    vec2 B = s == 0 ? p1 : (s == 1 ? p2 : (s == 2 ? p3 : p4));
+    vec2 d = B - A; float L2 = dot(d, d); if (L2 < 1e-20) continue;
+    if (s < firstS) firstS = s;
+    lastS = s;
+    float tu = dot(-A, d) / L2;
+    float t = clamp(tu, 0.0, 1.0);
+    vec2 c = A + t * d; float dd = dot(c, c);
+    if (dd < best) { best = dd; bA = A; bd2 = d; found = true; bs = s; bt = tu; }
+  }
+
+  if (!found || best > 2.0) return -1.0;
+
+  if ((bt < 0.0 && bs == firstS) || (bt > 1.0 && bs == lastS)) return -1.0;
+  vec2 nOut = normalize(vec2(bd2.y, -bd2.x));
+  float c1 = exactBoxCov(nOut, dot(nOut, bA));
+
+  bool atEnd = bt > 1.0, atStart = bt < 0.0;
+  if (atEnd || atStart) {
+    int s2 = atEnd ? bs + 1 : bs - 1;
+    vec2 A2 = vec2(0.0), d2 = vec2(0.0);
+    for (int k = 0; k < 4; k++) {
+      if (s2 < 0 || s2 > 3) break;
+      A2 = s2 == 0 ? p0 : (s2 == 1 ? p1 : (s2 == 2 ? p2 : p3));
+      d2 = (s2 == 0 ? p1 : (s2 == 1 ? p2 : (s2 == 2 ? p3 : p4))) - A2;
+      if (dot(d2, d2) >= 1e-20) break;
+      s2 += atEnd ? 1 : -1;
+    }
+    if (s2 >= 0 && s2 <= 3 && dot(d2, d2) >= 1e-20) {
+      vec2 n2 = normalize(vec2(d2.y, -d2.x));
+      float c2 = exactBoxCov(n2, dot(n2, A2));
+      float c12 = exactBoxCov2(nOut, dot(nOut, bA), n2, dot(n2, A2));
+      vec2 dIn = atEnd ? bd2 : d2, dOut = atEnd ? d2 : bd2;
+      float turn = dIn.x * dOut.y - dIn.y * dOut.x;
+      if (turn > 0.0) return c12;
+      if (turn < 0.0) return c1 + c2 - c12;
+    }
+  }
+  return c1;
+}
+
+float chainBorderParam(vec2 p) {
+  if (abs(p.y) >= abs(p.x)) return p.y < 0.0 ? clamp(p.x + 0.5, 0.0, 1.0) : 2.0 + clamp(0.5 - p.x, 0.0, 1.0);
+  return p.x > 0.0 ? 1.0 + clamp(p.y + 0.5, 0.0, 1.0) : 3.0 + clamp(0.5 - p.y, 0.0, 1.0);
+}
+
+float chainBoxCov(vec2 p0, vec2 p1, vec2 p2, vec2 p3, vec2 p4, float forceInside) {
+
+  {
+    vec2 lo = min(min(min(p0, p1), min(p2, p3)), p4), hi = max(max(max(p0, p1), max(p2, p3)), p4);
+    float m = forceInside > 1.5 ? 1.414215 : 0.500001;
+    if (hi.x < -m || lo.x > m || hi.y < -m || lo.y > m) return (forceInside > 0.5) ? 1.0 : (chainFillSide(p0, p1, p2, p3, p4) ? 1.0 : 0.0);
+  }
+  vec2 poly[12];
+  int n = 0;
+
+  int entryMask = 0;
+  for (int s = 0; s < 4; s++) {
+    vec2 A = s == 0 ? p0 : (s == 1 ? p1 : (s == 2 ? p2 : p3));
+    vec2 B = s == 0 ? p1 : (s == 1 ? p2 : (s == 2 ? p3 : p4));
+    vec2 d = B - A;
+    if (dot(d, d) < 1e-12) continue;
+    vec2 lo = min(A, B), hi = max(A, B);
+    if (hi.x < -0.500001 || lo.x > 0.500001 || hi.y < -0.500001 || lo.y > 0.500001) continue;
+    float t0 = 0.0, t1 = 1.0; bool ok = true;
+    for (int k = 0; k < 4; k++) {
+      float P = k == 0 ? -d.x : (k == 1 ? d.x : (k == 2 ? -d.y : d.y));
+      float Q = k == 0 ? A.x + 0.5 : (k == 1 ? 0.5 - A.x : (k == 2 ? A.y + 0.5 : 0.5 - A.y));
+      if (abs(P) < 1e-12) { if (Q < 0.0) ok = false; }
+      else { float r = Q / P;
+        if (P < 0.0) { if (r > t1) ok = false; else if (r > t0) t0 = r; }
+        else { if (r < t0) ok = false; else if (r < t1) t1 = r; } }
+    }
+    if (!ok || t1 < t0) continue;
+
+    vec2 A2 = mix(A, B, t0), B2 = mix(A, B, t1);
+
+    if (dot(B2 - A2, B2 - A2) < 1e-12) continue;
+    bool join = n > 0 && dot(poly[n - 1] - A2, poly[n - 1] - A2) <= 1e-10;
+    if (!join && n < 12) { poly[n] = A2; entryMask |= 1 << n; n++; }
+    if (n < 12) { poly[n] = B2; n++; }
+  }
+
+  if (n < 2) {
+    if (forceInside > 1.5) { float mc = chainMissCov(p0, p1, p2, p3, p4);
+      return mc < 0.0 ? 1.0 : mc; }
+    return (forceInside > 0.5 || chainFillSide(p0, p1, p2, p3, p4)) ? 1.0 : 0.0;
+  }
+
+  bool ring = dot(p4 - p0, p4 - p0) < 1e-12
+              && dot(poly[0] - poly[n - 1], poly[0] - poly[n - 1]) <= 1e-10 && n > 2;
+  if (ring) { n--; entryMask = entryMask & ~1; }
+
+  if (!ring) {
+    vec2 dEnd = poly[n - 1] - poly[n - 2];
+    if (dot(dEnd, dEnd) > 1e-12 && n < 12) {
+      vec2 dn = normalize(dEnd);
+      float tx = abs(dn.x) > 1e-6 ? ((dn.x > 0.0 ? 0.5 : -0.5) - poly[n - 1].x) / dn.x : 1e9;
+      float ty = abs(dn.y) > 1e-6 ? ((dn.y > 0.0 ? 0.5 : -0.5) - poly[n - 1].y) / dn.y : 1e9;
+      float t = min(tx, ty);
+      if (t > 0.0) { poly[n] = poly[n - 1] + dn * t; n++; }
+    }
+    vec2 dBeg = poly[1] - poly[0];
+    if (dot(dBeg, dBeg) > 1e-12 && n < 12) {
+      vec2 dn = normalize(-dBeg);
+      float tx = abs(dn.x) > 1e-6 ? ((dn.x > 0.0 ? 0.5 : -0.5) - poly[0].x) / dn.x : 1e9;
+      float ty = abs(dn.y) > 1e-6 ? ((dn.y > 0.0 ? 0.5 : -0.5) - poly[0].y) / dn.y : 1e9;
+      float t = min(tx, ty);
+      if (t > 0.0) {
+        vec2 E2 = poly[0] + dn * t;
+        for (int i = 11; i >= 1; i--) if (i <= n) poly[i] = poly[i - 1];
+
+        entryMask = ((entryMask << 1) | 1) & ~2;
+        poly[0] = E2; n++;
+      }
+    }
+  }
+
+  float area2 = 0.0, bsum = 0.0, minP = 8.0;
+  bool minEntry = false, anyGap = false;
+  for (int i = 0; i < 12; i++) {
+    if (i >= n) break;
+    int jn = (i + 1 == n) ? 0 : i + 1;
+    vec2 a = poly[i], b = poly[jn];
+    bool gap = (jn == 0 && !ring) || ((entryMask >> jn) & 1) != 0;
+    if (!gap) { area2 += a.x * b.y - a.y * b.x; continue; }
+    anyGap = true;
+    float pa = chainBorderParam(a), pb = chainBorderParam(b);
+    bsum += pb - pa;
+    if (pa < minP) { minP = pa; minEntry = false; }
+    if (pb < minP) { minP = pb; minEntry = true; }
+  }
+  if (!anyGap) return clamp(0.5 * area2 + (area2 < 0.0 ? 1.0 : 0.0), 0.0, 1.0);
+  return clamp(0.5 * area2 + 0.25 * (bsum + (minEntry ? 4.0 : 0.0)), 0.0, 1.0);
+}
+
+float strokeEdgeCov(float minD, float halfW, vec2 grad, vec2 ePx, bool exactAa) {
+  float pxSize = 0.5 * (ePx.x + ePx.y);
+  float halfWMin = 0.5 * pxSize;
+  float halfWVis = max(halfW, halfWMin);
+  float weightFade = halfW / halfWVis;
+  float distFromEdge = minD - halfWVis;
+  float cov = 0.0;
+  if (exactAa && dot(grad, grad) > 0.5 && distFromEdge <= 0.75 * pxSize) {
+    vec2 nUn = grad * ePx;
+
+    float il = inversesqrt(max(dot(nUn, nUn), 1e-30));
+    cov = exactBoxCov(nUn * il, -distFromEdge * il) * weightFade;
+  } else if (distFromEdge <= 0.5 * pxSize) {
+    cov = clamp(0.5 - distFromEdge / max(pxSize, 1e-30), 0.0, 1.0) * weightFade;
+  }
+  return cov;
+}
+
+#if !defined(MANTLE_NO_STROKE) && defined(MANTLE_STROKE_EXACT)
+vec3 sePx(vec2 n, float e, vec4 N, vec2 ePx) {
+  vec2 nd = strokeFrameMulT(N, n) * ePx;
+  float il = inversesqrt(max(dot(nd, nd), 1e-30));
+  return vec3(nd * il, -e * il);
+}
+
+float seSector(vec2 A, vec2 B, float r2) {
+  float y = A.x * B.y - A.y * B.x, x = dot(A, B);
+  return (y == 0.0 && x >= 0.0) ? 0.0 : 0.5 * r2 * curveAtan2(y, x);
+}
+
+float seCircleTri(vec2 A, vec2 B, float r2) {
+  vec2 D = B - A;
+  float a = dot(D, D);
+  if (a == 0.0) return 0.0;
+  float b = dot(A, D), c = dot(A, A) - r2;
+  float disc = b * b - a * c;
+  if (disc <= 0.0) return seSector(A, B, r2);
+  float s = sqrt(disc), t0 = (-b - s) / a, t1 = (-b + s) / a;
+  vec2 P = t0 <= 0.0 ? A : (t0 >= 1.0 ? B : A + D * t0), Q = t1 >= 1.0 ? B : (t1 <= 0.0 ? A : A + D * t1);
+  return seSector(A, P, r2) + 0.5 * (P.x * Q.y - P.y * Q.x) + seSector(Q, B, r2);
+}
+
+float seDiscQuadCut(vec2 C0, vec2 C1, vec2 C2, vec2 C3, float r2, vec2 u) {
+  float area = 0.0;
+  for (int i = 0; i < 4; i++) {
+    vec2 A = i == 0 ? C0 : (i == 1 ? C1 : (i == 2 ? C2 : C3));
+    vec2 B = i == 0 ? C1 : (i == 1 ? C2 : (i == 2 ? C3 : C0));
+    float fa = dot(A, u), fb = dot(B, u);
+    if (fa >= 0.0 && fb >= 0.0) area += seCircleTri(A, B, r2);
+    else if (fa >= 0.0) area += seCircleTri(A, mix(A, B, fa / (fa - fb)), r2);
+    else if (fb >= 0.0) area += seCircleTri(mix(A, B, fa / (fa - fb)), B, r2);
+  }
+  return abs(area);
+}
+
+bool seCirclePlaneSafe(float r, vec2 u, vec2 hx, vec2 hy, float reach) {
+  return r > 4096.0 * reach || (r > 256.0 * reach
+    && reach <= 2.0 * max(abs(dot(u, hx)), abs(dot(u, hy))));
+}
+float seCircleShare(vec2 f, vec2 u, float D, float r, vec2 hx, vec2 hy, float reach, float boxArea, vec4 N, vec2 ePx) {
+  if (r <= 0.0 || D - reach >= r) return 0.0;
+  if (D + reach <= r) return 1.0;
+  if (seCirclePlaneSafe(r, u, hx, hy, reach)) { vec3 h = sePx(u, D - r, N, ePx); return exactBoxCov(h.xy, h.z); }
+  return seDiscQuadCut(f - hx - hy, f + hx - hy, f + hx + hy, f - hx + hy, r * r, vec2(0.0)) / boxArea;
+}
+
+float seDiscQuadWedge(vec2 C0, vec2 C1, vec2 C2, vec2 C3, float r2, vec2 m0, vec2 m1) {
+  float area = 0.0;
+  for (int i = 0; i < 4; i++) {
+    vec2 A = i == 0 ? C0 : (i == 1 ? C1 : (i == 2 ? C2 : C3));
+    vec2 B = i == 0 ? C1 : (i == 1 ? C2 : (i == 2 ? C3 : C0));
+    float lo = 0.0, hi = 1.0;
+    for (int k = 0; k < 2; k++) {
+      vec2 m = k == 0 ? m0 : m1;
+      float fa = dot(A, m), fb = dot(B, m);
+      if (fa < 0.0 && fb < 0.0) hi = -1.0;
+      else if (fa < 0.0) lo = max(lo, fa / (fa - fb));
+      else if (fb < 0.0) hi = min(hi, fa / (fa - fb));
+    }
+    if (lo < hi) area += seCircleTri(mix(A, B, lo), mix(A, B, hi), r2);
+  }
+  return abs(area);
+}
+
+float seSectorShare(vec2 f, vec2 u, float D, float r, vec2 r0, vec2 r1, float sw, vec2 hx, vec2 hy, float reach,
+                    float boxArea, vec4 N, vec2 ePx) {
+  if (r <= 0.0 || D - reach >= r) return 0.0;
+  bool big = sw > 3.14159265;
+  vec2 a = big ? r1 : r0, b = big ? r0 : r1;
+  vec2 m0 = vec2(-a.y, a.x), m1 = vec2(b.y, -b.x);
+  float part;
+  if (seCirclePlaneSafe(r, u, hx, hy, reach)) {
+    vec3 h = sePx(u, D - r, N, ePx), w0 = sePx(-m0, -dot(m0, f), N, ePx), w1 = sePx(-m1, -dot(m1, f), N, ePx);
+    part = D + reach <= r ? exactBoxCov2(w0.xy, w0.z, w1.xy, w1.z) : exactBoxCov3(h.xy, h.z, w0.xy, w0.z, w1.xy, w1.z);
+  } else {
+    part = seDiscQuadWedge(f - hx - hy, f + hx - hy, f + hx + hy, f - hx + hy, r * r, m0, m1) / boxArea;
+  }
+  return big ? seCircleShare(f, u, D, r, hx, hy, reach, boxArea, N, ePx) - part : part;
+}
+
+float seCapShare(vec2 g, vec2 ub, float r, vec2 hx, vec2 hy, float reach, float boxArea, vec4 N, vec2 ePx) {
+  float dg = length(g);
+  if (dg - reach >= r || dot(g, ub) <= -reach) return 0.0;
+  if (seCirclePlaneSafe(r, dg > 0.0 ? g / dg : ub, hx, hy, reach)) {
+    vec3 hd = sePx(dg > 0.0 ? g / dg : ub, dg - r, N, ePx), hc = sePx(-ub, -dot(g, ub), N, ePx);
+    return exactBoxCov2(hd.xy, hd.z, hc.xy, hc.z);
+  }
+  return seDiscQuadCut(g - hx - hy, g + hx - hy, g + hx + hy, g - hx + hy, r * r, ub) / boxArea;
+}
+
+float strokeExactCov(vec4 P, vec4 Q, float halfWS, vec4 N, vec2 ePx) {
+  vec3 p1 = sePx(P.xy, P.z, N, ePx);
+  if (P.w == 1.0) return exactBoxCov(p1.xy, p1.z);
+  if (P.w == 4.0) {
+
+    vec2 V = -P.xy * (P.z + halfWS), u = Q.xy, pn = vec2(-u.y, u.x);
+    float sl = -dot(V, pn);
+    vec3 hb = dot(u, u) > 0.5 ? sePx(u, Q.z, N, ePx) : vec3(0.0, 0.0, -1.0);
+    vec3 h1 = sePx(pn, sl - halfWS, N, ePx), h2 = sePx(-pn, -sl - halfWS, N, ePx);
+    float slab = 0.0;
+    if (hb.z > -0.7072) {
+      if (h2.z >= 0.7072 && hb.z >= 0.7072) slab = exactBoxCov(h1.xy, h1.z);
+      else if (h1.z >= 0.7072 && hb.z >= 0.7072) slab = exactBoxCov(h2.xy, h2.z);
+      else slab = exactBoxCov3(h1.xy, h1.z, h2.xy, h2.z, hb.xy, hb.z);
+    }
+    float cap = 0.0;
+    if (hb.z < 0.7072) {
+
+      vec2 hx = strokeFrameMul(N, vec2(0.5 * ePx.x, 0.0)), hy = strokeFrameMul(N, vec2(0.0, 0.5 * ePx.y));
+      float rho = P.z + halfWS, reach = max(length(hx + hy), length(hx - hy));
+      if (rho + reach <= halfWS) cap = 1.0 - exactBoxCov(hb.xy, hb.z);
+      else if (rho - reach < halfWS) {
+
+        if (seCirclePlaneSafe(halfWS, P.xy, hx, hy, reach)) cap = exactBoxCov2(p1.xy, p1.z, -hb.xy, -hb.z);
+        else {
+          vec2 f = -V;
+          float boxArea = 4.0 * abs(hx.x * hy.y - hx.y * hy.x);
+          cap = seDiscQuadCut(f - hx - hy, f + hx - hy, f + hx + hy, f - hx + hy, halfWS * halfWS, u) / boxArea;
+        }
+      }
+    }
+    return clamp(slab + cap, 0.0, 1.0);
+  }
+  if (P.w == 9.0) {
+
+    vec3 pf = sePx(-P.xy, -P.z - 2.0 * halfWS, N, ePx);
+    if (!(dot(Q.xy, Q.xy) > 0.5)) return exactBoxCov2(p1.xy, p1.z, pf.xy, pf.z);
+    vec3 p2 = sePx(Q.xy, Q.z, N, ePx);
+    return exactBoxCov3(p1.xy, p1.z, pf.xy, pf.z, p2.xy, p2.z);
+  }
+  if (P.w >= 5.0) {
+
+    float R = Q.x, D = Q.y, sw = Q.w;
+    vec2 u = P.xy, f = u * D;
+    vec2 hx = strokeFrameMul(N, vec2(0.5 * ePx.x, 0.0)), hy = strokeFrameMul(N, vec2(0.0, 0.5 * ePx.y));
+    float reach = max(length(hx + hy), length(hx - hy)), boxArea = 4.0 * abs(hx.x * hy.y - hx.y * hy.x);
+    if (sw == 0.0)
+      return clamp(seCircleShare(f, u, D, R + halfWS, hx, hy, reach, boxArea, N, ePx)
+                 - seCircleShare(f, u, D, R - halfWS, hx, hy, reach, boxArea, N, ePx), 0.0, 1.0);
+    vec2 r0 = vec2(cos(Q.z), sin(Q.z)), r1 = vec2(cos(Q.z + sw), sin(Q.z + sw));
+    float cov = seSectorShare(f, u, D, R + halfWS, r0, r1, sw, hx, hy, reach, boxArea, N, ePx)
+              - seSectorShare(f, u, D, R - halfWS, r0, r1, sw, hx, hy, reach, boxArea, N, ePx);
+
+    int caps = int(P.w + 0.5) - 5;
+    if ((caps & 1) != 0) cov += seCapShare(f - R * r0, vec2(r0.y, -r0.x), halfWS, hx, hy, reach, boxArea, N, ePx);
+    if ((caps & 2) != 0) cov += seCapShare(f - R * r1, vec2(-r1.y, r1.x), halfWS, hx, hy, reach, boxArea, N, ePx);
+    float ro = halfWS - R;
+    if (ro > 0.0) {
+      cov += seSectorShare(f, u, D, ro, -r0, -r1, sw, hx, hy, reach, boxArea, N, ePx);
+      if (sw > 3.14159265)
+        cov -= seSectorShare(f, u, D, ro, r0, -r1, sw - 3.14159265, hx, hy, reach, boxArea, N, ePx)
+             + seSectorShare(f, u, D, ro, -r0, r1, sw - 3.14159265, hx, hy, reach, boxArea, N, ePx);
+    }
+    return clamp(cov, 0.0, 1.0);
+  }
+  vec3 p2 = sePx(Q.xy, Q.z, N, ePx);
+  if (P.w == 2.0) {
+    if (p2.z >= 0.7072) return exactBoxCov(p1.xy, p1.z);
+    if (p1.z >= 0.7072) return exactBoxCov(p2.xy, p2.z);
+    if (p1.z <= -0.7072 || p2.z <= -0.7072) return 0.0;
+    return exactBoxCov2(p1.xy, p1.z, p2.xy, p2.z);
+  }
+
+  if (p2.z <= -0.7072) return exactBoxCov(p1.xy, p1.z);
+  if (p1.z <= -0.7072) return exactBoxCov(p2.xy, p2.z);
+  if (p1.z >= 0.7072 || p2.z >= 0.7072) return 1.0;
+  return 1.0 - exactBoxCov2(-p1.xy, -p1.z, -p2.xy, -p2.z);
+}
+
+#endif
+
+#if defined(MANTLE_GWN) || defined(MANTLE_HARD) || defined(MANTLE_HARD_MIXED)
+
+#if defined(MANTLE_HARD_TREE) || defined(MANTLE_HARD_MIXED) || (defined(MANTLE_GWN) && !defined(MANTLE_GWN_SDF))
+#define GWN_WINDING_ONLY 1
+#endif
+
+#if defined(MANTLE_GWN) && defined(MANTLE_GWN_SDF) && !defined(MANTLE_HARD) && !defined(MANTLE_HARD_MIXED) && !defined(MANTLE_HARD_TREE)
+#define GWN_EXACT_AREA 1
+#endif
+
+float gwnChordT(vec2 a, vec2 b) { return a.x * (b.y - a.y) - a.y * (b.x - a.x); }
+
+float gwnCross(vec2 a, vec2 b) {
+  if ((a.y < 0.0) == (b.y < 0.0)) return 0.0;
+  float dy = b.y - a.y;
+  float t = gwnChordT(a, b);
+  return dy < 0.0 ? (t < 0.0 ? -1.0 : 0.0) : (t > 0.0 ? 1.0 : 0.0);
+}
+
+#if defined(MANTLE_HARD_TREE) || (defined(MANTLE_GWN) && !defined(MANTLE_HARD) && !defined(MANTLE_HARD_MIXED))
+
+const float GWN_TAU = 6.283185307179586;
+
+float gwnChord(vec2 p, vec2 A, vec2 B) {
+  vec2 a = A - p, b = B - p;
+  return curveAtan2(a.x * b.y - a.y * b.x, dot(a, b)) / GWN_TAU;
+}
+
+struct GwnSdfCand {
+  float dpx;
+
+  float sFill;
+
+  vec2 nf;
+  vec2 tv;
+  float endNear;
+  vec2 V;
+  float sg;
+};
+
+float gwnChordSide(vec2 a, vec2 b) {
+  float t = gwnChordT(a, b);
+  if (t != 0.0) return t < 0.0 ? 1.0 : -1.0;
+  float dy = b.y - a.y;
+  return (dy != 0.0 ? dy : b.x - a.x) > 0.0 ? 1.0 : -1.0;
+}
+
 float hardCrossCubic(vec2 c, vec4 p12, vec4 p34);
+
+#ifdef GWN_EXACT_AREA
+
+vec2 aacPL(vec2 emPt, vec2 c, vec2 px);
+float aacLineContrib(vec2 A, vec2 B, float q0, float q1);
+float aacQuadContrib(vec2 P0, vec2 P1, vec2 P2, float q0, float q1);
+float aacCubicContrib(vec2 P0, vec2 P1, vec2 P2, vec2 P3, float q0, float q1);
+#ifndef MANTLE_NO_ARC
+float aacArcContrib(vec4 d1, vec4 d2, vec4 ends, vec2 c, vec2 px, float q0, float q1);
+#endif
+float aacFold(float run, bool evenOdd);
+
+float gwnPieceArea(vec2 c, vec2 px, ivec2 sL, int type) {
+  if (type == 0) {
+    vec4 pe = texFetch(ivec2(sL.x + 1, sL.y));
+    return aacLineContrib(aacPL(pe.xy, c, px), aacPL(pe.zw, c, px), 0.0, 1.0);
+  }
+  if (type == 1) {
+    vec4 p12 = texFetch(ivec2(sL.x + 1, sL.y));
+    vec2 p3 = texFetch(ivec2(sL.x + 2, sL.y)).xy;
+    return aacQuadContrib(aacPL(p12.xy, c, px), aacPL(p12.zw, c, px), aacPL(p3, c, px), 0.0, 1.0);
+  }
+  if (type == 4 || type == 6) {
+    vec4 a = texFetch(sL);
+    vec4 b = texFetch(ivec2(sL.x + (type == 4 ? 5 : 1), sL.y));
+    vec2 P0 = a.xy, P1 = type == 4 ? b.xy : a.zw, P2 = type == 4 ? b.zw : b.xy, P3 = type == 4 ? a.zw : b.zw;
+    return aacCubicContrib(aacPL(P0, c, px), aacPL(P1, c, px), aacPL(P2, c, px), aacPL(P3, c, px), 0.0, 1.0);
+  }
+#ifndef MANTLE_NO_ARC
+  if (type == 5) {
+    return aacArcContrib(texFetch(ivec2(sL.x + 1, sL.y)), texFetch(ivec2(sL.x + 4, sL.y)), texFetch(sL), c, px, 0.0, 1.0);
+  }
+#endif
+  return 0.0;
+}
+#endif
 
 float gwnSegEval(vec2 c, vec2 px, ivec2 sL, int type, float sigma, out GwnSdfCand cand) {
   cand.dpx = 1e30; cand.sFill = 0.0; cand.nf = vec2(0.0);
-  cand.tv = vec2(0.0); cand.endNear = 0.0; cand.V = vec2(0.0);
+  cand.tv = vec2(0.0); cand.endNear = 0.0; cand.V = vec2(0.0); cand.sg = sigma;
   if (type == 6) {
 
     vec4 p01 = texFetch(sL);
     vec4 p23 = texFetch(ivec2(sL.x + 1, sL.y));
-    float wSeg = hardCrossCubic(c, p01 - vec4(c, c), p23 - vec4(c, c));
+
+    float t6ylo = min(min(p01.y, p01.w), min(p23.y, p23.w)), t6yhi = max(max(p01.y, p01.w), max(p23.y, p23.w));
+    float t6xlo = min(min(p01.x, p01.z), min(p23.x, p23.z)), t6xhi = max(max(p01.x, p01.z), max(p23.x, p23.z));
+    float wSeg = (c.y < t6ylo || c.y > t6yhi || c.x > t6xhi) ? 0.0
+               : (c.x < t6xlo ? gwnCross(p01.xy - c, p23.zw - c) : hardCrossCubic(c, p01 - vec4(c, c), p23 - vec4(c, c)));
+#ifdef GWN_WINDING_ONLY
+    return wSeg;
+#endif
     vec2 A = p01.xy, B = p23.zw, t = B - A;
     float L2 = dot(t, t);
-    if (L2 < 1e-20) return wSeg;
+    if (!(L2 > 0.0)) return wSeg;
     vec2 n = vec2(-t.y, t.x) * inversesqrt(L2);
     float f = dot(n, c - A);
     vec2 gPx = n / px;
     float gpx = length(gPx);
-    if (gpx < 1e-12) return wSeg;
+    if (!(gpx > 0.0)) return wSeg;
     float tproj = dot(c - A, t) / L2;
     cand.dpx = abs(f) / gpx;
     if (tproj < 0.0) cand.dpx = length((c - A) * px);
@@ -1972,13 +3170,16 @@ float gwnSegEval(vec2 c, vec2 px, ivec2 sL, int type, float sigma, out GwnSdfCan
     vec4 pe = texFetch(ivec2(sL.x + 1, sL.y));
     vec2 A = pe.xy, B = pe.zw, t = B - A;
     float wSeg = gwnCross(A - c, B - c);
+#ifdef GWN_WINDING_ONLY
+    return wSeg;
+#endif
     float L2 = dot(t, t);
-    if (L2 < 1e-20) return wSeg;
+    if (!(L2 > 0.0)) return wSeg;
     vec2 n = vec2(-t.y, t.x) * inversesqrt(L2);
     float f = dot(n, c - A);
     vec2 gPx = n / px;
     float gpx = length(gPx);
-    if (gpx < 1e-12) return wSeg;
+    if (!(gpx > 0.0)) return wSeg;
     float dPlane = abs(f) / gpx;
     float tproj = dot(c - A, t) / L2;
     cand.dpx = dPlane;
@@ -1998,12 +3199,12 @@ float gwnSegEval(vec2 c, vec2 px, ivec2 sL, int type, float sigma, out GwnSdfCan
     float wSeg = gwnCross(P0 - c, P2 - c);
     vec2 chord = P2 - P0;
     float cl2 = dot(chord, chord);
-    float tproj = cl2 > 1e-20 ? dot(c - P0, chord) / cl2 : 0.5;
+    float tproj = cl2 > 0.0 ? dot(c - P0, chord) / cl2 : 0.5;
 
     float d = (P1.y - P2.y) * (P0.x - P2.x) + (P2.x - P1.x) * (P0.y - P2.y);
     float l = 0.0, m = 0.0, n_ = 0.0, u = 0.0, v = 0.0;
     vec2 gL = vec2(0.0), gm = vec2(0.0), gn = vec2(0.0);
-    bool haveBary = abs(d) >= 1e-20;
+    bool haveBary = d != 0.0;
     if (haveBary) {
       gL = vec2(P1.y - P2.y, P2.x - P1.x) / d;
       gm = vec2(P2.y - P0.y, P0.x - P2.x) / d;
@@ -2012,8 +3213,8 @@ float gwnSegEval(vec2 c, vec2 px, ivec2 sL, int type, float sigma, out GwnSdfCan
       gn = -gL - gm;
       u = m * 0.5 + n_; v = n_;
 
-      if (l >= 0.0 && m >= 0.0 && n_ >= 0.0 && (u * u - v) < 0.0) {
-        float sideP = (P1.x - P0.x) * chord.y - (P1.y - P0.y) * chord.x;
+      float sideP = (P1.x - P0.x) * chord.y - (P1.y - P0.y) * chord.x;
+      if (l >= 0.0 && gwnChordSide(P0 - c, P2 - c) * sideP > 0.0 && n_ >= 0.0 && (u * u - v) < 0.0) {
         wSeg += sign(sideP);
       }
     }
@@ -2023,8 +3224,9 @@ float gwnSegEval(vec2 c, vec2 px, ivec2 sL, int type, float sigma, out GwnSdfCan
       vec2 V  = tproj < 0.0 ? P0 : P2;
       vec2 tg = tproj < 0.0 ? P1 - P0 : P2 - P1;
       float tl2 = dot(tg, tg);
-      if (tl2 < 1e-20) { tg = chord; tl2 = cl2; }
-      vec2 n = vec2(-tg.y, tg.x) * inversesqrt(max(tl2, 1e-20));
+      if (!(tl2 > 0.0)) { tg = chord; tl2 = cl2; }
+      if (!(tl2 > 0.0)) return wSeg;
+      vec2 n = vec2(-tg.y, tg.x) * inversesqrt(tl2);
       f = dot(n, c - V);
       gEm = n;
       rank = length((c - V) * px);
@@ -2036,15 +3238,15 @@ float gwnSegEval(vec2 c, vec2 px, ivec2 sL, int type, float sigma, out GwnSdfCan
     }
     vec2 gPx = gEm / px;
     float gpx = length(gPx);
-    if (gpx < 1e-12) return wSeg;
+    if (!(gpx > 0.0)) return wSeg;
     float dPlane = abs(f) / gpx;
     cand.dpx = rank >= 0.0 ? rank : dPlane;
 
-    if (rank < 0.0 && cl2 > 1e-20) {
+    if (rank < 0.0 && cl2 > 0.0) {
       float cl9 = sqrt(cl2);
       float devS9 = ((c.x - P0.x) * chord.y - (c.y - P0.y) * chord.x) / cl9;
       float ctrlDev = abs((P1.x - P0.x) * chord.y - (P1.y - P0.y) * chord.x) / cl9;
-      float slabPx = (abs(devS9) - 0.5 * ctrlDev) / max(min(1.0 / px.x, 1.0 / px.y), 1e-12);
+      float slabPx = (abs(devS9) - 0.5 * ctrlDev) / min(1.0 / px.x, 1.0 / px.y);
       cand.dpx = max(dPlane, slabPx);
     }
 
@@ -2065,7 +3267,7 @@ float gwnSegEval(vec2 c, vec2 px, ivec2 sL, int type, float sigma, out GwnSdfCan
     float wSeg = gwnCross(E0 - c, E1 - c);
     vec2 chord = E1 - E0;
     float cl2 = dot(chord, chord);
-    if (cl2 < 1e-20) return wSeg;
+    if (!(cl2 > 0.0)) return wSeg;
     float cl = sqrt(cl2);
     float tproj = dot(c - E0, chord) / cl2;
     float devS = ((c.x - E0.x) * chord.y - (c.y - E0.y) * chord.x) / cl;
@@ -2101,7 +3303,7 @@ float gwnSegEval(vec2 c, vec2 px, ivec2 sL, int type, float sigma, out GwnSdfCan
       vec4 tr = texFetch(ivec2(sL.x + 2, sL.y));
       vec4 tt = texFetch(ivec2(sL.x + 3, sL.y));
 
-      if (min(tc.z, tc.w) <= 1e-4 * max(max(tc.z, tc.w), 1e-9)) {
+      if (min(tc.z, tc.w) <= 1e-4 * max(tc.z, tc.w)) {
         vec2 nrm = vec2(-chord.y, chord.x) / cl;
         f = dot(nrm, c - E0);
         gEm = nrm;
@@ -2119,7 +3321,7 @@ float gwnSegEval(vec2 c, vec2 px, ivec2 sL, int type, float sigma, out GwnSdfCan
       }
     }
 
-    if (tproj > 0.0 && tproj < 1.0 && devS * luneAdd > 0.0 && abs(devS) <= maxDev
+    if (tproj > 0.0 && tproj < 1.0 && gwnChordSide(E0 - c, E1 - c) * luneAdd > 0.0 && abs(devS) <= maxDev
         && f * fRegionSgn > 0.0) wSeg += luneAdd;
     float rank = -1.0;
     if (tproj < 0.0 || tproj > 1.0) {
@@ -2132,11 +3334,11 @@ float gwnSegEval(vec2 c, vec2 px, ivec2 sL, int type, float sigma, out GwnSdfCan
     }
     vec2 gPx = gEm / px;
     float gpx = length(gPx);
-    if (gpx < 1e-12) return wSeg;
+    if (!(gpx > 0.0)) return wSeg;
     float dPlane = abs(f) / gpx;
     cand.dpx = rank >= 0.0 ? rank : dPlane;
 
-    float slabPx = (abs(devS) - maxDev) / max(min(1.0 / px.x, 1.0 / px.y), 1e-12);
+    float slabPx = (abs(devS) - maxDev) / min(1.0 / px.x, 1.0 / px.y);
     if (rank < 0.0) cand.dpx = max(dPlane, slabPx);
     vec2 tvq = vec2(gEm.y, -gEm.x);
     if (dot(tvq, chord) < 0.0) tvq = -tvq;
@@ -2153,31 +3355,90 @@ float gwnSegEval(vec2 c, vec2 px, ivec2 sL, int type, float sigma, out GwnSdfCan
 
 float hardCrossCubic(vec2 c, vec4 p12, vec4 p34);
 
+vec2 gwnBoxSize(vec4 bb) { return bandBoxSize(bb); }
+
+#ifdef GWN_EXACT_AREA
+
+float gwnFillOf(float w, bool evenOdd) {
+  float aw = abs(w);
+  return evenOdd ? ((mod(aw, 2.0) >= 0.5 && mod(aw, 2.0) < 1.5) ? 1.0 : 0.0) : step(0.5, aw);
+}
+
+float gwnLocalSide(GwnSdfCand c, float w, bool evenOdd, float inside) {
+  bool left = c.sFill * (c.sg == 0.0 ? 1.0 : sign(c.sg)) >= 0.0;
+  if (gwnFillOf(left ? w - 1.0 : w + 1.0, evenOdd) == inside) return 0.0;
+  return left == (inside > 0.5) ? 1.0 : -1.0;
+}
+
+float gwnModelCov(GwnSdfCand c1, GwnSdfCand c2, float w, bool evenOdd, float inside, vec2 px, out bool holds) {
+  holds = true;
+  if (c1.dpx > 0.70710678) return inside;
+  float loc = c1.endNear == 0.0 ? gwnLocalSide(c1, w, evenOdd, inside) : 9.0;
+#ifdef GWN_DIAG_SINGLE
+  bool single = true;
+#else
+  bool single = c2.dpx > 0.70710678;
+#endif
+  float cA = exactBoxCov(-c1.nf, c1.sFill);
+  if (single) {
+    if (loc == 0.0 && c1.sg == 0.0) return inside;
+    holds = loc == sign(c1.sg) && c1.sg != 0.0 && (c1.sFill >= 0.0) == (inside > 0.5);
+    return cA;
+  }
+
+  holds = abs(c1.sg) == 1.0 && abs(c2.sg) == 1.0 && (loc == 9.0 || loc == c1.sg);
+
+  bool reflex = false;
+  bool corner = c1.endNear != 0.0 && c2.endNear != 0.0 && c1.endNear != c2.endNear;
+  if (corner) {
+    vec2 dV = (c1.V - c2.V) * px;
+    corner = dot(dV, dV) < 0.01;
+    if (corner) {
+      vec2 tIn = c1.endNear > 0.0 ? c1.tv : c2.tv;
+      vec2 tOut = c1.endNear > 0.0 ? c2.tv : c1.tv;
+      float turn = tIn.x * tOut.y - tIn.y * tOut.x;
+      reflex = turn * (c1.endNear > 0.0 ? c1.sg : c2.sg) < 0.0;
+    }
+  }
+
+  if (!corner) { holds = holds && (c1.sFill >= 0.0) == (inside > 0.5) && (c2.sFill >= 0.0) == (inside > 0.5) && c1.endNear == 0.0; return cA; }
+
+  bool bothIn = (c1.sFill >= 0.0) && (c2.sFill >= 0.0);
+  bool anyIn  = (c1.sFill >= 0.0) || (c2.sFill >= 0.0);
+  if (anyIn != bothIn) reflex = inside > 0.5;
+  if (anyIn == bothIn && bothIn != (inside > 0.5)) holds = false;
+  if (c1.sg != c2.sg) holds = false;
+  float inter = exactBoxCov2(-c1.nf, c1.sFill, -c2.nf, c2.sFill);
+
+  return reflex ? (cA + exactBoxCov(-c2.nf, c2.sFill) - inter) : inter;
+}
+#endif
 float renderFillGWNSDF(vec2 c, vec2 px, ivec4 GD, bool evenOdd, vec4 shapeBB) {
   ivec2 gl = GD.xy;
   int bandsY = GD.w + 1, bandsX = GD.z + 1;
   vec4 hdr = bFetch(bLoc(gl, (bandsY + bandsX) * 2));
   int nodeBase = int(hdr.x), nodeCount = int(abs(hdr.y)), refBase = int(hdr.z);
-  float sigma = hdr.y >= 0.0 ? 1.0 : -1.0;
   if (nodeCount <= 0) return 0.0;
 
-  vec2 emPerPx = 1.0 / max(px, vec2(1e-6));
+  vec2 emPerPx = 1.0 / px;
   float cellR = 0.70710678 * max(emPerPx.x, emPerPx.y);
-  vec4 ext = bFetch(bLoc(gl, refBase + int(hdr.w)));
+#ifdef GWN_WINDING_ONLY
 
-#ifndef MANTLE_GWN_NOEXIT
+  cellR = 0.0;
+#endif
+  vec4 ext = bFetch(bLoc(gl, refBase + int(hdr.w)));
 
   int gridBase = int(ext.z);
   if (gridBase > 0) {
     int gwh = int(ext.w);
-    int GW = gwh / 256, GH = gwh - (gwh / 256) * 256;
-    vec2 bbSz = max(shapeBB.zw - shapeBB.xy, vec2(1e-6));
+    int GW = gwh >> 8, GH = gwh & 255;
+    vec2 bbSz = gwnBoxSize(shapeBB);
     vec2 g = (c - shapeBB.xy) / bbSz * vec2(float(GW), float(GH));
     int gx = int(floor(g.x)), gy = int(floor(g.y));
     if (gx >= 0 && gy >= 0 && gx < GW && gy < GH) {
       int ci = gy * GW + gx;
-      vec4 cell = bFetch(bLoc(gl, gridBase + ci / 2));
-      vec2 wm = ci - (ci / 2) * 2 == 0 ? cell.xy : cell.zw;
+      vec4 cell = bFetch(bLoc(gl, gridBase + (ci >> 1)));
+      vec2 wm = (ci & 1) == 0 ? cell.xy : cell.zw;
       if (wm.y > cellR) {
         float awg = abs(wm.x);
         if (!evenOdd) return step(0.5, awg);
@@ -2186,18 +3447,22 @@ float renderFillGWNSDF(vec2 c, vec2 px, ivec4 GD, bool evenOdd, vec4 shapeBB) {
       }
     }
   }
-#endif
 
   float w = 0.0;
+#ifdef GWN_EXACT_AREA
+
+  vec2 hb = 0.5 * emPerPx;
+  bool subPx = false;
+  float run = 0.0;
+#endif
   GwnSdfCand c1, c2;
-  c1.dpx = 1e30; c1.sFill = 0.0; c1.nf = vec2(0.0); c1.tv = vec2(0.0); c1.endNear = 0.0; c1.V = vec2(0.0);
+  c1.dpx = 1e30; c1.sFill = 0.0; c1.nf = vec2(0.0); c1.tv = vec2(0.0); c1.endNear = 0.0; c1.V = vec2(0.0); c1.sg = 0.0;
   c2 = c1;
 
   int GB = 0, byP = 0, nbB = -1, rbBase = 0;
-#ifndef MANTLE_GWN_NOEXIT
   GB = int(ext.y); rbBase = int(ext.x);
   if (GB > 0) {
-    float bandH = max(shapeBB.w - shapeBB.y, 1e-6) / float(GB);
+    float bandH = gwnBoxSize(shapeBB).y / float(GB);
     if (bandH <= 2.0 * cellR) { GB = 0; }
     else {
       byP = clamp(int((c.y - shapeBB.y) / bandH), 0, GB - 1);
@@ -2206,14 +3471,17 @@ float renderFillGWNSDF(vec2 c, vec2 px, ivec4 GD, bool evenOdd, vec4 shapeBB) {
       else if (bandH - yloc < cellR && byP < GB - 1) nbB = byP + 1;
     }
   }
-#endif
 
+#ifdef GWN_EXACT_AREA
+  for (int ph = 0; ph < 2; ph++) {
+  if (ph == 1 && !subPx) break;
+#endif
   for (int pass = 0; pass < 2; pass++) {
     int eBase = 0, eCount = 1;
     if (GB > 0) {
       int bandIdx = pass == 0 ? byP : nbB;
-      vec4 bh = bFetch(bLoc(gl, rbBase + bandIdx / 2));
-      vec2 bc = bandIdx - (bandIdx / 2) * 2 == 0 ? bh.xy : bh.zw;
+      vec4 bh = bFetch(bLoc(gl, rbBase + (bandIdx >> 1)));
+      vec2 bc = (bandIdx & 1) == 0 ? bh.xy : bh.zw;
       eBase = int(bc.x); eCount = int(bc.y);
     }
     for (int ei = 0; ei < 4096; ei++) {
@@ -2224,9 +3492,9 @@ float renderFillGWNSDF(vec2 c, vec2 px, ivec4 GD, bool evenOdd, vec4 shapeBB) {
         if (E.y < c.x - cellR) break;
         if (c.y < E.z - cellR || c.y > E.w + cellR) continue;
         int ex = int(E.x);
-        rootI = ex / 4;
-        int fl = ex - rootI * 4;
-        if (pass == 1 && ((nbB < byP && fl - (fl / 2) * 2 == 1) || (nbB > byP && fl >= 2)))
+        rootI = ex >> 2;
+        int fl = ex & 3;
+        if (pass == 1 && ((nbB < byP && (fl & 1) == 1) || (nbB > byP && fl >= 2)))
           continue;
       }
 
@@ -2240,26 +3508,61 @@ float renderFillGWNSDF(vec2 c, vec2 px, ivec4 GD, bool evenOdd, vec4 shapeBB) {
         float rr = B.z + cellR;
 
         if (dot(dcv, dcv) > rr * rr) {
+#ifdef GWN_EXACT_AREA
+          if (ph == 1) {
+            if (abs(dcv.y) <= B.z + hb.y && B.x + B.z > c.x - hb.x) run += aacLineContrib(aacPL(A.xy, c, px), aacPL(A.zw, c, px), 0.0, 1.0);
+          } else
+#endif
           if (abs(dcv.y) <= B.z && B.x + B.z > c.x) w += gwnCross(A.xy - c, A.zw - c);
           ni = B.w >= 0.0 ? int(B.w) : ni + 1;
           continue;
         }
+#ifdef GWN_EXACT_AREA
+        if (abs(dcv.x) + B.z <= hb.x && abs(dcv.y) + B.z <= hb.y) subPx = true;
+#endif
         if (B.w < 0.0) {
 
           int v = int(-B.w) - 1;
-          int rc = v - (v / 64) * 64, rs = v / 64;
+          int rc = v & 63, rs = v >> 6;
           for (int k = 0; k < 32; k++) {
             if (k >= rc) break;
             vec4 R = bFetch(bLoc(gl, refBase + rs + k));
+#ifdef GWN_EXACT_AREA
+            if (ph == 1) { run += gwnPieceArea(c, px, ivec2(int(R.x), int(R.y)), int(R.z + 0.5) & 15); continue; }
+#endif
             GwnSdfCand cd;
 
             float sgP = R.w;
-            w += gwnSegEval(c, px, ivec2(int(R.x), int(R.y)), int(R.z), sgP == 0.0 ? 1.0 : sgP, cd);
-#ifndef GWN_WINDING_ONLY
-            if (sgP != 0.0) {
-              if (cd.dpx < c1.dpx) { c2 = c1; c1 = cd; }
-              else if (cd.dpx < c2.dpx) { c2 = cd; }
+
+            int rz = int(R.z + 0.5), pty = rz & 15;
+            w += gwnSegEval(c, px, ivec2(int(R.x), int(R.y)), pty, sgP == 0.0 ? 1.0 : sign(sgP), cd);
+            cd.sg = sgP;
+
+            { int smb = rz >> 4; if ((cd.endNear < 0.0 && (smb == 1 || smb == 3)) || (cd.endNear > 0.0 && smb >= 2)) cd.endNear = 0.0; }
+#if defined(GWN_DIAG_FLIP_T0) || defined(GWN_DIAG_FLIP_T1) || defined(GWN_DIAG_FLIP_T4) || defined(GWN_DIAG_FLIP_T6)
+
+            {
+              int dt = pty;
+              bool flip = false;
+#ifdef GWN_DIAG_FLIP_T0
+              flip = flip || dt == 0;
+#endif
+#ifdef GWN_DIAG_FLIP_T1
+              flip = flip || dt == 1;
+#endif
+#ifdef GWN_DIAG_FLIP_T4
+              flip = flip || dt == 4;
+#endif
+#ifdef GWN_DIAG_FLIP_T6
+              flip = flip || dt == 6;
+#endif
+              if (flip) { cd.nf = -cd.nf; cd.sFill = -cd.sFill; }
             }
+#endif
+#ifndef GWN_WINDING_ONLY
+
+            if (cd.dpx < c1.dpx) { c2 = c1; c1 = cd; }
+            else if (cd.dpx < c2.dpx) { c2 = cd; }
 #endif
           }
           ni++;
@@ -2272,105 +3575,79 @@ float renderFillGWNSDF(vec2 c, vec2 px, ivec4 GD, bool evenOdd, vec4 shapeBB) {
     }
     if (GB <= 0 || nbB < 0) break;
   }
-  float aw = abs(w);
-  float inside = evenOdd ? ((mod(aw, 2.0) >= 0.5 && mod(aw, 2.0) < 1.5) ? 1.0 : 0.0) : step(0.5, aw);
-#ifdef GWN_WINDING_ONLY
+#ifdef GWN_EXACT_AREA
+  if (ph == 1) break;
 
-  return inside;
-#endif
-  if (c1.dpx > 0.70710678) return inside;
-
-  bool single = c2.dpx > 0.70710678;
-  float f1 = (single && ((c1.sFill >= 0.0) != (inside > 0.5))) ? -1.0 : 1.0;
-  float cA = exactBoxCov(-c1.nf * f1, c1.sFill * f1);
-  if (single) return cA;
-
-  float cB = exactBoxCov(-c2.nf, c2.sFill);
-
-  bool reflex = false;
-  bool corner = c1.endNear != 0.0 && c2.endNear != 0.0 && c1.endNear != c2.endNear;
-  if (corner) {
-    vec2 dV = (c1.V - c2.V) * px;
-    corner = dot(dV, dV) < 0.01;
-    if (corner) {
-      vec2 tIn = c1.endNear > 0.0 ? c1.tv : c2.tv;
-      vec2 tOut = c1.endNear > 0.0 ? c2.tv : c1.tv;
-      float turn = tIn.x * tOut.y - tIn.y * tOut.x;
-      reflex = turn * sigma < 0.0;
-    }
+  float inside = gwnFillOf(w, evenOdd);
+  bool holds;
+  float cov = gwnModelCov(c1, c2, w, evenOdd, inside, px, holds);
+  if (!subPx && holds) return cov;
+  subPx = true;
   }
-  if (!corner) reflex = (c1.sFill > 0.0) != (c2.sFill > 0.0) && inside > 0.5;
-  float inter = gwnBoxCov2(-c1.nf, c1.sFill, -c2.nf, c2.sFill);
-  return reflex ? (cA + cB - inter) : inter;
+  return aacFold(run, evenOdd);
+#else
+
+  float aw = abs(w);
+  return evenOdd ? ((mod(aw, 2.0) >= 0.5 && mod(aw, 2.0) < 1.5) ? 1.0 : 0.0) : step(0.5, aw);
+#endif
 }
 
 #endif
 
 float hardCrossLine(vec2 c, vec2 A, vec2 B) {
-  float dy = B.y - A.y;
-  if (abs(dy) < 1e-30) return 0.0;
-  float t = (c.y - A.y) / dy;
-  if (t < 0.0 || t >= 1.0) return 0.0;
-  float x = A.x + t * (B.x - A.x);
-  return (x > c.x) ? (dy > 0.0 ? 1.0 : -1.0) : 0.0;
+
+  return gwnCross(A - c, B - c);
 }
 
 float hardCrossQuad(vec2 c, vec2 P0, vec2 P1, vec2 P2) {
-  float a = P0.y - 2.0 * P1.y + P2.y;
-  float b = 2.0 * (P1.y - P0.y);
-  float cc = P0.y - c.y;
+
+  vec4 p12 = vec4(P0 - c, P1 - c);
+  vec2 p3 = P2 - c;
+  uint code = calcRootCode2(p12.y, p12.w, p3.y);
+  if (code == 0u) return 0.0;
+
+  if (min(min(p12.x, p12.z), p3.x) > 0.0) return ((code > 1u) ? 1.0 : 0.0) - (((code & 1u) != 0u) ? 1.0 : 0.0);
+  vec4 rt = slugSolveHorizQuad(p12, p3);
   float w = 0.0;
-  float ax = P0.x - 2.0 * P1.x + P2.x, bx = 2.0 * (P1.x - P0.x);
-  if (abs(a) < 1e-20) {
-    if (abs(b) < 1e-30) return 0.0;
-    float t = -cc / b;
-    if (t >= 0.0 && t < 1.0) { float x = ax * t * t + bx * t + P0.x;
-      if (x > c.x) w += (b > 0.0 ? 1.0 : -1.0); }
-    return w;
-  }
-  float disc = b * b - 4.0 * a * cc;
-  if (disc < 0.0) return 0.0;
-  float sd = sqrt(disc);
-  for (int r = 0; r < 2; r++) {
-    float t = (r == 0 ? (-b + sd) : (-b - sd)) / (2.0 * a);
-    if (t < 0.0 || t >= 1.0) continue;
-    float x = ax * t * t + bx * t + P0.x;
-    if (x <= c.x) continue;
-    float dydt = 2.0 * a * t + b;
-    w += dydt > 0.0 ? 1.0 : -1.0;
-  }
+  if ((code & 1u) != 0u && !isinf(rt.x) && rt.x == rt.x && rt.x > 0.0) w -= 1.0;
+  if (code > 1u && !isinf(rt.y) && rt.y == rt.y && rt.y > 0.0) w += 1.0;
   return w;
 }
 
 float hardCrossCubic(vec2 c, vec4 p12, vec4 p34) {
-  vec3 rs, ts;
-  solveCubicBisect(p12, p34, false, rs, ts);
-  vec4 cy = cubicCoeff(p12.y, p12.w, p34.y, p34.w);
+  vec3 rs, ts, up;
+  solveCubicBisect(p12, p34, false, rs, ts, up);
   float w = 0.0;
   for (int j = 0; j < 3; j++) {
-    if (ts[j] < 0.0 || ts[j] >= 1.0 || rs[j] >= 1e10 || rs[j] != rs[j]) continue;
+    if (ts[j] < 0.0 || rs[j] != rs[j]) continue;
     if (rs[j] <= 0.0) continue;
-    w += (evalCD(cy, ts[j]) > 0.0) ? 1.0 : -1.0;
+    w += (up[j] > 0.5) ? 1.0 : -1.0;
   }
   return w;
 }
 
-float hardCrossArc(vec2 c, vec4 d1, vec4 d2) {
+float hardCrossArc(vec2 c, vec4 d1, vec4 d2, vec4 ends) {
   float sp = sin(d2.z), cp = cos(d2.z);
-  float A = sp * d1.z, B = cp * d1.w, C = -(d1.y - c.y);
-  float Rlen = sqrt(A * A + B * B);
-  if (Rlen <= 1e-10) return 0.0;
-  float ratio = C / Rlen;
-  if (abs(ratio) >= 0.99999) return 0.0;
-  float arcDir = (d2.y >= d2.x) ? 1.0 : -1.0;
-  float ang = atan(B, A), b2 = acos(clamp(ratio, -1.0, 1.0));
+  vec3 sw = arcSweep(d2);
+
+  vec2 pLo, pHi;
+  arcEndsLoHi(ends, sw.z, pLo, pHi);
+
+  if (d1.x - (abs(cp * d1.z) + abs(sp * d1.w)) - c.x > 4.0 * arcRayUlpV(d1)) {
+    float nnLo = (pLo.y - c.y >= 0.0) ? 1.0 : 0.0, nnHi = (pHi.y - c.y >= 0.0) ? 1.0 : 0.0;
+    return sw.z * (nnHi - nnLo);
+  }
+  vec4 pcU; vec3 axU;
+  vec3 cr = arcRayCrossings(sw.x, sw.y, sw.z, sp * d1.z, cp * d1.w, -(d1.y - c.y),
+                            pLo.y - c.y, pHi.y - c.y, false, pcU, axU);
+
+  vec3 thc = (cr.x + cr.y + cr.z > 0.0) ? arcRayRoots(sw.x, sw.y, sp * d1.z, cp * d1.w, -(d1.y - c.y), pcU, axU) : vec3(sw.x);
   float w = 0.0;
-  for (int k = 0; k < 2; k++) {
-    float th = (k == 0) ? (ang + b2) : (ang - b2);
-    if (!arcInRange(th, d2.x, d2.y)) continue;
-    vec2 pnt; float ddx, ddy; arcSample(d1, cp, sp, th, pnt, ddx, ddy);
+  for (int j = 0; j < 3; j++) {
+    if (cr[j] == 0.0) continue;
+    vec2 pnt; float ddx, ddy; arcSample(d1, cp, sp, thc[j], pnt, ddx, ddy);
     if (pnt.x <= c.x) continue;
-    w += arcDir * ((ddy < 0.0) ? 1.0 : -1.0);
+    w += (cr[j] > 1.5) ? -1.0 : 1.0;
   }
   return w;
 }
@@ -2378,63 +3655,69 @@ float hardCrossArc(vec2 c, vec4 d1, vec4 d2) {
 float renderFillHardBand(vec2 c, ivec4 GD, bool evenOdd, vec4 shapeBB) {
   ivec2 gl = GD.xy;
   int bandsY = GD.w + 1;
-  vec2 bbSize = max(shapeBB.zw - shapeBB.xy, vec2(1e-6));
+  vec2 bbSize = bandBoxSize(shapeBB);
   int by = clamp(int((c.y - shapeBB.y) / bbSize.y * float(bandsY)), 0, bandsY - 1);
-  int hdr = by * 2;
-  vec4 cnts = bFetch(bLoc(gl, hdr));
+  int hdr = texLin(gl) + by * 2;
+  vec4 cnts = bFetchL(hdr);
   int nLine = int(cnts.x), nQuad = int(cnts.y);
-  int arrIdx = int(bFetch(bLoc(gl, hdr + 1)).x);
+  vec4 hdr1 = bFetchL(hdr + 1);
+  int hE = texLin(gl) + int(hdr1.x);
+
+  bool rej = fillRayReject(hdr1);
   float w = 0.0;
-  int hOff = 0;
 
 #ifndef MANTLE_NO_LINE
-  for (int i = 0; i < 1024; i++) {
-    if (i >= nLine) break;
-    vec2 segRaw = bandEntry(gl, arrIdx, hOff + i);
+  for (int i = 0; i < nLine; i++) {
+    vec4 segRaw = bFetchL(hE + i);
     if (segRaw.y < c.x) break;
-    ivec2 sL = segLocXY(segRaw.x);
-    vec4 pe = texFetch(ivec2(sL.x + 1, sL.y));
+    if (rej && rayLaneMiss(segRaw, c.y)) continue;
+    int sL = int(segRaw.x);
+    vec4 pe = cFetchL(sL + 1);
     w += hardCrossLine(c, pe.xy, pe.zw);
   }
 #endif
-  hOff += nLine;
+  hE += nLine;
 #ifndef MANTLE_NO_QUAD
-  for (int i = 0; i < 1024; i++) {
-    if (i >= nQuad) break;
-    vec2 segRaw = bandEntry(gl, arrIdx, hOff + i);
+  for (int i = 0; i < nQuad; i++) {
+    vec4 segRaw = bFetchL(hE + i);
     if (segRaw.y < c.x) break;
-    ivec2 sL = segLocXY(segRaw.x);
-    vec4 p12 = texFetch(ivec2(sL.x + 1, sL.y));
-    vec2 p3 = texFetch(ivec2(sL.x + 2, sL.y)).xy;
+    if (rej && rayLaneMiss(segRaw, c.y)) continue;
+    int sL = int(segRaw.x);
+    vec4 p12 = cFetchL(sL + 1);
+    vec2 p3 = cFetchL(sL + 2).xy;
     w += hardCrossQuad(c, p12.xy, p12.zw, p3);
   }
 #endif
-  hOff += nQuad;
+  hE += nQuad;
 #ifndef MANTLE_NO_CUBIC
   int nCubic = int(cnts.z);
-  for (int i = 0; i < 1024; i++) {
-    if (i >= nCubic) break;
-    vec2 segRaw = bandEntry(gl, arrIdx, hOff + i);
+  for (int i = 0; i < nCubic; i++) {
+    vec4 segRaw = bFetchL(hE + i);
     if (segRaw.y < c.x) break;
-    ivec2 sL = segLocXY(segRaw.x);
-    ivec2 dL = ivec2(sL.x + 1, sL.y);
-    vec4 p12 = texFetch(dL) - vec4(c, c);
-    vec4 p34 = texFetch(ivec2(dL.x + 1, dL.y)) - vec4(c, c);
+    if (rej && rayLaneMiss(segRaw, c.y)) continue;
+    int sL = int(segRaw.x);
+    vec4 p12 = cFetchL(sL + 1) - vec4(c, c);
+    vec4 p34 = cFetchL(sL + 2) - vec4(c, c);
+
+    if (min(min(p12.y, p12.w), min(p34.y, p34.w)) >= 0.0 || max(max(p12.y, p12.w), max(p34.y, p34.w)) < 0.0) continue;
+    if (min(min(p12.x, p12.z), min(p34.x, p34.z)) > 0.0) {
+      w += ((p34.w >= 0.0) ? 1.0 : 0.0) - ((p12.y >= 0.0) ? 1.0 : 0.0);
+      continue;
+    }
     w += hardCrossCubic(c, p12, p34);
   }
-  hOff += nCubic;
+  hE += nCubic;
 #else
-  hOff += int(cnts.z);
+  hE += int(cnts.z);
 #endif
 #ifndef MANTLE_NO_ARC
   int nArc = int(cnts.w);
-  for (int i = 0; i < 1024; i++) {
-    if (i >= nArc) break;
-    vec2 segRaw = bandEntry(gl, arrIdx, hOff + i);
+  for (int i = 0; i < nArc; i++) {
+    vec4 segRaw = bFetchL(hE + i);
     if (segRaw.y < c.x) break;
-    ivec2 sL = segLocXY(segRaw.x);
-    ivec2 dL = ivec2(sL.x + 1, sL.y);
-    w += hardCrossArc(c, texFetch(dL), texFetch(ivec2(dL.x + 1, dL.y)));
+    if (rej && rayLaneMiss(segRaw, c.y)) continue;
+    int sL = int(segRaw.x);
+    w += hardCrossArc(c, cFetchL(sL + 1), cFetchL(sL + 2), cFetchL(sL + 3));
   }
 #endif
   float aw = abs(w);
@@ -2444,8 +3727,6 @@ float renderFillHardBand(vec2 c, ivec4 GD, bool evenOdd, vec4 shapeBB) {
 }
 
 #endif
-
-#ifdef MANTLE_AAC
 
 vec2 aacPL(vec2 emPt, vec2 c, vec2 px) { return (emPt - c) * px + 0.5; }
 
@@ -2472,126 +3753,63 @@ vec2 aacQuadRoots(float qa, float qb, float qc) {
 
 #define AAC_EPS (1.0 / 65536.0)
 
-#define AAC_NEWTON 6
+#define AAC_ROOT_TOL (1.0 / 1048576.0)
+#define AAC_ROOT_NEWTON 8
+#define AAC_ROOT_STEPS 40
+
+float aacQuadRoot(float qa, float qb, float qc, float lo, float hi) {
+  if (abs(qa) < AAC_EPS) return clamp(abs(qb) > AAC_EPS ? -qc / qb : lo, lo, hi);
+  float sq = sqrt(max(qb * qb - 4.0 * qa * qc, 0.0));
+  float q  = -0.5 * (qb + (qb < 0.0 ? -sq : sq));
+  float r1 = q / qa, r2 = abs(q) > AAC_EPS ? qc / q : r1;
+  return clamp((r1 >= lo - 1e-4 && r1 <= hi + 1e-4) ? r1 : r2, lo, hi);
+}
 
 float aacSolveC(vec4 C, float ta, float tb, float V) {
   float lo = min(ta, tb), hi = max(ta, tb);
-  if (abs(C.x) < 1e-12) {
-    float qa = C.y, qb = C.z, qc = C.w - V;
-    if (abs(qa) < AAC_EPS)
-      return clamp(abs(qb) > AAC_EPS ? -qc / qb : lo, lo, hi);
-    float sq = sqrt(max(qb * qb - 4.0 * qa * qc, 0.0));
-    float q  = -0.5 * (qb + (qb < 0.0 ? -sq : sq));
-    float r1 = q / qa;
-    float r2 = abs(q) > AAC_EPS ? qc / q : r1;
-    float t  = (r1 >= lo - 1e-4 && r1 <= hi + 1e-4) ? r1 : r2;
-    return clamp(t, lo, hi);
-  }
+  if (abs(C.x) < 1e-12) return aacQuadRoot(C.y, C.z, C.w - V, lo, hi);
 #ifdef MANTLE_NO_CUBIC
   return 0.5 * (lo + hi);
 #else
-  float fa = evalC(C, lo) - V, fb = evalC(C, hi) - V, den = fb - fa;
-  float t = (abs(den) > AAC_EPS) ? clamp(lo - fa * (hi - lo) / den, lo, hi)
-                                 : 0.5 * (lo + hi);
-  for (int k = 0; k < AAC_NEWTON; k++) {
-    float f = evalC(C, t) - V;
-    float d = evalCD(C, t);
-    if (abs(d) < 1e-12) break;
-    t = clamp(t - f / d, lo, hi);
+  float a = lo, b = hi;
+  float fa = evalC(C, a) - V, fb = evalC(C, b) - V;
+  float tol = max(AAC_ROOT_TOL, (1.0 / 16777216.0) * (abs(C.x) + abs(C.y) + abs(C.z) + abs(C.w) + abs(V)));
+  if (abs(fa) <= tol) return a;
+  if (abs(fb) <= tol) return b;
+  if ((fa < 0.0) == (fb < 0.0)) return (abs(fa) <= abs(fb)) ? a : b;
+  float t = (a * fb - b * fa) / (fb - fa);
+  if (!(t > a && t < b)) t = 0.5 * (a + b);
+  for (int k = 0; k < AAC_ROOT_STEPS; k++) {
+    float ft = evalC(C, t) - V;
+    if (abs(ft) <= tol) return t;
+    if ((ft < 0.0) == (fa < 0.0)) a = t; else b = t;
+    float m = 0.5 * (a + b);
+    if (!(m > a && m < b)) break;
+    float tn = t - ft / evalCD(C, t);
+    t = (k < AAC_ROOT_NEWTON && tn > a && tn < b) ? tn : m;
   }
-  return t;
+  return 0.5 * (a + b);
 #endif
 }
 
-vec3 aacAntiF0(vec4 CX, vec4 CY) {
-  float a0 = CX.w, a1 = CX.z, a2 = CX.y;
-  float e0 = CY.z, e1 = 2.0 * CY.y, e2 = 3.0 * CY.x;
-  return vec3(a0 * e0,
-              (a0 * e1 + a1 * e0) * 0.5,
-              (a0 * e2 + a1 * e1 + a2 * e0) / 3.0);
-}
-vec3 aacAntiF1(vec4 CX, vec4 CY) {
-  float a1 = CX.z, a2 = CX.y, a3 = CX.x;
-  float e0 = CY.z, e1 = 2.0 * CY.y, e2 = 3.0 * CY.x;
-  return vec3((a1 * e2 + a2 * e1 + a3 * e0) * 0.25,
-              (a2 * e2 + a3 * e1) * 0.2,
-              (a3 * e2) / 6.0);
-}
-float aacAnti(vec3 F0, vec3 F1, float t) {
-  return t * (F0.x + t * (F0.y + t * (F0.z + t * (F1.x + t * (F1.y + t * F1.z)))));
-}
-
-float aacZoneI2(vec4 CX, vec4 CY, vec3 F0, vec3 F1, float a, float b) {
-  if (b - a < 1e-12) return 0.0;
-  float xm = evalC(CX, 0.5 * (a + b));
-  if (xm <= 0.0) return 0.0;
-  if (xm >= 1.0) return evalC(CY, b) - evalC(CY, a);
-  return aacAnti(F0, F1, b) - aacAnti(F0, F1, a);
-}
-
-float aacXMonoI2(vec4 CX, vec4 CY, vec3 F0, vec3 F1, float a, float b) {
-  if (b - a < 1e-12) return 0.0;
-  float xa = evalC(CX, a), xb = evalC(CX, b);
-  float xlo = min(xa, xb), xhi = max(xa, xb);
-  if (xhi <= 0.0) return 0.0;
-  if (xlo >= 1.0) return evalC(CY, b) - evalC(CY, a);
-  if (xlo >= 0.0 && xhi <= 1.0) return aacAnti(F0, F1, b) - aacAnti(F0, F1, a);
-  float c0 = 1e9, c1 = 1e9;
-  if (xlo < 0.0 && xhi > 0.0) c0 = aacSolveC(CX, a, b, 0.0);
-  if (xlo < 1.0 && xhi > 1.0) c1 = aacSolveC(CX, a, b, 1.0);
-  float m0 = min(c0, c1), m1 = max(c0, c1);
-  float acc = 0.0, prev = a;
-  if (m0 < 1e8) { acc += aacZoneI2(CX, CY, F0, F1, prev, m0); prev = m0; }
-  if (m1 < 1e8) { acc += aacZoneI2(CX, CY, F0, F1, prev, m1); prev = m1; }
-  return acc + aacZoneI2(CX, CY, F0, F1, prev, b);
-}
-
-float aacExactI2(vec4 CX, vec4 CY, vec3 F0, vec3 F1, float u0, float u1) {
-  vec2 ex = aacQuadRoots(3.0 * CX.x, 2.0 * CX.y, CX.z);
-  float e0 = ex.x, e1 = ex.y;
-  float s0 = (e0 > u0 + 1e-7 && e0 < u1 - 1e-7) ? e0 : 1e9;
-  float s1 = (e1 > u0 + 1e-7 && e1 < u1 - 1e-7) ? e1 : 1e9;
-  if (s1 < s0) { float tmp = s0; s0 = s1; s1 = tmp; }
-  float acc = 0.0, prev = u0;
-  if (s0 < 1e8) { acc += aacXMonoI2(CX, CY, F0, F1, prev, s0); prev = s0; }
-  if (s1 < 1e8) { acc += aacXMonoI2(CX, CY, F0, F1, prev, s1); prev = s1; }
-  return acc + aacXMonoI2(CX, CY, F0, F1, prev, u1);
+float aacZoneInt(vec4 CX, vec4 CY, float a, float b) {
+  float h = b - a, m = 0.5 * (a + b), d = 0.3872983346207417 * h;
+  float t0 = m - d, t2 = m + d;
+  float e2 = 3.0 * CY.x, e1 = 2.0 * CY.y;
+  float i0 = evalC(CX, t0) * ((e2 * t0 + e1) * t0 + CY.z);
+  float i1 = evalC(CX, m) * ((e2 * m + e1) * m + CY.z);
+  float i2 = evalC(CX, t2) * ((e2 * t2 + e1) * t2 + CY.z);
+  return h * ((5.0 / 18.0) * (i0 + i2) + (8.0 / 18.0) * i1);
 }
 
 float aacClampI(float w0, float w1) {
   float d = w0 - w1;
-  if (abs(d) < 1e-9) return clamp(0.5 * (w0 + w1), 0.0, 1.0);
+
+  if (abs(d) <= 1e-5 * (1.0 + abs(w0) + abs(w1))) return clamp(0.5 * (w0 + w1), 0.0, 1.0);
   float a0 = max(w0, 0.0),       a1 = max(w1, 0.0);
   float b0 = max(w0 - 1.0, 0.0), b1 = max(w1 - 1.0, 0.0);
-  return ((a0 * a0 - a1 * a1) - (b0 * b0 - b1 * b1)) / (2.0 * d);
-}
 
-float aacBezMonoContrib(vec4 CX, vec4 CY, vec3 F0, vec3 F1, float ta, float tb, float q0, float q1) {
-  float ya = evalC(CY, ta), yb = evalC(CY, tb);
-  if (max(ya, yb) <= q0 || min(ya, yb) >= q1) return 0.0;
-  bool inc = yb > ya;
-  float tLo, tHi;
-  if (inc) {
-    tLo = (ya >= q0) ? ta : aacSolveC(CY, ta, tb, q0);
-    tHi = (yb <= q1) ? tb : aacSolveC(CY, ta, tb, q1);
-  } else {
-    tLo = (yb >= q0) ? tb : aacSolveC(CY, ta, tb, q0);
-    tHi = (ya <= q1) ? ta : aacSolveC(CY, ta, tb, q1);
-  }
-  float u0 = min(tLo, tHi), u1 = max(tLo, tHi);
-  if (u1 - u0 < 1e-12) return 0.0;
-  return -aacExactI2(CX, CY, F0, F1, u0, u1);
-}
-
-float aacCurveContrib(vec4 CX, vec4 CY, float q0, float q1) {
-  vec3 F0 = aacAntiF0(CX, CY), F1 = aacAntiF1(CX, CY);
-  vec2 ey = aacQuadRoots(3.0 * CY.x, 2.0 * CY.y, CY.z);
-  float s0 = (ey.x > 1e-6 && ey.x < 1.0 - 1e-6) ? ey.x : 2.0;
-  float s1 = (ey.y > 1e-6 && ey.y < 1.0 - 1e-6) ? ey.y : 2.0;
-  float run = 0.0, prev = 0.0;
-  if (s0 < 1.5) { run += aacBezMonoContrib(CX, CY, F0, F1, prev, s0, q0, q1); prev = s0; }
-  if (s1 < 1.5) { run += aacBezMonoContrib(CX, CY, F0, F1, prev, s1, q0, q1); prev = s1; }
-  return run + aacBezMonoContrib(CX, CY, F0, F1, prev, 1.0, q0, q1);
+  return ((a0 - a1) * (a0 + a1) - (b0 - b1) * (b0 + b1)) / (2.0 * d);
 }
 
 float aacRightD(float y0, float y1, float q0, float q1) {
@@ -2612,19 +3830,94 @@ float aacLineContrib(vec2 A, vec2 B, float q0, float q1) {
   return -sgn * (hi - lo) * aacClampI(wlo, whi);
 }
 
+float aacQuadPiece(vec2 A, vec2 B, vec2 P0, float ta, float tb, vec2 pa, vec2 pb, float q0, float q1) {
+  if (!(tb > ta) || max(pa.y, pb.y) <= q0 || min(pa.y, pb.y) >= q1 || max(pa.x, pb.x) <= 0.0) return 0.0;
+  float ya = clamp(pa.y, q0, q1), yb = clamp(pb.y, q0, q1);
+  if (min(pa.x, pb.x) >= 1.0) return ya - yb;
+  float u0 = (pa.y == ya) ? ta : aacQuadRoot(A.y, B.y, P0.y - ya, ta, tb);
+  float u1 = (pb.y == yb) ? tb : aacQuadRoot(A.y, B.y, P0.y - yb, ta, tb);
+  float x0 = (u0 == ta) ? pa.x : (A.x * u0 + B.x) * u0 + P0.x;
+  float x1 = (u1 == tb) ? pb.x : (A.x * u1 + B.x) * u1 + P0.x;
+  if (max(x0, x1) <= 0.0) return 0.0;
+  if (min(x0, x1) >= 1.0) return ya - yb;
+
+  bool inOut = x0 < 0.0 || x0 > 1.0, outOut = x1 < 0.0 || x1 > 1.0;
+  float t0 = inOut ? aacQuadRoot(A.x, B.x, P0.x - (x0 < 0.0 ? 0.0 : 1.0), u0, u1) : u0;
+  float t1 = outOut ? aacQuadRoot(A.x, B.x, P0.x - (x1 < 0.0 ? 0.0 : 1.0), u0, u1) : u1;
+  float y0 = inOut ? (A.y * t0 + B.y) * t0 + P0.y : ya;
+  float y1 = outOut ? (A.y * t1 + B.y) * t1 + P0.y : yb;
+  float far = ((x0 > 1.0) ? y0 - ya : 0.0) + ((x1 > 1.0) ? yb - y1 : 0.0);
+
+  float h = t1 - t0, m = 0.5 * (t0 + t1), d = 0.28867513459481287 * h, g0 = m - d, g1 = m + d;
+  float zone = 0.5 * h * (((A.x * g0 + B.x) * g0 + P0.x) * (2.0 * A.y * g0 + B.y)
+                        + ((A.x * g1 + B.x) * g1 + P0.x) * (2.0 * A.y * g1 + B.y));
+  return -(zone + far);
+}
 float aacQuadContrib(vec2 P0, vec2 P1, vec2 P2, float q0, float q1) {
   if (max(P0.y, max(P1.y, P2.y)) <= q0 ||
       min(P0.y, min(P1.y, P2.y)) >= q1) return 0.0;
   if (min(P0.x, min(P1.x, P2.x)) >= 1.0) return aacRightD(P0.y, P2.y, q0, q1);
-  return aacCurveContrib(aacQuadCoeff(P0.x, P1.x, P2.x),
-                         aacQuadCoeff(P0.y, P1.y, P2.y), q0, q1);
+  vec2 d0 = P0 - P1, d1 = P2 - P1;
+  vec2 A = d0 + d1, B = -2.0 * d0;
+
+  float ty = (d0.y * d1.y > 0.0) ? d0.y / A.y : 1.0, tx = (d0.x * d1.x > 0.0) ? d0.x / A.x : 1.0;
+  float s0 = min(tx, ty), s1 = max(tx, ty);
+
+  float run = 0.0, ta = 0.0;
+  vec2 pa = P0;
+  for (int k = 0; k < 3; k++) {
+    float tb = (k == 0) ? s0 : ((k == 1) ? s1 : 1.0);
+    vec2 pb = (tb < 1.0) ? (A * tb + B) * tb + P0 : P2;
+    run += aacQuadPiece(A, B, P0, ta, tb, pa, pb, q0, q1);
+    ta = tb; pa = pb;
+  }
+  return run;
+}
+
+vec4 aacSort4(vec4 v) {
+  vec2 a = vec2(min(v.x, v.y), max(v.x, v.y)), b = vec2(min(v.z, v.w), max(v.z, v.w));
+  float lo = min(a.x, b.x), hi = max(a.y, b.y), m0 = max(a.x, b.x), m1 = min(a.y, b.y);
+  return vec4(lo, min(m0, m1), max(m0, m1), hi);
+}
+float aacSplitT(float t) { return (t > 1e-6 && t < 1.0 - 1e-6) ? t : 1.0; }
+
+float aacCubicPiece(vec4 CX, vec4 CY, float ta, float tb, vec2 pa, vec2 pb, float q0, float q1) {
+  if (!(tb > ta) || max(pa.y, pb.y) <= q0 || min(pa.y, pb.y) >= q1 || max(pa.x, pb.x) <= 0.0) return 0.0;
+  float ya = clamp(pa.y, q0, q1), yb = clamp(pb.y, q0, q1);
+  if (min(pa.x, pb.x) >= 1.0) return ya - yb;
+  float u0 = (pa.y == ya) ? ta : aacSolveC(CY, ta, tb, ya);
+  float u1 = (pb.y == yb) ? tb : aacSolveC(CY, ta, tb, yb);
+  float x0 = (u0 == ta) ? pa.x : evalC(CX, u0), x1 = (u1 == tb) ? pb.x : evalC(CX, u1);
+  if (max(x0, x1) <= 0.0) return 0.0;
+  if (min(x0, x1) >= 1.0) return ya - yb;
+  bool inOut = x0 < 0.0 || x0 > 1.0, outOut = x1 < 0.0 || x1 > 1.0;
+  float t0 = inOut ? aacSolveC(CX, u0, u1, x0 < 0.0 ? 0.0 : 1.0) : u0;
+  float t1 = outOut ? aacSolveC(CX, u0, u1, x1 < 0.0 ? 0.0 : 1.0) : u1;
+  float y0 = inOut ? evalC(CY, t0) : ya, y1 = outOut ? evalC(CY, t1) : yb;
+  float far = ((x0 > 1.0) ? y0 - ya : 0.0) + ((x1 > 1.0) ? yb - y1 : 0.0);
+  return -(aacZoneInt(CX, CY, t0, t1) + far);
 }
 float aacCubicContrib(vec2 P0, vec2 P1, vec2 P2, vec2 P3, float q0, float q1) {
   if (max(max(P0.y, P1.y), max(P2.y, P3.y)) <= q0 ||
       min(min(P0.y, P1.y), min(P2.y, P3.y)) >= q1) return 0.0;
   if (min(min(P0.x, P1.x), min(P2.x, P3.x)) >= 1.0) return aacRightD(P0.y, P3.y, q0, q1);
-  return aacCurveContrib(aacCubicCoeff(P0.x, P1.x, P2.x, P3.x),
-                         aacCubicCoeff(P0.y, P1.y, P2.y, P3.y), q0, q1);
+  vec4 CX = aacCubicCoeff(P0.x, P1.x, P2.x, P3.x), CY = aacCubicCoeff(P0.y, P1.y, P2.y, P3.y);
+#ifdef MANTLE_NO_CUBIC_SPLITS
+  return aacCubicPiece(CX, CY, 0.0, 1.0, P0, P3, q0, q1);
+#else
+  vec2 ex = aacQuadRoots(3.0 * CX.x, 2.0 * CX.y, CX.z), ey = aacQuadRoots(3.0 * CY.x, 2.0 * CY.y, CY.z);
+  vec4 s = aacSort4(vec4(aacSplitT(ex.x), aacSplitT(ex.y), aacSplitT(ey.x), aacSplitT(ey.y)));
+
+  float run = 0.0, ta = 0.0;
+  vec2 pa = P0;
+  for (int k = 0; k < 5; k++) {
+    float tb = (k < 4) ? s[k] : 1.0;
+    vec2 pb = (tb < 1.0) ? vec2(evalC(CX, tb), evalC(CY, tb)) : P3;
+    run += aacCubicPiece(CX, CY, ta, tb, pa, pb, q0, q1);
+    ta = tb; pa = pb;
+  }
+  return run;
+#endif
 }
 
 #ifndef MANTLE_NO_ARC
@@ -2641,93 +3934,119 @@ vec2 aacPhaseExtrema(float phi, float lo, float hi) {
   return vec2(min(e0, e1), max(e0, e1));
 }
 
-float aacTrigF(vec3 X, vec3 Y, float th) {
-  float c = cos(th), s = sin(th);
-  return X.x * (Y.y * c + Y.z * s)
-       + (X.z * Y.z - X.y * Y.y) * 0.5 * s * s
-       + (X.y * Y.z - X.z * Y.y) * 0.5 * th
-       + (X.y * Y.z + X.z * Y.y) * 0.5 * s * c;
+float aacTrigDF(vec3 X, vec3 Y, float a, float b) {
+  float h = 0.5 * (b - a), m = 0.5 * (a + b), h2 = h * h;
+  float sh = (abs(h) < 0.25) ? h * (1.0 - h2 * (1.0 / 6.0) * (1.0 - h2 * 0.05)) : sin(h);
+  float ch = cos(h), sm = sin(m), cm = cos(m);
+  float K1 = X.z * Y.z - X.y * Y.y, K2 = X.y * Y.z - X.z * Y.y, K3 = X.y * Y.z + X.z * Y.y;
+  return 2.0 * sh * X.x * (Y.z * cm - Y.y * sm)
+       + K2 * h
+       + sh * ch * (2.0 * K1 * sm * cm + K3 * (cm * cm - sm * sm));
 }
 
 float aacTrigSolve(float C, float R, float phi, float V, float a, float b) {
   float r = clamp((V - C) / max(R, 1e-9), -1.0, 1.0);
   float ac = acos(r);
   float lo = min(a, b), hi = max(a, b);
-  for (int k = 0; k < 2; k++) {
-    float th = phi + (k == 0 ? ac : -ac);
-    th += ceil((lo - th) / TWO_PI) * TWO_PI;
-    if (th <= hi + 1e-4) return clamp(th, lo, hi);
-  }
-  return 0.5 * (lo + hi);
+  float th0 = phi + ac, th1 = phi - ac;
+  th0 += ceil((lo - th0) / TWO_PI) * TWO_PI;
+  th1 += ceil((lo - th1) / TWO_PI) * TWO_PI;
+  if (th0 <= hi + 1e-4) return clamp(th0, lo, hi);
+  if (th1 <= hi + 1e-4) return clamp(th1, lo, hi);
+
+  float d0 = min(th0 - hi, lo + TWO_PI - th0), d1 = min(th1 - hi, lo + TWO_PI - th1);
+  float th = (d0 <= d1) ? th0 : th1;
+  return (th - hi <= lo + TWO_PI - th) ? hi : lo;
 }
 
-float aacArcZoneI2(vec3 X, vec3 Y, float RX, float pX, float RY, float pY, float a, float b) {
+float aacArcZoneI2(vec3 X, vec3 Y, float RX, float pX, float RY, float pY, float a, float b, float ya, float yb,
+                   float q0, float q1) {
   if (abs(b - a) < 1e-12) return 0.0;
   float xm = aacTrigEvalR(X.x, RX, pX, 0.5 * (a + b));
   if (xm <= 0.0) return 0.0;
-  if (xm >= 1.0) return aacTrigEvalR(Y.x, RY, pY, b) - aacTrigEvalR(Y.x, RY, pY, a);
-  return aacTrigF(X, Y, b) - aacTrigF(X, Y, a);
+
+  if (xm >= 1.0) return clamp(yb, q0, q1) - clamp(ya, q0, q1);
+  return aacTrigDF(X, Y, a, b);
 }
 
-float aacArcXMonoI2(vec3 X, vec3 Y, float RX, float pX, float RY, float pY, float a, float b) {
+float aacArcXMonoI2(vec3 X, vec3 Y, float RX, float pX, float RY, float pY, float a, float b, float ya, float yb,
+                    float q0, float q1) {
   if (abs(b - a) < 1e-12) return 0.0;
   float xa = aacTrigEvalR(X.x, RX, pX, a), xb = aacTrigEvalR(X.x, RX, pX, b);
   float xlo = min(xa, xb), xhi = max(xa, xb);
   if (xhi <= 0.0) return 0.0;
-  if (xlo >= 1.0) return aacTrigEvalR(Y.x, RY, pY, b) - aacTrigEvalR(Y.x, RY, pY, a);
-  if (xlo >= 0.0 && xhi <= 1.0) return aacTrigF(X, Y, b) - aacTrigF(X, Y, a);
+  if (xlo >= 1.0) return clamp(yb, q0, q1) - clamp(ya, q0, q1);
+  if (xlo >= 0.0 && xhi <= 1.0) return aacTrigDF(X, Y, a, b);
   bool h0 = (xlo < 0.0 && xhi > 0.0);
   bool h1 = (xlo < 1.0 && xhi > 1.0);
   float t0 = h0 ? aacTrigSolve(X.x, RX, pX, 0.0, a, b) : a;
   float t1 = h1 ? aacTrigSolve(X.x, RX, pX, 1.0, a, b) : a;
   bool fwd = b > a;
-  float acc = 0.0, prev = a;
+
+  float acc = 0.0, prev = a, yPrev = ya;
   if (h0 && h1) {
     float m0 = fwd ? min(t0, t1) : max(t0, t1);
     float m1 = fwd ? max(t0, t1) : min(t0, t1);
-    acc += aacArcZoneI2(X, Y, RX, pX, RY, pY, prev, m0); prev = m0;
-    acc += aacArcZoneI2(X, Y, RX, pX, RY, pY, prev, m1); prev = m1;
+    float y0 = aacTrigEvalR(Y.x, RY, pY, m0), y1 = aacTrigEvalR(Y.x, RY, pY, m1);
+    acc += aacArcZoneI2(X, Y, RX, pX, RY, pY, prev, m0, yPrev, y0, q0, q1); prev = m0; yPrev = y0;
+    acc += aacArcZoneI2(X, Y, RX, pX, RY, pY, prev, m1, yPrev, y1, q0, q1); prev = m1; yPrev = y1;
   } else if (h0 || h1) {
-    float m = h0 ? t0 : t1;
-    acc += aacArcZoneI2(X, Y, RX, pX, RY, pY, prev, m); prev = m;
+    float m = h0 ? t0 : t1, ym = aacTrigEvalR(Y.x, RY, pY, m);
+    acc += aacArcZoneI2(X, Y, RX, pX, RY, pY, prev, m, yPrev, ym, q0, q1); prev = m; yPrev = ym;
   }
-  return acc + aacArcZoneI2(X, Y, RX, pX, RY, pY, prev, b);
+  return acc + aacArcZoneI2(X, Y, RX, pX, RY, pY, prev, b, yPrev, yb, q0, q1);
 }
 
-float aacArcMonoI2(vec3 X, vec3 Y, float RX, float pX, float RY, float pY, float a, float b) {
+float aacArcMonoI2(vec3 X, vec3 Y, float RX, float pX, float RY, float pY, float a, float b, float ya, float yb,
+                   float q0, float q1) {
   vec2 ex = aacPhaseExtrema(pX, min(a, b), max(a, b));
   float g0 = ex.x, g1 = ex.y;
   int n = (g0 < 1e8) ? ((g1 < 1e8) ? 2 : 1) : 0;
   bool fwd = b > a;
-  float acc = 0.0, prev = a;
-  if (n == 1) { acc += aacArcXMonoI2(X, Y, RX, pX, RY, pY, prev, g0); prev = g0; }
-  else if (n == 2) {
-    float m0 = fwd ? g0 : g1, m1 = fwd ? g1 : g0;
-    acc += aacArcXMonoI2(X, Y, RX, pX, RY, pY, prev, m0); prev = m0;
-    acc += aacArcXMonoI2(X, Y, RX, pX, RY, pY, prev, m1); prev = m1;
+
+  float m0 = (n == 2) ? (fwd ? g0 : g1) : ((n == 1) ? g0 : b);
+  float m1 = (n == 2) ? (fwd ? g1 : g0) : b;
+  float ym0 = (n >= 1) ? aacTrigEvalR(Y.x, RY, pY, m0) : yb, ym1 = (n == 2) ? aacTrigEvalR(Y.x, RY, pY, m1) : yb;
+  float acc = 0.0, prev = a, yPrev = ya;
+  for (int k = 0; k < 3; k++) {
+    float nx = (k == 0) ? m0 : ((k == 1) ? m1 : b);
+    float yNx = (k == 0) ? ym0 : ((k == 1) ? ym1 : yb);
+    acc += aacArcXMonoI2(X, Y, RX, pX, RY, pY, prev, nx, yPrev, yNx, q0, q1);
+    prev = nx; yPrev = yNx;
   }
-  return acc + aacArcXMonoI2(X, Y, RX, pX, RY, pY, prev, b);
+  return acc;
 }
 
-float aacArcMonoContrib(vec3 X, vec3 Y, float RX, float pX, float RY, float pY, float a, float b, float q0, float q1) {
-  float ya = aacTrigEvalR(Y.x, RY, pY, a), yb = aacTrigEvalR(Y.x, RY, pY, b);
+float aacArcMonoContrib(vec3 X, vec3 Y, float RX, float pX, float RY, float pY, float a, float b, float ya, float yb,
+                        float q0, float q1) {
   if (max(ya, yb) <= q0 || min(ya, yb) >= q1) return 0.0;
   bool inc = yb > ya;
-  float uA = inc ? ((ya >= q0) ? a : aacTrigSolve(Y.x, RY, pY, q0, a, b))
-                 : ((ya <= q1) ? a : aacTrigSolve(Y.x, RY, pY, q1, a, b));
-  float uB = inc ? ((yb <= q1) ? b : aacTrigSolve(Y.x, RY, pY, q1, a, b))
-                 : ((yb >= q0) ? b : aacTrigSolve(Y.x, RY, pY, q0, a, b));
-  if (abs(uB - uA) < 1e-12) return 0.0;
-  return -aacArcMonoI2(X, Y, RX, pX, RY, pY, uA, uB);
+
+  bool loIn = (inc ? ya : yb) >= q0, hiIn = (inc ? yb : ya) <= q1;
+  float tq0 = loIn ? (inc ? a : b) : aacTrigSolve(Y.x, RY, pY, q0, a, b);
+  float tq1 = hiIn ? (inc ? b : a) : aacTrigSolve(Y.x, RY, pY, q1, a, b);
+
+  float yq0 = loIn ? (inc ? ya : yb) : q0, yq1 = hiIn ? (inc ? yb : ya) : q1;
+  float uA = inc ? tq0 : tq1, uB = inc ? tq1 : tq0;
+
+  if (abs(uB - uA) < 1e-12) return -clamp(aacTrigEvalR(X.x, RX, pX, uA), 0.0, 1.0) * (inc ? yq1 - yq0 : yq0 - yq1);
+  return -aacArcMonoI2(X, Y, RX, pX, RY, pY, uA, uB, inc ? yq0 : yq1, inc ? yq1 : yq0, q0, q1);
 }
 
-float aacArcContrib(vec4 d1, vec4 d2, vec2 c, vec2 px, float q0, float q1) {
+float aacArcContribXY(vec3 X, vec3 Y, float th0, float th1, vec2 yE, float q0, float q1);
+float aacArcContrib(vec4 d1, vec4 d2, vec4 ends, vec2 c, vec2 px, float q0, float q1) {
   float dth = d2.y - d2.x;
   if (abs(dth) < 1e-9) return 0.0;
   float sp = sin(d2.z), cp = cos(d2.z);
-  float th0 = d2.x, th1 = d2.y;
   vec3 X = vec3((d1.x - c.x) * px.x + 0.5,  px.x * cp * d1.z, -px.x * sp * d1.w);
   vec3 Y = vec3((d1.y - c.y) * px.y + 0.5,  px.y * sp * d1.z,  px.y * cp * d1.w);
+
+  vec2 yE = (vec2(ends.y, ends.w) - c.y) * px.y + 0.5;
+  return aacArcContribXY(X, Y, d2.x, d2.y, yE, q0, q1);
+}
+
+float aacArcContribXY(vec3 X, vec3 Y, float th0, float th1, vec2 yE, float q0, float q1) {
+  float dth = th1 - th0;
 
   float Ry = abs(Y.y) + abs(Y.z);
   if (Y.x + Ry <= q0 || Y.x - Ry >= q1) return 0.0;
@@ -2735,32 +4054,38 @@ float aacArcContrib(vec4 d1, vec4 d2, vec2 c, vec2 px, float q0, float q1) {
   float Rx = abs(X.y) + abs(X.z);
   if (X.x + Rx <= 0.0) return 0.0;
   if (X.x - Rx >= 1.0)
-    return aacRightD(aacTrigEval(Y, th0), aacTrigEval(Y, th1), q0, q1);
+    return aacRightD(yE.x, yE.y, q0, q1);
 
-  float RX = sqrt(X.y * X.y + X.z * X.z), pX = atan(X.z, X.y);
-  float RY = sqrt(Y.y * Y.y + Y.z * Y.z), pY = atan(Y.z, Y.y);
+  float RX = sqrt(X.y * X.y + X.z * X.z), pX = curveAtan2(X.z, X.y);
+  float RY = sqrt(Y.y * Y.y + Y.z * Y.z), pY = curveAtan2(Y.z, Y.y);
 
   vec2 ey = aacPhaseExtrema(pY, min(th0, th1), max(th0, th1));
   float g0 = ey.x, g1 = ey.y;
   int n = (g0 < 1e8) ? ((g1 < 1e8) ? 2 : 1) : 0;
 
+  float yTh0 = yE.x, yTh1 = yE.y;
+  float yG0 = (n >= 1) ? aacTrigEvalR(Y.x, RY, pY, g0) : yTh1, yG1 = (n >= 2) ? aacTrigEvalR(Y.x, RY, pY, g1) : yTh1;
   {
-    float ya = aacTrigEvalR(Y.x, RY, pY, th0), yb = aacTrigEvalR(Y.x, RY, pY, th1);
-    float ymin = min(ya, yb), ymax = max(ya, yb);
-    if (n >= 1) { float v = aacTrigEvalR(Y.x, RY, pY, g0); ymin = min(ymin, v); ymax = max(ymax, v); }
-    if (n >= 2) { float v = aacTrigEvalR(Y.x, RY, pY, g1); ymin = min(ymin, v); ymax = max(ymax, v); }
+    float ymin = min(yTh0, yTh1), ymax = max(yTh0, yTh1);
+    if (n >= 1) { ymin = min(ymin, yG0); ymax = max(ymax, yG0); }
+    if (n >= 2) { ymin = min(ymin, yG1); ymax = max(ymax, yG1); }
     if (ymax <= q0 || ymin >= q1) return 0.0;
   }
 
   bool fwd = dth > 0.0;
-  float run = 0.0, prev = th0;
-  if (n == 1) { run += aacArcMonoContrib(X, Y, RX, pX, RY, pY, prev, g0, q0, q1); prev = g0; }
-  else if (n == 2) {
-    float m0 = fwd ? g0 : g1, m1 = fwd ? g1 : g0;
-    run += aacArcMonoContrib(X, Y, RX, pX, RY, pY, prev, m0, q0, q1); prev = m0;
-    run += aacArcMonoContrib(X, Y, RX, pX, RY, pY, prev, m1, q0, q1); prev = m1;
+
+  float m0 = (n == 2) ? (fwd ? g0 : g1) : ((n == 1) ? g0 : th1);
+  float m1 = (n == 2) ? (fwd ? g1 : g0) : th1;
+  float ym0 = (n == 2) ? (fwd ? yG0 : yG1) : ((n == 1) ? yG0 : yTh1);
+  float ym1 = (n == 2) ? (fwd ? yG1 : yG0) : yTh1;
+  float run = 0.0, prev = th0, yPrev = yTh0;
+  for (int k = 0; k < 3; k++) {
+    float nx = (k == 0) ? m0 : ((k == 1) ? m1 : th1);
+    float yNx = (k == 0) ? ym0 : ((k == 1) ? ym1 : yTh1);
+    run += aacArcMonoContrib(X, Y, RX, pX, RY, pY, prev, nx, yPrev, yNx, q0, q1);
+    prev = nx; yPrev = yNx;
   }
-  return run + aacArcMonoContrib(X, Y, RX, pX, RY, pY, prev, th1, q0, q1);
+  return run;
 }
 
 #endif
@@ -2772,58 +4097,66 @@ float aacFold(float run, bool evenOdd) {
   return clamp(cc, 0.0, 1.0);
 }
 
+const float AAC_LANE_SLACK = 9.5367431640625e-7;
+bool aacLaneMiss(vec4 e, float cy, float py, float q0, float q1) {
+  float a = (e.z - cy) * py + 0.5, b = (e.w - cy) * py + 0.5;
+  return max(a, b) < q0 - AAC_LANE_SLACK || min(a, b) > q1 + AAC_LANE_SLACK;
+}
+
 float aacWalkBand(ivec2 gl, int bandY, vec2 c, vec2 px, float xBreak, float q0, float q1) {
-  int hdr = bandY * 2;
-  vec4 cnts = bFetch(bLoc(gl, hdr));
+  int hdr = texLin(gl) + bandY * 2;
+  vec4 cnts = bFetchL(hdr);
   int nLine = int(cnts.x), nQuad = int(cnts.y), nCubic = int(cnts.z), nArc = int(cnts.w);
-  int arrIdx = int(bFetch(bLoc(gl, hdr + 1)).x);
-  int hOff = 0;
+  vec4 hdr1 = bFetchL(hdr + 1);
+  int hE = texLin(gl) + int(hdr1.x);
+
+  bool rej = fillRayReject(hdr1);
   float run = 0.0;
 
 #ifndef MANTLE_NO_LINE
-  for (int i = 0; i < 1024; i++) {
-    if (i >= nLine) break;
-    vec2 segRaw = bandEntry(gl, arrIdx, hOff + i);
+  for (int i = 0; i < nLine; i++) {
+    vec4 segRaw = bFetchL(hE + i);
     if (segRaw.y * px.x < xBreak) break;
-    ivec2 sL = segLocXY(segRaw.x);
-    vec4 pe = texFetch(ivec2(sL.x + 1, sL.y));
+    if (rej && aacLaneMiss(segRaw, c.y, px.y, q0, q1)) continue;
+    int sL = int(segRaw.x);
+    vec4 pe = cFetchL(sL + 1);
     run += aacLineContrib(aacPL(pe.xy, c, px), aacPL(pe.zw, c, px), q0, q1);
   }
 #endif
-  hOff += nLine;
+  hE += nLine;
 #ifndef MANTLE_NO_QUAD
-  for (int i = 0; i < 1024; i++) {
-    if (i >= nQuad) break;
-    vec2 segRaw = bandEntry(gl, arrIdx, hOff + i);
+  for (int i = 0; i < nQuad; i++) {
+    vec4 segRaw = bFetchL(hE + i);
     if (segRaw.y * px.x < xBreak) break;
-    ivec2 sL = segLocXY(segRaw.x);
-    vec4 p12 = texFetch(ivec2(sL.x + 1, sL.y));
-    vec2 p3  = texFetch(ivec2(sL.x + 2, sL.y)).xy;
+    if (rej && aacLaneMiss(segRaw, c.y, px.y, q0, q1)) continue;
+    int sL = int(segRaw.x);
+    vec4 p12 = cFetchL(sL + 1);
+    vec2 p3  = cFetchL(sL + 2).xy;
     run += aacQuadContrib(aacPL(p12.xy, c, px), aacPL(p12.zw, c, px), aacPL(p3, c, px), q0, q1);
   }
 #endif
-  hOff += nQuad;
+  hE += nQuad;
 #ifndef MANTLE_NO_CUBIC
-  for (int i = 0; i < 1024; i++) {
-    if (i >= nCubic) break;
-    vec2 segRaw = bandEntry(gl, arrIdx, hOff + i);
+  for (int i = 0; i < nCubic; i++) {
+    vec4 segRaw = bFetchL(hE + i);
     if (segRaw.y * px.x < xBreak) break;
-    ivec2 sL = segLocXY(segRaw.x);
-    vec4 p12 = texFetch(ivec2(sL.x + 1, sL.y));
-    vec4 p34 = texFetch(ivec2(sL.x + 2, sL.y));
+    if (rej && aacLaneMiss(segRaw, c.y, px.y, q0, q1)) continue;
+    int sL = int(segRaw.x);
+    vec4 p12 = cFetchL(sL + 1);
+    vec4 p34 = cFetchL(sL + 2);
     run += aacCubicContrib(aacPL(p12.xy, c, px), aacPL(p12.zw, c, px), aacPL(p34.xy, c, px), aacPL(p34.zw, c, px), q0, q1);
   }
 #endif
-  hOff += nCubic;
+  hE += nCubic;
 #ifndef MANTLE_NO_ARC
-  for (int i = 0; i < 1024; i++) {
-    if (i >= nArc) break;
-    vec2 segRaw = bandEntry(gl, arrIdx, hOff + i);
+  for (int i = 0; i < nArc; i++) {
+    vec4 segRaw = bFetchL(hE + i);
     if (segRaw.y * px.x < xBreak) break;
-    ivec2 sL = segLocXY(segRaw.x);
-    vec4 d1 = texFetch(ivec2(sL.x + 1, sL.y));
-    vec4 d2 = texFetch(ivec2(sL.x + 2, sL.y));
-    run += aacArcContrib(d1, d2, c, px, q0, q1);
+    if (rej && aacLaneMiss(segRaw, c.y, px.y, q0, q1)) continue;
+    int sL = int(segRaw.x);
+    vec4 d1 = cFetchL(sL + 1);
+    vec4 d2 = cFetchL(sL + 2);
+    run += aacArcContrib(d1, d2, cFetchL(sL + 3), c, px, q0, q1);
   }
 #endif
   return run;
@@ -2832,9 +4165,9 @@ float aacWalkBand(ivec2 gl, int bandY, vec2 c, vec2 px, float xBreak, float q0, 
 float renderFillAAC(vec2 c, vec2 px, ivec4 GD, bool evenOdd, vec4 shapeBB) {
   ivec2 gl = GD.xy;
   int bandsY = GD.w + 1;
-  vec2 bbSize = max(shapeBB.zw - shapeBB.xy, vec2(1e-6));
+  vec2 bbSize = bandBoxSize(shapeBB);
 
-  float hy = 0.5 / max(abs(px.y), 1e-12);
+  float hy = 0.5 / abs(px.y);
   float bandH = bbSize.y / float(bandsY);
   float xBreak = c.x * px.x - 0.5;
   float yA = c.y - hy, yB = c.y + hy;
@@ -2850,11 +4183,28 @@ float renderFillAAC(vec2 c, vec2 px, ivec4 GD, bool evenOdd, vec4 shapeBB) {
 #endif
   float run = 0.0;
 
-  for (int bi = 0; bi < 96; bi++) {
-    int bandY = b0 + bi * bandStride;
-    if (bandY > b1) break;
+  int bandSteps = (b1 - b0) / bandStride + 1;
+  int bandFirst = b0;
+
+  bool levelWalk = false;
+  if (!pairCovers && bandSteps > 2) {
+    vec4 lv = bFetch(bLoc(gl, 1));
+    int lTop = int(lv.z);
+    int l = max(int(lv.w), 1), first = int(lv.y) / 2;
+    for (int k = l; k < lTop && (b1 >> l) > (b0 >> l) + 1; k++) {
+      first += (bandsY + (1 << l) - 1) >> l;
+      l++;
+    }
+    if (lTop > 0 && (b1 >> l) <= (b0 >> l) + 1) {
+      levelWalk = true;
+      bandFirst = first + (b0 >> l);
+      bandSteps = 1;
+    }
+  }
+  for (int bi = 0; bi < bandSteps; bi++) {
+    int bandY = bandFirst + bi * bandStride;
     float q0 = 0.0, q1 = 1.0;
-    if (!pairCovers) {
+    if (!pairCovers && !levelWalk) {
 
       float e0 = (max(yA, shapeBB.y + float(bandY)     * bandH) - c.y) * px.y + 0.5;
       float e1 = (min(yB, shapeBB.y + float(bandY + bandStride) * bandH) - c.y) * px.y + 0.5;
@@ -2867,48 +4217,2239 @@ float renderFillAAC(vec2 c, vec2 px, ivec4 GD, bool evenOdd, vec4 shapeBB) {
   return aacFold(run, evenOdd);
 }
 
+#ifdef MANTLE_ROTATED_MAP
+
+vec2 aacPLM(vec2 emPt, vec2 c, vec2 mx, vec2 my) { vec2 d = emPt - c; return mx * d.x + my * d.y + 0.5; }
+
+float aacWallLine(vec2 A, vec2 B, float alpha, float beta, float q0, float q1) {
+  float dy = B.y - A.y;
+  if (dy == 0.0) return 0.0;
+  float lo = max(q0, min(A.y, B.y)), hi = min(q1, max(A.y, B.y));
+  if (hi <= lo) return 0.0;
+  float dxdy = (B.x - A.x) / dy;
+  float ulo = A.x + dxdy * (lo - A.y) - beta * lo - alpha;
+  float uhi = A.x + dxdy * (hi - A.y) - beta * hi - alpha;
+  float len = (ulo > 0.0 && uhi > 0.0) ? hi - lo
+            : (ulo <= 0.0 && uhi <= 0.0) ? 0.0
+            : ((ulo > 0.0) ? (hi - lo) * ulo / (ulo - uhi) : (hi - lo) * uhi / (uhi - ulo));
+  return (dy > 0.0) ? len : -len;
+}
+
+float aacWallPiece(vec4 CY, vec4 CU, float a, float b, float ya, float yb) {
+  if (b - a < 1e-12) return 0.0;
+  float ua = evalC(CU, a), ub = evalC(CU, b);
+  if (ua > 0.0 && ub > 0.0) return yb - ya;
+  if (ua <= 0.0 && ub <= 0.0) return 0.0;
+  float ys = evalC(CY, aacSolveC(CU, a, b, 0.0));
+  return (ua > 0.0) ? ys - ya : yb - ys;
+}
+
+float aacWallMono(vec4 CY, vec4 CU, float ta, float tb, float ya, float yb, float q0, float q1) {
+  if (max(ya, yb) <= q0 || min(ya, yb) >= q1) return 0.0;
+  bool inc = yb > ya;
+  float yLoEnd = inc ? ya : yb, yHiEnd = inc ? yb : ya;
+  bool loIn = yLoEnd >= q0, hiIn = yHiEnd <= q1;
+  float tLo = loIn ? (inc ? ta : tb) : aacSolveC(CY, ta, tb, q0);
+  float tHi = hiIn ? (inc ? tb : ta) : aacSolveC(CY, ta, tb, q1);
+  float yLo = loIn ? yLoEnd : q0, yHi = hiIn ? yHiEnd : q1;
+  bool lo0 = tLo <= tHi;
+  float u0 = lo0 ? tLo : tHi, u1 = lo0 ? tHi : tLo, y0 = lo0 ? yLo : yHi, y1 = lo0 ? yHi : yLo;
+  if (u1 - u0 < 1e-12) return evalC(CU, u0) > 0.0 ? y1 - y0 : 0.0;
+  vec2 ex = aacQuadRoots(3.0 * CU.x, 2.0 * CU.y, CU.z);
+  float s0 = (ex.x > u0 + 1e-7 && ex.x < u1 - 1e-7) ? ex.x : u1, s1 = (ex.y > u0 + 1e-7 && ex.y < u1 - 1e-7) ? ex.y : u1;
+  float m0 = min(s0, s1), m1 = max(s0, s1);
+  float ym0 = (m0 < u1) ? evalC(CY, m0) : y1, ym1 = (m1 < u1) ? evalC(CY, m1) : y1;
+  return aacWallPiece(CY, CU, u0, m0, y0, ym0) + aacWallPiece(CY, CU, m0, m1, ym0, ym1) + aacWallPiece(CY, CU, m1, u1, ym1, y1);
+}
+float aacWallCurve(vec4 CX, vec4 CY, float yEnd1, float alpha, float beta, float q0, float q1) {
+  vec4 CU = CX - beta * CY - vec4(0.0, 0.0, 0.0, alpha);
+  vec2 ey = aacQuadRoots(3.0 * CY.x, 2.0 * CY.y, CY.z);
+  float s0 = (ey.x > 1e-6 && ey.x < 1.0 - 1e-6) ? ey.x : 2.0;
+  float s1 = (ey.y > 1e-6 && ey.y < 1.0 - 1e-6) ? ey.y : 2.0;
+  float e0 = (s0 < 1.5) ? s0 : ((s1 < 1.5) ? s1 : 1.0);
+  float e1 = (s0 < 1.5 && s1 < 1.5) ? s1 : 1.0;
+  float ye0 = (e0 < 1.0) ? evalC(CY, e0) : yEnd1, ye1 = (e1 < 1.0) ? evalC(CY, e1) : yEnd1;
+  return aacWallMono(CY, CU, 0.0, e0, CY.w, ye0, q0, q1) + aacWallMono(CY, CU, e0, e1, ye0, ye1, q0, q1)
+       + aacWallMono(CY, CU, e1, 1.0, ye1, yEnd1, q0, q1);
+}
+float aacWallQuad(vec2 P0, vec2 P1, vec2 P2, float alpha, float beta, float q0, float q1) {
+  if (max(P0.y, max(P1.y, P2.y)) <= q0 || min(P0.y, min(P1.y, P2.y)) >= q1) return 0.0;
+  float u0 = P0.x - beta * P0.y - alpha, u1 = P1.x - beta * P1.y - alpha, u2 = P2.x - beta * P2.y - alpha;
+  if (max(u0, max(u1, u2)) <= 0.0) return 0.0;
+  if (min(u0, min(u1, u2)) > 0.0) return clamp(P2.y, q0, q1) - clamp(P0.y, q0, q1);
+  return aacWallCurve(aacQuadCoeff(P0.x, P1.x, P2.x), aacQuadCoeff(P0.y, P1.y, P2.y), P2.y, alpha, beta, q0, q1);
+}
+float aacWallCubic(vec2 P0, vec2 P1, vec2 P2, vec2 P3, float alpha, float beta, float q0, float q1) {
+  if (max(max(P0.y, P1.y), max(P2.y, P3.y)) <= q0 || min(min(P0.y, P1.y), min(P2.y, P3.y)) >= q1) return 0.0;
+  float u0 = P0.x - beta * P0.y - alpha, u1 = P1.x - beta * P1.y - alpha;
+  float u2 = P2.x - beta * P2.y - alpha, u3 = P3.x - beta * P3.y - alpha;
+  if (max(max(u0, u1), max(u2, u3)) <= 0.0) return 0.0;
+  if (min(min(u0, u1), min(u2, u3)) > 0.0) return clamp(P3.y, q0, q1) - clamp(P0.y, q0, q1);
+  return aacWallCurve(aacCubicCoeff(P0.x, P1.x, P2.x, P3.x), aacCubicCoeff(P0.y, P1.y, P2.y, P3.y), P3.y, alpha, beta, q0, q1);
+}
+#ifndef MANTLE_NO_ARC
+
+float aacWallArcPiece(float UC, float RU, float pU, float YC, float RY, float pY, float a, float b, float ya, float yb) {
+  if (abs(b - a) < 1e-12) return 0.0;
+  float ua = aacTrigEvalR(UC, RU, pU, a), ub = aacTrigEvalR(UC, RU, pU, b);
+  if (ua > 0.0 && ub > 0.0) return yb - ya;
+  if (ua <= 0.0 && ub <= 0.0) return 0.0;
+  float ys = aacTrigEvalR(YC, RY, pY, aacTrigSolve(UC, RU, pU, 0.0, a, b));
+  return (ua > 0.0) ? ys - ya : yb - ys;
+}
+float aacWallArcMono(float UC, float RU, float pU, float YC, float RY, float pY, float a, float b, float ya, float yb,
+                     float q0, float q1) {
+  if (max(ya, yb) <= q0 || min(ya, yb) >= q1) return 0.0;
+  bool inc = yb > ya;
+  bool loIn = (inc ? ya : yb) >= q0, hiIn = (inc ? yb : ya) <= q1;
+  float tq0 = loIn ? (inc ? a : b) : aacTrigSolve(YC, RY, pY, q0, a, b);
+  float tq1 = hiIn ? (inc ? b : a) : aacTrigSolve(YC, RY, pY, q1, a, b);
+  float yq0 = loIn ? (inc ? ya : yb) : q0, yq1 = hiIn ? (inc ? yb : ya) : q1;
+  float uA = inc ? tq0 : tq1, uB = inc ? tq1 : tq0, yA = inc ? yq0 : yq1, yB = inc ? yq1 : yq0;
+  if (abs(uB - uA) < 1e-12) return aacTrigEvalR(UC, RU, pU, uA) > 0.0 ? yB - yA : 0.0;
+  vec2 ex = aacPhaseExtrema(pU, min(uA, uB), max(uA, uB));
+  float g0 = ex.x, g1 = ex.y;
+  int n = (g0 < 1e8) ? ((g1 < 1e8) ? 2 : 1) : 0;
+  bool fwd = uB > uA;
+  float m0 = (n == 2) ? (fwd ? g0 : g1) : ((n == 1) ? g0 : uB);
+  float m1 = (n == 2) ? (fwd ? g1 : g0) : uB;
+  float ym0 = (n >= 1) ? aacTrigEvalR(YC, RY, pY, m0) : yB, ym1 = (n == 2) ? aacTrigEvalR(YC, RY, pY, m1) : yB;
+  return aacWallArcPiece(UC, RU, pU, YC, RY, pY, uA, m0, yA, ym0) + aacWallArcPiece(UC, RU, pU, YC, RY, pY, m0, m1, ym0, ym1)
+       + aacWallArcPiece(UC, RU, pU, YC, RY, pY, m1, uB, ym1, yB);
+}
+float aacWallArc(vec3 X, vec3 Y, float th0, float th1, vec2 yE, float alpha, float beta, float q0, float q1) {
+  if (abs(th1 - th0) < 1e-9) return 0.0;
+  vec3 U = X - beta * Y - vec3(alpha, 0.0, 0.0);
+  float Ry = abs(Y.y) + abs(Y.z), Ru = abs(U.y) + abs(U.z);
+  if (Y.x + Ry <= q0 || Y.x - Ry >= q1 || U.x + Ru <= 0.0) return 0.0;
+  float RY = sqrt(Y.y * Y.y + Y.z * Y.z), pY = curveAtan2(Y.z, Y.y);
+  float yTh0 = yE.x, yTh1 = yE.y;
+  if (U.x - Ru > 0.0) return clamp(yTh1, q0, q1) - clamp(yTh0, q0, q1);
+  float RU = sqrt(U.y * U.y + U.z * U.z), pU = curveAtan2(U.z, U.y);
+  vec2 ey = aacPhaseExtrema(pY, min(th0, th1), max(th0, th1));
+  float g0 = ey.x, g1 = ey.y;
+  int n = (g0 < 1e8) ? ((g1 < 1e8) ? 2 : 1) : 0;
+  bool fwd = th1 > th0;
+  float m0 = (n == 2) ? (fwd ? g0 : g1) : ((n == 1) ? g0 : th1);
+  float m1 = (n == 2) ? (fwd ? g1 : g0) : th1;
+  float ym0 = (n >= 1) ? aacTrigEvalR(Y.x, RY, pY, m0) : yTh1, ym1 = (n == 2) ? aacTrigEvalR(Y.x, RY, pY, m1) : yTh1;
+  return aacWallArcMono(U.x, RU, pU, Y.x, RY, pY, th0, m0, yTh0, ym0, q0, q1)
+       + aacWallArcMono(U.x, RU, pU, Y.x, RY, pY, m0, m1, ym0, ym1, q0, q1)
+       + aacWallArcMono(U.x, RU, pU, Y.x, RY, pY, m1, th1, ym1, yTh1, q0, q1);
+}
+
+vec2 aacArcEndYM(vec4 ends, vec2 c, vec2 mx, vec2 my) {
+  vec2 d0 = ends.xy - c, d1 = ends.zw - c;
+  return vec2((mx * d0.x + my * d0.y + 0.5).y, (mx * d1.x + my * d1.y + 0.5).y);
+}
+void aacArcXYM(vec4 d1, vec4 d2, vec2 c, vec2 mx, vec2 my, out vec3 X, out vec3 Y) {
+  float sp = sin(d2.z), cp = cos(d2.z);
+  vec2 d = d1.xy - c;
+  vec2 k0 = mx * d.x + my * d.y + 0.5, kc = (mx * cp + my * sp) * d1.z, ks = (my * cp - mx * sp) * d1.w;
+  X = vec3(k0.x, kc.x, ks.x);
+  Y = vec3(k0.y, kc.y, ks.y);
+}
 #endif
 
-float renderFill(vec2 c, vec2 px, ivec4 GD, bool evenOdd, vec4 shapeBB) {
-  vec4 exInfo;
-  vec2 slInfo;
-  vec4 L = fillLinear(c, px, GD, shapeBB, exInfo, slInfo);
-  float wsum = max(L.z + L.w, 1.0 / 65536.0);
+float renderFillAACM(vec2 c, vec2 mx, vec2 my, ivec4 GD, bool evenOdd, vec4 shapeBB) {
+  if (mx.y == 0.0 && my.x == 0.0) return renderFillAAC(c, vec2(mx.x, my.y), GD, evenOdd, shapeBB);
 
-  float mag = max(abs(L.x * L.z + L.y * L.w) / wsum, min(abs(L.x), abs(L.y)));
+  if (abs(mx.x) < abs(mx.y)) { vec2 tx = vec2(mx.y, -mx.x), ty = vec2(my.y, -my.x); mx = tx; my = ty; }
+  float det = mx.x * my.y - my.x * mx.y;
+  float J00 = my.y / det, J01 = -my.x / det, J10 = -mx.y / det, J11 = mx.x / det;
+  vec2 pa = 1.0 / vec2(abs(J00) + abs(J01), abs(J10) + abs(J11));
 
-  float est = evenOdd ? (1.0 - abs(1.0 - fract(mag * 0.5) * 2.0)) : clamp(mag, 0.0, 1.0);
+  ivec2 gl = GD.xy;
+  int bandsY = GD.w + 1;
+  vec2 bbSize = bandBoxSize(shapeBB);
+  float hy = 0.5 / pa.y;
+  int b0 = clamp(int((c.y - hy - shapeBB.y) / bbSize.y * float(bandsY)), 0, bandsY - 1);
+  int b1 = clamp(int((c.y + hy - shapeBB.y) / bbSize.y * float(bandsY)), 0, bandsY - 1);
+#ifdef MANTLE_AAC_PAIR_BANDS
+  bool covers = (b1 <= b0 + 1);
+#else
+  bool covers = (b0 == b1);
+#endif
+  int bandY = b0;
+  if (!covers) {
+    vec4 lv = bFetch(bLoc(gl, 1));
+    int lTop = int(lv.z);
+    int l = max(int(lv.w), 1), first = int(lv.y) / 2;
+    for (int k = l; k < lTop && (b1 >> l) > (b0 >> l) + 1; k++) {
+      first += (bandsY + (1 << l) - 1) >> l;
+      l++;
+    }
+    if (!(lTop > 0 && (b1 >> l) <= (b0 >> l) + 1)) return renderFillAAC(c, pa, GD, evenOdd, shapeBB);
+    bandY = first + (b0 >> l);
+  }
 
-#ifdef MANTLE_EXACT_EDGE
-  if (exInfo.w == 1.0 && (evenOdd || mag < 1.25)) {
-    float _L = max(length(exInfo.xy), 1e-9);
-    float ec = exactBoxCov(exInfo.xy / _L, exInfo.z / _L);
-    return (abs(ec - est) <= abs((1.0 - ec) - est)) ? ec : 1.0 - ec;
+  vec2 E0 = vec2(0.5 * (J00 - J01), 0.5 * (J10 - J11)) * pa + 0.5, E1 = vec2(0.5 * (J00 + J01), 0.5 * (J10 + J11)) * pa + 0.5;
+  float beta = (E1.x - E0.x) / (E1.y - E0.y), alpha = E0.x - beta * E0.y;
+  float wq0 = min(E0.y, E1.y), wq1 = max(E0.y, E1.y);
+
+  int hdr = texLin(gl) + bandY * 2;
+  vec4 cnts = bFetchL(hdr);
+  int nLine = int(cnts.x), nQuad = int(cnts.y), nCubic = int(cnts.z), nArc = int(cnts.w);
+  vec4 hdr1 = bFetchL(hdr + 1);
+  int hE = texLin(gl) + int(hdr1.x);
+  bool rej = fillRayReject(hdr1);
+  float xBreak = c.x * pa.x - 0.5;
+  float inBox = 0.0, far = 0.0;
+#ifndef MANTLE_NO_LINE
+  for (int i = 0; i < nLine; i++) {
+    vec4 segRaw = bFetchL(hE + i);
+    if (segRaw.y * pa.x < xBreak) break;
+    if (rej && aacLaneMiss(segRaw, c.y, pa.y, 0.0, 1.0)) continue;
+    vec4 pe = cFetchL(int(segRaw.x) + 1);
+    far += aacWallLine(aacPL(pe.xy, c, pa), aacPL(pe.zw, c, pa), alpha, beta, wq0, wq1);
+    vec2 A = aacPLM(pe.xy, c, mx, my), B = aacPLM(pe.zw, c, mx, my);
+    if (max(A.x, B.x) > 0.0 && min(A.x, B.x) < 1.0 && max(A.y, B.y) > 0.0 && min(A.y, B.y) < 1.0)
+      inBox += aacLineContrib(A, B, 0.0, 1.0) + aacWallLine(A, B, 1.0, 0.0, 0.0, 1.0);
   }
 #endif
-#ifdef MANTLE_SLOPE_AA
-
-  if ((evenOdd || mag < 1.25) && est > 0.002 && est < 0.998
-      && abs(slInfo.x) < 8.0 && abs(slInfo.y) < 8.0) {
-    vec2 n0 = vec2(slInfo.y, slInfo.x);
-    float L0 = length(n0);
-    if (L0 > 1e-6) {
-      vec2 n = n0 / L0;
-      float d = slInfo.x * slInfo.y / L0;
-      float cH = clamp(abs(L.x), 0.0, 1.0), cV = clamp(abs(L.y), 0.0, 1.0);
-      float pH = clamp(0.5 + (n.x > 0.0 ? slInfo.x : -slInfo.x), 0.0, 1.0);
-      float pV = clamp(0.5 + (n.y > 0.0 ? slInfo.y : -slInfo.y), 0.0, 1.0);
-      float e1 = abs(pH - cH) + abs(pV - cV);
-      float e2 = abs(1.0 - pH - cH) + abs(1.0 - pV - cV);
-      if (min(e1, e2) < 0.02) {
-        float ec = exactBoxCov(n, d);
-        return e1 <= e2 ? ec : 1.0 - ec;
-      }
+  hE += nLine;
+#ifndef MANTLE_NO_QUAD
+  for (int i = 0; i < nQuad; i++) {
+    vec4 segRaw = bFetchL(hE + i);
+    if (segRaw.y * pa.x < xBreak) break;
+    if (rej && aacLaneMiss(segRaw, c.y, pa.y, 0.0, 1.0)) continue;
+    int sL = int(segRaw.x);
+    vec4 p12 = cFetchL(sL + 1);
+    vec2 p3 = cFetchL(sL + 2).xy;
+    far += aacWallQuad(aacPL(p12.xy, c, pa), aacPL(p12.zw, c, pa), aacPL(p3, c, pa), alpha, beta, wq0, wq1);
+    vec2 A = aacPLM(p12.xy, c, mx, my), B = aacPLM(p12.zw, c, mx, my), C = aacPLM(p3, c, mx, my);
+    if (max(A.x, max(B.x, C.x)) > 0.0 && min(A.x, min(B.x, C.x)) < 1.0 && max(A.y, max(B.y, C.y)) > 0.0 && min(A.y, min(B.y, C.y)) < 1.0)
+      inBox += aacQuadContrib(A, B, C, 0.0, 1.0) + aacWallQuad(A, B, C, 1.0, 0.0, 0.0, 1.0);
+  }
+#endif
+  hE += nQuad;
+#ifndef MANTLE_NO_CUBIC
+  for (int i = 0; i < nCubic; i++) {
+    vec4 segRaw = bFetchL(hE + i);
+    if (segRaw.y * pa.x < xBreak) break;
+    if (rej && aacLaneMiss(segRaw, c.y, pa.y, 0.0, 1.0)) continue;
+    int sL = int(segRaw.x);
+    vec4 p12 = cFetchL(sL + 1), p34 = cFetchL(sL + 2);
+    far += aacWallCubic(aacPL(p12.xy, c, pa), aacPL(p12.zw, c, pa), aacPL(p34.xy, c, pa), aacPL(p34.zw, c, pa), alpha, beta, wq0, wq1);
+    vec2 A = aacPLM(p12.xy, c, mx, my), B = aacPLM(p12.zw, c, mx, my), C = aacPLM(p34.xy, c, mx, my), D = aacPLM(p34.zw, c, mx, my);
+    if (max(max(A.x, B.x), max(C.x, D.x)) > 0.0 && min(min(A.x, B.x), min(C.x, D.x)) < 1.0
+        && max(max(A.y, B.y), max(C.y, D.y)) > 0.0 && min(min(A.y, B.y), min(C.y, D.y)) < 1.0)
+      inBox += aacCubicContrib(A, B, C, D, 0.0, 1.0) + aacWallCubic(A, B, C, D, 1.0, 0.0, 0.0, 1.0);
+  }
+#endif
+  hE += nCubic;
+#ifndef MANTLE_NO_ARC
+  for (int i = 0; i < nArc; i++) {
+    vec4 segRaw = bFetchL(hE + i);
+    if (segRaw.y * pa.x < xBreak) break;
+    if (rej && aacLaneMiss(segRaw, c.y, pa.y, 0.0, 1.0)) continue;
+    int sL = int(segRaw.x);
+    vec4 d1 = cFetchL(sL + 1), d2 = cFetchL(sL + 2), ends = cFetchL(sL + 3);
+    vec3 X, Y;
+    aacArcXYM(d1, d2, c, vec2(pa.x, 0.0), vec2(0.0, pa.y), X, Y);
+    far += aacWallArc(X, Y, d2.x, d2.y, aacArcEndYM(ends, c, vec2(pa.x, 0.0), vec2(0.0, pa.y)), alpha, beta, wq0, wq1);
+    aacArcXYM(d1, d2, c, mx, my, X, Y);
+    float Rx = abs(X.y) + abs(X.z), Ry = abs(Y.y) + abs(Y.z);
+    if (X.x + Rx > 0.0 && X.x - Rx < 1.0 && Y.x + Ry > 0.0 && Y.x - Ry < 1.0) {
+      vec2 yE = aacArcEndYM(ends, c, mx, my);
+      inBox += aacArcContribXY(X, Y, d2.x, d2.y, yE, 0.0, 1.0) + aacWallArc(X, Y, d2.x, d2.y, yE, 1.0, 0.0, 0.0, 1.0);
     }
   }
 #endif
-  return est;
+  return aacFold(inBox - far / (pa.y * abs(J11)), evenOdd);
 }
+#endif
+
+float renderFill(vec2 c, vec2 px, ivec4 GD, bool evenOdd, vec4 shapeBB) {
+  return renderFillAAC(c, px, GD, evenOdd, shapeBB);
+}
+
+float renderFillM(vec2 c, vec2 mx, vec2 my, ivec4 GD, bool evenOdd, vec4 shapeBB) {
+#ifdef MANTLE_ROTATED_MAP
+  return renderFillAACM(c, mx, my, GD, evenOdd, shapeBB);
+#else
+  return renderFillAAC(c, vec2(mx.x, my.y), GD, evenOdd, shapeBB);
+#endif
+}
+
+#ifdef MANTLE_LB_FILL
+#define vEm vEmCoord
+#define LB_FLAT flat in
+#define LB_SMOOTH in
+
+#define LBK_INTERIOR     0.0
+#define LBK_CUBIC        2.0
+#define LBK_CUBIC_BEZ    4.0
+#define LBK_ARC          5.0
+#define LBK_DISC         7.0
+#define LBK_EDGE_STRIP  10.0
+#define LBK_CURVE_BAND  12.0
+#define LBK_CHAIN_STRIP 13.0
+
+#define LB_IS(k)         (vKind > (k) - 0.5 && vKind < (k) + 0.5)
+#define LB_IS_INTERIOR   (vKind < LBK_INTERIOR + 0.5)
+#define LB_IS_CUBIC      LB_IS(LBK_CUBIC)
+#define LB_IS_ARC        LB_IS(LBK_ARC)
+#define LB_IS_DISC_ANY   (vKind > 5.5 && vKind < LBK_DISC + 0.5)
+#define LB_IS_EDGE_STRIP LB_IS(LBK_EDGE_STRIP)
+#define LB_IS_CURVE_BAND LB_IS(LBK_CURVE_BAND)
+#define LB_IS_CHAIN_STRIP LB_IS(LBK_CHAIN_STRIP)
+
+LB_FLAT vec4 vLB0;
+LB_FLAT vec4 vLB1;
+LB_FLAT vec4 vLB2;
+LB_FLAT vec4 vLB3;
+LB_SMOOTH vec3 vTC;
+LB_FLAT float vKind;
+LB_FLAT float vSign;
+LB_FLAT float vEmPerPx;
+LB_FLAT float vSeam;
+
+#define cM00   vLB0.xyz
+#define cM01   vec3(vLB0.w, vLB1.xy)
+#define cM02   vec3(vLB1.zw, vLB2.x)
+#define cM11a  vLB2.y
+#define cM12   vLB2.z
+#define cM22   vLB2.w
+
+#define vCh2A  vLB1
+
+#define cBoxA  vLB1.xy
+#define cBoxU  vLB1.zw
+#define cBoxV  vLB2.xy
+#define vCh2B  vLB2
+
+#define vNa    vLB0.xy
+#define vNb    vLB0.zw
+#define vLine2 vLB0.xyz
+#define vLineT vLB0.w
+
+#define cCen   vLB3.xy
+#define cScale vLB3.z
+#define cHalf  vLB3.w
+
+const float LB_COV_WROTE_O = -2.0;
+#define LBCOV_OUT(c) (c)
+
+#undef LB_FLAT
+#undef LB_SMOOTH
+
+#define CP_STREAM_TAG    14.0
+#define CP_IS_CPATCH_VERTEX (vKind > CP_STREAM_TAG - 0.5 && vKind < CP_STREAM_TAG + 0.5)
+
+#ifdef MANTLE_CPATCH
+
+#define CP_AA_REACH 0.7072
+
+#define CP_POS_REL 9.5367432e-7
+#define CP_CUT_TIE 0.0009765625
+
+#define CP_ARC3 32.0
+
+#define CP_COMP 64.0
+
+#define CP_HORN 4096.0
+
+#define CP_END 256.0
+
+#define CP_AREA 131072.0
+#define CP_AREA_RIGHT 262144.0
+#ifndef CP_CLAIM_MIN
+#define CP_CLAIM_MIN 0.15
+#endif
+#ifndef CP_HULL16_DILATE
+#define CP_HULL16_DILATE 0.0
+#endif
+
+#define CP_SEAM_NEAR 0.5
+
+#ifndef CP_BOX_SLACK
+#define CP_BOX_SLACK CP_AA_REACH
+#endif
+#ifndef CP_HULLVAR_BIAS
+#define CP_HULLVAR_BIAS 0.0
+#endif
+
+#ifndef CP_HULL_AGREE
+#define CP_HULL_AGREE 0.0015
+#endif
+
+void cpArcEval(vec4 g0, vec4 g1, bool arc3, float t, out vec2 b, out vec2 d) {
+  float u = 1.0 - t;
+  if (arc3) {
+    float w = g1.z;
+    if (w == 1.0) {
+      vec3 bb = vec3(u * u, 2.0 * u * t, t * t);
+      b = bb.x * g0.xy + bb.y * g0.zw + bb.z * g1.xy;
+      d = (2.0 * u) * (g0.zw - g0.xy) + (2.0 * t) * (g1.xy - g0.zw);
+      return;
+    }
+    vec3 bb = vec3(u * u, 2.0 * u * t * w, t * t);
+    vec2 h = bb.x * g0.xy + bb.y * g0.zw + bb.z * g1.xy;
+    float hw = bb.x + bb.y + bb.z;
+    vec3 db = vec3(-2.0 * u, 2.0 * w * (1.0 - 2.0 * t), 2.0 * t);
+    vec2 dh = db.x * g0.xy + db.y * g0.zw + db.z * g1.xy;
+    float dw = db.x + db.y + db.z;
+    float iw = hw != 0.0 ? 1.0 / hw : 0.0;
+    b = h * iw;
+    d = (dh - b * dw) * iw;
+    return;
+  }
+  vec4 bb = vec4(u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
+  b = bb.x * g0.xy + bb.y * g0.zw + bb.z * g1.xy + bb.w * g1.zw;
+  vec3 cb = vec3(3.0 * u * u, 6.0 * u * t, 3.0 * t * t);
+  d = cb.x * (g0.zw - g0.xy) + cb.y * (g1.xy - g0.zw) + cb.z * (g1.zw - g1.xy);
+}
+
+float cpGreenCross(vec2 p, vec2 t, vec2 n, float d, out float a) {
+  a = dot(n, t);
+  a = abs(a) < 1e-8 ? (a < 0.0 ? -1e-8 : 1e-8) : a;
+  return (d - dot(n, p)) / a;
+}
+void cpGreenKeep(float a, float r, inout float s0, inout float s1) {
+  if (a > 0.0) s1 = min(s1, r); else s0 = max(s0, r);
+}
+float cpGreenMap(vec2 pa, vec2 ta, float r, vec2 pb, vec2 tb) {
+  return dot(pa + r * ta - pb, tb) / dot(tb, tb);
+}
+
+void cpGreenSlab(vec2 p, vec2 t, out float s0, out float s1) {
+  vec2 q = vec2(abs(t.x) < 1e-8 ? (t.x < 0.0 ? -1e-8 : 1e-8) : t.x,
+                abs(t.y) < 1e-8 ? (t.y < 0.0 ? -1e-8 : 1e-8) : t.y);
+  vec2 lo = (vec2(-0.5) - p) / q, hi = (vec2(0.5) - p) / q;
+  vec2 mn = min(lo, hi), mx = max(lo, hi);
+  s0 = max(mn.x, mn.y); s1 = min(mx.x, mx.y);
+}
+
+void cpGreenSide(vec2 nb, vec2 n1, float d1, vec2 n2, float d2, vec2 n3, float d3, inout float a2, inout float a3) {
+  vec2 p = 0.5 * nb, t = vec2(-nb.y, nb.x);
+  float s0 = -0.5, s1 = 0.5, a, r;
+  r = cpGreenCross(p, t, n1, d1, a); cpGreenKeep(a, r, s0, s1);
+  r = cpGreenCross(p, t, n2, d2, a); cpGreenKeep(a, r, s0, s1);
+  a2 += 0.25 * max(0.0, s1 - s0);
+  r = cpGreenCross(p, t, n3, d3, a); cpGreenKeep(a, r, s0, s1);
+  a3 += 0.25 * max(0.0, s1 - s0);
+}
+float cpExactBoxCov23(vec2 n1, float d1, vec2 n2, float d2, vec2 n3, float d3, bool third, out float area2) {
+  d1 -= 2e-6 * length(n1); d2 -= 4e-6 * length(n2); d3 -= 6e-6 * length(n3);
+  float a2 = 0.0, a3 = 0.0;
+  cpGreenSide(vec2(1.0, 0.0), n1, d1, n2, d2, n3, d3, a2, a3);
+  cpGreenSide(vec2(0.0, 1.0), n1, d1, n2, d2, n3, d3, a2, a3);
+  cpGreenSide(vec2(-1.0, 0.0), n1, d1, n2, d2, n3, d3, a2, a3);
+  cpGreenSide(vec2(0.0, -1.0), n1, d1, n2, d2, n3, d3, a2, a3);
+  bool has2 = dot(n2, n2) > 0.0;
+  vec2 p1 = n1 * (d1 / dot(n1, n1)), t1 = vec2(-n1.y, n1.x);
+  vec2 p2 = has2 ? n2 * (d2 / dot(n2, n2)) : vec2(0.0), t2 = vec2(-n2.y, n2.x);
+  float s0, s1, a12, a13, a21, a23;
+  float r12 = cpGreenCross(p1, t1, n2, d2, a12), r13 = cpGreenCross(p1, t1, n3, d3, a13);
+  cpGreenSlab(p1, t1, s0, s1); cpGreenKeep(a12, r12, s0, s1);
+  a2 += 0.5 * d1 * max(0.0, s1 - s0);
+  cpGreenKeep(a13, r13, s0, s1);
+  a3 += 0.5 * d1 * max(0.0, s1 - s0);
+  float r23 = 0.0;
+  if (has2) {
+    float r21 = cpGreenCross(p2, t2, n1, d1, a21);
+    if (abs(dot(n2, t1)) >= 1e-8) { r21 = cpGreenMap(p1, t1, r12, p2, t2); a21 = -a12; }
+    r23 = cpGreenCross(p2, t2, n3, d3, a23);
+    cpGreenSlab(p2, t2, s0, s1); cpGreenKeep(a21, r21, s0, s1);
+    a2 += 0.5 * d2 * max(0.0, s1 - s0);
+    cpGreenKeep(a23, r23, s0, s1);
+    a3 += 0.5 * d2 * max(0.0, s1 - s0);
+  }
+  area2 = clamp(a2, 0.0, 1.0);
+  if (!third || !(dot(n3, n3) > 0.0)) return area2;
+  vec2 p3 = n3 * (d3 / dot(n3, n3)), t3 = vec2(-n3.y, n3.x);
+  float a31, a32;
+  float r31 = cpGreenCross(p3, t3, n1, d1, a31), r32 = cpGreenCross(p3, t3, n2, d2, a32);
+  if (abs(dot(n3, t1)) >= 1e-8) { r31 = cpGreenMap(p1, t1, r13, p3, t3); a31 = -a13; }
+  if (has2 && abs(dot(n3, t2)) >= 1e-8) { r32 = cpGreenMap(p2, t2, r23, p3, t3); a32 = -a23; }
+  cpGreenSlab(p3, t3, s0, s1); cpGreenKeep(a31, r31, s0, s1); cpGreenKeep(a32, r32, s0, s1);
+  a3 += 0.5 * d3 * max(0.0, s1 - s0);
+  return clamp(a3, 0.0, 1.0);
+}
+
+float cpConicClosestT(vec4 g0, vec4 g1, vec2 p) {
+  float w = g1.z;
+  vec2 U0 = g0.xy - p, U1 = w * (g0.zw - p), U2 = g1.xy - p;
+  vec2 a0 = U0, a1 = 2.0 * (U1 - U0), a2 = U0 - 2.0 * U1 + U2;
+  float w1 = 2.0 * (w - 1.0), w2 = 2.0 - 2.0 * w;
+  vec2 V2 = a2 * w1 - a1 * w2, V1 = 2.0 * (a2 - a0 * w2), V0 = a1 - a0 * w1;
+  float c4 = dot(a2, V2), c3 = dot(a2, V1) + dot(a1, V2), c2 = dot(a2, V0) + dot(a1, V1) + dot(a0, V2);
+  float c1 = dot(a1, V0) + dot(a0, V1), c0 = dot(a0, V0);
+
+  float rts[4];
+  int nr = 0;
+  {
+    float A = 12.0 * c4, B = 6.0 * c3, C = 2.0 * c2;
+    float sc = max(abs(A), max(abs(B), abs(C)));
+    if (sc > 0.0) {
+      if (abs(A) <= 1e-12 * sc) {
+        if (abs(B) > 1e-12 * sc) { float r = -C / B; if (r > 0.0 && r < 1.0) rts[nr++] = r; }
+      } else {
+        float dq = B * B - 4.0 * A * C;
+        if (dq >= 0.0) {
+          float sq = sqrt(dq);
+          float q = -0.5 * (B + (B >= 0.0 ? sq : -sq));
+          float r0 = q / A;
+          float r1 = (abs(q) > 0.0) ? C / q : r0;
+          float lo = min(r0, r1), hi = max(r0, r1);
+          if (lo > 0.0 && lo < 1.0) rts[nr++] = lo;
+          if (hi > lo && hi > 0.0 && hi < 1.0) rts[nr++] = hi;
+        }
+      }
+    }
+  }
+  for (int lv = 1; lv >= 0; lv--) {
+    float nxt[4];
+    int nn = 0;
+    float lo = 0.0, flo = cdPoly(0.0, c4, c3, c2, c1, c0, lv, 0.0);
+    for (int i = 0; i <= 4; i++) {
+      if (i > nr) break;
+      float hi = (i == nr) ? 1.0 : rts[i];
+      float fhi = cdPoly(0.0, c4, c3, c2, c1, c0, lv, hi);
+      if (flo == 0.0 && lo > 0.0 && nn < 4) nxt[nn++] = lo;
+      if (flo * fhi < 0.0) {
+        float a = lo, b = hi, fa = flo;
+        for (int k = 0; k < 24; k++) {
+          float m = 0.5 * (a + b);
+          float fm = cdPoly(0.0, c4, c3, c2, c1, c0, lv, m);
+          if (fa * fm <= 0.0) b = m; else { a = m; fa = fm; }
+        }
+        if (nn < 4) nxt[nn++] = 0.5 * (a + b);
+      }
+      lo = hi; flo = fhi;
+    }
+    nr = nn;
+    for (int i = 0; i < 4; i++) rts[i] = nxt[i];
+  }
+
+  vec2 b, d;
+  cpArcEval(g0, g1, true, 0.0, b, d);
+  float bt = 0.0, bs = dot(b - p, b - p);
+  cpArcEval(g0, g1, true, 1.0, b, d);
+  if (dot(b - p, b - p) < bs) { bs = dot(b - p, b - p); bt = 1.0; }
+  for (int i = 0; i < 4; i++) {
+    if (i >= nr) break;
+    cpArcEval(g0, g1, true, rts[i], b, d);
+    float dd = dot(b - p, b - p);
+    if (dd < bs) { bs = dd; bt = rts[i]; }
+  }
+  return bt;
+}
+
+float cpCubicCertFoot(vec4 g0, vec4 g1, vec2 p, vec4 cx, vec4 cy, float certEm, out bool certOut) {
+  float bt = 0.0, bd = 1e30;
+  vec2 b, d;
+  for (int k = 0; k <= 8; ++k) {
+    float t = float(k) * 0.125;
+    cpArcEval(g0, g1, false, t, b, d);
+    float dd = dot(b - p, b - p);
+    if (dd < bd) { bd = dd; bt = t; }
+  }
+  cpArcEval(g0, g1, false, bt, b, d);
+  for (int it = 0; it < 5; ++it) {
+    vec2 e = b - p;
+    float g2 = dot(d, d);
+    float nt = g2 > 0.0 ? clamp(bt - dot(e, d) / g2, 0.0, 1.0) : bt;
+    vec2 b2, d2;
+    cpArcEval(g0, g1, false, nt, b2, d2);
+    bool better = dot(b2 - p, b2 - p) <= dot(e, e);
+    bt = better ? nt : bt; b = better ? b2 : b; d = better ? d2 : d;
+  }
+
+  vec2 Q0 = g0.xy - p, Q1 = g0.zw - p, Q2 = g1.xy - p, Q3 = g1.zw - p;
+  float c0 = dot(Q0, Q0), c1 = dot(Q0, Q1), c2 = (6.0 * dot(Q0, Q2) + 9.0 * dot(Q1, Q1)) / 15.0,
+        c3 = (2.0 * dot(Q0, Q3) + 18.0 * dot(Q1, Q2)) / 20.0, c4 = (6.0 * dot(Q1, Q3) + 9.0 * dot(Q2, Q2)) / 15.0,
+        c5 = dot(Q2, Q3), c6 = dot(Q3, Q3);
+
+  float s = bt;
+  float a0 = c0 + s * (c1 - c0), a1 = c1 + s * (c2 - c1), a2 = c2 + s * (c3 - c2), a3 = c3 + s * (c4 - c3),
+        a4 = c4 + s * (c5 - c4), a5 = c5 + s * (c6 - c5);
+  float b0 = a0 + s * (a1 - a0), b1 = a1 + s * (a2 - a1), b2_ = a2 + s * (a3 - a2), b3 = a3 + s * (a4 - a3), b4 = a4 + s * (a5 - a4);
+  float e0 = b0 + s * (b1 - b0), e1 = b1 + s * (b2_ - b1), e2 = b2_ + s * (b3 - b2_), e3 = b3 + s * (b4 - b3);
+  float f0 = e0 + s * (e1 - e0), f1 = e1 + s * (e2 - e1), f2 = e2 + s * (e3 - e2);
+  float h0 = f0 + s * (f1 - f0), h1 = f1 + s * (f2 - f1);
+  float Dg = h0 + s * (h1 - h0);
+  float mn = min(min(min(c0, a0), min(b0, e0)), min(min(f0, h0), min(h1, f2)));
+  mn = min(mn, min(min(e3, b4), min(a5, c6)));
+  float dg = sqrt(max(Dg, 0.0));
+  float nz = 1.1920929e-6 * max(max(max(abs(c0), abs(c1)), max(abs(c2), abs(c3))), max(max(abs(c4), abs(c5)), abs(c6)));
+  certOut = mn - nz >= Dg - (2.0 * dg * certEm + certEm * certEm);
+  bool in0 = bt <= 0.0 && dot(Q0, g0.zw - g0.xy) < 0.0, in1 = bt >= 1.0 && dot(Q3, g1.zw - g1.xy) > 0.0;
+  float d0 = d2AtT(cx, cy, 0.0), d1 = d2AtT(cx, cy, 1.0);
+  float bt2 = (d0 <= d1) ? 0.0 : 1.0, bs = min(d0, d1);
+  float tt = clamp(bt, 0.0, 1.0), dd = d2AtT(cx, cy, tt);
+  float r = dd < bs ? tt : bt2;
+  return (in0 && r <= 0.0) ? 5.9604645e-8 : ((in1 && r >= 1.0) ? 0.99999994 : r);
+}
+
+float cpArcDistFootTangent(vec4 g0, vec4 g1, bool arc3, vec2 p, float certEm, out float tOut, out vec2 footOut, out vec2 tangentOut) {
+  float bt;
+  if (arc3 && g1.z == 1.0) {
+
+    vec2 P0 = g0.xy - p, P1 = g0.zw - p, P2 = g1.xy - p;
+    bt = quadClosestT(P0 - 2.0 * P1 + P2, 2.0 * (P1 - P0), P0);
+  } else if (arc3) {
+    bt = cpConicClosestT(g0, g1, p);
+  } else {
+
+    vec2 P0 = g0.xy - p, P1 = g0.zw - p, P2 = g1.xy - p, P3 = g1.zw - p;
+    vec2 k3 = P3 - P0 + 3.0 * (P1 - P2), k2 = 3.0 * (P0 - 2.0 * P1 + P2), k1 = 3.0 * (P1 - P0);
+    bool cert_ = false;
+    if (certEm > 0.0) bt = cpCubicCertFoot(g0, g1, p, vec4(k3.x, k2.x, k1.x, P0.x), vec4(k3.y, k2.y, k1.y, P0.y), certEm, cert_);
+    if (!cert_) bt = cubicClosestDescend(vec4(k3.x, k2.x, k1.x, P0.x), vec4(k3.y, k2.y, k1.y, P0.y));
+  }
+  vec2 b, d;
+  cpArcEval(g0, g1, arc3, bt, b, d);
+  tOut = bt; footOut = b; tangentOut = d;
+  return length(b - p);
+}
+float cpArcDistFoot(vec4 g0, vec4 g1, bool arc3, vec2 p, float certEm, out float tOut, out vec2 footOut) {
+  vec2 tangent;
+  return cpArcDistFootTangent(g0, g1, arc3, p, certEm, tOut, footOut, tangent);
+}
+float cpArcDist(vec4 g0, vec4 g1, bool arc3, vec2 p, out float tOut) {
+  vec2 f_;
+  return cpArcDistFoot(g0, g1, arc3, p, 0.0, tOut, f_);
+}
+
+float cpHullRamp(vec2 n, float a, float s0, float s1, vec2 p, float emPerPx) {
+
+  float u = dot(vec2(-n.y, n.x), p);
+  if (u < s0 - CP_AA_REACH * emPerPx || u > s1 + CP_AA_REACH * emPerPx) return a >= 0.0 ? 1.0 : exactBoxCov(n, a);
+  return exactBoxCov(n, a);
+}
+float cpHullHard(vec3 abc, float kind, vec2 p, float invPx, out float softH, out float areaH) {
+  float A = dot(abc.xy, p) + abc.z;
+
+  float gH = max(length(abc.xy), 1e-20);
+
+  float sdH = A / gH * invPx
+            + (kind > 15.5 ? CP_HULL16_DILATE : CP_POS_REL * (abs(p.x) + abs(p.y)) * invPx + CP_CUT_TIE);
+  softH = sdH;
+  areaH = exactBoxCov(abc.xy, sdH);
+
+  return step(0.0, sdH);
+}
+
+#ifdef MANTLE_CPATCH_COMP
+
+float cpOutlineBound(vec4 og0, vec4 og1, bool arc3, vec2 p, float invPx) {
+  float ot; vec2 foot;
+  float od = cpArcDistFoot(og0, og1, arc3, p, 4.8828125e-4 / invPx, ot, foot) * invPx;
+  vec2 ov = p - foot;
+  float ovl = length(ov);
+  if (!(ovl > 0.0)) return 1.0;
+  return exactBoxCov(ov / ovl, od);
+}
+#endif
+
+float cpatchCurveCov(int idx, vec2 p, float emPerPx, out bool cutOut, out float softOut, out bool nearOut,
+                     out bool hullOut, out float sdOut, out vec2 nOut, out float outlOut) {
+  softOut = 1.0; nearOut = false;
+  cutOut = false; hullOut = false; sdOut = 1e30;
+
+  outlOut = 1.0;
+
+  nOut = vec2(0.0);
+
+  int t = idx * 7;
+
+  float invPx = 1.0 / max(emPerPx, 1e-30);
+#ifdef MANTLE_CPATCH_BLEND3
+
+  float cpbZ = min(emPerPx, 0.0);
+  vec3 cpbW = vec3(1.0 - cpbZ, cpbZ, cpbZ);
+#define CPFETCH(ti) (cpbW.x * texFetch(ivec2(ti, 0)) + cpbW.y * texFetch(ivec2((ti) + 7, 0)) \
+                                                    + cpbW.z * texFetch(ivec2((ti) + 14, 0)))
+#else
+#define CPFETCH(ti) texFetch(ivec2(ti, 0))
+#endif
+  vec4 e0 = CPFETCH(t);
+
+  float arcTag = e0.w;
+#ifndef MANTLE_CPATCH_NO_QUADRATIC_AREA
+  bool convexRight = arcTag >= CP_AREA + CP_AREA_RIGHT - 0.5;
+  if (convexRight) arcTag -= CP_AREA_RIGHT;
+  bool convexEnd = arcTag >= CP_AREA - 0.5;
+  if (convexEnd) arcTag -= CP_AREA;
+#endif
+
+  float hornW = floor(arcTag / CP_HORN + 1e-3);
+  arcTag -= CP_HORN * hornW;
+  bool hornRight = hornW > 3.5;
+  float hornE = hornRight ? hornW - 4.0 : hornW;
+
+  float endW = floor(arcTag / CP_END + 1e-3);
+  arcTag -= CP_END * endW;
+  bool sq0 = mod(endW, 2.0) > 0.5, sq1 = mod(floor(endW * 0.5), 2.0) > 0.5;
+  bool oc0 = mod(floor(endW * 0.25), 2.0) > 0.5, oc1 = endW > 7.5;
+
+  float compTag = arcTag > 2.0 * CP_COMP - 0.5 ? 2.0 : (arcTag > CP_COMP - 0.5 ? 1.0 : 0.0);
+  arcTag -= CP_COMP * compTag;
+  e0.w = arcTag;
+  bool arc3 = arcTag > CP_ARC3 - 0.5;
+  if (arc3) e0.w = arcTag - CP_ARC3;
+
+  float kraw = e0.w;
+
+  if (kraw > 13.5) {
+    if (kraw > 21.5) {
+      cutOut = false;
+      vec4 q1 = CPFETCH(t + 1), q2 = CPFETCH(t + 2), q3 = CPFETCH(t + 3);
+
+      vec4 av = vec4(dot(e0.xy, p) + e0.z, dot(q1.xy, p) + q1.z, dot(q2.xy, p) + q2.z, dot(q3.xy, p) + q3.z) * invPx;
+      float amin = min(min(av.x, av.y), min(av.z, av.w));
+      if (amin >= CP_AA_REACH) return 1.0;
+      if (amin <= -CP_AA_REACH) return 0.0;
+      vec4 q4 = CPFETCH(t + 4), q5 = CPFETCH(t + 5);
+#ifdef MANTLE_CPATCH_EXACT_COMBINE
+
+      vec2 n1 = vec2(1.0, 0.0), n2 = vec2(1.0, 0.0);
+      float d1 = 1e9, d2 = 1e9, mh = 1.0;
+      vec3 pl[4]; pl[0] = e0.xyz; pl[1] = q1.xyz; pl[2] = q2.xyz; pl[3] = q3.xyz;
+      vec2 sp[4]; sp[0] = vec2(q1.w, q2.w); sp[1] = vec2(q3.w, q4.x);
+      sp[2] = vec2(q4.y, q4.z); sp[3] = vec2(q4.w, q5.x);
+      for (int i = 0; i < 4; i++) {
+        vec3 abc = pl[i];
+        float ai = av[i];
+        float u = dot(vec2(-abc.y, abc.x), p);
+        if (u < sp[i].x - CP_AA_REACH * emPerPx || u > sp[i].y + CP_AA_REACH * emPerPx) {
+          mh = min(mh, step(0.0, ai));
+          continue;
+        }
+        if (ai < d1) { n2 = n1; d2 = d1; n1 = abc.xy; d1 = ai; }
+        else if (ai < d2) { n2 = abc.xy; d2 = ai; }
+      }
+
+      float mc = d1 > 1e8 ? 1.0 : (d2 > 1e8 ? exactBoxCov(n1, d1) : exactBoxCov2(n1, d1, n2, d2));
+      return min(mh, mc);
+#else
+      float m = 1.0;
+      m = min(m, cpHullRamp(e0.xy, av.x, q1.w, q2.w, p, emPerPx));
+      m = min(m, cpHullRamp(q1.xy, av.y, q3.w, q4.x, p, emPerPx));
+      m = min(m, cpHullRamp(q2.xy, av.z, q4.y, q4.z, p, emPerPx));
+      m = min(m, cpHullRamp(q3.xy, av.w, q4.w, q5.x, p, emPerPx));
+      return m;
+#endif
+    }
+    if (kraw > 20.5) {
+      vec4 q1 = CPFETCH(t + 1), q2 = CPFETCH(t + 2), q3 = CPFETCH(t + 3), q4 = CPFETCH(t + 4);
+
+      float m = 1.0, ms = 1e30, sX, aX, ma = 1.0;
+      m = min(m, cpHullHard(e0.xyz, q1.w, p, invPx, sX, aX)); ms = min(ms, sX); ma = min(ma, aX);
+      m = min(m, cpHullHard(q1.xyz, q2.w, p, invPx, sX, aX)); ms = min(ms, sX); ma = min(ma, aX);
+      m = min(m, cpHullHard(q2.xyz, q3.w, p, invPx, sX, aX)); ms = min(ms, sX); ma = min(ma, aX);
+      m = min(m, cpHullHard(q3.xyz, q4.x, p, invPx, sX, aX)); ms = min(ms, sX); ma = min(ma, aX);
+      softOut = ma;
+
+      hullOut = true;
+      sdOut = ms;
+      return m;
+    }
+    return 1.0;
+  }
+
+  bool isCut = kraw > 7.5;
+  cutOut = isCut;
+  float kind = isCut ? kraw - 8.0 : kraw;
+
+#ifdef MANTLE_CPATCH_E1_ALWAYS
+
+  vec4 e1 = CPFETCH(t + 1);
+#else
+  vec4 e1 = (kind < 0.5) ? vec4(0.0, 0.0, 0.0, 1.0) : CPFETCH(t + 1);
+#endif
+  float sg = e1.w;
+#ifndef MANTLE_CPATCH_NO_QUADRATIC_AREA
+  if (convexEnd && kind > 0.5 && kind < 1.5) {
+    vec4 cg0 = CPFETCH(t + 5), cg1 = CPFETCH(t + 6);
+    vec2 cp0 = cg0.xy, cp1 = cg0.zw, cp2 = cg1.xy;
+    vec2 ct0 = cp1 - cp0, ct1 = cp2 - cp1;
+    bool before = dot(p - cp0, ct0) <= 0.0;
+    bool after = dot(p - cp2, ct1) >= 0.0;
+    if (before || after) {
+      vec2 ct = before ? ct0 : ct1, ep = before ? cp0 : cp2;
+      vec2 cn = normalize(vec2(-ct.y, ct.x)) * (convexRight ? -1.0 : 1.0);
+      sdOut = dot(p - ep, cn) * invPx; nOut = cn;
+      nearOut = abs(sdOut) <= CP_AA_REACH;
+      softOut = exactBoxCov(cn, sdOut); return softOut;
+    }
+  }
+#endif
+
+  vec4 e2c = (kind < 1.5) ? vec4(0.0) : CPFETCH(t + 2);
+  vec4 e3c = (kind < 0.5) ? vec4(0.0) : CPFETCH(t + 3);
+#define CP_EVAL(pp, ff, gg) { \
+    float _A0 = dot(e0.xy, (pp)) + e0.z; \
+    if (kind < 0.5) { (ff) = _A0; (gg) = e0.xy; } \
+    else if (kind < 1.5) { float _A1 = dot(e1.xy, (pp)) + e1.z; \
+      (ff) = _A0 * _A0 - _A1; (gg) = 2.0 * _A0 * e0.xy - e1.xy; } \
+    else { float _A1 = dot(e1.xy, (pp)) + e1.z; float _A2 = dot(e2c.xy, (pp)) + e2c.z; \
+      if (kind > 4.5) { (ff) = _A0 * _A0 - _A1 * _A2; \
+        (gg) = 2.0 * _A0 * e0.xy - _A2 * e1.xy - _A1 * e2c.xy; } \
+      else if (kind < 3.5) { (ff) = _A0 * _A0 * _A0 - _A1 * _A2; \
+        (gg) = 3.0 * _A0 * _A0 * e0.xy - _A2 * e1.xy - _A1 * e2c.xy; } \
+      else { float _A3 = dot(e3c.xy, (pp)) + e3c.z; float _C0 = e2c.w, _C1 = e3c.w; \
+        (ff) = _C1 * _A0 * _A3 - _C0 * _C0 * _A0 - _C1 * _A1 * _A1 + 2.0 * _C0 * _A1 * _A2 - _A3 * _A2 * _A2; \
+        (gg) = (_C1 * _A3 - _C0 * _C0) * e0.xy + (_C1 * _A0 - _A2 * _A2) * e3c.xy \
+             + (2.0 * _C0 * _A2 - 2.0 * _C1 * _A1) * e1.xy \
+             + (2.0 * _C0 * _A1 - 2.0 * _A3 * _A2) * e2c.xy; } } }
+  float f; vec2 gf;
+  CP_EVAL(p, f, gf)
+  f *= sg; gf *= sg;
+
+  if (isCut) {
+    bool far_ = false;
+    if (kind > 3.5 && kind < 4.5) {
+      if (compTag < 0.5) {
+        vec4 ca_ = CPFETCH(t + 5), cz_ = CPFETCH(t + 6);
+        vec2 cd_ = cz_.zw - ca_.xy;
+        float cL_ = length(cd_), cu_ = cL_ > 0.0 ? dot(p - ca_.xy, cd_) / cL_ : 0.0, cr_ = CP_AA_REACH * emPerPx;
+        far_ = cu_ < -cr_ || cu_ > cL_ + cr_;
+      }
+    } else {
+      vec4 cb_ = kind < 0.5 ? CPFETCH(t + 3) : e3c;
+      far_ = length(max(max(cb_.xy - p, p - cb_.zw), vec2(0.0))) * invPx > CP_AA_REACH;
+    }
+    if (far_) { nearOut = true; return f >= 0.0 ? 1.0 : 0.0; }
+  }
+
+  float cutRes = isCut ? CP_POS_REL * (abs(p.x) + abs(p.y)) * invPx + CP_CUT_TIE : 0.0;
+
+  float gpx = length(gf) * emPerPx;
+#ifdef MANTLE_CPATCH_ONLYCUT
+
+  if (!isCut) return 1.0;
+#endif
+#ifdef MANTLE_CPATCH_NOCUT
+
+  if (isCut) return 1.0;
+#endif
+
+  bool hornNear = false;
+  if (hornE > 0.5 && !isCut) {
+    vec2 hbo = kind > 3.5 && kind < 4.5 ? vec2(0.0) : max(max(e3c.xy - p, p - e3c.zw), vec2(0.0));
+    vec4 hst = CPFETCH(t + 4);
+    float hpx = length(hbo) * invPx;
+    if (dot(hst.xy, hst.xy) > 0.5) { float hv = dot(hst.xy, p); hpx = max(hpx, max(max(hst.z - hv, hv - hst.w), 0.0) * invPx); }
+    hornNear = hpx <= CP_AA_REACH;
+  }
+  if (f > gpx * 0.7072 && !hornNear) return 1.0;
+
+#ifdef MANTLE_CPATCH_HARD
+
+  return step(0.0, f);
+#else
+
+#ifdef MANTLE_CPATCH_RAMP
+  return isCut ? step(0.0, f) : clamp(0.5 + f / max(gpx * MANTLE_CPATCH_RAMP, 1e-30), 0.0, 1.0);
+#else
+
+  float g2 = dot(gf, gf);
+  float ig = g2 > 0.0 ? min(inversesqrt(g2), 1e20) : 1e20;
+
+#ifdef MANTLE_CPATCH_COMP
+#define CP_COMPANION(sdv) \
+  if (compTag > 0.0 && isCut && (sdv) >= -CP_AA_REACH) { \
+    vec4 cbx_ = CPFETCH(t + 4); \
+    vec2 cbo_ = max(max(cbx_.xy - p, p - cbx_.zw), vec2(0.0)); \
+    if (length(cbo_) <= CP_AA_REACH * emPerPx) \
+      outlOut = cpOutlineBound(CPFETCH(t + 5), CPFETCH(t + 6), compTag > 1.5, p, invPx); \
+  }
+#else
+#define CP_COMPANION(sdv)
+#endif
+  if (kind < 0.5) {
+    float sdL = f * ig * invPx;
+    vec2 nL = gf * ig;
+
+    if (!isCut && sdL >= 0.0 && sdL <= CP_AA_REACH) {
+      vec4 lb = CPFETCH(t + 3);
+      vec2 ov = max(max(lb.xy - p, p - lb.zw), vec2(0.0));
+      float bpx = length(ov) * invPx;
+      if (bpx > sdL && (oc0 || oc1)) {
+        vec4 le = CPFETCH(t + 5);
+        vec2 ld = le.zw - le.xy;
+        float lu = dot(p - le.xy, ld);
+        if ((lu < 0.0 && oc0) || (lu > dot(ld, ld) && oc1)) bpx = 0.0;
+      }
+      sdL = max(sdL, bpx);
+    }
+
+    if (!isCut && (sq0 || sq1) && sdL < 0.0) {
+      vec4 le = CPFETCH(t + 5);
+      vec2 ld = le.zw - le.xy;
+      if ((sq0 && dot(p - le.xy, ld) < 0.0) || (sq1 && dot(p - le.zw, ld) > 0.0)) {
+        softOut = 0.0; sdOut = sdL; nOut = nL;
+        return 0.0;
+      }
+    }
+    softOut = exactBoxCov(nL, sdL);
+    nearOut = !isCut && abs(sdL) <= CP_AA_REACH;
+    sdOut = sdL; nOut = nL;
+    CP_COMPANION(sdL)
+
+    if (isCut && endW > 0.5 && sdL < -cutRes) {
+      vec4 le = CPFETCH(t + 5);
+      vec2 q0 = p - le.xy, q1 = p - le.zw;
+      bool pe0 = sq0 && dot(q0, le.xy - le.zw) > 0.0, pe1 = sq1 && dot(q1, le.zw - le.xy) > 0.0;
+      if (pe0 || pe1) {
+        vec4 l1 = CPFETCH(t + 1), l2 = CPFETCH(t + 2);
+        if (pe0 && dot(q0, l1.xy) >= 0.0 && dot(q0, vec2(l1.z, l2.x)) < 0.0) return 1.0;
+        if (pe1) { vec4 l4 = CPFETCH(t + 4);
+          if (dot(q1, l2.yz) >= 0.0 && dot(q1, l4.xy) < 0.0) return 1.0; }
+      }
+    }
+    return isCut ? step(-cutRes, sdL) : softOut;
+  }
+
+  float dpx;
+  if (isCut) {
+    dpx = abs(f) * ig * invPx;
+  } else {
+
+    vec2 q = p; float fq = f; vec2 gq = gf;
+    for (int it = 0; it < 2; ++it) {
+      float g2 = dot(gq, gq);
+
+      if (g2 < 1.1754944e-38) break;
+      q -= fq * gq / g2;
+      float ff; vec2 gg;
+      CP_EVAL(q, ff, gg)
+      fq = ff * sg; gq = gg * sg;
+    }
+    dpx = length(p - q) * invPx;
+  }
+
+  bool hasBox = kind < 3.5 || kind > 4.5;
+  vec4 boxc = e3c;
+  float boxPx = 0.0;
+  if (hasBox) {
+    vec2 outv = max(max(boxc.xy - p, p - boxc.zw), vec2(0.0));
+    boxPx = length(outv) * invPx;
+  }
+
+  vec4 strip = CPFETCH(t + 4);
+  float stripPx = 0.0;
+  if (dot(strip.xy, strip.xy) > 0.5) {
+    float v = dot(strip.xy, p);
+    stripPx = max(max(strip.z - v, v - strip.w), 0.0) * invPx;
+    boxPx = max(boxPx, stripPx);
+    hasBox = true;
+  }
+
+  bool cutArc = false, cutSdOn = false;
+  float cutSd = 0.0;
+  if (isCut && f < 0.0 && compTag < 0.5 && dot(strip.xy, strip.xy) > 0.5) {
+    if (stripPx > CP_AA_REACH) {
+      vec4 ca_ = CPFETCH(t + 5), cz_ = CPFETCH(t + 6);
+      vec2 cE1_ = arc3 ? cz_.xy : cz_.zw;
+      float cf0_, cf1_; vec2 cn0_, cn1_;
+      CP_EVAL(ca_.xy, cf0_, cn0_)
+      CP_EVAL(cE1_, cf1_, cn1_)
+      float cin_ = dot((dot(cn0_, cn0_) >= dot(cn1_, cn1_) ? cn0_ : cn1_) * sg, strip.xy), cv_ = dot(strip.xy, p);
+      if ((cv_ > strip.w && cin_ > 0.0) || (cv_ < strip.z && cin_ < 0.0)) { cutSdOn = true; cutSd = stripPx; }
+    } else {
+      vec2 cq_ = p; float cfq_ = f; vec2 cgq_ = gf;
+      for (int it = 0; it < 2; ++it) {
+        float cg2_ = dot(cgq_, cgq_);
+        if (!(cg2_ > 0.0)) break;
+        cq_ -= cfq_ * cgq_ / cg2_;
+        float cff_; vec2 cgg_;
+        CP_EVAL(cq_, cff_, cgg_)
+        cfq_ = cff_ * sg; cgq_ = cgg_ * sg;
+      }
+      float cvq_ = dot(strip.xy, cq_);
+      cutArc = cvq_ < strip.z || cvq_ > strip.w;
+    }
+  }
+
+  bool hornGeo = false, hornLine = false;
+  vec2 hornF = vec2(0.0), hornT = vec2(0.0);
+  float hornAd = 0.0;
+  if ((!isCut && (dpx <= CP_AA_REACH || boxPx <= CP_AA_REACH || hornNear)) || cutArc) {
+    vec4 g0 = CPFETCH(t + 5), g1 = CPFETCH(t + 6);
+    float at; vec2 afoot, aTangent;
+    float ad = cpArcDistFootTangent(g0, g1, arc3, p, hornE > 0.5 ? 0.0 : 4.8828125e-4 * emPerPx, at, afoot, aTangent) * invPx;
+
+    if (!isCut && f < 0.0 && ((sq0 && at <= 0.0) || (sq1 && at >= 1.0))) {
+      softOut = 0.0; sdOut = -ad; nOut = vec2(0.0);
+      return 0.0;
+    }
+
+    if (hornE > 0.5 && ad <= CP_AA_REACH) {
+      bool cusp0 = at <= 0.0 && (hornE == 1.0 || hornE == 3.0), cusp1 = at >= 1.0 && hornE > 1.5;
+      if (at > 0.0 && at < 1.0) {
+        vec2 hb_, hd_;
+        cpArcEval(g0, g1, arc3, at, hb_, hd_);
+        if (dot(hd_, hd_) > 0.0) { hornGeo = true; hornF = afoot; hornT = hd_; hornAd = ad; }
+      } else {
+        vec2 hb_, hd_;
+        cpArcEval(g0, g1, arc3, at <= 0.0 ? 0.0 : 1.0, hb_, hd_);
+        if (cusp0 || cusp1) hd_ = g1.xy - g0.zw;
+        if (dot(hd_, hd_) > 0.0) { hornGeo = true; hornLine = true; hornF = hb_; hornT = hd_; }
+      }
+    }
+    if (at > 0.0 && at < 1.0) {
+      dpx = ad;
+
+      if (!isCut && f < 0.0 && dot(aTangent, aTangent) > 0.0)
+        f = dot(p - afoot, vec2(-aTangent.y, aTangent.x)) * (hornRight ? -1.0 : 1.0);
+    }
+
+    else if (f >= 0.0 && ad > dpx) dpx = ad;
+    if (isCut && at > 0.0 && at < 1.0) {
+      float cff_; vec2 cgg_;
+      CP_EVAL(afoot, cff_, cgg_)
+      cutSdOn = true; cutSd = dot(p - afoot, cgg_ * sg) >= 0.0 ? ad : -ad;
+    }
+  }
+  if (hasBox && !isCut && f >= 0.0) dpx = max(dpx, boxPx);
+
+  float sd = (f < 0.0 ? -dpx : dpx);
+
+  float sdStep = sd;
+
+  vec2 nrm = gf * ig;
+
+  {
+    float k0 = dot(e0.xy, p) + e0.z;
+    vec3 H = vec3(0.0);
+    if (kind < 0.5) { }
+    else if (kind < 1.5) H = 2.0 * vec3(e0.x * e0.x, e0.x * e0.y, e0.y * e0.y);
+    else {
+      vec3 oo = vec3(e0.x * e0.x, e0.x * e0.y, e0.y * e0.y);
+      vec3 c12 = vec3(2.0 * e1.x * e2c.x, e1.x * e2c.y + e1.y * e2c.x, 2.0 * e1.y * e2c.y);
+      if (kind > 4.5)      H = 2.0 * oo - c12;
+      else if (kind < 3.5) H = 6.0 * k0 * oo - c12;
+      else {
+        float a1 = dot(e1.xy, p) + e1.z, a2 = dot(e2c.xy, p) + e2c.z;
+        float a3 = dot(e3c.xy, p) + e3c.z, C0 = e2c.w, C1 = e3c.w;
+        vec3 c03 = vec3(2.0 * e0.x * e3c.x, e0.x * e3c.y + e0.y * e3c.x, 2.0 * e0.y * e3c.y);
+        vec3 c11 = vec3(e1.x * e1.x, e1.x * e1.y, e1.y * e1.y);
+        vec3 c32 = vec3(2.0 * e3c.x * e2c.x, e3c.x * e2c.y + e3c.y * e2c.x, 2.0 * e3c.y * e2c.y);
+        vec3 c22 = vec3(e2c.x * e2c.x, e2c.x * e2c.y, e2c.y * e2c.y);
+        H = C1 * c03 - 2.0 * C1 * c11 + 2.0 * C0 * c12 - 2.0 * a2 * c32 - 2.0 * a3 * c22;
+      }
+      H *= sg;
+    }
+    if (g2 > 0.0) {
+
+      float kap = (H.x * nrm.y * nrm.y - 2.0 * H.y * nrm.x * nrm.y + H.z * nrm.x * nrm.x) * ig;
+      sd += clamp(kap * emPerPx, -2.0, 2.0) / 24.0;
+    }
+  }
+  if (hornGeo) {
+
+    vec2 hl = normalize(vec2(-hornT.y, hornT.x)) * (hornRight ? -1.0 : 1.0);
+    if (hornLine) { sd = dot(hl, p - hornF) * invPx; nrm = hl; }
+    else {
+      vec2 hv = p - hornF;
+      float hs = dot(hl, hv) < 0.0 ? -1.0 : 1.0, hvl = length(hv);
+      sd = hs * hornAd;
+      nrm = hvl > 0.0 ? hs * hv / hvl : hl;
+    }
+  }
+  softOut = exactBoxCov(nrm, sd);
+  sdOut = sd; nOut = nrm;
+
+  nearOut = !isCut && hasBox && abs(sd) <= CP_AA_REACH && boxPx <= CP_AA_REACH;
+  CP_COMPANION(sd)
+  if (cutSdOn) sdStep = cutSd;
+
+  if (isCut && endW > 0.5 && sdStep < -cutRes && kind > 0.5 && kind < 1.5) {
+    vec4 qa = CPFETCH(t + 5), qb = CPFETCH(t + 6), qg = CPFETCH(t + 2);
+    if (sq0) { vec2 q = p - qa.xy;
+      if (dot(q, qa.xy - qa.zw) > 0.0 && dot(q, vec2(cos(qg.x), sin(qg.x))) >= 0.0 && dot(q, vec2(cos(qg.y), sin(qg.y))) < 0.0) return 1.0; }
+    if (sq1) { vec2 q = p - qb.xy;
+      if (dot(q, qb.xy - qa.zw) > 0.0 && dot(q, vec2(cos(qg.z), sin(qg.z))) >= 0.0 && dot(q, vec2(cos(qg.w), sin(qg.w))) < 0.0) return 1.0; }
+  }
+  return isCut ? step(-cutRes, sdStep) : softOut;
+#undef CP_COMPANION
+#endif
+#endif
+}
+#endif
+
+#ifdef MANTLE_CPATCH
+
+float cpatchLineCov(vec4 e, vec2 p, float emPerPx, out bool cutOut, out float softOut, out bool nearOut) {
+
+  float kraw = e.w > CP_ARC3 - 0.5 ? e.w - CP_ARC3 : e.w;
+  bool isCut = kraw > 7.5;
+  cutOut = isCut; softOut = 1.0; nearOut = false;
+  float gLen = max(length(e.xy), 1e-20);
+  float sd = (dot(e.xy, p) + e.z) / gLen / max(emPerPx, 1e-30);
+
+  if (kraw > 16.5) return exactBoxCov(e.xy, (dot(e.xy, p) + e.z) / max(emPerPx, 1e-30));
+  if (kraw > 15.5) return step(0.0, dot(e.xy, p) + e.z);
+  if (kraw > 13.5) return step(-CP_POS_REL * (abs(p.x) + abs(p.y)) / max(emPerPx, 1e-30) - CP_CUT_TIE, (dot(e.xy, p) + e.z) / max(emPerPx, 1e-30));
+  if (sd > (isCut ? 0.25 : CP_AA_REACH)) return 1.0;
+  softOut = exactBoxCov(e.xy / gLen, sd);
+  nearOut = !isCut && abs(sd) <= CP_AA_REACH;
+  return isCut ? step(-CP_POS_REL * (abs(p.x) + abs(p.y)) / max(emPerPx, 1e-30) - CP_CUT_TIE, sd) : softOut;
+}
+
+float cpatchCurveCov(int idx, vec2 p, float emPerPx) {
+  bool c_, n_, h_; float s_, sd_, o_;
+  vec2 g_;
+  return cpatchCurveCov(idx, p, emPerPx, c_, s_, n_, h_, sd_, g_, o_);
+}
+
+#ifndef MANTLE_CPATCH_NO_QUADRATIC_AREA
+
+vec2 cpAreaEval(vec2 p0, vec2 p1, vec2 p2, float t) {
+  return mix(mix(p0, p1, t), mix(p1, p2, t), t);
+}
+vec2 cpAreaRoots(float a, float b, float c) {
+  vec2 roots = vec2(-1.0);
+  if (a == 0.0) {
+    if (b != 0.0) roots.x = -c / b;
+  } else {
+    float disc = b*b - 4.0*a*c;
+
+    if (disc < 0.0 && disc >= -64.0 * 1.1920929e-7 * (b*b + abs(4.0*a*c))) disc = 0.0;
+    if (disc >= 0.0) {
+      float sq = sqrt(disc), q = -0.5 * (b + (b < 0.0 ? -sq : sq));
+      roots = q == 0.0 ? vec2(-b/(2.0*a)) : vec2(q/a, c/q);
+    }
+  }
+  return roots;
+}
+
+float cpAreaRootIn(float a,float b,float c,float lo,float hi) {
+  vec2 roots=cpAreaRoots(a,b,c);
+  float m=0.5*(lo+hi);
+  return clamp(abs(roots.x-m)<=abs(roots.y-m)?roots.x:roots.y,lo,hi);
+}
+float cpAreaCurve(vec2 p0, vec2 p1, vec2 p2) {
+  if (max(max(p0.x,p1.x),p2.x) <= 0.0) return 0.0;
+  if (min(min(p0.x,p1.x),p2.x) >= 1.0)
+    return clamp(p2.y,0.0,1.0)-clamp(p0.y,0.0,1.0);
+  if (max(max(p0.y,p1.y),p2.y) <= 0.0 || min(min(p0.y,p1.y),p2.y) >= 1.0) return 0.0;
+  vec2 a=p0-2.0*p1+p2,b=2.0*(p1-p0);
+  float tx=a.x==0.0?1.0:-b.x/(2.0*a.x),ty=a.y==0.0?1.0:-b.y/(2.0*a.y);
+  if(tx<=0.0||tx>=1.0)tx=1.0;
+  if(ty<=0.0||ty>=1.0)ty=1.0;
+  float first=min(tx,ty),second=max(tx,ty),area=0.0;
+  for(int span=0;span<3;span++) {
+    float lo=span==0?0.0:(span==1?first:second),hi=span==0?first:(span==1?second:1.0);
+    if(hi<=lo)continue;
+    vec2 pl=cpAreaEval(p0,p1,p2,lo),ph=cpAreaEval(p0,p1,p2,hi);
+    if(max(pl.y,ph.y)<=0.0||min(pl.y,ph.y)>=1.0)continue;
+    float yl=pl.y,yh=ph.y;
+    bool up=ph.y>=pl.y;
+    if(up?yl<0.0:yl>1.0) {float wall=up?0.0:1.0;lo=cpAreaRootIn(a.y,b.y,p0.y-wall,lo,hi);yl=wall;}
+    if(up?yh>1.0:yh<0.0) {float wall=up?1.0:0.0;hi=cpAreaRootIn(a.y,b.y,p0.y-wall,lo,hi);yh=wall;}
+    if(hi<=lo)continue;
+    pl=cpAreaEval(p0,p1,p2,lo);ph=cpAreaEval(p0,p1,p2,hi);
+    if(max(pl.x,ph.x)<=0.0)continue;
+    if(min(pl.x,ph.x)>=1.0) {area+=yh-yl;continue;}
+    bool right=ph.x>=pl.x;
+
+    if(right?ph.x>1.0:pl.x>1.0) {
+      float t=cpAreaRootIn(a.x,b.x,p0.x-1.0,lo,hi),y=cpAreaEval(p0,p1,p2,t).y;
+      area+=right?yh-y:y-yl;
+      if(right)hi=t;else lo=t;
+    }
+    if(right?pl.x<0.0:ph.x<0.0) {
+      float t=cpAreaRootIn(a.x,b.x,p0.x,lo,hi);
+      if(right)lo=t;else hi=t;
+    }
+    float h=hi-lo,m=0.5*(lo+hi),d=0.2886751345948129*h,t0=m-d,t1=m+d;
+    if(h>0.0) area+=0.5*h*(cpAreaEval(p0,p1,p2,t0).x*2.0*mix(p1.y-p0.y,p2.y-p1.y,t0)
+                  +cpAreaEval(p0,p1,p2,t1).x*2.0*mix(p1.y-p0.y,p2.y-p1.y,t1));
+  }
+  return area;
+}
+
+#if defined(MANTLE_NO_CUBIC) || defined(MANTLE_CPATCH_NO_CUBIC_AREA)
+#define CP_AREA_MAX_CURVES 64
+#else
+#define CP_AREA_MAX_CURVES 256
+#endif
+float cpConvexArea(int first,int n,vec2 dx,vec2 dy) {
+  float det=dx.x*dy.y-dx.y*dy.x;
+  vec2 mapX=vec2(dy.y,-dy.x)/det,mapY=vec2(-dx.y,dx.x)/det;
+  float area=0.0;
+  for(int i=0;i<CP_AREA_MAX_CURVES;i++) {
+    if(i>=n) break;
+    int t=(first+i)*7;
+    vec4 e0=CPFETCH(t),g0=CPFETCH(t+5),g1=CPFETCH(t+6);
+    vec2 q0=g0.xy-vEm,q1=g0.zw-vEm,q2=g1.xy-vEm;
+    vec2 p0=vec2(dot(mapX,q0),dot(mapY,q0))+0.5;
+    vec2 p1=vec2(dot(mapX,q1),dot(mapY,q1))+0.5;
+    vec2 p2=vec2(dot(mapX,q2),dot(mapY,q2))+0.5;
+    float tag=e0.w-CP_AREA-(e0.w>=CP_AREA+CP_AREA_RIGHT-0.5?CP_AREA_RIGHT:0.0);
+    if(tag<0.5) {p2=p1;p1=0.5*(p0+p2);}
+#if !defined(MANTLE_NO_CUBIC) && !defined(MANTLE_CPATCH_NO_CUBIC_AREA)
+    if(tag>33.5) {
+      vec2 q3=g1.zw-vEm;
+      vec2 p3=vec2(dot(mapX,q3),dot(mapY,q3))+0.5;
+      vec2 lo=min(min(p0,p1),min(p2,p3)),hi=max(max(p0,p1),max(p2,p3));
+
+      if(hi.x>0.0 && hi.y>0.0 && lo.y<1.0) {
+        if(lo.x>=1.0) area+=clamp(p3.y,0.0,1.0)-clamp(p0.y,0.0,1.0);
+        else if(all(greaterThanEqual(lo,vec2(0.0))) && all(lessThanEqual(hi,vec2(1.0))))
+          area+=aacZoneInt(aacCubicCoeff(p0.x,p1.x,p2.x,p3.x),aacCubicCoeff(p0.y,p1.y,p2.y,p3.y),0.0,1.0);
+
+        else area-=aacCubicContrib(p0,p1,p2,p3,0.0,1.0);
+      }
+    } else
+#endif
+      area+=cpAreaCurve(p0,p1,p2);
+  }
+  return clamp(abs(area),0.0,1.0);
+}
+
+#endif
+
+float cpatchCoverage() {
+#ifdef MANTLE_CPATCH_QUADRATIC_AREA_ONLY
+    vec2 dx=dFdx(vEm),dy=dFdy(vEm);
+
+    if(any(notEqual(vAffineFootprint,vec4(0.0)))){dx=vAffineFootprint.xy;dy=vAffineFootprint.zw;}
+    if(abs(dx.x*dy.y-dx.y*dy.x)==0.0)return 0.0;
+    return cpConvexArea(int(cCen.x+0.5),int(cCen.y+0.5),dx,dy);
+#else
+
+#ifndef MANTLE_CPATCH_NO_QUADRATIC_AREA
+    vec2 areaDx=dFdx(vEm),areaDy=dFdy(vEm);
+
+    if(any(notEqual(vAffineFootprint,vec4(0.0)))){areaDx=vAffineFootprint.xy;areaDy=vAffineFootprint.zw;}
+#endif
+#ifdef MANTLE_CPATCH_DEBUG
+    return 1.0;
+
+#endif
+
+    vec4 cell = vLB0;
+    if (cell.z > cell.x && cell.w > cell.y
+        && (vEm.x < cell.x || vEm.x >= cell.z || vEm.y < cell.y || vEm.y >= cell.w)) return 0.0;
+    int first = int(cCen.x + 0.5), n = int(cCen.y + 0.5);
+#ifndef MANTLE_CPATCH_NO_QUADRATIC_AREA
+    if(n>=3 && n<=CP_AREA_MAX_CURVES && CPFETCH(first*7).w>=CP_AREA - 0.5
+       && abs(areaDx.x*areaDy.y-areaDx.y*areaDy.x)>0.0)
+      return cpConvexArea(first,n,areaDx,areaDy);
+#endif
+    int lineBlocks = 0;
+#ifdef MANTLE_CPATCH_ONLYN5
+
+    if (n != 5) return 0.02;
+    return 1.0;
+#endif
+#ifdef MANTLE_CPATCH_SHOWX
+
+    return clamp((vEm.x - 50.0) / 300.0, 0.02, 1.0);
+#endif
+#ifdef MANTLE_CPATCH_REJHARD
+
+    {
+      for (int i = 0; i < 32; i++) {
+        if (i >= n) break;
+        if (cpatchCurveCov(first + i, vEm, vEmPerPx) <= 0.0)
+#ifdef CP_REJ_IDX
+
+          return (i == CP_REJ_IDX) ? 1.0 : 0.02;
+#else
+          return clamp(float(n * 8 + i + 1) / 64.0, 0.02, 1.0);
+#endif
+      }
+      return 0.015;
+    }
+#endif
+#ifdef MANTLE_CPATCH_SHOWREJ
+
+    {
+      for (int i = 0; i < 32; i++) {
+        if (i >= n) break;
+
+        if (cpatchCurveCov(first + i, vEm, vEmPerPx) < 0.5) return clamp(float(i + 1) / 32.0, 0.02, 1.0);
+      }
+      return 0.01;
+    }
+#endif
+#ifdef MANTLE_CPATCH_SHOWN
+
+    return clamp(float(n) / 8.0, 0.02, 1.0);
+#endif
+
+    float cov = 1.0, cutHard = 1.0, cutFar = 1.0;
+
+    float hullHard = 1.0, hullSoft = 1.0, sdHull = 1e30, sdEdge = 1e30;
+    bool nearArc = false;
+
+    float exC1 = 1.0, exD1 = 0.0, exC2 = 1.0, exD2 = 0.0;
+    vec2 exN1 = vec2(0.0), exN2 = vec2(0.0);
+
+    for (int i = lineBlocks; i < 128; i++) {
+      if (i >= n) break;
+
+#ifdef MANTLE_CPATCH_BODYCOST
+
+      if (min(vEmPerPx, 0.0) < -1.0) {
+        int b4 = (first + i) * 5;
+        bool cA, nA; float sA;
+        cov = min(cov, cpatchLineCov(texFetch(ivec2(b4 + 0, 0)), vEm, vEmPerPx, cA, sA, nA));
+        cov = min(cov, cpatchLineCov(texFetch(ivec2(b4 + 1, 0)), vEm, vEmPerPx, cA, sA, nA));
+        cov = min(cov, cpatchLineCov(texFetch(ivec2(b4 + 2, 0)), vEm, vEmPerPx, cA, sA, nA));
+        cov = min(cov, cpatchLineCov(texFetch(ivec2(b4 + 3, 0)), vEm, vEmPerPx, cA, sA, nA));
+      }
+#endif
+      bool cut9, near9, hull9; float soft9, sd9, outl9; vec2 n9;
+      float c9 = cpatchCurveCov(first + i, vEm, vEmPerPx, cut9, soft9, near9, hull9, sd9, n9, outl9);
+      if (hull9) { hullHard = min(hullHard, c9); hullSoft = min(hullSoft, soft9); sdHull = min(sdHull, sd9); }
+      else if (cut9) {
+        if (near9) cutFar = min(cutFar, c9);
+        else cutHard = min(cutHard, c9);
+
+        if (outl9 < cov) sdEdge = 1e30;
+        cov = min(cov, outl9);
+      }
+      else {
+        if (c9 < cov) sdEdge = sd9;
+        cov = min(cov, c9); nearArc = nearArc || near9;
+        if (c9 < 1.0 && dot(n9, n9) > 0.0) {
+          if (c9 < exC1) { exC2 = exC1; exD2 = exD1; exN2 = exN1; exC1 = c9; exD1 = sd9; exN1 = n9; }
+          else if (c9 < exC2) { exC2 = c9; exD2 = sd9; exN2 = n9; }
+        }
+      }
+
+    }
+
+    if (exC2 < 1.0) {
+      float ex2;
+      cpExactBoxCov23(-exN1, exD1, -exN2, exD2, vec2(0.0), 1.0, false, ex2);
+      cov = min(cov, ex2);
+    }
+
+    vec2 bxA = cBoxA;
+    if (dot(bxA, bxA) > 1e-12) {
+      vec2 bxB = vec2(-bxA.y, bxA.x);
+      float bu = dot(bxA, vEm), bv = dot(bxB, vEm);
+      float bd = min(min(bu - cBoxU.x, cBoxU.y - bu), min(bv - cBoxV.x, cBoxV.y - bv))
+               / max(vEmPerPx, 1e-30);
+      hullHard = min(hullHard, step(-CP_BOX_SLACK, bd));
+    }
+
+    vec2 hvN = vTC.xy;
+    float hvL = length(hvN);
+    hullHard = min(hullHard, exactBoxCov(hvL > 1e-9 ? hvN / hvL : vec2(1.0, 0.0), vTC.z));
+
+    sdHull = min(sdHull, vTC.z);
+
+    bool hullRedundant = nearArc && cov < CP_SEAM_NEAR && sdEdge < 1e29 && sdHull < 1e29
+                         && abs(sdEdge - sdHull) < CP_HULL_AGREE;
+
+    cov = min(cov, hullRedundant ? 1.0 : ((nearArc && cov < CP_SEAM_NEAR) ? hullSoft : hullHard));
+
+    cov = min(cov, cutHard);
+    if (!nearArc) cov = min(cov, cutFar);
+
+    if (cov < 0.004) discard;
+    return LBCOV_OUT(cov);
+#endif
+}
+#endif
+
+float slugCov(float f, vec2 grad) {
+  float g = max(length(grad), 1e-30);
+  return exactBoxCov(grad / g, -f / g);
+}
+
+#define LB_CORNER_GATE(g) ((g) > 0.0)
+
+float curveCov(float f, float fx, float fy, float fxx, float fyy, float fxy) {
+  vec2 grad = vec2(fx, fy);
+  float g = max(length(grad), 1e-30);
+  vec2 nn = grad / g;
+  float kPx = (fxx * nn.y * nn.y - 2.0 * fxy * nn.x * nn.y + fyy * nn.x * nn.x) / g;
+
+  kPx = clamp(kPx, -2.0, 2.0);
+  return exactBoxCov(grad / g, -f / g - kPx / 24.0);
+}
+
+float arcCov(float f, float fx, float fy, float fxx, float fyy, float fxy) {
+  vec2 grad = vec2(fx, fy);
+  float g = max(length(grad), 1e-30);
+  vec2 n = grad / g;
+  float kPx = clamp((fxx * n.y * n.y - 2.0 * fxy * n.x * n.y + fyy * n.x * n.x) / g, -2.0, 2.0);
+  float d = -f / g;
+
+  float lo = -1e9, hi = 1e9;
+  if (abs(n.y) > 1e-9) { float u0 = (d * n.x - 0.5) / n.y, u1 = (d * n.x + 0.5) / n.y; lo = max(lo, min(u0, u1)); hi = min(hi, max(u0, u1)); }
+  else if (abs(d * n.x) > 0.5) { lo = 1.0; hi = -1.0; }
+  if (abs(n.x) > 1e-9) { float v0 = (-0.5 - d * n.y) / n.x, v1 = (0.5 - d * n.y) / n.x; lo = max(lo, min(v0, v1)); hi = min(hi, max(v0, v1)); }
+  else if (abs(d * n.y) > 0.5) { lo = 1.0; hi = -1.0; }
+  float mom = (hi > lo) ? (lo * lo + lo * hi + hi * hi) / 6.0 : 0.0;
+  return exactBoxCov(n, d - kPx * mom);
+}
+
+mat2 lbChainCellMap() {
+  float basePx = uGlobalBBox.z / max(uCanvasAR.x * uViewportSize.x, 1.0);
+  mat2 W = mat2(uWorldM[0].xy, uWorldM[1].xy);
+  mat2 F = mat2(1.0, 0.0, 0.0, -1.0);
+  mat2 C = (F * W * F) * (1.0 / basePx);
+  if (determinant(C) < 0.0) { C[0].y = -C[0].y; C[1].y = -C[1].y; }
+  return C;
+}
+vec2 lbChainCell(vec2 p, float invE, mat2 C) {
+  return (uHasWorldM == 0) ? (p - vEm) * invE : C * (p - vEm);
+}
+
+float lbTangentTriDist(vec2 p, vec2 ab, vec2 nA, vec2 nB, float chordD) {
+  float det = nA.x * nB.y - nA.y * nB.x;
+  float L = length(ab);
+  if (!(abs(det) > 1e-3) || !(L > 0.0)) return chordD;
+  vec2 q = vec2(-nA.y, nA.x) * (dot(nB, ab) / det);
+  if (length(q - 0.5 * ab) > L) return chordD;
+  vec2 qb = ab - q, pq = p - q, pb = p - ab;
+  float s1 = q.x * p.y - q.y * p.x, s2 = qb.x * pq.y - qb.y * pq.x, s3 = ab.y * pb.x - ab.x * pb.y;
+  if ((s1 >= 0.0 && s2 >= 0.0 && s3 >= 0.0) || (s1 <= 0.0 && s2 <= 0.0 && s3 <= 0.0)) return 0.0;
+  float dAq = length(p - q * clamp(dot(p, q) / max(dot(q, q), 1e-30), 0.0, 1.0));
+  float dQb = length(pq - qb * clamp(dot(pq, qb) / max(dot(qb, qb), 1e-30), 0.0, 1.0));
+  return min(chordD, min(dAq, dQb));
+}
+
+float lbHalfPlaneBoxCov(vec2 n, float c, vec2 emx, vec2 emy) {
+  vec2 d = vec2(dot(n, emx), dot(n, emy));
+  float g = dot(n, vEm) - c, s = 0.5 * (abs(d.x) + abs(d.y));
+  if (g <= -s) return 1.0;
+  if (g >= s) return 0.0;
+  float L = length(d);
+  return exactBoxCov(d / L, -g / L);
+}
+
+float lbHalfPlanesBoxCov2(vec2 n1, float c1, vec2 n2, float c2, vec2 emx, vec2 emy) {
+  vec2 d1 = vec2(dot(n1, emx), dot(n1, emy)), d2 = vec2(dot(n2, emx), dot(n2, emy));
+  float g1 = dot(n1, vEm) - c1, g2 = dot(n2, vEm) - c2;
+  float s1 = 0.5 * (abs(d1.x) + abs(d1.y)), s2 = 0.5 * (abs(d2.x) + abs(d2.y));
+  bool in1 = g1 <= -s1, in2 = g2 <= -s2;
+  if ((!in1 && g1 >= s1) || (!in2 && g2 >= s2)) return 0.0;
+  if (in1) return lbHalfPlaneBoxCov(n2, c2, emx, emy);
+  if (in2) return lbHalfPlaneBoxCov(n1, c1, emx, emy);
+  float L1 = length(d1), L2 = length(d2);
+  return exactBoxCov2(d1 / L1, -g1 / L1, d2 / L2, -g2 / L2);
+}
+
+#ifndef MANTLE_LB_NO_CUBIC_CHAIN
+
+float cbEval(vec4 co, float t) { return ((co.x * t + co.y) * t + co.z) * t + co.w; }
+float cbEvalD(vec4 co, float t) { return (3.0 * co.x * t + 2.0 * co.y) * t + co.z; }
+
+float cbSolve(vec4 co, float L, float t0, float t1, float f0, float f1) {
+  float tolF = 1e-6 * (1.0 + abs(co.x) + abs(co.y) + abs(co.z) + abs(co.w - L));
+  float t = t0 + (t1 - t0) * clamp(f0 / (f0 - f1), 0.0, 1.0);
+  for (int it = 0; it < 16; it++) {
+    float ft = cbEval(co, t) - L;
+    if (abs(ft) <= tolF) break;
+    if ((ft < 0.0) == (f0 < 0.0)) { t0 = t; f0 = ft; } else t1 = t;
+    float d = cbEvalD(co, t), dd = 6.0 * co.x * t + 2.0 * co.y;
+    float den = 2.0 * d * d - ft * dd;
+    float tn = den != 0.0 ? t - 2.0 * ft * d / den : -1.0;
+    if (!(tn > t0 && tn < t1)) tn = 0.5 * (t0 + t1);
+    t = tn;
+  }
+  return t;
+}
+
+vec2 cbDirStart(vec2 A, vec2 C1, vec2 C2, vec2 B) {
+  vec2 g = C1 - A;
+  if (dot(g, g) <= 1e-24) g = C2 - A;
+  if (dot(g, g) <= 1e-24) g = B - A;
+  return g;
+}
+vec2 cbDirEnd(vec2 A, vec2 C1, vec2 C2, vec2 B) {
+  vec2 g = B - C2;
+  if (dot(g, g) <= 1e-24) g = B - C1;
+  if (dot(g, g) <= 1e-24) g = B - A;
+  return g;
+}
+
+vec2 cbExtrema(float A, float B, float C) {
+  float disc = B * B - 4.0 * A * C;
+  if (disc < 0.0) return vec2(2.0);
+  float q = -0.5 * (B + (B >= 0.0 ? sqrt(disc) : -sqrt(disc)));
+  float r1 = A != 0.0 ? q / A : 2.0, r2 = q != 0.0 ? C / q : 2.0;
+  return vec2(r1 > 0.0 && r1 < 1.0 ? r1 : 2.0, r2 > 0.0 && r2 < 1.0 ? r2 : 2.0);
+}
+
+void cbEvent(vec2 q, int side, bool entry, inout float bsum, inout float minP, inout bool minEntry) {
+  float p = side == 0 ? q.x + 0.5 : (side == 1 ? 1.5 + q.y : (side == 2 ? 2.5 - q.x : 3.5 - q.y));
+  bsum += entry ? p : -p;
+  if (p < minP) { minP = p; minEntry = entry; }
+}
+
+vec4 cbToBorder(vec2 q, vec2 dn) {
+  float tx = abs(dn.x) > 1e-6 ? ((dn.x > 0.0 ? 0.5 : -0.5) - q.x) / dn.x : 1e9;
+  float ty = abs(dn.y) > 1e-6 ? ((dn.y > 0.0 ? 0.5 : -0.5) - q.y) / dn.y : 1e9;
+  if (tx <= ty) return vec4(dn.x > 0.0 ? 0.5 : -0.5, clamp(q.y + dn.y * tx, -0.5, 0.5), dn.x > 0.0 ? 1.0 : 3.0, tx);
+  return vec4(clamp(q.x + dn.x * ty, -0.5, 0.5), dn.y > 0.0 ? 0.5 : -0.5, dn.y > 0.0 ? 2.0 : 0.0, ty);
+}
+
+float cubicChainBoxCov(vec2 p0, vec2 p1, vec2 p2, vec2 p3, vec2 p4, bool lineFirst, float forceInside) {
+  vec2 cA = lineFirst ? p1 : p0, cC1 = lineFirst ? p2 : p1, cC2 = lineFirst ? p3 : p2, cB = lineFirst ? p4 : p3;
+  vec2 lA = lineFirst ? p0 : p3, lB = lineFirst ? p1 : p4;
+  vec2 cd = cB - cA, c1d = cC1 - cA, c2d = cC2 - cA, ld = lB - lA;
+  bool cubOn = !(dot(cd, cd) < 1e-12 && dot(c1d, c1d) < 1e-12 && dot(c2d, c2d) < 1e-12), linOn = !(dot(ld, ld) < 1e-12);
+
+  int sFirst = (lineFirst ? linOn : cubOn) ? 0 : 1, sLast = (lineFirst ? cubOn : linOn) ? 1 : 0;
+  float area2 = 0.0, bsum = 0.0, minP = 8.0;
+  bool minEntry = false, hit = false, open = false, pend = false;
+  vec2 pendQ = vec2(0.0);
+  int pendSide = -1;
+  for (int s = 0; s < 2; s++) {
+    bool cub = lineFirst ? s == 1 : s == 0;
+    if (!(cub ? cubOn : linOn)) continue;
+    vec2 A = cub ? cA : lA, B = cub ? cB : lB, C1 = cub ? cC1 : lA, C2 = cub ? cC2 : lB;
+    vec2 lo = min(min(A, B), min(C1, C2)), hi = max(max(A, B), max(C1, C2));
+    if (hi.x < -0.5 || lo.x > 0.5 || hi.y < -0.5 || lo.y > 0.5) continue;
+
+    if (max(abs(A.x), abs(A.y)) > 0.5 && max(abs(B.x), abs(B.y)) > 0.5) {
+      vec2 n = vec2(A.y - B.y, B.x - A.x);
+      float d1 = dot(n, C1 - A), d2 = dot(n, C2 - A);
+      float fl = d1 * d2 > 0.0 ? 0.75 : 0.4444444444444444;
+      float cd = -dot(n, A), sup = 0.5 * (abs(n.x) + abs(n.y));
+      if (cd - sup > fl * max(0.0, max(d1, d2)) || cd + sup < fl * min(0.0, min(d1, d2))) continue;
+    }
+
+    vec2 k3 = cub ? -A + 3.0 * C1 - 3.0 * C2 + B : vec2(0.0), k2 = cub ? 3.0 * A - 6.0 * C1 + 3.0 * C2 : vec2(0.0);
+    vec2 k1 = cub ? 3.0 * (C1 - A) : B - A;
+    vec4 cx = vec4(k3.x, k2.x, k1.x, A.x), cy = vec4(k3.y, k2.y, k1.y, A.y);
+
+    vec2 ex = cub ? cbExtrema(3.0 * cx.x, 2.0 * cx.y, cx.z) : vec2(2.0), ey = cub ? cbExtrema(3.0 * cy.x, 2.0 * cy.y, cy.z) : vec2(2.0);
+    float sa = min(ex.x, ex.y), sb = max(ex.x, ex.y), sc = min(ey.x, ey.y), sd = max(ey.x, ey.y);
+    float sm1 = max(sa, sc), sm2 = min(sb, sd);
+    vec4 sp = vec4(min(sa, sc), min(sm1, sm2), max(sm1, sm2), max(sb, sd));
+    float ta = 0.0;
+    vec2 Pa = A;
+    for (int k = 0; k < 5; k++) {
+      float tb = k == 0 ? sp.x : (k == 1 ? sp.y : (k == 2 ? sp.z : (k == 3 ? sp.w : 1.0)));
+      tb = min(tb, 1.0);
+      if (!(tb > ta)) continue;
+      vec2 Pb = tb < 1.0 ? vec2(cbEval(cx, tb), cbEval(cy, tb)) : B;
+      float t0 = ta;
+      vec2 Q0a = Pa;
+      ta = tb; Pa = Pb;
+      if (max(Q0a.x, Pb.x) < -0.5 || min(Q0a.x, Pb.x) > 0.5 || max(Q0a.y, Pb.y) < -0.5 || min(Q0a.y, Pb.y) > 0.5) continue;
+
+      float tl = t0, th = tb, fa = Q0a.x, fb = Pb.x;
+      int lSide = -1, hSide = -1;
+      if (fb >= fa) {
+        if (fa < -0.5) { tl = cbSolve(cx, -0.5, t0, tb, fa + 0.5, fb + 0.5); lSide = 3; }
+        if (fb > 0.5) { th = cbSolve(cx, 0.5, t0, tb, fa - 0.5, fb - 0.5); hSide = 1; }
+      } else {
+        if (fa > 0.5) { tl = cbSolve(cx, 0.5, t0, tb, fa - 0.5, fb - 0.5); lSide = 1; }
+        if (fb < -0.5) { th = cbSolve(cx, -0.5, t0, tb, fa + 0.5, fb + 0.5); hSide = 3; }
+      }
+
+      float ya = lSide < 0 ? Q0a.y : cbEval(cy, tl), yb = hSide < 0 ? Pb.y : cbEval(cy, th);
+      float u = tl, v = th;
+      int uSide = lSide, vSide = hSide;
+      if (yb >= ya) {
+        if (yb < -0.5 || ya > 0.5) continue;
+        if (ya < -0.5) { u = cbSolve(cy, -0.5, tl, th, ya + 0.5, yb + 0.5); uSide = 0; }
+        if (yb > 0.5) { v = cbSolve(cy, 0.5, tl, th, ya - 0.5, yb - 0.5); vSide = 2; }
+      } else {
+        if (ya < -0.5 || yb > 0.5) continue;
+        if (ya > 0.5) { u = cbSolve(cy, 0.5, tl, th, ya - 0.5, yb - 0.5); uSide = 2; }
+        if (yb < -0.5) { v = cbSolve(cy, -0.5, tl, th, ya + 0.5, yb + 0.5); vSide = 0; }
+      }
+
+      vec2 Q0 = Q0a, Q3 = Pb;
+      if (uSide == 1 || uSide == 3) Q0 = vec2(uSide == 1 ? 0.5 : -0.5, clamp(ya, -0.5, 0.5));
+      else if (uSide >= 0) Q0 = vec2(clamp(cbEval(cx, u), -0.5, 0.5), uSide == 2 ? 0.5 : -0.5);
+      if (vSide == 1 || vSide == 3) Q3 = vec2(vSide == 1 ? 0.5 : -0.5, clamp(yb, -0.5, 0.5));
+      else if (vSide >= 0) Q3 = vec2(clamp(cbEval(cx, v), -0.5, 0.5), vSide == 2 ? 0.5 : -0.5);
+      bool zero = !(v > u);
+
+      bool atEnd = tb == 1.0 && s == sLast;
+      if (uSide >= 0) {
+        if (zero) {
+          if (vSide >= 0) continue;
+          if (!atEnd) { pend = true; pendQ = Q0; pendSide = uSide; continue; }
+
+          vec4 r = cbToBorder(Q0, normalize(cbDirEnd(A, C1, C2, B)));
+          if (!(r.w >= 1e-6)) continue;
+          cbEvent(Q0, uSide, true, bsum, minP, minEntry);
+          area2 += Q0.x * r.y - Q0.y * r.x;
+          cbEvent(r.xy, int(r.z), false, bsum, minP, minEntry);
+          hit = true;
+          continue;
+        }
+        cbEvent(Q0, uSide, true, bsum, minP, minEntry);
+      } else if (!(t0 == 0.0 && s == sFirst)) {
+        if (zero) { if (vSide >= 0 && open) { cbEvent(Q3, vSide, false, bsum, minP, minEntry); open = false; } pend = false; continue; }
+        if (pend) { cbEvent(pendQ, pendSide, true, bsum, minP, minEntry); pend = false; }
+      } else {
+
+        vec4 r = cbToBorder(Q0, normalize(-cbDirStart(A, C1, C2, B)));
+        if (zero) {
+          if (!(vSide >= 0 && r.w >= 1e-6)) continue;
+          cbEvent(r.xy, int(r.z), true, bsum, minP, minEntry);
+          area2 += r.x * Q3.y - r.y * Q3.x;
+          cbEvent(Q3, vSide, false, bsum, minP, minEntry);
+          hit = true;
+          continue;
+        }
+        area2 += r.x * Q0.y - r.y * Q0.x;
+        cbEvent(r.xy, int(r.z), true, bsum, minP, minEntry);
+      }
+      open = true; hit = true;
+      area2 += Q0.x * Q3.y - Q0.y * Q3.x;
+      if (cub) {
+        vec2 d0 = vec2(cbEvalD(cx, u), cbEvalD(cy, u)), d1 = vec2(cbEvalD(cx, v), cbEvalD(cy, v)), c = Q3 - Q0, dd = d0 - d1;
+        float h = (v - u) / 3.0;
+        area2 += 0.3 * h * (2.0 * (dd.x * c.y - dd.y * c.x) - h * (d0.x * d1.y - d0.y * d1.x));
+      }
+
+      if (vSide >= 0) { cbEvent(Q3, vSide, false, bsum, minP, minEntry); open = false; }
+      else if (atEnd) {
+        vec4 r = cbToBorder(Q3, normalize(cbDirEnd(A, C1, C2, B)));
+        area2 += Q3.x * r.y - Q3.y * r.x;
+        cbEvent(r.xy, int(r.z), false, bsum, minP, minEntry);
+        open = false;
+      }
+    }
+  }
+  if (!hit) {
+    if (forceInside < 1.5) return forceInside > 0.5 ? 1.0 : 0.0;
+
+    vec2 A = lineFirst ? p0 : p3, B = lineFirst ? p1 : p4;
+    vec2 d = B - A; float L2 = dot(d, d);
+    if (L2 < 1e-20) return 1.0;
+    float tu = dot(-A, d) / L2;
+    if (!(tu > 0.0 && tu < 1.0)) return 1.0;
+    vec2 c = A + tu * d;
+    if (dot(c, c) > 2.0) return 1.0;
+    vec2 nOut = normalize(vec2(d.y, -d.x));
+    return exactBoxCov(nOut, dot(nOut, A));
+  }
+  return clamp(0.5 * area2 + 0.25 * (bsum + (minEntry ? 4.0 : 0.0)), 0.0, 1.0);
+}
+#endif
+
+float lbCoverage() {
+#ifdef MANTLE_CPATCH
+
+  if (CP_IS_CPATCH_VERTEX) return cpatchCoverage();
+#endif
+
+#ifndef MANTLE_LB_NO_EDGE_STRIP
+  if (LB_IS_EDGE_STRIP) {
+    vec2 p1k = cCen, p2k = vec2(cScale, cHalf);
+    vec2 tdk = (p2k - p1k) / max(length(p2k - p1k), 1e-30);
+    vec2 nOwn = vec2(-tdk.y, tdk.x) * vSign;
+    float fOwn = dot(nOwn, vEm - p1k);
+    float codeA = floor((vSeam + 0.5) / 16.0), codeB = vSeam - codeA * 16.0;
+    float tyA = floor((codeA + 0.5) / 4.0) - 1.0; bool curveA = mod(codeA, 4.0) >= 1.5;
+    float tsA = mod(codeA, 2.0);
+    float tyB = floor((codeB + 0.5) / 4.0) - 1.0; bool curveB = mod(codeB, 4.0) >= 1.5;
+    float tsB = mod(codeB, 2.0);
+    vec2 rA = vEm - p1k, rB = vEm - p2k;
+    vec2 wA, wB;
+
+    vec4 q10 = (gl_FragCoord.xyxy + uFragOrigin.xyxy - vec4(vLB1.xy, vLB2.xy)) * vec4(vLB1.zw, vLB2.zw);
+    vec2 s10 = q10.xz + q10.yw;
+    bool shA10 = dot(vLB1.zw, vLB1.zw) > 0.0, shB10 = dot(vLB2.zw, vLB2.zw) > 0.0;
+    if (curveA) { wA = vec2(-vNa.y, vNa.x) * (tsA > 0.5 ? 1.0 : -1.0);
+      if (dot(rA, wA) >= 0.0 && length(rA) < 2.5 * vEmPerPx && fOwn > 0.35 * vEmPerPx) discard; }
+    else {
+
+      float nDotA = dot(nOwn, vNa);
+      bool acuteA = tyA > 0.5 && nDotA < -0.35;
+      vec2 sumA = nOwn + vNa;
+      bool degenA = dot(sumA, sumA) < 0.08;
+      bool tipA = acuteA && fOwn > 0.0 && length(rA) < 2.2 * vEmPerPx;
+      if (!(tipA && (acuteA || degenA))) {
+        if (shA10) {
+          if (s10.x < 0.0) discard;
+        } else {
+          wA = degenA ? vec2(-nOwn.y, nOwn.x) : vec2(-sumA.y, sumA.x);
+          if (dot(wA, tdk) < 0.0) wA = -wA;
+          if (dot(rA, wA) < 0.0) discard;
+        }
+      }
+    }
+    if (curveB) { wB = vec2(-vNb.y, vNb.x) * (tsB > 0.5 ? 1.0 : -1.0);
+      if (dot(rB, wB) >= 0.0 && length(rB) < 2.5 * vEmPerPx && fOwn > 0.35 * vEmPerPx) discard; }
+    else {
+      float nDotB = dot(nOwn, vNb);
+      bool acuteB = tyB > 0.5 && nDotB < -0.35;
+
+      if (acuteB && fOwn > 0.0 && dot(vNb, rB) > 0.0 && length(rB) < 2.2 * vEmPerPx) discard;
+      else if (shB10) {
+        if (s10.y >= 0.0) discard;
+      } else {
+        vec2 sumB = nOwn + vNb;
+        bool degenB = dot(sumB, sumB) < 0.08;
+        wB = degenB ? vec2(-nOwn.y, nOwn.x) : vec2(-sumB.y, sumB.x);
+        if (dot(wB, tdk) < 0.0) wB = -wB;
+        if (dot(rB, wB) >= 0.0) discard;
+      }
+    }
+    float fA = dot(vNa, rA) - 0.5 * vTC.y * dot(rA, rA);
+    float fB = dot(vNb, rB) - 0.5 * vTC.z * dot(rB, rB);
+
+    float tipGateA = (tyA > 0.5 && !curveA && dot(nOwn, vNa) < -0.35) ? 2.2 : 2.0;
+    float tipGateB = (tyB > 0.5 && !curveB && dot(nOwn, vNb) < -0.35) ? 2.2 : 2.0;
+    float gA = clamp((tipGateA - length(rA) / vEmPerPx) / 1.5, 0.0, 1.0);
+    float gB = clamp((tipGateB - length(rB) / vEmPerPx) / 1.5, 0.0, 1.0);
+
+    float sOwn = fOwn < -0.012 * vEmPerPx ? 1.0 : 0.0;
+    float sA = fA < 0.0 ? 1.0 : 0.0, sB = fB < 0.0 ? 1.0 : 0.0;
+    float sAe = tyA > 0.5 ? (gA > 0.01 ? sA : 1.0) : (gA > 0.01 ? sA : 0.0);
+    float sBe = tyB > 0.5 ? (gB > 0.01 ? sB : 1.0) : (gB > 0.01 ? sB : 0.0);
+    float insid = sOwn;
+    insid = tyA > 0.5 ? min(insid, sAe) : (tyA < -0.5 ? max(insid, sAe) : insid);
+    insid = tyB > 0.5 ? min(insid, sBe) : (tyB < -0.5 ? max(insid, sBe) : insid);
+    if (insid > 0.5) discard;
+
+    float invPx10 = 1.0 / max(vEmPerPx, 1e-30);
+    float dOwn10 = -fOwn * invPx10;
+    float c10 = exactBoxCov(nOwn, dOwn10);
+    float cOwnP10 = c10;
+    if (abs(tyA) > 0.5 && LB_CORNER_GATE(gA)) {
+      vec2 nA10 = vNa / max(length(vNa), 1e-9);
+      float dA10 = -fA * invPx10;
+      float cA10 = exactBoxCov(nA10, dA10);
+      float interA = exactBoxCov2(nOwn, dOwn10, nA10, dA10);
+      float kpA = max(0.0, dot(nOwn, vNa));
+      float exA = tyA > 0.0
+        ? mix(clamp(c10 + interA - cOwnP10, 0.0, 1.0), min(c10, cA10), kpA)
+        : mix(clamp(c10 + cA10 - interA, 0.0, 1.0), max(c10, cA10), kpA);
+      c10 = mix(c10, exA, gA);
+    }
+    if (abs(tyB) > 0.5 && LB_CORNER_GATE(gB)) {
+      vec2 nB10 = vNb / max(length(vNb), 1e-9);
+      float dB10 = -fB * invPx10;
+      float cB10 = exactBoxCov(nB10, dB10);
+      float interB = exactBoxCov2(nOwn, dOwn10, nB10, dB10);
+      float kpB = max(0.0, dot(nOwn, vNb));
+      float exB = tyB > 0.0
+        ? mix(clamp(c10 + interB - cOwnP10, 0.0, 1.0), min(c10, cB10), kpB)
+        : mix(clamp(c10 + cB10 - interB, 0.0, 1.0), max(c10, cB10), kpB);
+      c10 = mix(c10, exB, gB);
+    }
+
+    if (c10 < 0.004) discard;
+
+    return c10;
+  }
+#endif
+#ifndef MANTLE_NO_BEZOUT
+
+#ifndef MANTLE_LB_NO_CURVE_BAND
+  if (LB_IS_CURVE_BAND) {
+    float mag12 = abs(vSign);
+    float s12 = vSign >= 0.0 ? 1.0 : -1.0;
+    bool cubic12 = false;
+    if (mag12 >= 8192.0) { cubic12 = true; mag12 -= 8192.0; }
+    if (mag12 >= 4096.0) mag12 -= 4096.0;
+    float spanB12 = 0.0, spanA12 = 0.0;
+    if (mag12 >= 2048.0) { spanB12 = 1.0; mag12 -= 2048.0; }
+    if (mag12 >= 1024.0) { spanA12 = 1.0; mag12 -= 1024.0; }
+    float codeA = floor((mag12 + 0.5) / 16.0), codeB = mag12 - codeA * 16.0;
+    float tyA = floor((codeA + 0.5) / 4.0) - 1.0; bool curveA = mod(codeA, 4.0) >= 1.5;
+    float tyB = floor((codeB + 0.5) / 4.0) - 1.0; bool curveB = mod(codeB, 4.0) >= 1.5;
+    vec2 a12 = cCen, b12 = vec2(cScale, cHalf);
+    vec2 rA = vEm - a12, rB = vEm - b12;
+    vec2 nA12 = cM01.yz, nB12 = cM02.xy;
+
+    vec2 nOA = unpackHalf2x16(floatBitsToUint(cM02.z));
+    vec2 nOB = unpackHalf2x16(floatBitsToUint(cM11a));
+    float kA12 = cM12, kB12 = cM22;
+    bool ends12 = cubic12 && dot(a12, a12) + dot(b12, b12) > 0.0;
+
+    vec3 tx12d = dFdx(vTC), ty12d = dFdy(vTC);
+
+    vec2 emx12 = dFdx(vEm), emy12 = dFdy(vEm);
+
+    float bound12 = 1.0;
+    if (vLB0.w > 0.5 && vLB0.w < 1.5) {
+      bound12 = lbHalfPlaneBoxCov(vLB0.xy, vLB0.z, emx12, emy12);
+    } else if (vLB0.w > 1.5 && dot(nOA, nOA) > 0.0 && dot(nOB, nOB) > 0.0 && dot(b12 - a12, b12 - a12) > 0.0) {
+
+      if (dot(nOA, b12 - a12) < 0.0) {
+        bound12 = lbHalfPlanesBoxCov2(nOA, dot(nOA, a12), nOB, dot(nOB, b12), emx12, emy12);
+      } else {
+        vec2 ch12 = b12 - a12, nC12 = vec2(ch12.y, -ch12.x);
+        if (dot(nC12, nOA) < 0.0) nC12 = -nC12;
+        bound12 = lbHalfPlaneBoxCov(nC12, dot(nC12, a12), emx12, emy12);
+      }
+    }
+    if (cubic12 && !ends12) {
+      float k12 = vTC.x, l12 = vTC.y, m12 = vTC.z;
+      float f12c = s12 * (k12 * k12 * k12 - l12 * m12);
+      vec3 tx12c = tx12d, ty12c = ty12d;
+      float fx12c = s12 * (3.0 * k12 * k12 * tx12c.x - (tx12c.y * m12 + l12 * tx12c.z));
+      float fy12c = s12 * (3.0 * k12 * k12 * ty12c.x - (ty12c.y * m12 + l12 * ty12c.z));
+      float fxx12c = s12 * (6.0 * k12 * tx12c.x * tx12c.x - 2.0 * tx12c.y * tx12c.z);
+      float fyy12c = s12 * (6.0 * k12 * ty12c.x * ty12c.x - 2.0 * ty12c.y * ty12c.z);
+      float fxy12c = s12 * (6.0 * k12 * tx12c.x * ty12c.x - (tx12c.y * ty12c.z + ty12c.y * tx12c.z));
+      float c12c = min(curveCov(f12c, fx12c, fy12c, fxx12c, fyy12c, fxy12c), bound12);
+      if (c12c < 0.999 && f12c < 0.0) discard;
+      if (c12c < 0.004) discard;
+      return c12c;
+    }
+
+    float u12 = vTC.x, v12 = vTC.y, r12 = vTC.z;
+
+    if (!cubic12 && r12 > 0.0) {
+      float hu12 = u12 / r12, hv12 = v12 / r12;
+      if (hv12 >= 0.0 && hu12 >= hv12 && 1.0 - 2.0 * hu12 + hv12 >= 0.0) discard;
+    }
+    vec2 sA12 = vec2(-nOA.y, nOA.x) * (spanA12 > 0.5 ? 1.0 : -1.0);
+    vec2 sB12 = vec2(-nOB.y, nOB.x) * (spanB12 > 0.5 ? 1.0 : -1.0);
+
+    bool aSide12 = true, bSide12 = true;
+    if (!cubic12 && dot(nOA, nOB) < 0.0) {
+      vec2 ab12 = b12 - a12;
+      float sinT12 = sB12.x * sA12.y - sB12.y * sA12.x;
+      float detEm12 = emx12.x * emy12.y - emx12.y * emy12.x;
+      float lam12 = (sB12.x * ab12.y - sB12.y * ab12.x) / sinT12;
+      vec2 c12 = a12 + lam12 * sA12;
+      vec2 gU12 = vec2(tx12d.x * emy12.y - emx12.y * ty12d.x, emx12.x * ty12d.x - emy12.x * tx12d.x) / detEm12;
+      float uc12 = u12 + dot(gU12, c12 - vEm);
+      vec2 nM12 = nOA + nOB;
+      float k0 = length(c12 - a12), k1 = length(b12 - c12);
+      if (uc12 > 0.0 && lam12 > 0.0 && dot(nM12, nM12) > 0.0 && k0 > 0.0 && k1 > 0.0) {
+        float w12 = 0.5 / uc12;
+        nM12 = normalize(nM12);
+        float dk12 = k0 - k1;
+        float r12m = (dk12 + sqrt(dk12 * dk12 + 4.0 * k0 * k1 * w12 * w12)) / (2.0 * k1 * w12);
+        float wr12 = 1.0 + 2.0 * w12 * r12m + r12m * r12m;
+        vec2 qm12 = ((2.0 * w12 * r12m + r12m * r12m) * (c12 - a12) + r12m * r12m * (b12 - c12)) / wr12;
+        float off12 = nM12.x * qm12.y - nM12.y * qm12.x;
+        float sgnB12 = (nM12.x * ab12.y - nM12.y * ab12.x) - off12 < 0.0 ? -1.0 : 1.0;
+        float side12 = ((nM12.x * rA.y - nM12.y * rA.x) - off12) * sgnB12;
+        aSide12 = side12 <= 0.0;
+        bSide12 = side12 > 0.0;
+      }
+    }
+
+    float f12, fx12, fy12, fxx12, fyy12, fxy12;
+    if (cubic12) {
+      float k12 = u12, l12 = v12, m12 = r12;
+      f12 = s12 * (k12 * k12 * k12 - l12 * m12);
+      vec3 tx12 = tx12d, ty12 = ty12d;
+      fx12 = s12 * (3.0 * k12 * k12 * tx12.x - (tx12.y * m12 + l12 * tx12.z));
+      fy12 = s12 * (3.0 * k12 * k12 * ty12.x - (ty12.y * m12 + l12 * ty12.z));
+      fxx12 = s12 * (6.0 * k12 * tx12.x * tx12.x - 2.0 * tx12.y * tx12.z);
+      fyy12 = s12 * (6.0 * k12 * ty12.x * ty12.x - 2.0 * ty12.y * ty12.z);
+      fxy12 = s12 * (6.0 * k12 * tx12.x * ty12.x - (tx12.y * ty12.z + ty12.y * tx12.z));
+    } else {
+      f12 = s12 * (u12 * u12 - v12 * r12);
+      vec3 tx12 = tx12d, ty12 = ty12d;
+      fx12 = s12 * (2.0 * u12 * tx12.x - (tx12.y * r12 + v12 * tx12.z));
+      fy12 = s12 * (2.0 * u12 * ty12.x - (ty12.y * r12 + v12 * ty12.z));
+      fxx12 = s12 * (2.0 * tx12.x * tx12.x - 2.0 * tx12.y * tx12.z);
+      fyy12 = s12 * (2.0 * ty12.x * ty12.x - 2.0 * ty12.y * ty12.z);
+      fxy12 = s12 * (2.0 * tx12.x * ty12.x - (tx12.y * ty12.z + ty12.y * tx12.z));
+    }
+    float dpx12 = f12 / max(length(vec2(fx12, fy12)), 1e-30);
+
+    bool chainA = abs(tyA) > 0.5, chainB = abs(tyB) > 0.5;
+    if (!chainA) { if (aSide12 && dot(rA, sA12) < 0.0) discard; }
+    else if (aSide12) {
+      vec2 bisA = nOA + nA12;
+      if (dot(bisA, bisA) > 1e-6) {
+        vec2 wA12 = vec2(-bisA.y, bisA.x);
+        if (dot(rA, wA12) * dot(wA12, sA12) < 0.0) discard;
+      } else if (dot(rA, sA12) < 0.0) discard;
+    }
+    if (!chainB) { if (bSide12 && dot(rB, sB12) < 0.0) discard; }
+    else if (bSide12) {
+      vec2 bisB = nOB + nB12;
+      if (dot(bisB, bisB) > 1e-6) {
+        vec2 wB12 = vec2(-bisB.y, bisB.x);
+        if (dot(rB, wB12) * dot(wB12, sB12) <= 0.0) discard;
+      } else if (dot(rB, sB12) < 0.0) discard;
+    }
+    bool wgA = chainA && aSide12 && dot(rA, sA12) < 0.0;
+    bool wgB = chainB && bSide12 && dot(rB, sB12) < 0.0;
+
+    float fA12 = dot(nA12, rA) - 0.5 * kA12 * dot(rA, rA);
+    float fB12 = dot(nB12, rB) - 0.5 * kB12 * dot(rB, rB);
+    float gL12 = max(length(vec2(fx12, fy12)), 1e-30);
+    vec2 nG12 = vec2(fx12, fy12) / gL12;
+    float kOwnS12 = (fxx12 * nG12.y * nG12.y - 2.0 * fxy12 * nG12.x * nG12.y + fyy12 * nG12.x * nG12.x) / gL12;
+    float kOwnPx = abs(kOwnS12);
+    float fOwn12;
+    vec2 nOwn12;
+    float dOwn12;
+    if (wgA || wgB) {
+      vec2 nOw = wgA ? nOA : nOB;
+      vec2 rw = wgA ? rA : rB;
+      fOwn12 = dot(nOw, rw);
+      vec2 gOw = vec2(dot(nOw, emx12), dot(nOw, emy12));
+      float gOwL = max(length(gOw), 1e-30);
+      nOwn12 = gOw / gOwL;
+      dOwn12 = -fOwn12 / gOwL;
+    } else {
+      fOwn12 = f12;
+      nOwn12 = vec2(fx12, fy12) / gL12;
+      dOwn12 = -f12 / gL12 - clamp(kOwnS12, -2.0, 2.0) / 24.0;
+    }
+    float cOwn12 = min(exactBoxCov(nOwn12, dOwn12), bound12);
+    float rgA12 = 0.5 / max(max(abs(kA12) * vEmPerPx, 1e-6), kOwnPx);
+    float rgB12 = 0.5 / max(max(abs(kB12) * vEmPerPx, 1e-6), kOwnPx);
+    float gA12 = clamp(rgA12 - length(rA) / vEmPerPx, 0.0, 1.0);
+    float gB12 = clamp(rgB12 - length(rB) / vEmPerPx, 0.0, 1.0);
+    bool cnA = abs(tyA) > 0.5, cnB = abs(tyB) > 0.5;
+    float sOwn12 = fOwn12 < 0.0 ? 1.0 : 0.0;
+    float sA12i = fA12 < 0.0 ? 1.0 : 0.0, sB12i = fB12 < 0.0 ? 1.0 : 0.0;
+    float sAe12 = tyA > 0.5 ? (gA12 > 0.0 ? sA12i : 1.0) : (gA12 > 0.0 ? sA12i : 0.0);
+    float sBe12 = tyB > 0.5 ? (gB12 > 0.0 ? sB12i : 1.0) : (gB12 > 0.0 ? sB12i : 0.0);
+    float insid12 = sOwn12;
+    if (cnA) insid12 = tyA > 0.5 ? min(insid12, sAe12) : max(insid12, sAe12);
+    if (cnB) insid12 = tyB > 0.5 ? min(insid12, sBe12) : max(insid12, sBe12);
+    if (insid12 > 0.5) discard;
+
+    float c12 = cOwn12;
+    if (cnA && LB_CORNER_GATE(gA12)) {
+      vec2 gA12w = vec2(dot(nA12, emx12), dot(nA12, emy12));
+      float gA12L = max(length(gA12w), 1e-30);
+      vec2 nAn12 = gA12w / gA12L;
+      float dA12 = -fA12 / gA12L;
+      float cA12 = exactBoxCov(nAn12, dA12);
+      float interA12 = min(exactBoxCov2(nOwn12, dOwn12, nAn12, dA12), cOwn12);
+      if (tyA < 0.0) {
+
+        vec2 sNA12 = vec2(-nA12.y, nA12.x) * ((spanA12 > 0.5 ? -1.0 : 1.0) / max(length(nA12), 1e-9));
+        vec2 gFA12 = vec2(dot(sNA12, emx12), dot(sNA12, emy12));
+        float gFA12L = max(length(gFA12), 1e-30);
+        vec2 nFA12 = -gFA12 / gFA12L;
+        float dFA12 = dot(rA, sNA12) / gFA12L;
+        cA12 = exactBoxCov2(nAn12, dA12, nFA12, dFA12);
+        interA12 = min(exactBoxCov3(nOwn12, dOwn12, nAn12, dA12, nFA12, dFA12), cOwn12);
+      }
+      float kpA12 = max(0.0, dot(nOA, nA12));
+      float exA12 = tyA > 0.0
+        ? mix(clamp(c12 + interA12 - cOwn12, 0.0, 1.0), min(c12, cA12), kpA12)
+        : mix(clamp(c12 + cA12 - interA12, 0.0, 1.0), max(c12, cA12), kpA12);
+      c12 = mix(c12, exA12, gA12);
+    }
+    if (cnB && LB_CORNER_GATE(gB12)) {
+      vec2 gB12w = vec2(dot(nB12, emx12), dot(nB12, emy12));
+      float gB12L = max(length(gB12w), 1e-30);
+      vec2 nBn12 = gB12w / gB12L;
+      float dB12 = -fB12 / gB12L;
+      float cB12 = exactBoxCov(nBn12, dB12);
+      float interB12 = min(exactBoxCov2(nOwn12, dOwn12, nBn12, dB12), cOwn12);
+      if (tyB < 0.0) {
+        vec2 sNB12 = vec2(-nB12.y, nB12.x) * ((spanB12 > 0.5 ? -1.0 : 1.0) / max(length(nB12), 1e-9));
+        vec2 gFB12 = vec2(dot(sNB12, emx12), dot(sNB12, emy12));
+        float gFB12L = max(length(gFB12), 1e-30);
+        vec2 nFB12 = -gFB12 / gFB12L;
+        float dFB12 = dot(rB, sNB12) / gFB12L;
+        cB12 = exactBoxCov2(nBn12, dB12, nFB12, dFB12);
+        interB12 = min(exactBoxCov3(nOwn12, dOwn12, nBn12, dB12, nFB12, dFB12), cOwn12);
+      }
+      float kpB12 = max(0.0, dot(nOB, nB12));
+      float exB12 = tyB > 0.0
+        ? mix(clamp(c12 + interB12 - cOwn12, 0.0, 1.0), min(c12, cB12), kpB12)
+        : mix(clamp(c12 + cB12 - interB12, 0.0, 1.0), max(c12, cB12), kpB12);
+      c12 = mix(c12, exB12, gB12);
+    }
+    if (c12 <= 0.0) discard;
+    /* In-span exterior-band contract: fill-side partials are interior turf.
+       Wedges use the two-plane ownership test above instead. */
+    if (!wgA && !wgB && f12 < 0.0 && c12 < 0.999) discard;
+    /* Counter-hole chord ribbons extrude into the empty region; UV
+       extrapolation can then paint mid-gray far past the arc while dpx still
+       reads "near". Gate on s12<0: nested counters use sign -1 when ink sits
+       on the control side; outer bowls keep their bulge AA past the chord.
+       FAR FROM THE REGION THE ARC CAN OCCUPY, not from its chord. The sign does not
+       say which side the ink is on -- an even-odd ring's OUTER bowl carries s12 < 0 -- and the
+       chord stood in for the curve: near an arc's end, where it runs along its end tangent at 45
+       degrees or more to the chord, a pixel a tenth of a pixel outside the arc read 1.8 px from
+       the chord and lost its antialiasing (96 levels at every extreme point of lbMorphEvenOdd's
+       outer ring at t = 0.03). The tangent triangle contains the chord, so this discards a subset
+       of what the chord did: pixels past the arc's ENDS, where the extrapolation lives. */
+    if (!wgA && !wgB && fOwn12 >= 0.0 && s12 < 0.0) {
+      vec2 ab = b12 - a12;
+      float abL2 = max(dot(ab, ab), 1e-37);
+      float t = clamp(dot(rA, ab) / abL2, 0.0, 1.0);
+      float dChord = lbTangentTriDist(rA, ab, nOA, nOB, length(rA - ab * t)) / max(vEmPerPx, 1e-30);
+      if (dChord > 1.5 && abs(dpx12) < 1.0) discard;
+      if (dChord > 1.2 && abs(dpx12) < 0.7 && c12 < 0.95) discard;
+    }
+    /*
+
+ */
+    if (!wgA && !wgB && fOwn12 >= 0.0) {
+      vec2 uA12 = vec2(-nA12.y, nA12.x) * (mod(codeA, 2.0) > 0.5 ? 1.0 : -1.0);
+      vec2 uB12 = vec2(-nB12.y, nB12.x) * (mod(codeB, 2.0) > 0.5 ? 1.0 : -1.0);
+      if (!cnA && gA12 > 0.0 && dot(sA12, nA12) > 0.0 && fA12 < 0.0 && dot(rA, uA12) >= 0.0) discard;
+      if (!cnB && gB12 > 0.0 && dot(sB12, nB12) > 0.0 && fB12 < 0.0 && dot(rB, uB12) >= 0.0) discard;
+    }
+    return c12;
+  }
+#endif
+#endif
+
+#ifndef MANTLE_LB_NO_CHAIN_STRIP
+  if (LB_IS_CHAIN_STRIP) {
+    float invE = 1.0 / max(vEmPerPx, 1e-30);
+    mat2 cellM = lbChainCellMap();
+    vec2 c0 = lbChainCell(cCen, invE, cellM);
+    vec2 c1 = lbChainCell(vec2(cScale, cHalf), invE, cellM);
+    vec2 c2 = lbChainCell(vLine2.xy, invE, cellM);
+    vec2 c3 = lbChainCell(vec2(vLine2.z, vLineT), invE, cellM);
+    return chainBoxCov(c0, c1, c2, c3, c3, 0.0);
+  }
+#endif
+
+  if (LB_IS_INTERIOR) {
+
+    if (vTC.x > 1.5) {
+
+      float invE = 1.0 / max(vEmPerPx, 1e-30);
+      mat2 cellM = lbChainCellMap();
+      vec2 c0 = lbChainCell(cCen, invE, cellM);
+      vec2 c1 = lbChainCell(vec2(cScale, cHalf), invE, cellM);
+      vec2 c2 = lbChainCell(vLine2.xy, invE, cellM);
+      vec2 c3 = lbChainCell(vec2(vLine2.z, vLineT), invE, cellM);
+      vec2 c4 = lbChainCell(vTC.yz, invE, cellM);
+
+      float cov;
+#ifndef MANTLE_LB_NO_CUBIC_CHAIN
+      if (vTC.x > 3.5) cov = cubicChainBoxCov(c0, c1, c2, c3, c4, vTC.x > 4.5, 2.0);
+      else
+#endif
+      cov = chainBoxCov(c0, c1, c2, c3, c4, 2.0);
+#ifndef MANTLE_NO_BEZOUT
+
+      if (any(notEqual(vCh2A, vec4(0.0))) || any(notEqual(vCh2B, vec4(0.0)))) {
+        vec2 d0 = lbChainCell(vCh2A.xy, invE, cellM);
+        vec2 d1 = lbChainCell(vCh2A.zw, invE, cellM);
+        vec2 d2 = lbChainCell(vCh2B.xy, invE, cellM);
+        vec2 d3 = lbChainCell(vCh2B.zw, invE, cellM);
+#ifndef MANTLE_LB_NO_CUBIC_CHAIN
+
+        cov = min(cov, vSeam > 0.5 ? cubicChainBoxCov(d0, d1, d2, d3, d3, false, 1.0) : chainBoxCov(d0, d1, d2, d3, d3, 1.0));
+#else
+        cov = min(cov, chainBoxCov(d0, d1, d2, d3, d3, 1.0));
+#endif
+      }
+#endif
+#ifdef MANTLE_LB_NO_CHAIN_COV
+
+      return LBCOV_OUT(1.0);
+#endif
+      return LBCOV_OUT(cov);
+    }
+    if (dot(cCen, cCen) > 1e-9) {
+      float fi = dot(cCen, vEm) - cScale;
+
+      float invPxL = 1.0 / max(vEmPerPx, 1e-30);
+      float cA = exactBoxCov(cCen, -fi * invPxL);
+
+      if (abs(vLineT) > 0.5) {
+        float fiB = dot(vLine2.xy, vEm) - vLine2.z;
+        float cB = exactBoxCov(vLine2.xy, -fiB * invPxL);
+        float invPx = invPxL;
+
+        float inter = (cA <= 0.0 || cB <= 0.0) ? 0.0 : cA >= 1.0 ? cB : cB >= 1.0 ? cA
+                    : exactBoxCov2(cCen, -fi * invPx, vLine2.xy, -fiB * invPx);
+        cA = vLineT > 0.0 ? inter : (cA + cB - inter);
+      }
+
+      if (abs(cHalf) > 0.5 && dot(vTC.xy, vTC.xy) > 1e-9) {
+        float cC = exactBoxCov(vTC.xy, -(dot(vTC.xy, vEm) - vTC.z) * invPxL);
+        cA = cHalf > 0.0 ? max(0.0, cA + cC - 1.0) : cA + cC - cA * cC;
+      }
+      return cA;
+    } else return 1.0;
+  }
+
+  float f;
+  vec2 f4gEm = vec2(0.0);
+
+#ifndef LB_BEZ_RING
+#define LB_BEZ_RING 0.25
+#endif
+  bool f4has = false;
+  if (vKind < LBK_CUBIC + 0.5) {
+
+    f = vSign * (vTC.x * vTC.x * vTC.x - vTC.y * vTC.z);
+  } else if (vKind < LBK_CUBIC_BEZ + 0.5) {
+
+#if !defined(MANTLE_NO_BEZOUT) && !defined(MANTLE_LB_NO_CUBIC_BEZ)
+#ifndef MANTLE_LB_NO_CUBIC_CHAIN
+
+    if (vSeam > 9.5) {
+      float invE4 = 1.0 / max(vEmPerPx, 1e-30);
+      mat2 cellM4 = lbChainCellMap();
+      float covArc = cubicChainBoxCov(lbChainCell(vLB0.xy, invE4, cellM4), lbChainCell(vLB0.zw, invE4, cellM4),
+                                      lbChainCell(vLB1.xy, invE4, cellM4), lbChainCell(vLB1.zw, invE4, cellM4),
+                                      lbChainCell(vLB1.zw, invE4, cellM4), false, 0.0);
+      if (covArc < 0.004) discard;
+      return LBCOV_OUT(covArc);
+    }
+#endif
+
+    vec2 n = (vEm - cCen) / cScale;
+    float lin02 = cM02.y * n.x + cM02.z * n.y;
+    float M00 = cM00.x + dot(cM00.yz, n);
+    float M01 = cM01.x + dot(cM01.yz, n);
+    float M02 = cM02.x + lin02;
+    float M11 = cM11a  + lin02;
+    float det = M00 * (M11 * cM22 - cM12 * cM12)
+              - M01 * (M01 * cM22 - cM12 * M02)
+              + M02 * (M01 * cM12 - M11 * M02);
+    f = vSign * det;
+
+    float d00 = M11 * cM22 - cM12 * cM12;
+    float d01 = -2.0 * M01 * cM22 + 2.0 * M02 * cM12;
+    float d02 = 2.0 * M01 * cM12 - 2.0 * M02 * M11;
+    float d11 = M00 * cM22 - M02 * M02;
+    vec2 gN = d00 * cM00.yz + d01 * cM01.yz + (d02 + d11) * cM02.yz;
+    f4gEm = vSign * gN / cScale;
+    f4has = true;
+#else
+
+    f = 1.0;
+#endif
+  } else if (vKind < LBK_ARC + 0.5) {
+
+    f = (vSign > 0.0 ? 1.0 : -1.0) * (vTC.x * vTC.x - vTC.y * vTC.z);
+  } else if (vKind < LBK_DISC + 0.5) {
+
+#ifndef MANTLE_LB_NO_DISC
+
+    vec2 d7 = vEm - cCen;
+    vec2 G7, W7;
+    float w7;
+    if (cHalf < -1.5) {
+      float rx7 = max(cScale, 1e-30), ry7 = max(vNa.x, 1e-30);
+      float c7 = vNa.y, s7 = vNb.x;
+      vec2 q7 = vec2((d7.x * c7 + d7.y * s7) / rx7, (-d7.x * s7 + d7.y * c7) / ry7);
+      float Lq7 = max(length(q7), 1e-9);
+      f = vSign * (Lq7 - 1.0);
+      vec2 qh7 = q7 / Lq7, th7 = vec2(-qh7.y, qh7.x);
+      G7 = vSign * vec2(qh7.x * c7 / rx7 - qh7.y * s7 / ry7, qh7.x * s7 / rx7 + qh7.y * c7 / ry7);
+      W7 = vec2(th7.x * c7 / rx7 - th7.y * s7 / ry7, th7.x * s7 / rx7 + th7.y * c7 / ry7);
+      w7 = vSign / Lq7;
+    } else {
+      float L7 = max(length(d7), 1e-30);
+      vec2 dh7 = d7 / L7;
+      float sig7 = 1.0, halfW7 = 0.0;
+      if (LB_IS(LBK_DISC) && cHalf >= 0.0) { sig7 = L7 >= cScale ? 1.0 : -1.0; halfW7 = cHalf; }
+      f = vSign * (sig7 * (L7 - cScale) - halfW7);
+      G7 = (vSign * sig7) * dh7;
+      W7 = vec2(-dh7.y, dh7.x);
+      w7 = vSign * sig7 / L7;
+    }
+
+    vec2 emx7 = dFdx(vEm), emy7 = dFdy(vEm);
+    float fx7 = dot(G7, emx7), fy7 = dot(G7, emy7);
+    float wx7 = dot(W7, emx7), wy7 = dot(W7, emy7);
+
+    float cov7 = (cHalf < -1.5) ? curveCov(f, fx7, fy7, w7 * wx7 * wx7, w7 * wy7 * wy7, w7 * wx7 * wy7)
+                                : arcCov(f, fx7, fy7, w7 * wx7 * wx7, w7 * wy7 * wy7, w7 * wx7 * wy7);
+
+    if (cov7 < 0.004) discard;
+    return LBCOV_OUT(cov7);
+#else
+    f = 1.0;
+#endif
+  } else {
+
+    f = 0.0;
+  }
+
+  float cov;
+  bool isCubic = LB_IS_CUBIC;
+  bool isBez = LB_IS(LBK_CUBIC_BEZ);
+  bool isRquad = LB_IS_ARC;
+
+  vec3 txT = dFdx(vTC), tyT = dFdy(vTC);
+  vec2 emxT = dFdx(vEm), emyT = dFdy(vEm);
+
+  vec2 g4xT = vec2(0.0), g4yT = vec2(0.0);
+  if (f4has) { g4xT = dFdx(f4gEm); g4yT = dFdy(f4gEm); }
+  if (isCubic && vSeam > 0.5 && vSeam < 5.0) {
+
+    vec2 a = cCen, b = vec2(cScale, cHalf);
+
+    float clipEpsC = 0.05 * vEmPerPx;
+    if (dot(vEm - a, vNa) < -clipEpsC || dot(vEm - b, vNb) < -clipEpsC) discard;
+  } else if (isRquad) {
+
+    vec2 a = cCen, b = vec2(cScale, cHalf), ch = b - a;
+    if (dot(ch, ch) > 0.0 && (dot(vEm - a, ch) < 0.0 || dot(vEm - b, ch) > 0.0)) discard;
+  }
+  if (isCubic || isRquad) {
+    vec3 tx = txT, ty = tyT;
+    float fx, fy, fxx, fyy, fxy;
+    if (isCubic) {
+      float k = vTC.x, l = vTC.y, m = vTC.z;
+      fx = vSign * (3.0 * k * k * tx.x - (tx.y * m + l * tx.z));
+      fy = vSign * (3.0 * k * k * ty.x - (ty.y * m + l * ty.z));
+      fxx = vSign * (6.0 * k * tx.x * tx.x - 2.0 * tx.y * tx.z);
+      fyy = vSign * (6.0 * k * ty.x * ty.x - 2.0 * ty.y * ty.z);
+      fxy = vSign * (6.0 * k * tx.x * ty.x - (tx.y * ty.z + ty.y * tx.z));
+    } else {
+      float s5 = vSign > 0.0 ? 1.0 : -1.0;
+      float U = vTC.x, V = vTC.y, Rr = vTC.z;
+      fx = s5 * (2.0 * U * tx.x - (tx.y * Rr + V * tx.z));
+      fy = s5 * (2.0 * U * ty.x - (ty.y * Rr + V * ty.z));
+      fxx = s5 * (2.0 * tx.x * tx.x - 2.0 * tx.y * tx.z);
+      fyy = s5 * (2.0 * ty.x * ty.x - 2.0 * ty.y * ty.z);
+      fxy = s5 * (2.0 * tx.x * ty.x - (tx.y * ty.z + ty.y * tx.z));
+    }
+    cov = curveCov(f, fx, fy, fxx, fyy, fxy);
+    if (isRquad && abs(vSign) > 2.0) {
+
+      float s5 = vSign > 0.0 ? 1.0 : -1.0;
+      float gC = s5 * (vTC.y - vTC.x);
+      vec2  gG = s5 * vec2(tx.y - tx.x, ty.y - ty.x);
+      cov = min(cov, slugCov(gC, gG));
+    }
+  } else {
+    if (f4has) {
+
+      bool keepOn4 = dot(vTC.xy, vTC.xy) > 0.0;
+      float keep4 = 1.0;
+#ifndef MANTLE_LB_MORPH
+
+      vec2 n4f = vSeam > 5.0 ? unpackHalf2x16(floatBitsToUint(vLB3.w)) : vec2(0.0);
+      if (dot(n4f, n4f) > 0.0) {
+        vec2 u4f = normalize(n4f);
+        keep4 = keepOn4 ? lbHalfPlanesBoxCov2(vTC.xy, vTC.z, u4f, vEmPerPx, emxT, emyT) : lbHalfPlaneBoxCov(u4f, vEmPerPx, emxT, emyT);
+      } else
+#endif
+      if (keepOn4) keep4 = lbHalfPlaneBoxCov(vTC.xy, vTC.z, emxT, emyT);
+      if (keep4 <= 0.0) { cov = 0.0; }
+      else {
+
+      vec2 emx = emxT, emy = emyT;
+      float fx4 = dot(f4gEm, emx), fy4 = dot(f4gEm, emy);
+      float fxx4 = dot(g4xT, emx), fyy4 = dot(g4yT, emy);
+      float fxy4 = dot(g4yT, emx);
+      cov = min(curveCov(f, fx4, fy4, fxx4, fyy4, fxy4), keep4);
+#ifdef MANTLE_DEBUG_K4
+      float dpx = f / max(length(vec2(fx4, fy4)), 1e-12);
+      o = vec4(clamp(0.5 + dpx * 0.25, 0.0, 1.0), clamp(0.5 + fxx4 * 2.0, 0.0, 1.0), cov, 1.0);
+      return LB_COV_WROTE_O;
+#endif
+      }
+    } else {
+
+      cov = 0.0;
+    }
+  }
+
+  if ((isCubic || isBez) && vSeam > 5.0 && cov < 0.999 && f < 0.0) discard;
+
+  if (cov < 0.004) discard;
+  return LBCOV_OUT(cov);
+}
+
+#endif
 
 vec2 transformClipCoord(vec2 emCoord, int row) {
 
@@ -2916,11 +6457,12 @@ vec2 transformClipCoord(vec2 emCoord, int row) {
   return emCoord;
 #else
   if (uHasOverrides != 1) return emCoord;
-  vec4 ovAff = texelFetch(uOverrideTex, ivec2(OV_AFFINE, row), 0);
-  vec4 ovP   = texelFetch(uOverrideTex, ivec2(OV_POS_VIS, row), 0);
+  vec4 ovAff = texelFetch(uOverrideTex, ovAt(OV_AFFINE, row), 0);
+  vec4 ovP   = texelFetch(uOverrideTex, ovAt(OV_POS_VIS, row), 0);
 
   float det = ovAff.x * ovAff.w - ovAff.y * ovAff.z;
-  if (abs(det) < 1e-12) return emCoord;
+
+  if (!(abs(det) > 2.384185791015625e-7 * (abs(ovAff.x * ovAff.w) + abs(ovAff.y * ovAff.z)))) return emCoord;
   float invDet = 1.0 / det;
   vec2 d = emCoord - ovP.xy;
   return vec2(invDet * ( ovAff.w * d.x - ovAff.y * d.y),
@@ -2928,63 +6470,288 @@ vec2 transformClipCoord(vec2 emCoord, int row) {
 #endif
 }
 
+vec2 transformClipPx(vec2 invPx, int row) {
+#if defined(MANTLE_NO_CLIP) && defined(MANTLE_NO_MASK)
+  return invPx;
+#else
+  if (uHasOverrides != 1) return invPx;
+  vec4 ovAff = texelFetch(uOverrideTex, ovAt(OV_AFFINE, row), 0);
+  if (ovAff == vec4(1.0, 0.0, 0.0, 1.0)) return invPx;
+  float det = ovAff.x * ovAff.w - ovAff.y * ovAff.z;
+  if (!(abs(det) > 2.384185791015625e-7 * (abs(ovAff.x * ovAff.w) + abs(ovAff.y * ovAff.z)))) return invPx;
+  vec2 e = 1.0 / invPx;
+  vec2 local = vec2(abs(ovAff.w) * e.x + abs(ovAff.y) * e.y, abs(ovAff.z) * e.x + abs(ovAff.x) * e.y) / abs(det);
+  return 1.0 / max(local, vec2(1e-30));
+#endif
+}
+
+vec2 transformClipDir(vec2 dEm, int row) {
+#if defined(MANTLE_NO_CLIP) && defined(MANTLE_NO_MASK)
+  return dEm;
+#else
+  if (uHasOverrides != 1) return dEm;
+  vec4 ovAff = texelFetch(uOverrideTex, ovAt(OV_AFFINE, row), 0);
+  float det = ovAff.x * ovAff.w - ovAff.y * ovAff.z;
+  if (!(abs(det) > 2.384185791015625e-7 * (abs(ovAff.x * ovAff.w) + abs(ovAff.y * ovAff.z)))) return dEm;
+  float invDet = 1.0 / det;
+  return vec2(invDet * ( ovAff.w * dEm.x - ovAff.y * dEm.y),
+              invDet * (-ovAff.z * dEm.x + ovAff.x * dEm.y));
+#endif
+}
+
+vec2 transformClipEPx(vec2 dx, vec2 dy, int row) { return abs(transformClipDir(dx, row)) + abs(transformClipDir(dy, row)); }
+
+#ifdef MANTLE_ROTATED_MAP
+#define PATTERN_CHILD_PIXEL cMx, cMy
+
+void childMap(int row, inout vec2 mx, inout vec2 my) {
+#if !defined(MANTLE_NO_CLIP) || !defined(MANTLE_NO_MASK)
+  if (uHasOverrides != 1) return;
+  vec4 m = texelFetch(uOverrideTex, ovAt(OV_AFFINE, row), 0);
+  if (m == vec4(1.0, 0.0, 0.0, 1.0)) return;
+  float det = m.x * m.w - m.y * m.z;
+  if (!(abs(det) > 2.384185791015625e-7 * (abs(m.x * m.w) + abs(m.y * m.z)))) return;
+  vec2 lx = mx * m.x + my * m.z, ly = mx * m.y + my * m.w;
+  if (det < 0.0) { lx.y = -lx.y; ly.y = -ly.y; }
+  mx = lx; my = ly;
+#endif
+}
+float childFill(vec2 c, vec2 mx, vec2 my, ivec4 cGD, bool evenOdd, vec4 cBB) {
+#ifdef MANTLE_AAC
+  return renderFillAACM(c, mx, my, cGD, evenOdd, cBB);
+#else
+  return renderFillM(c, mx, my, cGD, evenOdd, cBB);
+#endif
+}
+#else
+#define PATTERN_CHILD_PIXEL cInvPx
+float childFill(vec2 c, vec2 invPx, ivec4 cGD, bool evenOdd, vec4 cBB) {
+#ifdef MANTLE_AAC
+  return renderFillAAC(c, invPx, cGD, evenOdd, cBB);
+#else
+  return renderFill(c, invPx, cGD, evenOdd, cBB);
+#endif
+}
+#endif
+
 float evalClipCoverageAtRow(vec2 emCoord, vec2 px, int firstRow) {
-  vec4 fcap = texelFetch(uMetaTex, ivec2(MT_CAP_JOIN, firstRow), 0);
-  int fflags = int(fcap.w + 0.5);
-  bool multiClip = (fflags & 2048) != 0;
-  if (!multiClip) {
-    vec4 cBB    = texelFetch(uMetaTex, ivec2(MT_BBOX, firstRow), 0);
-    vec4 cGlyph = texelFetch(uMetaTex, ivec2(MT_GLYPH_BAND, firstRow), 0);
-    vec4 cStrokePad = texelFetch(uMetaTex, ivec2(MT_STROKE_PARAMS, firstRow), 0);
-    bool cEvenOdd = cStrokePad.y > 0.5;
-    ivec4 cGD = ivec4(int(cGlyph.x), int(cGlyph.y),
-                      int(cGlyph.z), int(cGlyph.w));
-    vec2 localCoord = transformClipCoord(emCoord, firstRow);
-    return renderFill(localCoord, px, cGD, cEvenOdd, cBB);
-  }
+
   float acc = 0.0;
-  const int kMaxClipChildren = 16;
-  for (int k = 0; k < kMaxClipChildren; k++) {
+  bool multiClip = false;
+  int rows = metaRowsOf(textureSize(uMetaTex, 0));
+  for (int k = 0; firstRow + k < rows; k++) {
     int cRow = firstRow + k;
-    vec4 ccap = texelFetch(uMetaTex, ivec2(MT_CAP_JOIN, cRow), 0);
+    vec4 ccap = texelFetch(uMetaTex, metaAt(MT_CAP_JOIN, cRow), 0);
     int cflags = int(ccap.w + 0.5);
-    if ((cflags & 256) == 0) break;
-    vec4 cBB    = texelFetch(uMetaTex, ivec2(MT_BBOX, cRow), 0);
-    vec4 cGlyph = texelFetch(uMetaTex, ivec2(MT_GLYPH_BAND, cRow), 0);
-    vec4 cStrokePad = texelFetch(uMetaTex, ivec2(MT_STROKE_PARAMS, cRow), 0);
+    if (k == 0) multiClip = (cflags & 2048) != 0;
+    if (multiClip && (cflags & 256) == 0) break;
+    vec4 cBB    = texelFetch(uMetaTex, metaAt(MT_BBOX, cRow), 0);
+    vec4 cGlyph = texelFetch(uMetaTex, metaAt(MT_GLYPH_BAND, cRow), 0);
+    vec4 cStrokePad = texelFetch(uMetaTex, metaAt(MT_STROKE_PARAMS, cRow), 0);
     bool cEvenOdd = cStrokePad.y > 0.5;
     ivec4 cGD = ivec4(int(cGlyph.x), int(cGlyph.y),
                       int(cGlyph.z), int(cGlyph.w));
     vec2 localCoord = transformClipCoord(emCoord, cRow);
-    float c = renderFill(localCoord, px, cGD, cEvenOdd, cBB);
+    float c = renderFill(localCoord, transformClipPx(px, cRow), cGD, cEvenOdd, cBB);
     acc = max(acc, c);
-    if ((cflags & 4096) != 0) break;
+
+    if (!multiClip || acc >= 1.0 || (cflags & 4096) != 0) break;
   }
   return clamp(acc, 0.0, 1.0);
 }
 
-float primFillCoverage(int kind, vec2 p, vec4 bb, float rx) {
-  vec2 he = 0.5 * (bb.zw - bb.xy);
-  vec2 q  = p - 0.5 * (bb.xy + bb.zw);
-  float d;
-  if (kind == 1) {
-    d = length(q) - min(he.x, he.y);
-  } else {
-    vec2 e = abs(q) - he + rx;
-    d = min(max(e.x, e.y), 0.0) + length(max(e, vec2(0.0))) - rx;
+float evalClipCoverage(vec2 emCoord, vec2 px, int firstRow) {
+  float acc = 0.0;
+  bool multiClip = false;
+  int rows = metaRowsOf(textureSize(uMetaTex, 0));
+  for (int k = 0; firstRow + k < rows; k++) {
+    int cRow = firstRow + k;
+    vec4 ccap = texelFetch(uMetaTex, metaAt(MT_CAP_JOIN, cRow), 0);
+    int cflags = int(ccap.w + 0.5);
+    if (k == 0) multiClip = (cflags & 2048) != 0;
+    if (multiClip && (cflags & 256) == 0) break;
+    vec4 cBB    = texelFetch(uMetaTex, metaAt(MT_BBOX, cRow), 0);
+    vec4 cGlyph = texelFetch(uMetaTex, metaAt(MT_GLYPH_BAND, cRow), 0);
+    vec4 cStrokePad = texelFetch(uMetaTex, metaAt(MT_STROKE_PARAMS, cRow), 0);
+    bool cEvenOdd = cStrokePad.y > 0.5;
+    ivec4 cGD = ivec4(int(cGlyph.x), int(cGlyph.y),
+                      int(cGlyph.z), int(cGlyph.w));
+    vec2 localCoord = transformClipCoord(emCoord, cRow);
+    float c = renderFill(localCoord, transformClipPx(px, cRow), cGD, cEvenOdd, cBB);
+
+    if (c > acc) {
+      vec4 cMeta7 = texelFetch(uMetaTex, metaAt(MT_PAINT_ID, cRow), 0);
+      int innerClipId = int(cMeta7.z + 0.5);
+      if (innerClipId > 0) c *= evalClipCoverageAtRow(emCoord, px, innerClipId - 1);
+    }
+    acc = max(acc, c);
+    if (!multiClip || acc >= 1.0 || (cflags & 4096) != 0) break;
   }
-  float g = max(length(vec2(dFdx(d), dFdy(d))), 1e-6);
+  return clamp(acc, 0.0, 1.0);
+}
+
+float primRectCoverage(vec2 p, vec4 bb, vec2 ePx) {
+  vec2 w = max(ePx, vec2(1e-30));
+  vec2 a = max(p - 0.5 * w, bb.xy);
+  vec2 b = min(p + 0.5 * w, bb.zw);
+  vec2 ov = max(b - a, vec2(0.0));
+  return (ov.x / w.x) * (ov.y / w.y);
+}
+
+float primDeepCoverage(vec2 p, vec4 bb, float rx, vec2 emDx, vec2 emDy) {
+  vec2 a = max(bb.xy - p, p - bb.zw);
+  vec2 e = a + rx;
+  if (e.x <= 0.0 && e.y <= 0.0) return 1.0;
+  vec2 o = max(e, vec2(0.0));
+  float len = length(o);
+  float d = (o.y >= o.x ? o.x * o.x + a.y * (o.y + rx) : o.y * o.y + a.x * (o.x + rx)) / (len + rx);
+  vec2 n = o / len;
+  n.x = (p.x < 0.5 * (bb.x + bb.z)) ? -n.x : n.x;
+  n.y = (p.y < 0.5 * (bb.y + bb.w)) ? -n.y : n.y;
+  float g = max(abs(dot(n, emDx)) + abs(dot(n, emDy)), 1e-30);
   return clamp(0.5 - d / g, 0.0, 1.0);
 }
 
+int coverKernelId(int flagsShape, float kindV) {
+#if defined(MANTLE_COVER_KERNEL) && defined(MANTLE_LB_FILL)
+  return int(-kindV - 1.0 + 0.5);
+#else
+  return (flagsShape >> 15) & 3;
+#endif
+}
+
+#if defined(MANTLE_COVER_KERNEL) && defined(MANTLE_LB_FILL)
+#define MANTLE_COVER_KID_SRC vKind
+#else
+#define MANTLE_COVER_KID_SRC (-1.0)
+#endif
+
+#if !defined(MANTLE_NO_PATTERN_MEAN) && !defined(MANTLE_NO_PATTERN)
+
+vec4 patternRowsAt(vec2 tileEm, vec2 tileSize, vec2 cEPx, vec2 cInvPx,
+#ifdef MANTLE_ROTATED_MAP
+    vec2 cMx, vec2 cMy,
+#endif
+    vec2 nearLo, vec2 nearHi, vec2 patDx, vec2 patDy, int firstRow1, int lastRow1) {
+  vec4 acc = vec4(0.0);
+
+  for (int row1 = firstRow1; row1 <= lastRow1; row1++) {
+    int rowIdx = row1 - 1;
+
+    vec4 cStrokePad = texelFetch(uMetaTex, metaAt(MT_STROKE_PARAMS, rowIdx), 0);
+    float cStrokeWidth = cStrokePad.x;
+    vec4 cStroke= texelFetch(uMetaTex, metaAt(MT_STROKE, rowIdx), 0);
+    vec4 cGrad7  = texelFetch(uMetaTex, metaAt(MT_PAINT_ID, rowIdx), 0);
+    int cStrokeGradId = int(cGrad7.y + 0.5);
+    vec4 cBB    = texelFetch(uMetaTex, metaAt(MT_BBOX, rowIdx), 0);
+    vec4 cGlyph = texelFetch(uMetaTex, metaAt(MT_GLYPH_BAND, rowIdx), 0);
+    ivec4 cGD = ivec4(int(cGlyph.x), int(cGlyph.y),
+                      int(cGlyph.z), int(cGlyph.w));
+    if (cStrokeWidth > 0.0 && (cStroke.a > 0.0 || cStrokeGradId > 0)) {
+
+      vec4 cCapJoin = texelFetch(uMetaTex, metaAt(MT_CAP_JOIN, rowIdx), 0);
+      int cStartCap = int(cCapJoin.x + 0.5);
+      int cJoinStyle = int(cCapJoin.y + 0.5);
+      float cMiterLimit = cCapJoin.z;
+      int cEndCapEnc = int(texelFetch(uMetaTex, metaAt(MT_PRIM, rowIdx), 0).z + 0.5);
+      int cEndCap = (cEndCapEnc == 0) ? cStartCap : (cEndCapEnc - 1);
+
+      int cDashId = int(cStrokePad.w + 0.5);
+      strokeDashScale = (int(cCapJoin.w + 0.5) & 1) != 0 ? 0.5 * (cEPx.x + cEPx.y) : 1.0;
+      float halfW = cStrokeWidth * 0.5 * strokeWidthMultiplier(int(cCapJoin.w + 0.5), cEPx);
+      vec2 _sgDummy; vec4 _seDP, _seDQ;
+      float minD;
+
+      bool cLocalSt = (int(cCapJoin.w + 0.5) & FS_STROKE_LOCAL) != 0;
+      vec4 cStN = vec4(0.0);
+      if (cLocalSt) cStN = texelFetch(uMetaTex, metaAt(MT_SOLID, rowIdx), 0);
+      minD = strokeWalk(tileEm, cGD, cBB, cStN, cLocalSt, halfW,
+                        cStartCap, cEndCap, cJoinStyle, cMiterLimit, cDashId, _sgDummy,
+                        -1e20, strokeAaReachEm(halfW, cEPx), cEPx, false, _seDP, _seDQ);
+      float cCov = strokeEdgeCov(minD, halfW, vec2(0.0), cEPx, false);
+      if (cCov <= 0.0) continue;
+
+#ifndef MANTLE_NO_GRADIENT
+
+      vec4 paint = cStrokeGradId > 0
+        ? sampleGradient(cStrokeGradId, tileEm, cBB, patDx, patDy) * cStroke
+        : cStroke;
+#else
+      vec4 paint = cStroke;
+#endif
+      float a = cCov * paint.a;
+      vec3 premul = paint.rgb * a;
+      acc.rgb = premul + acc.rgb * (1.0 - a);
+      acc.a   = a      + acc.a   * (1.0 - a);
+    } else {
+
+      bool cEvenOdd = cStrokePad.y > 0.5;
+
+      float cCov = 0.0;
+      for (int nb = 0; nb < 9; nb++) {
+        vec2 q = tileEm;
+        bool use = true;
+        if (nb == 1)      { use = nearLo.x > 0.5 && cBB.z > tileSize.x - cEPx.x; q = tileEm + vec2(tileSize.x, 0.0); }
+        else if (nb == 2) { use = nearHi.x > 0.5 && cBB.x < cEPx.x;               q = tileEm - vec2(tileSize.x, 0.0); }
+        else if (nb == 3) { use = nearLo.y > 0.5 && cBB.w > tileSize.y - cEPx.y; q = tileEm + vec2(0.0, tileSize.y); }
+        else if (nb == 4) { use = nearHi.y > 0.5 && cBB.y < cEPx.y;               q = tileEm - vec2(0.0, tileSize.y); }
+        else if (nb == 5) { use = nearLo.x > .5 && nearLo.y > .5 && cBB.z > tileSize.x - cEPx.x && cBB.w > tileSize.y - cEPx.y; q = tileEm + tileSize; }
+        else if (nb == 6) { use = nearLo.x > .5 && nearHi.y > .5 && cBB.z > tileSize.x - cEPx.x && cBB.y < cEPx.y; q = tileEm + vec2(tileSize.x, -tileSize.y); }
+        else if (nb == 7) { use = nearHi.x > .5 && nearLo.y > .5 && cBB.x < cEPx.x && cBB.w > tileSize.y - cEPx.y; q = tileEm + vec2(-tileSize.x, tileSize.y); }
+        else if (nb == 8) { use = nearHi.x > .5 && nearHi.y > .5 && cBB.x < cEPx.x && cBB.y < cEPx.y; q = tileEm - tileSize; }
+        if (use) {
+          float r = childFill(q, PATTERN_CHILD_PIXEL, cGD, cEvenOdd, cBB);
+          cCov = (nb == 0) ? r : cCov + r;
+        }
+      }
+      cCov = clamp(cCov, 0.0, 1.0);
+      if (cCov <= 0.0) continue;
+
+      vec4 cImg8 = texelFetch(uMetaTex, metaAt(MT_FILTER_BLEND, rowIdx), 0);
+      int cImgId = int(cImg8.w + 0.5);
+      int cFillGradId = int(cGrad7.x + 0.5);
+      vec4 paint;
+      if (cImgId > 0) {
+        vec4 cImgRect = texelFetch(uMetaTex, metaAt(MT_IMAGE_RECT, rowIdx), 0);
+        vec4 cAtlas   = texelFetch(uMetaTex, metaAt(MT_ATLAS, rowIdx), 0);
+
+        paint = sampleMappedChildImage(tileEm, cImgRect, cAtlas, patDx, patDy, cFillGradId)
+              * texelFetch(uMetaTex, metaAt(MT_FILL, rowIdx), 0);
+      }
+#ifndef MANTLE_NO_GRADIENT
+      else if (cFillGradId > 0) {
+        paint = sampleGradient(cFillGradId, tileEm, cBB, patDx, patDy)
+              * texelFetch(uMetaTex, metaAt(MT_FILL, rowIdx), 0);
+      }
+#endif
+      else {
+        vec4 cFill  = texelFetch(uMetaTex, metaAt(MT_FILL, rowIdx), 0);
+        paint = cFill;
+      }
+      float a = cCov * paint.a;
+      vec3 premul = paint.rgb * a;
+      acc.rgb = premul + acc.rgb * (1.0 - a);
+      acc.a   = a      + acc.a   * (1.0 - a);
+    }
+  }
+  return acc;
+}
+
+#endif
+
 void main() {
+#ifdef MANTLE_FRAG_STUB
+
+  fragColor = vec4(0.02, 0.02, 0.02, 0.02);
+  return;
+#endif
   int y = vInst;
-#ifdef MANTLE_LB_COV
+#ifdef MANTLE_COMPOSED
   vec4 vShapeBBox = uLBShapeBBox;
   vec4 vFill      = uLBFill;
 #else
-  vec4 vShapeBBox = texelFetch(uMetaTex, ivec2(MT_BBOX, y), 0);
-  vec4 vFill      = texelFetch(uMetaTex, ivec2(MT_FILL, y), 0);
+  vec4 vShapeBBox = texelFetch(uMetaTex, metaAt(MT_BBOX, y), 0);
+  vec4 vFill      = texelFetch(uMetaTex, metaAt(MT_FILL, y), 0);
 #endif
 
   if ((vOverrideMask & 1) != 0) vFill = vOverrideFill;
@@ -3026,62 +6793,49 @@ void main() {
   }
 #endif
 #endif
-#ifdef MANTLE_LB_COV
-  vec4 vStroke    = uLBStroke;
-#else
-  vec4 vStroke    = texelFetch(uMetaTex, ivec2(MT_STROKE, y), 0);
-#endif
-  if ((vOverrideMask & 2) != 0) vStroke = vOverrideStroke;
-  vStroke *= vOverrideTint;
-#ifdef MANTLE_INSTANCED
-  vStroke = clamp(vStroke + vInstBias, 0.0, 1.0);
-#endif
-#ifndef MANTLE_NO_RECOLOR
-#ifndef MANTLE_NO_CHANNEL_LERP
-  if (uChannelLerpEnabled != 0) {
-    vec3 tint = vStroke.r * uChannelLerpPrimary.rgb
-              + vStroke.b * uChannelLerpContrast.rgb;
-    float k = clamp(vStroke.g + (1.0 - vStroke.a), 0.0, 1.0);
-    vStroke = vec4(mix(tint, uChannelLerpHighlight.rgb, k), vStroke.a);
-  }
-#endif
-#ifndef MANTLE_NO_PALETTE
-  if (uPaletteEnabled != 0) {
-    float ch =
-        uPaletteChannel == 0 ? vStroke.r :
-        uPaletteChannel == 1 ? vStroke.g :
-        uPaletteChannel == 2 ? vStroke.b :
-                               vStroke.a;
-    int idx = clamp(int(ch * float(uPaletteSize)),
-                    0, uPaletteSize - 1);
-    vec4 looked = texelFetch(uPalette, ivec2(idx, 0), 0);
-    vStroke.rgb = looked.rgb;
-  }
-#endif
-#ifndef MANTLE_NO_COLOR_MATRIX
-  if (uColorMatrixEnabled != 0) {
-    vStroke = clamp(uColorMatrix * vStroke + uColorMatrixOffset, 0.0, 1.0);
-  }
-#endif
-#endif
-  vec4 vStrokePad = texelFetch(uMetaTex, ivec2(MT_STROKE_PARAMS, y), 0);
-  vec4 vGlyphBand = texelFetch(uMetaTex, ivec2(MT_GLYPH_BAND, y), 0);
+    vec4 vStrokePad = texelFetch(uMetaTex, metaAt(MT_STROKE_PARAMS, y), 0);
+    vec4 vGlyphBand = texelFetch(uMetaTex, metaAt(MT_GLYPH_BAND, y), 0);
 
-  vec4 vCapJoin   = texelFetch(uMetaTex, ivec2(MT_CAP_JOIN, y), 0);
+    vec4 vCapJoin   = texelFetch(uMetaTex, metaAt(MT_CAP_JOIN, y), 0);
 
   int startCap = int(vCapJoin.x + 0.5);
   int flagsShape = int(vCapJoin.w + 0.5);
 
-  vec4 vMeta8  = texelFetch(uMetaTex, ivec2(MT_FILTER_BLEND, y), 0);
+  vec4 vMeta8  = texelFetch(uMetaTex, metaAt(MT_FILTER_BLEND, y), 0);
   int vFilterId = int(vMeta8.x + 0.5);
 
   int vImageId = int(vMeta8.w + 0.5);
 
-  vec4 vMeta7  = texelFetch(uMetaTex, ivec2(MT_PAINT_ID, y), 0);
+  vec4 vMeta7  = texelFetch(uMetaTex, metaAt(MT_PAINT_ID, y), 0);
   int vFillGradId   = int(vMeta7.x + 0.5);
+#ifndef MANTLE_NO_STROKE
   int vStrokeGradId = int(vMeta7.y + 0.5);
   bool nonScalingStroke = (flagsShape & 1) != 0;
   float vStrokeWidth = (vOverrideMask & 4) != 0 ? vOverrideStrokeWidth : vStrokePad.x;
+#endif
+
+  bool screenZero = false;
+#ifndef MANTLE_NO_EXTCLIP
+  if (uExtClipMode > 0) {
+    float em = texture(uExtClipTex, (gl_FragCoord.xy + uFragOrigin) / uViewportSize).a;
+    screenZero = ((uExtClipMode == 2) ? (1.0 - em) : em) == 0.0;
+  }
+#endif
+#ifndef MANTLE_NO_MASK
+
+  bool ovMoved = (vOverrideMask & 8) != 0;
+  if (uHasOffscreenMask != 0 && !ovMoved) {
+    int zRow = int(vMeta7.w + 0.5) - 1;
+    if (zRow >= 0 && (int(texelFetch(uMetaTex, metaAt(MT_CAP_JOIN, zRow), 0).w + 0.5) & 512) != 0) {
+      int zLayer = texelFetch(uMaskRowToLayerTex, mrlAt(MRL_ROW, zRow), 0).r;
+      if (zLayer >= 0) {
+        vec2 muv = (gl_FragCoord.xy + uFragOrigin) / uViewportSize;
+        screenZero = screenZero || clamp(texture(uMaskRTArray, vec3(muv, float(zLayer))).r, 0.0, 1.0) == 0.0;
+      }
+    }
+  }
+#endif
+
   bool evenOddFill = vStrokePad.y > 0.5;
   float accumGroupId = vStrokePad.z;
 
@@ -3089,11 +6843,39 @@ void main() {
   ivec4 GD = ivec4(int(vGlyphBand.x), int(vGlyphBand.y), int(vGlyphBand.z), int(vGlyphBand.w));
 
   vec2 emCoord = vEmCoord;
-  vec2 ePx = fwidth(emCoord);
-  vec2 invPx = 1.0 / max(ePx, vec2(1e-6));
+#ifdef MANTLE_CPATCH
 
+  if (CP_IS_CPATCH_VERTEX) emCoord += vLB2.zw;
+#endif
+  vec2 ePx = fwidth(emCoord);
+
+  vec2 emDx = dFdx(emCoord), emDy = dFdy(emCoord);
+
+  if (any(notEqual(vAffineFootprint, vec4(0.0)))) {
+    emDx = vAffineFootprint.xy;
+    emDy = vAffineFootprint.zw;
+    ePx = abs(emDx) + abs(emDy);
+  }
+
+  vec2 invPx = 1.0 / max(ePx, vec2(1e-30));
+
+#ifdef MANTLE_ROTATED_MAP
+
+  vec2 slMx = vec2(invPx.x, 0.0), slMy = vec2(0.0, invPx.y);
+  if (emDx.y != 0.0 || emDy.x != 0.0) {
+    float det = emDx.x * emDy.y - emDy.x * emDx.y;
+    if (det != 0.0) {
+      slMx = vec2(emDy.y, -emDx.y) / det;
+      slMy = vec2(-emDy.x, emDx.x) / det;
+      if (det < 0.0) { slMx.y = -slMx.y; slMy.y = -slMy.y; }
+    }
+  }
+#endif
+
+#ifndef MANTLE_NO_STROKE
   bool noHScale = (flagsShape & (1 << 13)) != 0;
   bool noVScale = (flagsShape & (1 << 14)) != 0;
+  strokeDashScale = nonScalingStroke ? 0.5 * (ePx.x + ePx.y) : 1.0;
   if (nonScalingStroke || noHScale || noVScale) {
     float emPerPx;
     if (noHScale && noVScale) emPerPx = 0.5 * (ePx.x + ePx.y);
@@ -3102,22 +6884,50 @@ void main() {
     else                      emPerPx = 0.5 * (ePx.x + ePx.y);
     vStrokeWidth *= emPerPx;
   }
+#endif
 
   bool doFill = vFill.a > 0.0;
 
-  vec4 t11 = texelFetch(uMetaTex, ivec2(MT_PRIM, y), 0);
+  vec4 t11 = texelFetch(uMetaTex, metaAt(MT_PRIM, y), 0);
   int primKind = int(t11.x + 0.5);
-  bool squareBB = abs((vShapeBBox.z - vShapeBBox.x) - (vShapeBBox.w - vShapeBBox.y))
-                    <= 1e-3 * max(vShapeBBox.z - vShapeBBox.x, 1e-6);
-  bool primFast = doFill && (primKind == 2 || primKind == 3
-                             || (primKind == 1 && squareBB));
 
+  bool squareBB = abs((vShapeBBox.z - vShapeBBox.x) - (vShapeBBox.w - vShapeBBox.y))
+                    <= 1e-3 * max(vShapeBBox.z - vShapeBBox.x, vShapeBBox.w - vShapeBBox.y);
+
+  bool axisMap = emDx.y == 0.0 && emDy.x == 0.0;
+
+  bool primDeep = false;
+
+#if !defined(MANTLE_PRIM_WALK) && !defined(MANTLE_NO_ARC)
+  if (doFill && (primKind == 3 || (primKind == 1 && squareBB))) {
+    float primR = primKind == 3 ? t11.z : 0.5 * (vShapeBBox.z - vShapeBBox.x);
+    primDeep = primR * max(invPx.x, invPx.y) >= 2097152.0;
+  }
+#endif
+  bool primFast = doFill && ((primKind == 2 && axisMap) || primDeep);
+
+#ifndef MANTLE_NO_PATTERN
+
+  vec4 vAtlasSlot = texelFetch(uMetaTex, metaAt(MT_ATLAS, y), 0);
+#endif
+#ifdef MANTLE_LB_FILL
+#define FCOV_UNUSED (vKind >= 0.0)
+#else
+#define FCOV_UNUSED false
+#endif
   bool occSkip = false;
-  if (uHasOccupancy == 1 && doFill && !primFast) {
-    vec4 t5occ = texelFetch(uMetaTex, ivec2(MT_SOLID, y), 0);
+
+  bool walkFill = doFill && !screenZero;
+
+  if (!FCOV_UNUSED && uHasOccupancy == 1 && walkFill && !primFast) {
+    vec4 t5occ = texelFetch(uMetaTex, metaAt(MT_SOLID, y), 0);
     int occG = int(t5occ.y + 0.5);
     if (occG > 0) {
-      vec4 t10occ = texelFetch(uMetaTex, ivec2(MT_ATLAS, y), 0);
+#ifndef MANTLE_NO_PATTERN
+      vec4 t10occ = vAtlasSlot;
+#else
+      vec4 t10occ = texelFetch(uMetaTex, metaAt(MT_ATLAS, y), 0);
+#endif
 
       if (t10occ.w < 1.5) {
         float occCW = (vShapeBBox.z - vShapeBBox.x) / float(occG);
@@ -3135,45 +6945,86 @@ void main() {
       }
     }
   }
-#ifdef MANTLE_LB_COV
 
-  float fCov = doFill ? texture(uLBCovTex, (gl_FragCoord.xy + uFragOrigin) / uLBCovTexSize).r : 0.0;
+#ifdef MANTLE_LB_FILL_COV
+
+  float fCovBase = FCOV_UNUSED ? 0.0
+    : doFill ? texture(uLBCovTex, (gl_FragCoord.xy + uFragOrigin) / uLBCovTexSize).r : 0.0;
+#elif defined(MANTLE_NO_COVER_FILL) && defined(MANTLE_LB_FILL)
+
+  float fCovBase = 0.0;
 #else
-  float fCov = occSkip ? 1.0
+  float fCovBase = FCOV_UNUSED ? 0.0
+    : occSkip ? 1.0
     : !primFast
 
-#if defined(MANTLE_HARD_MIXED)
-    ? (doFill ? (
+#if defined(MANTLE_HARD_MIXED) || defined(MANTLE_COVER_KERNEL)
+    ? (walkFill ? (
 #ifdef MANTLE_HARD_TREE
-        ((flagsShape >> 15) & 3) == 3 ? renderFillGWNSDF(emCoord, 1.0/max(ePx,vec2(1e-6)), GD, evenOddFill, vShapeBBox) :
+        coverKernelId(flagsShape, MANTLE_COVER_KID_SRC) == 3 ? renderFillGWNSDF(emCoord, invPx, GD, evenOddFill, vShapeBBox) :
 #endif
-        ((flagsShape >> 15) & 3) == 2 ? renderFillHardBand(emCoord, GD, evenOddFill, vShapeBBox)
-#ifdef MANTLE_AAC
-      : renderFillAAC(emCoord, 1.0/max(ePx,vec2(1e-6)), GD, evenOddFill, vShapeBBox)
+        coverKernelId(flagsShape, MANTLE_COVER_KID_SRC) == 2 ? renderFillHardBand(emCoord, GD, evenOddFill, vShapeBBox)
+#if defined(MANTLE_AAC) && defined(MANTLE_ROTATED_MAP)
+      : renderFillAACM(emCoord, slMx, slMy, GD, evenOddFill, vShapeBBox)
+#elif defined(MANTLE_AAC)
+      : renderFillAAC(emCoord, invPx, GD, evenOddFill, vShapeBBox)
+#elif defined(MANTLE_ROTATED_MAP)
+      : renderFillM(emCoord, slMx, slMy, GD, evenOddFill, vShapeBBox)
 #else
-      : renderFill(emCoord, 1.0/max(ePx,vec2(1e-6)), GD, evenOddFill, vShapeBBox)
+      : renderFill(emCoord, invPx, GD, evenOddFill, vShapeBBox)
 #endif
       ) : 0.0)
 #elif defined(MANTLE_HARD) && defined(MANTLE_HARD_TREE)
-    ? (doFill ? renderFillGWNSDF(emCoord, 1.0/max(ePx,vec2(1e-6)), GD, evenOddFill, vShapeBBox) : 0.0)
+    ? (walkFill ? renderFillGWNSDF(emCoord, invPx, GD, evenOddFill, vShapeBBox) : 0.0)
 #elif defined(MANTLE_HARD)
 
-    ? (doFill ? renderFillHardBand(emCoord, GD, evenOddFill, vShapeBBox) : 0.0)
+    ? (walkFill ? renderFillHardBand(emCoord, GD, evenOddFill, vShapeBBox) : 0.0)
 #elif defined(MANTLE_GWN) && defined(MANTLE_GWN_SDF)
-    ? (doFill ? renderFillGWNSDF(emCoord, 1.0/max(ePx,vec2(1e-6)), GD, evenOddFill, vShapeBBox) : 0.0)
+    ? (walkFill ? renderFillGWNSDF(emCoord, invPx, GD, evenOddFill, vShapeBBox) : 0.0)
 #elif defined(MANTLE_GWN)
-    ? (doFill ? renderFillGWNSDF(emCoord, 1.0/max(ePx,vec2(1e-6)), GD, evenOddFill, vShapeBBox) : 0.0)
+    ? (walkFill ? renderFillGWNSDF(emCoord, invPx, GD, evenOddFill, vShapeBBox) : 0.0)
+#elif defined(MANTLE_AAC) && defined(MANTLE_ROTATED_MAP)
+    ? (walkFill ? renderFillAACM(emCoord, slMx, slMy, GD, evenOddFill, vShapeBBox) : 0.0)
 #elif defined(MANTLE_AAC)
-    ? (doFill ? renderFillAAC(emCoord, 1.0/max(ePx,vec2(1e-6)), GD, evenOddFill, vShapeBBox) : 0.0)
+    ? (walkFill ? renderFillAAC(emCoord, invPx, GD, evenOddFill, vShapeBBox) : 0.0)
+#elif defined(MANTLE_ROTATED_MAP)
+    ? (walkFill ? renderFillM(emCoord, slMx, slMy, GD, evenOddFill, vShapeBBox) : 0.0)
 #else
-    ? (doFill ? renderFill(emCoord, 1.0/max(ePx,vec2(1e-6)), GD, evenOddFill, vShapeBBox) : 0.0)
+    ? (walkFill ? renderFill(emCoord, invPx, GD, evenOddFill, vShapeBBox) : 0.0)
 #endif
-    : primFillCoverage(primKind, emCoord, vShapeBBox, (primKind == 3) ? t11.z : 0.0);
+
+#ifdef MANTLE_NO_STROKE
+    : primDeep ? primDeepCoverage(emCoord, vShapeBBox, primKind == 3 ? t11.z : 0.5 * (vShapeBBox.z - vShapeBBox.x), emDx, emDy)
+#endif
+    : primRectCoverage(emCoord, vShapeBBox, ePx);
+#ifndef MANTLE_NO_STROKE
+  if (primDeep) fCovBase = primDeepCoverage(emCoord, vShapeBBox, primKind == 3 ? t11.z : 0.5 * (vShapeBBox.z - vShapeBBox.x), emDx, emDy);
+#endif
+#endif
+
+#ifdef MANTLE_LB_FILL
+  float fCov = (vKind >= 0.0) ? (doFill ? lbCoverage() : 0.0) : fCovBase;
+#ifdef MANTLE_LB_FRAGDBG
+
+  if (vKind < 0.0 || fCov <= MANTLE_LB_FRAGDBG) discard;
+  const float dbgU = 1.0 / 64.0;
+  fragColor = vec4(dbgU * vKind / 15.0,
+                   dbgU * (fCov > 0.98 ? 1.0 : 0.0),
+                   vKind < 0.5 ? dbgU : 0.0,
+                   dbgU);
+  return;
+#endif
+#else
+  float fCov = fCovBase;
+#endif
+#ifdef MANTLE_COV_STUB
+
+  fCov = 0.75;
 #endif
 
 #ifndef MANTLE_NO_GRADIENT
-  vec4 fillPaint = (vFillGradId > 0)
-    ? sampleGradient(vFillGradId, emCoord, vShapeBBox) * vFill
+  vec4 fillPaint = (vFillGradId > 0 && fCov != 0.0 && !screenZero)
+    ? sampleGradient(vFillGradId, emCoord, vShapeBBox, emDx, emDy) * vFill
     : vFill;
 #else
   vec4 fillPaint = vFill;
@@ -3181,15 +7032,19 @@ void main() {
   vec4 color = vec4(fillPaint.rgb * fillPaint.a, fillPaint.a) * fCov;
 
 #ifndef MANTLE_NO_IMAGE
-  if (vImageId > 0) {
-    vec4 vAtlas9  = texelFetch(uMetaTex, ivec2(MT_ATLAS, y), 0);
+  if (vImageId > 0 && !screenZero) {
+#ifndef MANTLE_NO_PATTERN
+    vec4 vAtlas9  = vAtlasSlot;
+#else
+    vec4 vAtlas9  = texelFetch(uMetaTex, metaAt(MT_ATLAS, y), 0);
+#endif
     if (abs(vAtlas9.w - 2.0) >= 0.5) {
-#ifdef MANTLE_LB_COV
+#ifdef MANTLE_COMPOSED
       vec4 vImgRect = uLBImageRect;
 #else
-      vec4 vImgRect = texelFetch(uMetaTex, ivec2(MT_IMAGE_RECT, y), 0);
+      vec4 vImgRect = texelFetch(uMetaTex, metaAt(MT_IMAGE_RECT, y), 0);
 #endif
-      vec4 imgCol = sampleTopLevelImage(emCoord, vImgRect, vAtlas9);
+      vec4 imgCol = sampleMappedTopLevelImage(emCoord, vImgRect, vAtlas9, emDx, emDy, vFillGradId);
 
       vec4 tinted = imgCol * vFill;
       color = vec4(tinted.rgb * tinted.a, tinted.a) * fCov;
@@ -3199,73 +7054,131 @@ void main() {
 
 #ifndef MANTLE_NO_PATTERN
 
-  vec4 vAtlasSlot = texelFetch(uMetaTex, ivec2(MT_ATLAS, y), 0);
-  if (abs(vAtlasSlot.w - 2.0) < 0.5 && fCov > 0.0) {
-    vec4 vImageRect = texelFetch(uMetaTex, ivec2(MT_IMAGE_RECT, y), 0);
+  if (abs(vAtlasSlot.w - 2.0) < 0.5 && fCov > 0.0 && !screenZero) {
+    int resourceLayer = uHasPatternGroups != 0 ? texelFetch(uMaskRowToLayerTex, mrlAt(1, y), 0).r : -1;
+    if (resourceLayer >= 0) {
+      vec2 resourceUV = (gl_FragCoord.xy + uFragOrigin) / uViewportSize;
+      color = texture(uMaskRTArray, vec3(resourceUV, float(resourceLayer))) * fCov
+        * vec4(vFill.rgb * vFill.a, vFill.a);
+    } else {
+    vec4 vImageRect = texelFetch(uMetaTex, metaAt(MT_IMAGE_RECT, y), 0);
     vec2 tileOrigin = vImageRect.xy;
 
-    vec2 tileSize   = max(vImageRect.zw, vec2(1e-6));
+    vec2 tileSize   = max(vImageRect.zw, vec2(1e-30));
 
-    vec4 vPatLinv = texelFetch(uMetaTex, ivec2(MT_SOLID, y), 0);
+    vec4 vPatLinv = texelFetch(uMetaTex, metaAt(MT_SOLID, y), 0);
     mat2 patLinv  = mat2(vPatLinv.x, vPatLinv.y, vPatLinv.z, vPatLinv.w);
     vec2 patCoord = patLinv * emCoord;
+    vec2 patDx = patLinv * emDx, patDy = patLinv * emDy;
+
+#ifndef MANTLE_NO_PATTERN_MEAN
+    const int PATTERN_MEAN_N = 4;
+#endif
+    vec2 cEPx = ePx, cInvPx = invPx;
+#ifdef MANTLE_ROTATED_MAP
+    vec2 cMx = slMx, cMy = slMy;
+#endif
+    if (vPatLinv.x != 1.0 || vPatLinv.y != 0.0 || vPatLinv.z != 0.0 || vPatLinv.w != 1.0) {
+      cEPx = abs(patDx) + abs(patDy);
+      cInvPx = 1.0 / max(cEPx, vec2(1e-30));
+#ifdef MANTLE_ROTATED_MAP
+      cMx = vec2(cInvPx.x, 0.0); cMy = vec2(0.0, cInvPx.y);
+      if (patDx.y != 0.0 || patDy.x != 0.0) {
+        float det = patDx.x * patDy.y - patDy.x * patDx.y;
+        if (det != 0.0) {
+          cMx = vec2(patDy.y, -patDx.y) / det;
+          cMy = vec2(-patDy.x, patDx.x) / det;
+          if (det < 0.0) { cMx.y = -cMx.y; cMy.y = -cMy.y; }
+        }
+      }
+#endif
+    }
     vec2 rel    = patCoord - tileOrigin;
     vec2 tileEm = rel - floor(rel / tileSize) * tileSize;
     int firstRow1 = int(vAtlasSlot.x + 0.5);
     int lastRow1  = int(vAtlasSlot.y + 0.5);
-    vec2 patPx = 1.0 / max(ePx, vec2(1e-6));
 
-    vec2 nearLo = step(tileEm, ePx);
-    vec2 nearHi = step(tileSize - tileEm, ePx);
+    vec2 nearLo = step(tileEm, cEPx);
+    vec2 nearHi = step(tileSize - tileEm, cEPx);
+
+    vec4 accMean = vec4(0.0);
+#ifndef MANTLE_NO_PATTERN_MEAN
+    bvec2 patMin = greaterThan(cEPx, tileSize);
+    if (patMin.x || patMin.y) {
+
+      ivec2 nSub = ivec2(patMin.x ? PATTERN_MEAN_N : 1, patMin.y ? PATTERN_MEAN_N : 1);
+      vec2 patCell = tileSize / vec2(nSub);
+      vec2 mEPx = cEPx, mInvPx = cInvPx, mNearLo = nearLo, mNearHi = nearHi;
+      vec2 mDx = vec2(patMin.x ? patCell.x : patDx.x, patMin.y ? 0.0 : patDx.y);
+      vec2 mDy = vec2(patMin.x ? 0.0 : patDy.x, patMin.y ? patCell.y : patDy.y);
+      if (patMin.x) { mEPx.x = patCell.x; mInvPx.x = 1.0 / patCell.x; mNearLo.x = 0.0; mNearHi.x = 0.0; }
+      if (patMin.y) { mEPx.y = patCell.y; mInvPx.y = 1.0 / patCell.y; mNearLo.y = 0.0; mNearHi.y = 0.0; }
+#ifdef MANTLE_ROTATED_MAP
+      vec2 mMx = vec2(mInvPx.x, 0.0), mMy = vec2(0.0, mInvPx.y);
+#endif
+      vec4 accAll = vec4(0.0);
+      for (int sj = 0; sj < nSub.y; sj++) {
+        for (int si = 0; si < nSub.x; si++) {
+          vec2 tileS = tileEm;
+          if (patMin.x) tileS.x = (float(si) + 0.5) * patCell.x;
+          if (patMin.y) tileS.y = (float(sj) + 0.5) * patCell.y;
+          accAll += patternRowsAt(tileS, tileSize, mEPx, mInvPx,
+#ifdef MANTLE_ROTATED_MAP
+            mMx, mMy,
+#endif
+            mNearLo, mNearHi, mDx, mDy, firstRow1, lastRow1);
+        }
+      }
+      accMean = accAll / float(nSub.x * nSub.y);
+    } else
+#endif
+    {
     vec4 acc = vec4(0.0);
 
-    for (int k = 0; k < 16; k++) {
-      int row1 = firstRow1 + k;
-      if (row1 > lastRow1) break;
+    for (int row1 = firstRow1; row1 <= lastRow1; row1++) {
       int rowIdx = row1 - 1;
 
-      vec4 cStrokePad = texelFetch(uMetaTex, ivec2(MT_STROKE_PARAMS, rowIdx), 0);
+      vec4 cStrokePad = texelFetch(uMetaTex, metaAt(MT_STROKE_PARAMS, rowIdx), 0);
       float cStrokeWidth = cStrokePad.x;
-      vec4 cStroke= texelFetch(uMetaTex, ivec2(MT_STROKE, rowIdx), 0);
-      vec4 cGrad7  = texelFetch(uMetaTex, ivec2(MT_PAINT_ID, rowIdx), 0);
+      vec4 cStroke= texelFetch(uMetaTex, metaAt(MT_STROKE, rowIdx), 0);
+      vec4 cGrad7  = texelFetch(uMetaTex, metaAt(MT_PAINT_ID, rowIdx), 0);
       int cStrokeGradId = int(cGrad7.y + 0.5);
-      vec4 cBB    = texelFetch(uMetaTex, ivec2(MT_BBOX, rowIdx), 0);
-      vec4 cGlyph = texelFetch(uMetaTex, ivec2(MT_GLYPH_BAND, rowIdx), 0);
+      vec4 cBB    = texelFetch(uMetaTex, metaAt(MT_BBOX, rowIdx), 0);
+      vec4 cGlyph = texelFetch(uMetaTex, metaAt(MT_GLYPH_BAND, rowIdx), 0);
       ivec4 cGD = ivec4(int(cGlyph.x), int(cGlyph.y),
                         int(cGlyph.z), int(cGlyph.w));
       if (cStrokeWidth > 0.0 && (cStroke.a > 0.0 || cStrokeGradId > 0)) {
 
-        vec4 cCapJoin = texelFetch(uMetaTex, ivec2(MT_CAP_JOIN, rowIdx), 0);
+        vec4 cCapJoin = texelFetch(uMetaTex, metaAt(MT_CAP_JOIN, rowIdx), 0);
         int cStartCap = int(cCapJoin.x + 0.5);
         int cJoinStyle = int(cCapJoin.y + 0.5);
         float cMiterLimit = cCapJoin.z;
-        int cEndCapEnc = int(texelFetch(uMetaTex, ivec2(MT_PRIM, rowIdx), 0).z + 0.5);
+        int cEndCapEnc = int(texelFetch(uMetaTex, metaAt(MT_PRIM, rowIdx), 0).z + 0.5);
         int cEndCap = (cEndCapEnc == 0) ? cStartCap : (cEndCapEnc - 1);
 
         int cDashId = int(cStrokePad.w + 0.5);
-        float halfW = cStrokeWidth * 0.5;
-        float minD = strokeMinDist(tileEm, cGD, cBB, halfW,
-                                       cStartCap, cEndCap,
-                                       cJoinStyle, cMiterLimit, cDashId);
-        float pxSize = 0.5 * (ePx.x + ePx.y);
-        float halfWMin = 0.5 * pxSize;
-        float halfWVis = max(halfW, halfWMin);
-        float weightFade = halfW / halfWVis;
-        float distFromEdge = minD - halfWVis;
-        float cCov = 0.0;
-        if (distFromEdge <= 0.5 * pxSize) {
-          cCov = clamp(0.5 - distFromEdge / max(pxSize, 1e-6), 0.0, 1.0);
-          cCov *= weightFade;
-        }
+        strokeDashScale = (int(cCapJoin.w + 0.5) & 1) != 0 ? 0.5 * (cEPx.x + cEPx.y) : 1.0;
+        float halfW = cStrokeWidth * 0.5 * strokeWidthMultiplier(int(cCapJoin.w + 0.5), cEPx);
+        vec2 _sgDummy; vec4 _seDP, _seDQ;
+        float minD;
+
+        bool cLocalSt = (int(cCapJoin.w + 0.5) & FS_STROKE_LOCAL) != 0;
+        vec4 cStN = vec4(0.0);
+        if (cLocalSt) cStN = texelFetch(uMetaTex, metaAt(MT_SOLID, rowIdx), 0);
+        minD = strokeWalk(tileEm, cGD, cBB, cStN, cLocalSt, halfW,
+                          cStartCap, cEndCap, cJoinStyle, cMiterLimit, cDashId, _sgDummy,
+                          -1e20, strokeAaReachEm(halfW, cEPx), cEPx, false, _seDP, _seDQ);
+        float cCov = strokeEdgeCov(minD, halfW, vec2(0.0), cEPx, false);
         if (cCov <= 0.0) continue;
 
-#ifndef MANTLE_NO_GRADIENT
+  #ifndef MANTLE_NO_GRADIENT
+
         vec4 paint = cStrokeGradId > 0
-          ? sampleGradient(cStrokeGradId, tileEm, cBB)
+          ? sampleGradient(cStrokeGradId, tileEm, cBB, patDx, patDy) * cStroke
           : cStroke;
-#else
+  #else
         vec4 paint = cStroke;
-#endif
+  #endif
         float a = cCov * paint.a;
         vec3 premul = paint.rgb * a;
         acc.rgb = premul + acc.rgb * (1.0 - a);
@@ -3273,34 +7186,46 @@ void main() {
       } else {
 
         bool cEvenOdd = cStrokePad.y > 0.5;
-        float cCov = renderFill(tileEm, patPx, cGD, cEvenOdd, cBB);
-        if (nearLo.x > 0.5 && cBB.z > tileSize.x - ePx.x)
-          cCov += renderFill(tileEm + vec2(tileSize.x, 0.0), patPx, cGD, cEvenOdd, cBB);
-        if (nearHi.x > 0.5 && cBB.x < ePx.x)
-          cCov += renderFill(tileEm - vec2(tileSize.x, 0.0), patPx, cGD, cEvenOdd, cBB);
-        if (nearLo.y > 0.5 && cBB.w > tileSize.y - ePx.y)
-          cCov += renderFill(tileEm + vec2(0.0, tileSize.y), patPx, cGD, cEvenOdd, cBB);
-        if (nearHi.y > 0.5 && cBB.y < ePx.y)
-          cCov += renderFill(tileEm - vec2(0.0, tileSize.y), patPx, cGD, cEvenOdd, cBB);
+
+        float cCov = 0.0;
+        for (int nb = 0; nb < 9; nb++) {
+          vec2 q = tileEm;
+          bool use = true;
+          if (nb == 1)      { use = nearLo.x > 0.5 && cBB.z > tileSize.x - cEPx.x; q = tileEm + vec2(tileSize.x, 0.0); }
+          else if (nb == 2) { use = nearHi.x > 0.5 && cBB.x < cEPx.x;               q = tileEm - vec2(tileSize.x, 0.0); }
+          else if (nb == 3) { use = nearLo.y > 0.5 && cBB.w > tileSize.y - cEPx.y; q = tileEm + vec2(0.0, tileSize.y); }
+          else if (nb == 4) { use = nearHi.y > 0.5 && cBB.y < cEPx.y;               q = tileEm - vec2(0.0, tileSize.y); }
+          else if (nb == 5) { use = nearLo.x > .5 && nearLo.y > .5 && cBB.z > tileSize.x - cEPx.x && cBB.w > tileSize.y - cEPx.y; q = tileEm + tileSize; }
+          else if (nb == 6) { use = nearLo.x > .5 && nearHi.y > .5 && cBB.z > tileSize.x - cEPx.x && cBB.y < cEPx.y; q = tileEm + vec2(tileSize.x, -tileSize.y); }
+          else if (nb == 7) { use = nearHi.x > .5 && nearLo.y > .5 && cBB.x < cEPx.x && cBB.w > tileSize.y - cEPx.y; q = tileEm + vec2(-tileSize.x, tileSize.y); }
+          else if (nb == 8) { use = nearHi.x > .5 && nearHi.y > .5 && cBB.x < cEPx.x && cBB.y < cEPx.y; q = tileEm - tileSize; }
+          if (use) {
+            float r = childFill(q, PATTERN_CHILD_PIXEL, cGD, cEvenOdd, cBB);
+            cCov = (nb == 0) ? r : cCov + r;
+          }
+        }
         cCov = clamp(cCov, 0.0, 1.0);
         if (cCov <= 0.0) continue;
 
-        vec4 cImg8 = texelFetch(uMetaTex, ivec2(MT_FILTER_BLEND, rowIdx), 0);
+        vec4 cImg8 = texelFetch(uMetaTex, metaAt(MT_FILTER_BLEND, rowIdx), 0);
         int cImgId = int(cImg8.w + 0.5);
         int cFillGradId = int(cGrad7.x + 0.5);
         vec4 paint;
         if (cImgId > 0) {
-          vec4 cImgRect = texelFetch(uMetaTex, ivec2(MT_IMAGE_RECT, rowIdx), 0);
-          vec4 cAtlas   = texelFetch(uMetaTex, ivec2(MT_ATLAS, rowIdx), 0);
-          paint = sampleChildImage(tileEm, cImgRect, cAtlas);
+          vec4 cImgRect = texelFetch(uMetaTex, metaAt(MT_IMAGE_RECT, rowIdx), 0);
+          vec4 cAtlas   = texelFetch(uMetaTex, metaAt(MT_ATLAS, rowIdx), 0);
+
+          paint = sampleMappedChildImage(tileEm, cImgRect, cAtlas, patDx, patDy, cFillGradId)
+                * texelFetch(uMetaTex, metaAt(MT_FILL, rowIdx), 0);
         }
-#ifndef MANTLE_NO_GRADIENT
+  #ifndef MANTLE_NO_GRADIENT
         else if (cFillGradId > 0) {
-          paint = sampleGradient(cFillGradId, tileEm, cBB);
+          paint = sampleGradient(cFillGradId, tileEm, cBB, patDx, patDy)
+                * texelFetch(uMetaTex, metaAt(MT_FILL, rowIdx), 0);
         }
-#endif
+  #endif
         else {
-          vec4 cFill  = texelFetch(uMetaTex, ivec2(MT_FILL, rowIdx), 0);
+          vec4 cFill  = texelFetch(uMetaTex, metaAt(MT_FILL, rowIdx), 0);
           paint = cFill;
         }
         float a = cCov * paint.a;
@@ -3309,53 +7234,118 @@ void main() {
         acc.a   = a      + acc.a   * (1.0 - a);
       }
     }
-    color = acc * fCov;
+    accMean = acc;
+    }
+    color = accMean * fCov * vec4(vFill.rgb * vFill.a, vFill.a);
+    }
   }
 #endif
 
 #ifndef MANTLE_NO_STROKE
-  if (vStrokeWidth > 0.0 && vStroke.a > 0.0) {
-#ifdef MANTLE_LB_COV
 
-    float strokeCov = texture(uStrokeCovTex, (gl_FragCoord.xy + uFragOrigin) / uLBCovTexSize).r;
+  vec4 vStroke = vec4(0.0);
+  if (!screenZero && vStrokeWidth > 0.0) {
+#ifdef MANTLE_COMPOSED
+    vStroke = uLBStroke;
 #else
-    int joinStyle = int(vCapJoin.y + 0.5);
-    float miterLimit = vCapJoin.z;
-    float halfW = vStrokeWidth * 0.5;
-
-    int endCapEnc = int(texelFetch(uMetaTex, ivec2(MT_PRIM, y), 0).z + 0.5);
-    int endCap = (endCapEnc == 0) ? startCap : (endCapEnc - 1);
-    float minD = strokeMinDist(emCoord, GD, vShapeBBox, halfW,
-                                   startCap, endCap,
-                                   joinStyle, miterLimit, dashId);
-
-    float pxSize = 0.5 * (ePx.x + ePx.y);
-    float halfWMin = 0.5 * pxSize;
-    float halfWVis = max(halfW, halfWMin);
-    float weightFade = halfW / halfWVis;
-    float distFromEdge = minD - halfWVis;
-
-    float strokeCov = 0.0;
-    if (distFromEdge <= 0.5 * pxSize) {
-      strokeCov = clamp(0.5 - distFromEdge / max(pxSize, 1e-6), 0.0, 1.0) * weightFade;
+    vStroke = texelFetch(uMetaTex, metaAt(MT_STROKE, y), 0);
+#endif
+    if ((vOverrideMask & 2) != 0) vStroke = vOverrideStroke;
+    vStroke *= vOverrideTint;
+#ifdef MANTLE_INSTANCED
+    vStroke = clamp(vStroke + vInstBias, 0.0, 1.0);
+#endif
+#ifndef MANTLE_NO_RECOLOR
+#ifndef MANTLE_NO_CHANNEL_LERP
+    if (uChannelLerpEnabled != 0) {
+      vec3 tint = vStroke.r * uChannelLerpPrimary.rgb
+                + vStroke.b * uChannelLerpContrast.rgb;
+      float k = clamp(vStroke.g + (1.0 - vStroke.a), 0.0, 1.0);
+      vStroke = vec4(mix(tint, uChannelLerpHighlight.rgb, k), vStroke.a);
     }
 #endif
+#ifndef MANTLE_NO_PALETTE
+    if (uPaletteEnabled != 0) {
+      float ch =
+          uPaletteChannel == 0 ? vStroke.r :
+          uPaletteChannel == 1 ? vStroke.g :
+          uPaletteChannel == 2 ? vStroke.b :
+                                 vStroke.a;
+      int idx = clamp(int(ch * float(uPaletteSize)),
+                      0, uPaletteSize - 1);
+      vec4 looked = texelFetch(uPalette, ivec2(idx, 0), 0);
+      vStroke.rgb = looked.rgb;
+    }
+#endif
+#ifndef MANTLE_NO_COLOR_MATRIX
+    if (uColorMatrixEnabled != 0) {
+      vStroke = clamp(uColorMatrix * vStroke + uColorMatrixOffset, 0.0, 1.0);
+    }
+#endif
+#endif
+  }
 
-    int vStrokeImageId = int(texelFetch(uMetaTex, ivec2(MT_PRIM, y), 0).w + 0.5);
+  if (!screenZero && vStrokeWidth > 0.0 && vStroke.a > 0.0) {
+    int joinStyle = int(vCapJoin.y + 0.5);
+    float miterLimit = vCapJoin.z;
+    strokeDashScale = nonScalingStroke ? 0.5 * (ePx.x + ePx.y) : 1.0;
+    float halfW = vStrokeWidth * 0.5;
+
+    int endCapEnc = int(t11.z + 0.5);
+    int endCap = (endCapEnc == 0) ? startCap : (endCapEnc - 1);
+
+    float minD;
+
+    vec2 strokeGrad = vec2(0.0);
+
+    vec4 edgeP = vec4(0.0), edgeQ = vec4(0.0), edgeN = vec4(1.0, 0.0, 0.0, 1.0);
+    float halfWS = halfW;
+    vec2 annHe = 0.5 * (vShapeBBox.zw - vShapeBBox.xy);
+    if (primKind == 4 && squareBB && dashId == 0) {
+      vec2 annQ = emCoord - 0.5 * (vShapeBBox.xy + vShapeBBox.zw);
+      float annR = min(annHe.x, annHe.y) - vStrokePad.x * 0.5;
+      float annL = length(annQ);
+      minD = abs(annL - annR);
+
+      strokeGrad = (annL > 1e-9) ? (annQ / annL) * sign(annL - annR) : vec2(0.0);
+    } else {
+
+      bool locSt = (flagsShape & FS_STROKE_LOCAL) != 0;
+      if (locSt) edgeN = texelFetch(uMetaTex, metaAt(MT_SOLID, y), 0);
+
+      minD = strokeWalk(emCoord, GD, vShapeBBox, locSt ? edgeN : vec4(0.0), locSt, halfW,
+                        startCap, endCap, joinStyle, miterLimit, dashId, strokeGrad,
+                        max(halfW - 0.5 * length(ePx), 0.0), strokeAaReachEm(halfW, ePx), ePx, true, edgeP, edgeQ);
+    }
+
+#ifdef MANTLE_STROKE_EXACT
+    float strokeCov = (uStrokeExactAa != 0 && edgeP.w > 0.0 && halfW >= 0.25 * (ePx.x + ePx.y))
+                      ? strokeExactCov(edgeP, edgeQ, halfWS, edgeN, ePx)
+                      : strokeEdgeCov(minD, halfW, strokeGrad, ePx, uStrokeExactAa != 0);
+#else
+    float strokeCov = strokeEdgeCov(minD, halfW, strokeGrad, ePx, uStrokeExactAa != 0);
+#endif
+
+    int vStrokeImageId = int(t11.w + 0.5);
     vec4 strokePaint;
     if (vStrokeImageId > 0) {
-#ifdef MANTLE_LB_COV
+#ifdef MANTLE_COMPOSED
       vec4 vImgRect = uLBImageRect;
 #else
-      vec4 vImgRect = texelFetch(uMetaTex, ivec2(MT_IMAGE_RECT, y), 0);
+      vec4 vImgRect = texelFetch(uMetaTex, metaAt(MT_IMAGE_RECT, y), 0);
 #endif
-      vec4 vAtlas10 = texelFetch(uMetaTex, ivec2(MT_ATLAS, y), 0);
-      vec4 imgCol = sampleTopLevelImage(emCoord, vImgRect, vAtlas10);
+#ifndef MANTLE_NO_PATTERN
+      vec4 vAtlas10 = vAtlasSlot;
+#else
+      vec4 vAtlas10 = texelFetch(uMetaTex, metaAt(MT_ATLAS, y), 0);
+#endif
+      vec4 imgCol = sampleMappedTopLevelImage(emCoord, vImgRect, vAtlas10, emDx, emDy, vStrokeGradId);
 
       strokePaint = imgCol * vStroke;
 #ifndef MANTLE_NO_GRADIENT
-    } else if (vStrokeGradId > 0) {
-      strokePaint = sampleGradient(vStrokeGradId, emCoord, vShapeBBox) * vStroke;
+    } else if (vStrokeGradId > 0 && strokeCov != 0.0) {
+
+      strokePaint = sampleGradient(vStrokeGradId, emCoord, vShapeBBox, emDx, emDy) * vStroke;
 #endif
     } else {
       strokePaint = vStroke;
@@ -3366,125 +7356,84 @@ void main() {
   }
 #endif
 
-  vec4 vMeta7m = texelFetch(uMetaTex, ivec2(MT_PAINT_ID, y), 0);
 #ifndef MANTLE_NO_CLIP
-  int clipId = int(vMeta7m.z + 0.5);
-  if (clipId > 0) {
-    int firstRow = clipId - 1;
-    vec2 pxInv = 1.0 / max(ePx, vec2(1e-6));
-    vec4 fcap = texelFetch(uMetaTex, ivec2(MT_CAP_JOIN, firstRow), 0);
-    int fflags = int(fcap.w + 0.5);
-    bool multiClip = (fflags & 2048) != 0;
-    float clipCov;
-    if (multiClip) {
+  int clipId = int(vMeta7.z + 0.5);
 
-      float acc = 0.0;
-      const int kMaxClipChildren = 16;
-      for (int k = 0; k < kMaxClipChildren; k++) {
-        int cRow = firstRow + k;
-        vec4 ccap = texelFetch(uMetaTex, ivec2(MT_CAP_JOIN, cRow), 0);
-        int cflags = int(ccap.w + 0.5);
-        if ((cflags & 256) == 0) break;
-        vec4 cBB    = texelFetch(uMetaTex, ivec2(MT_BBOX, cRow), 0);
-        vec4 cGlyph = texelFetch(uMetaTex, ivec2(MT_GLYPH_BAND, cRow), 0);
-        vec4 cStrokePad = texelFetch(uMetaTex, ivec2(MT_STROKE_PARAMS, cRow), 0);
-        bool cEvenOdd = cStrokePad.y > 0.5;
-        ivec4 cGD = ivec4(int(cGlyph.x), int(cGlyph.y),
-                          int(cGlyph.z), int(cGlyph.w));
-        vec2 localCoord = transformClipCoord(emCoord, cRow);
-        float c = renderFill(localCoord, pxInv, cGD, cEvenOdd, cBB);
+  if (clipId > 0 && !screenZero && any(notEqual(color, vec4(0.0)))) {
 
-        vec4 cMeta7 = texelFetch(uMetaTex, ivec2(MT_PAINT_ID, cRow), 0);
-        int innerClipId = int(cMeta7.z + 0.5);
-        if (innerClipId > 0) {
-          c *= evalClipCoverageAtRow(emCoord, pxInv, innerClipId - 1);
-        }
-        acc = max(acc, c);
-        if ((cflags & 4096) != 0) break;
-      }
-      clipCov = clamp(acc, 0.0, 1.0);
-    } else {
-
-      vec4 cBB    = texelFetch(uMetaTex, ivec2(MT_BBOX, firstRow), 0);
-      vec4 cGlyph = texelFetch(uMetaTex, ivec2(MT_GLYPH_BAND, firstRow), 0);
-      vec4 cStrokePad = texelFetch(uMetaTex, ivec2(MT_STROKE_PARAMS, firstRow), 0);
-      bool cEvenOdd = cStrokePad.y > 0.5;
-      ivec4 cGD = ivec4(int(cGlyph.x), int(cGlyph.y),
-                        int(cGlyph.z), int(cGlyph.w));
-      vec2 localCoord = transformClipCoord(emCoord, firstRow);
-      clipCov = renderFill(localCoord, pxInv, cGD, cEvenOdd, cBB);
-      vec4 cMeta7 = texelFetch(uMetaTex, ivec2(MT_PAINT_ID, firstRow), 0);
-      int innerClipId = int(cMeta7.z + 0.5);
-      if (innerClipId > 0) {
-        clipCov *= evalClipCoverageAtRow(emCoord, pxInv, innerClipId - 1);
-      }
-    }
-    color *= clipCov;
+    color *= evalClipCoverage(emCoord, invPx, clipId - 1);
   }
 #endif
 #ifndef MANTLE_NO_MASK
-  int maskId = int(vMeta7m.w + 0.5);
+  int maskId = int(vMeta7.w + 0.5);
   if (maskId > 0) {
     int firstRow = maskId - 1;
 
-    vec4 firstCap = texelFetch(uMetaTex, ivec2(MT_CAP_JOIN, firstRow), 0);
+    vec4 firstCap = texelFetch(uMetaTex, metaAt(MT_CAP_JOIN, firstRow), 0);
     int firstFlags = int(firstCap.w + 0.5);
     bool isMultiShape = (firstFlags & 512) != 0;
     if (!isMultiShape) {
 
-      vec2 pxInvM = 1.0 / max(ePx, vec2(1e-6));
-      vec4 mBB    = texelFetch(uMetaTex, ivec2(MT_BBOX, firstRow), 0);
-      vec4 mFill  = texelFetch(uMetaTex, ivec2(MT_FILL, firstRow), 0);
-      vec4 mGlyph = texelFetch(uMetaTex, ivec2(MT_GLYPH_BAND, firstRow), 0);
-      vec4 mStrokePad = texelFetch(uMetaTex, ivec2(MT_STROKE_PARAMS, firstRow), 0);
-      vec4 mIso = texelFetch(uMetaTex, ivec2(MT_FILTER_BLEND, firstRow), 0);
-      int mIsLum = int(mIso.z + 0.5);
-      ivec4 mGD = ivec4(int(mGlyph.x), int(mGlyph.y),
-                        int(mGlyph.z), int(mGlyph.w));
-      bool mEvenOdd = mStrokePad.y > 0.5;
+      if (!screenZero && any(notEqual(color, vec4(0.0)))) {
 
-      vec2 mLocal = transformClipCoord(emCoord, firstRow);
-      float mCov = renderFill(mLocal, pxInvM, mGD, mEvenOdd, mBB);
+        vec4 mFill  = texelFetch(uMetaTex, metaAt(MT_FILL, firstRow), 0);
+        vec4 mIso = texelFetch(uMetaTex, metaAt(MT_FILTER_BLEND, firstRow), 0);
+        int mIsLum = int(mIso.z + 0.5);
+        float w = (mIsLum != 0)
+          ? dot(mFill.rgb, vec3(0.2126, 0.7152, 0.0722)) * mFill.a
+          : mFill.a;
+        float mCov = 0.0;
+        if (w != 0.0) {
+          vec4 mBB    = texelFetch(uMetaTex, metaAt(MT_BBOX, firstRow), 0);
+          vec4 mGlyph = texelFetch(uMetaTex, metaAt(MT_GLYPH_BAND, firstRow), 0);
+          vec4 mStrokePad = texelFetch(uMetaTex, metaAt(MT_STROKE_PARAMS, firstRow), 0);
+          ivec4 mGD = ivec4(int(mGlyph.x), int(mGlyph.y),
+                            int(mGlyph.z), int(mGlyph.w));
+          bool mEvenOdd = mStrokePad.y > 0.5;
 
-      vec4 mMeta7 = texelFetch(uMetaTex, ivec2(MT_PAINT_ID, firstRow), 0);
-      int innerClipId = int(mMeta7.z + 0.5);
-      if (innerClipId > 0) {
-        mCov *= evalClipCoverageAtRow(emCoord, pxInvM, innerClipId - 1);
+          vec2 mLocal = transformClipCoord(emCoord, firstRow);
+#ifdef MANTLE_ROTATED_MAP
+          vec2 mMx = slMx, mMy = slMy;
+          childMap(firstRow, mMx, mMy);
+          mCov = childFill(mLocal, mMx, mMy, mGD, mEvenOdd, mBB);
+#else
+          mCov = childFill(mLocal, transformClipPx(invPx, firstRow), mGD, mEvenOdd, mBB);
+#endif
+
+          if (mCov > 0.0) {
+            vec4 mMeta7 = texelFetch(uMetaTex, metaAt(MT_PAINT_ID, firstRow), 0);
+            int innerClipId = int(mMeta7.z + 0.5);
+            if (innerClipId > 0) {
+              mCov *= evalClipCoverage(emCoord, invPx, innerClipId - 1);
+            }
+          }
+        }
+        color *= mCov * w;
       }
-      float w = (mIsLum != 0)
-        ? dot(mFill.rgb, vec3(0.2126, 0.7152, 0.0722)) * mFill.a
-        : mFill.a;
-      color *= mCov * w;
-    } else if (uHasOffscreenMask != 0) {
+    } else if (uHasOffscreenMask != 0 && !ovMoved) {
 
-      int layer = texelFetch(uMaskRowToLayerTex, ivec2(MRL_ROW, firstRow), 0).r;
+      int layer = texelFetch(uMaskRowToLayerTex, mrlAt(MRL_ROW, firstRow), 0).r;
       if (layer >= 0) {
         vec2 muv = (gl_FragCoord.xy + uFragOrigin) / uViewportSize;
         float maskA = texture(uMaskRTArray, vec3(muv, float(layer))).r;
         color *= clamp(maskA, 0.0, 1.0);
       }
-    } else {
+    } else if (!screenZero) {
 
       vec4 acc = vec4(0.0);
-      const int kMaxMaskChildren = 8;
-      for (int k = 0; k < kMaxMaskChildren; k++) {
+      int maskRows = metaRowsOf(textureSize(uMetaTex, 0));
+      for (int k = 0; firstRow + k < maskRows; k++) {
         int cRow = firstRow + k;
-        vec4 cCap = texelFetch(uMetaTex, ivec2(MT_CAP_JOIN, cRow), 0);
+        vec4 cCap = texelFetch(uMetaTex, metaAt(MT_CAP_JOIN, cRow), 0);
         int cFlags = int(cCap.w + 0.5);
         if ((cFlags & 256) == 0) break;
-        vec4 cBB     = texelFetch(uMetaTex, ivec2(MT_BBOX, cRow), 0);
-        vec4 cFill   = texelFetch(uMetaTex, ivec2(MT_FILL, cRow), 0);
-        vec4 cStroke = texelFetch(uMetaTex, ivec2(MT_STROKE, cRow), 0);
-        vec4 cGlyph  = texelFetch(uMetaTex, ivec2(MT_GLYPH_BAND, cRow), 0);
-        vec4 cStrokePad = texelFetch(uMetaTex, ivec2(MT_STROKE_PARAMS, cRow), 0);
-        vec4 cGrad7  = texelFetch(uMetaTex, ivec2(MT_PAINT_ID, cRow), 0);
-        vec4 cIso    = texelFetch(uMetaTex, ivec2(MT_FILTER_BLEND, cRow), 0);
-        vec4 cImgRect = texelFetch(uMetaTex, ivec2(MT_IMAGE_RECT, cRow), 0);
-        vec4 cAtlas   = texelFetch(uMetaTex, ivec2(MT_ATLAS, cRow), 0);
-        int cIsLum  = int(cIso.z + 0.5);
-        int cFillGradId   = int(cGrad7.x + 0.5);
+
+        vec4 cBB     = texelFetch(uMetaTex, metaAt(MT_BBOX, cRow), 0);
+        vec4 cStroke = texelFetch(uMetaTex, metaAt(MT_STROKE, cRow), 0);
+        vec4 cGlyph  = texelFetch(uMetaTex, metaAt(MT_GLYPH_BAND, cRow), 0);
+        vec4 cStrokePad = texelFetch(uMetaTex, metaAt(MT_STROKE_PARAMS, cRow), 0);
+        vec4 cGrad7  = texelFetch(uMetaTex, metaAt(MT_PAINT_ID, cRow), 0);
         int cStrokeGradId = int(cGrad7.y + 0.5);
-        int cImgId  = int(cIso.w + 0.5);
         float cSW   = cStrokePad.x;
         ivec4 cGD = ivec4(int(cGlyph.x), int(cGlyph.y),
                           int(cGlyph.z), int(cGlyph.w));
@@ -3492,57 +7441,83 @@ void main() {
 
         vec2 cLocal = transformClipCoord(emCoord, cRow);
         float cCov;
-        vec4 cPaint;
 
-        if (cSW > 0.0 && (cStroke.a > 0.0 || cStrokeGradId > 0)) {
+#ifdef MANTLE_NO_STROKE
+        const bool cIsStroke = false;
+#else
+        bool cIsStroke = cSW > 0.0 && (cStroke.a > 0.0 || cStrokeGradId > 0);
+#endif
+        if (cIsStroke) {
 
           int cDashId = int(cStrokePad.w + 0.5);
-          float halfW = cSW * 0.5;
+          vec2 cEPx = transformClipEPx(emDx, emDy, cRow);
+          strokeDashScale = (cFlags & 1) != 0 ? 0.5 * (cEPx.x + cEPx.y) : 1.0;
+          float halfW = cSW * 0.5 * strokeWidthMultiplier(cFlags, cEPx);
           int startCapM  = int(cCap.x + 0.5);
           int joinStyle = int(cCap.y + 0.5);
           float miterLim = cCap.z;
-          int endCapMEnc = int(texelFetch(uMetaTex, ivec2(MT_PRIM, cRow), 0).z + 0.5);
+          int endCapMEnc = int(texelFetch(uMetaTex, metaAt(MT_PRIM, cRow), 0).z + 0.5);
           int endCapM = (endCapMEnc == 0) ? startCapM : (endCapMEnc - 1);
-          float minD = strokeMinDist(cLocal, cGD, cBB, halfW,
-                                         startCapM, endCapM,
-                                         joinStyle, miterLim, cDashId);
-          float pxSize = 0.5 * (ePx.x + ePx.y);
-          float halfWMin = 0.5 * pxSize;
-          float halfWVis = max(halfW, halfWMin);
-          float weightFade = halfW / halfWVis;
-          float distFromEdge = minD - halfWVis;
-          cCov = (distFromEdge <= 0.5 * pxSize)
-            ? clamp(0.5 - distFromEdge / max(pxSize, 1e-6), 0.0, 1.0) * weightFade
-            : 0.0;
-#ifndef MANTLE_NO_GRADIENT
-          cPaint = (cStrokeGradId > 0)
-            ? sampleGradient(cStrokeGradId, cLocal, cBB)
-            : cStroke;
-#else
-          cPaint = cStroke;
-#endif
+          vec2 _sgDummy; vec4 _seDP, _seDQ;
+          float minD;
+
+          bool cLocalSt = (cFlags & FS_STROKE_LOCAL) != 0;
+          vec4 cStN = vec4(0.0);
+          if (cLocalSt) cStN = texelFetch(uMetaTex, metaAt(MT_SOLID, cRow), 0);
+          minD = strokeWalk(cLocal, cGD, cBB, cStN, cLocalSt, halfW,
+                            startCapM, endCapM, joinStyle, miterLim, cDashId, _sgDummy,
+                            -1e20, strokeAaReachEm(halfW, cEPx), cEPx, false, _seDP, _seDQ);
+          cCov = strokeEdgeCov(minD, halfW, vec2(0.0), cEPx, false);
         } else {
-          cCov = renderFill(cLocal, 1.0/max(ePx,vec2(1e-6)), cGD, cEvenOdd, cBB);
-          if (cImgId > 0) {
-            cPaint = sampleChildImage(cLocal, cImgRect, cAtlas);
-          }
-#ifndef MANTLE_NO_GRADIENT
-          else if (cFillGradId > 0) {
-            cPaint = sampleGradient(cFillGradId, cLocal, cBB);
-          }
+#ifdef MANTLE_ROTATED_MAP
+          vec2 cMx = slMx, cMy = slMy;
+          childMap(cRow, cMx, cMy);
+          cCov = childFill(cLocal, cMx, cMy, cGD, cEvenOdd, cBB);
+#else
+          cCov = childFill(cLocal, transformClipPx(invPx, cRow), cGD, cEvenOdd, cBB);
 #endif
-          else {
-            cPaint = cFill;
-          }
+        }
+
+        if (cCov > 0.0) {
+          int cClipId = int(cGrad7.z + 0.5);
+          if (cClipId > 0) cCov *= evalClipCoverage(emCoord, invPx, cClipId - 1);
         }
         if (cCov > 0.0) {
-          float weight = (cIsLum != 0)
-            ? dot(cPaint.rgb, vec3(0.2126, 0.7152, 0.0722)) * cPaint.a
-            : cPaint.a;
-          float a = cCov * weight;
+          vec4 cIso    = texelFetch(uMetaTex, metaAt(MT_FILTER_BLEND, cRow), 0);
+          int cIsLum  = int(cIso.z + 0.5);
+          vec2 cLocDx = transformClipDir(emDx, cRow), cLocDy = transformClipDir(emDy, cRow);
+          vec4 cPaint;
+          if (cIsStroke) {
+#ifndef MANTLE_NO_GRADIENT
+            cPaint = (cStrokeGradId > 0)
+              ? sampleGradient(cStrokeGradId, cLocal, cBB, cLocDx, cLocDy) * cStroke
+              : cStroke;
+#else
+            cPaint = cStroke;
+#endif
+          } else {
+            int cFillGradId   = int(cGrad7.x + 0.5);
+            int cImgId  = int(cIso.w + 0.5);
+            vec4 cFill  = texelFetch(uMetaTex, metaAt(MT_FILL, cRow), 0);
+            if (cImgId > 0) {
+              vec4 cImgRect = texelFetch(uMetaTex, metaAt(MT_IMAGE_RECT, cRow), 0);
+              vec4 cAtlas   = texelFetch(uMetaTex, metaAt(MT_ATLAS, cRow), 0);
+              cPaint = sampleMappedChildImage(cLocal, cImgRect, cAtlas, cLocDx, cLocDy, cFillGradId) * cFill;
+            }
+#ifndef MANTLE_NO_GRADIENT
+            else if (cFillGradId > 0) {
+              cPaint = sampleGradient(cFillGradId, cLocal, cBB, cLocDx, cLocDy) * cFill;
+            }
+#endif
+            else {
+              cPaint = cFill;
+            }
+          }
 
-          acc.rgb = vec3(a) + acc.rgb * (1.0 - a);
-          acc.a   = a      + acc.a   * (1.0 - a);
+          float a = cCov * cPaint.a;
+          float v = (cIsLum != 0) ? dot(cPaint.rgb, vec3(0.2126, 0.7152, 0.0722)) * a : a;
+          acc.rgb = vec3(v) + acc.rgb * (1.0 - a);
+          acc.a   = v      + acc.a   * (1.0 - a);
         }
         if ((cFlags & 1024) != 0) break;
       }
@@ -3561,7 +7536,16 @@ void main() {
 #endif
 #ifndef MANTLE_NO_FILTER
   color = applyFilterPre(vFilterId, color);
+  if (uFilterCoverageScale > 0.0) color *= uFilterCoverageScale;
 #endif
+
+#if defined(MANTLE_AAC) && (!defined(MANTLE_LB_FILL) || defined(MANTLE_COVER_PAINT_ONLY)) && !defined(MANTLE_NO_COVER_FILL)
+  if (color.a < 0.5/255.0) discard;
+#elif defined(MANTLE_CPATCH_QUADRATIC_AREA_ONLY)
+
+  if (color.a < 0.5/255.0) discard;
+#else
   if (color.a < 1.0/255.0) discard;
+#endif
   fragColor = color;
 }

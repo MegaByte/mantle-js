@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // textSmallScaleDilationSmoke.mjs — small-scaled text keeps its cover-quad
 // AA band.
 //
@@ -13,11 +16,12 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { fontFixture, requireAsset } from './_assets.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MROOT = path.resolve(__dirname, '..');
-const fontB64 = readFileSync(new URL('./font/fixtures/roboto-regular.ttf', import.meta.url)).toString('base64');
+const fontB64 = readFileSync(requireAsset(fontFixture('roboto-regular.ttf'))).toString('base64');
 
 const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="1179" height="679"></canvas>
 <script type="module">
@@ -41,37 +45,69 @@ window.__ready = true;
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/') { res.writeHead(200, {'content-type':'text/html'}); res.end(HTML); return; }
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(HTML);
+    return;
+  }
   let p = decodeURIComponent(req.url.split('?')[0]);
   const ct = p.endsWith('.glsl') ? 'text/plain' : 'text/javascript';
-  try { res.writeHead(200, {'content-type':ct}); res.end(readFileSync(path.join(MROOT, p))); }
-  catch { if (!res.headersSent) res.writeHead(404); res.end(); }
+  try {
+    res.writeHead(200, { 'content-type': ct });
+    res.end(readFileSync(path.join(MROOT, p)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 let failures = 0;
 const ok = (m) => console.log('ok ' + m);
-const fail = (m) => { failures++; console.error('FAIL: ' + m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL: ' + m);
+};
 
 // Prefer real GPU (the cull is driver-specific); falls back to swiftshader.
-const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--use-angle=metal', '--enable-unsafe-swiftshader'] });
+const browser = await launchBrowser({
+  headless: 'new',
+  args: ['--no-sandbox', '--use-angle=metal', '--enable-unsafe-swiftshader'],
+});
 const page = await browser.newPage();
-page.on('pageerror', e => console.error('  [page-err]', e.message));
+page.on('pageerror', (e) => console.error('  [page-err]', e.message));
 try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 30000 });
-  const got = await page.waitForFunction('window.__ready === true', { timeout: 30000 }).then(()=>1).catch(()=>0);
-  if (!got) { fail('page did not become ready'); }
-  else {
+  const got = await page
+    .waitForFunction('window.__ready === true', { timeout: 30000, polling: 100 })
+    .then(() => 1)
+    .catch(() => 0);
+  if (!got) {
+    fail('page did not become ready');
+  } else {
     const o = await page.evaluate('window.__out');
-    console.log('renderer:', o.renderer, '| center ink px:', o.center, '| top-right ink px:', o.topRight);
-    if (o.center > 100) ok('small-scale text renders centered'); else fail('centered small text starved: ' + o.center);
-    if (o.topRight > 100) ok('small-scale text renders flush top-right (cover quad not starved at edge)');
+    console.log(
+      'renderer:',
+      o.renderer,
+      '| center ink px:',
+      o.center,
+      '| top-right ink px:',
+      o.topRight,
+    );
+    if (o.center > 100) ok('small-scale text renders centered');
+    else fail('centered small text starved: ' + o.center);
+    if (o.topRight > 100)
+      ok('small-scale text renders flush top-right (cover quad not starved at edge)');
     else fail('flush-right small text vanished/starved: ' + o.topRight);
     // The two placements are the same glyphs at the same scale → similar coverage.
-    if (o.topRight > o.center * 0.6) ok('right-edge coverage comparable to center (no edge starvation)');
+    if (o.topRight > o.center * 0.6)
+      ok('right-edge coverage comparable to center (no edge starvation)');
     else fail('right-edge coverage much lower than center: ' + o.topRight + ' vs ' + o.center);
   }
-} finally { await browser.close(); server.close(); }
+} finally {
+  await browser.close();
+  server.close();
+}
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nTEXT-SMALL-SCALE-DILATION PASS');
 process.exit(failures ? 1 : 0);

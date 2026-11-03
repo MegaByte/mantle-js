@@ -1,11 +1,14 @@
-// Exercises the segment-segment intersection dispatcher across EVERY
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// Exercises the segment-segment intersection dispatcher across every
 // supported type-pair, with emphasis on the curve/curve and arc kernels
 // (quad/quad, quad/cubic, cubic/cubic, line/arc, quad/arc, cubic/arc,
 // arc/arc).
 //
 // Three layers of verification:
 //   (1) Direct dispatcher: call intersectSegments() on every pair in
-//       BOTH argument orders. Assert it never throws, returns params
+//       both argument orders. Assert it never throws, returns params
 //       in [0,1], points that actually lie on both segments, and that
 //       swapping arguments swaps (tA,tB) symmetrically (same count).
 //   (2) Mid-pipeline: feed curved + arc shapes through intersectAndSplit
@@ -19,37 +22,61 @@ import { intersectAndSplit } from '../src/svg/pathBoolean/planar/segmentSet.js';
 import { subdivideYMonotone } from '../src/svg/pathBoolean/subdivide.js';
 import { unionPaths } from '../src/svg/pathBoolean/union.js';
 import {
-  mkLine, mkQuad, mkCubic, mkArc, segStart, segEnd,
-  SEG_LINE, SEG_QUAD, SEG_CUBIC, SEG_ARC,
+  mkLine,
+  mkQuad,
+  mkCubic,
+  mkArc,
+  segStart,
+  segEnd,
+  SEG_LINE,
+  SEG_QUAD,
+  SEG_CUBIC,
+  SEG_ARC,
 } from '../src/svg/segment.js';
 
 let failures = 0;
 const ok = (m) => console.log('ok  ', m);
-const fail = (m) => { failures++; console.error('FAIL', m); };
+const fail = (m) => {
+  failures++;
+  console.error('FAIL', m);
+};
 
 // ---- geometric evaluators (independent of the kernels) so we can
 //      double-check that a returned (t, point) actually lies on the seg.
 function evalSeg(seg, t) {
   if (seg.type === SEG_LINE) {
-    return [seg.p1[0] + t * (seg.p2[0] - seg.p1[0]),
-            seg.p1[1] + t * (seg.p2[1] - seg.p1[1])];
+    return [seg.p1[0] + t * (seg.p2[0] - seg.p1[0]), seg.p1[1] + t * (seg.p2[1] - seg.p1[1])];
   }
   if (seg.type === SEG_QUAD) {
     const u = 1 - t;
-    return [u*u*seg.p1[0] + 2*u*t*seg.p2[0] + t*t*seg.p3[0],
-            u*u*seg.p1[1] + 2*u*t*seg.p2[1] + t*t*seg.p3[1]];
+    return [
+      u * u * seg.p1[0] + 2 * u * t * seg.p2[0] + t * t * seg.p3[0],
+      u * u * seg.p1[1] + 2 * u * t * seg.p2[1] + t * t * seg.p3[1],
+    ];
   }
   if (seg.type === SEG_CUBIC) {
     const u = 1 - t;
-    return [u*u*u*seg.p1[0] + 3*u*u*t*seg.p2[0] + 3*u*t*t*seg.p3[0] + t*t*t*seg.p4[0],
-            u*u*u*seg.p1[1] + 3*u*u*t*seg.p2[1] + 3*u*t*t*seg.p3[1] + t*t*t*seg.p4[1]];
+    return [
+      u * u * u * seg.p1[0] +
+        3 * u * u * t * seg.p2[0] +
+        3 * u * t * t * seg.p3[0] +
+        t * t * t * seg.p4[0],
+      u * u * u * seg.p1[1] +
+        3 * u * u * t * seg.p2[1] +
+        3 * u * t * t * seg.p3[1] +
+        t * t * t * seg.p4[1],
+    ];
   }
   if (seg.type === SEG_ARC) {
     const th = seg.theta_start + t * (seg.theta_end - seg.theta_start);
-    const cp = Math.cos(seg.phi), sp = Math.sin(seg.phi);
-    const ct = Math.cos(th), st = Math.sin(th);
-    return [seg.cx + cp*seg.rx*ct - sp*seg.ry*st,
-            seg.cy + sp*seg.rx*ct + cp*seg.ry*st];
+    const cp = Math.cos(seg.phi),
+      sp = Math.sin(seg.phi);
+    const ct = Math.cos(th),
+      st = Math.sin(th);
+    return [
+      seg.cx + cp * seg.rx * ct - sp * seg.ry * st,
+      seg.cy + sp * seg.rx * ct + cp * seg.ry * st,
+    ];
   }
   return [NaN, NaN];
 }
@@ -57,27 +84,27 @@ function evalSeg(seg, t) {
 // ---- build one representative of each type that all cross near (10,0) ----
 // A horizontal-ish line, an up-bump quad, a down-bump quad, an S-cubic, an
 // inverted-S cubic, and two distinct circles (as full arcs via mkArc).
-const L  = mkLine([0, 0], [20, 0]);
+const L = mkLine([0, 0], [20, 0]);
 const L2 = mkLine([0, -8], [20, 8]);
 const Qup = mkQuad([0, 0], [10, 16], [20, 0]);
 const Qdn = mkQuad([0, 4], [10, -16], [20, 4]);
-const Cs  = mkCubic([0, -6], [7, 14], [13, -14], [20, 6]);
+const Cs = mkCubic([0, -6], [7, 14], [13, -14], [20, 6]);
 const Cs2 = mkCubic([0, 6], [7, -14], [13, 14], [20, -6]);
 // Circle A center (4,0) r=10, circle B center (16,0) r=10 → cross at x=10, y=±√(100-36)=±8.
 const ArcA = mkArc(4, 0, 10, 10, 0, 1.999 * Math.PI, 0, 1, 1);
 const ArcB = mkArc(16, 0, 10, 10, 0, 1.999 * Math.PI, 0, 1, 1);
 
 const PAIRS = [
-  ['line/line',   L,   L2 ],
-  ['line/quad',   L,   Qup],
-  ['line/cubic',  L,   Cs ],
-  ['line/arc',    L2,  ArcA],
-  ['quad/quad',   Qup, Qdn],
-  ['quad/cubic',  Qup, Cs2],
-  ['quad/arc',    Qup, ArcA],
-  ['cubic/cubic', Cs,  Cs2],
-  ['cubic/arc',   Cs,  ArcA],
-  ['arc/arc',     ArcA, ArcB],
+  ['line/line', L, L2],
+  ['line/quad', L, Qup],
+  ['line/cubic', L, Cs],
+  ['line/arc', L2, ArcA],
+  ['quad/quad', Qup, Qdn],
+  ['quad/cubic', Qup, Cs2],
+  ['quad/arc', Qup, ArcA],
+  ['cubic/cubic', Cs, Cs2],
+  ['cubic/arc', Cs, ArcA],
+  ['arc/arc', ArcA, ArcB],
 ];
 
 console.log('--- layer 1: direct dispatcher, every supported pair ---');
@@ -103,7 +130,7 @@ for (const [name, a, b] of PAIRS) {
   if (r.length > 0) anyHadHits = true;
 
   // Validate each hit: params in [0,1] and the reported point sits on
-  // BOTH segments to a generous geometric tolerance.
+  // both segments to a generous geometric tolerance.
   let bad = 0;
   for (const h of r) {
     if (!(h.tA >= -1e-6 && h.tA <= 1 + 1e-6)) bad++;
@@ -117,8 +144,7 @@ for (const [name, a, b] of PAIRS) {
   // Swap symmetry: tA<->tB must match within tolerance for the same set.
   if (bad === 0)
     ok(`${name}: ${r.length} hit(s), params in range, points on both segs, order-symmetric`);
-  else
-    fail(`${name}: ${bad} validation problem(s) across ${r.length} hit(s)`);
+  else fail(`${name}: ${bad} validation problem(s) across ${r.length} hit(s)`);
 }
 if (!anyHadHits) fail('no pair produced any intersection — geometry is degenerate');
 else ok('curve/arc pairs produced real crossings (kernels actually ran)');
@@ -155,7 +181,9 @@ try {
 if (split.length > mixed.length)
   ok(`crossings split geometry (${split.length} > ${mixed.length}) — kernels fed the splitter`);
 else
-  fail(`no splitting occurred (${split.length} <= ${mixed.length}) — kernels produced no interior hits`);
+  fail(
+    `no splitting occurred (${split.length} <= ${mixed.length}) — kernels produced no interior hits`,
+  );
 
 console.log('\n--- layer 3: full unionPaths over overlapping curved shapes ---');
 // Two closed lens/leaf shapes made of two quads each, overlapping so their
@@ -187,7 +215,10 @@ if (sil.length > 0) {
     let matched = false;
     for (const t of sil) {
       const st = segStart(t);
-      if (Math.hypot(st[0] - e[0], st[1] - e[1]) < 1e-3) { matched = true; break; }
+      if (Math.hypot(st[0] - e[0], st[1] - e[1]) < 1e-3) {
+        matched = true;
+        break;
+      }
     }
     if (!matched) openEnds++;
   }

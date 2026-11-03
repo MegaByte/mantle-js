@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 120">
+  <defs>
+    <pattern id="p" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="rotate(20)">
+      <path d="M0 10 Q 5 0 10 10 T 20 10" fill="none" stroke="#7a3fb0" stroke-width="2"/>
+      <circle cx="10" cy="15" r="3" fill="#e0a526"/>
+    </pattern>
+  </defs>
+  <path d="M10 10 C 60 -10, 140 30, 190 10 L 190 110 Q 100 90 10 110 Z" fill="url(#p)" stroke="#333" stroke-width="2"/>
+</svg>

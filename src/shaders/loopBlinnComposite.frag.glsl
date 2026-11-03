@@ -1,9 +1,7 @@
 #version 300 es
-// loopBlinnComposite.frag.glsl — multiply paint by the Loop-Blinn coverage
-// and emit premultiplied color for OVER compositing (blendFunc ONE,
-// ONE_MINUS_SRC_ALPHA). uColor is straight (non-premultiplied) RGBA; we
-// premultiply here after scaling alpha by coverage. Single coverage sample;
-// the coverage buffer already carries the analytic AA + additive union.
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 precision highp float;
 in vec2 vUv;
 uniform sampler2D uCoverage;

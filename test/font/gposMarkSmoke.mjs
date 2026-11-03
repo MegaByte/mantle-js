@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // GPOS lookup types 3/4/6 reader coverage. Verifies the cursive,
 // mark-to-base, and mark-to-mark readers return well-formed anchor
 // offsets when paired with a real Arabic font.
@@ -6,28 +9,36 @@ import { readFileSync } from 'fs';
 import { MantleFontAsset } from '../../src/font/fontAsset.js';
 
 const font = new MantleFontAsset(
-  new Uint8Array(readFileSync('/System/Library/Fonts/SFArabic.ttf'))
+  new Uint8Array(readFileSync('/System/Library/Fonts/SFArabic.ttf')),
 );
 font.getMetrics(0x41);
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 const gpos = font.gpos;
 
 // ----- T1: capability bits ------------------------------------------
 {
-  console.log(`hasCursive=${gpos.hasCursive} hasMarkBase=${gpos.hasMarkBase} hasMarkMark=${gpos.hasMarkMark}`);
+  console.log(
+    `hasCursive=${gpos.hasCursive} hasMarkBase=${gpos.hasMarkBase} hasMarkMark=${gpos.hasMarkMark}`,
+  );
   if (!gpos.hasMarkBase) fail('T1 SFArabic should have mark-to-base');
-  else ok(`T1 SFArabic capability bits: mark=${gpos.hasMarkBase}, mkmk=${gpos.hasMarkMark}, curs=${gpos.hasCursive}`);
+  else
+    ok(
+      `T1 SFArabic capability bits: mark=${gpos.hasMarkBase}, mkmk=${gpos.hasMarkMark}, curs=${gpos.hasCursive}`,
+    );
 }
 
 // ----- T2: mark-to-base — base letter beh (0x0628) + fatha (0x064E)
 //          should yield an anchor offset (the fatha sits above beh).
 {
   const baseGid = font.codepointToGlyphId(0x0628);
-  const markGid = font.codepointToGlyphId(0x064E);
+  const markGid = font.codepointToGlyphId(0x064e);
   if (!baseGid || !markGid) {
     fail(`T2 missing gids: beh=${baseGid} fatha=${markGid}`);
   } else {
@@ -45,8 +56,8 @@ const gpos = font.gpos;
 {
   // A (0x41) probably has no gid OR has gid but won't be in mark
   // coverage. Either way, no attachment.
-  const baseGid = font.codepointToGlyphId(0x41) || 1;  // .notdef fallback
-  const markGid = font.codepointToGlyphId(0x064E);
+  const baseGid = font.codepointToGlyphId(0x41) || 1; // .notdef fallback
+  const markGid = font.codepointToGlyphId(0x064e);
   if (markGid) {
     const att = gpos.getMarkBaseAttachment(baseGid, markGid);
     if (att && att.dx !== undefined) {
@@ -62,7 +73,7 @@ const gpos = font.gpos;
 //   "base" mark in this attachment; fatha sits above it.
 {
   const shaddaGid = font.codepointToGlyphId(0x0651);
-  const fathaGid  = font.codepointToGlyphId(0x064E);
+  const fathaGid = font.codepointToGlyphId(0x064e);
   if (!shaddaGid || !fathaGid) fail(`T4 missing gids: shadda=${shaddaGid} fatha=${fathaGid}`);
   else if (!gpos.hasMarkMark) {
     ok(`T4 font has no mark-to-mark; skip`);

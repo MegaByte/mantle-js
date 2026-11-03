@@ -1,4 +1,6 @@
 #version 300 es
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
 // drawImageInstanced fragment — sample the shared source texture, apply the
 // PER-INSTANCE tint+alpha that the vertex stage folded into vTint.
 //

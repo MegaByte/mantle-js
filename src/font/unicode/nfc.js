@@ -1,12 +1,18 @@
-// Unicode Normalization Form C (UAX #15) — table-driven, deterministic.
-// This is the canonical fallback used when the platform `String.normalize` is
-// unavailable or behind our pinned Unicode version (and on C# it is the primary
-// path, since Unity IL2CPP invariant globalization breaks string.Normalize).
-import { ccc as cccTrie } from "./tables/ccc.js";
-import { nfcData } from "./tables/nfcData.js";
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
 
-const SBASE = 0xac00, LBASE = 0x1100, VBASE = 0x1161, TBASE = 0x11a7;
-const LCOUNT = 19, VCOUNT = 21, TCOUNT = 28, NCOUNT = VCOUNT * TCOUNT, SCOUNT = LCOUNT * NCOUNT;
+import { ccc as cccTrie } from './tables/ccc.js';
+import { nfcData } from './tables/nfcData.js';
+
+const SBASE = 0xac00,
+  LBASE = 0x1100,
+  VBASE = 0x1161,
+  TBASE = 0x11a7;
+const LCOUNT = 19,
+  VCOUNT = 21,
+  TCOUNT = 28,
+  NCOUNT = VCOUNT * TCOUNT,
+  SCOUNT = LCOUNT * NCOUNT;
 
 const ccc = (cp) => cccTrie.get(cp);
 
@@ -33,7 +39,7 @@ const [compStarter, compCombining, compComposed] = (() => {
     if (excl.has(decompKeys[i])) continue;
     pairs.push([first, second, decompKeys[i]]);
   }
-  pairs.sort((x, y) => (x[0] - y[0]) || (x[1] - y[1]));
+  pairs.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
   return [
     Uint32Array.from(pairs, (p) => p[0]),
     Uint32Array.from(pairs, (p) => p[1]),
@@ -42,7 +48,8 @@ const [compStarter, compCombining, compComposed] = (() => {
 })();
 
 function decompIndex(cp) {
-  let lo = 0, hi = decompKeys.length - 1;
+  let lo = 0,
+    hi = decompKeys.length - 1;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
     const k = decompKeys[mid];
@@ -60,11 +67,18 @@ function getComposite(a, b) {
     return SBASE + ((a - LBASE) * VCOUNT + (b - VBASE)) * TCOUNT;
   }
   // Hangul LV + T
-  if (a >= SBASE && a < SBASE + SCOUNT && (a - SBASE) % TCOUNT === 0 && b > TBASE && b < TBASE + TCOUNT) {
+  if (
+    a >= SBASE &&
+    a < SBASE + SCOUNT &&
+    (a - SBASE) % TCOUNT === 0 &&
+    b > TBASE &&
+    b < TBASE + TCOUNT
+  ) {
     return a + (b - TBASE);
   }
   // Table: binary search by (starter, combining)
-  let lo = 0, hi = compStarter.length - 1;
+  let lo = 0,
+    hi = compStarter.length - 1;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
     const sa = compStarter[mid];
@@ -150,7 +164,7 @@ export function toNFC(str) {
   const cps = [];
   for (const ch of str) cps.push(ch.codePointAt(0));
   const out = toNFCCodepoints(cps);
-  let s = "";
+  let s = '';
   for (let i = 0; i < out.length; i++) s += String.fromCodePoint(out[i]);
   return s;
 }

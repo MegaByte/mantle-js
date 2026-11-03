@@ -1,4 +1,6 @@
 #version 300 es
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
 // loopBlinnComposite.vert.glsl — fullscreen-quad pass that multiplies a
 // shape's paint by the Loop-Blinn coverage buffer and OVER-composites it
 // onto the canvas. Pairs with loopBlinn.frag (coverage) + this composite's

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // isolationSmoke.mjs — Verify that <g isolation="isolate"> routes its
 // children through a private offscreen FBO so blend modes among the
 // children stay LOCAL to the group, not blending with the parent
@@ -26,46 +29,61 @@ import { readFileSync, mkdirSync, writeFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from './_launch.mjs';
+import { openReady } from './_pageReady.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
-const OUT  = path.join(__dirname, 'visuals', 'isolation');
+const OUT = path.join(__dirname, 'visuals', 'isolation');
 mkdirSync(OUT, { recursive: true });
 
 function mime(p) {
   if (p.endsWith('.html')) return 'text/html; charset=utf-8';
-  if (p.endsWith('.js') || p.endsWith('.mjs') || p.endsWith('.glsl')) return 'text/javascript; charset=utf-8';
+  if (p.endsWith('.js') || p.endsWith('.mjs') || p.endsWith('.glsl'))
+    return 'text/javascript; charset=utf-8';
   if (p.endsWith('.svg')) return 'image/svg+xml; charset=utf-8';
   return 'application/octet-stream';
 }
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost');
   let p = decodeURIComponent(u.pathname === '/' ? '/mantleDemo.html' : u.pathname);
-  try { res.writeHead(200, { 'content-type': mime(p) }); res.end(readFileSync(path.join(ROOT, p))); }
-  catch (e) { try { res.writeHead(404); res.end(); } catch {} }
+  try {
+    res.writeHead(200, { 'content-type': mime(p) });
+    res.end(readFileSync(path.join(ROOT, p)));
+  } catch (e) {
+    try {
+      res.writeHead(404);
+      res.end();
+    } catch {}
+  }
 });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
-const browser = await puppeteer.launch({
-  headless: 'new', args: ['--enable-unsafe-swiftshader', '--no-sandbox'],
+const browser = await launchBrowser({
+  headless: 'new',
+  args:
+    process.env.MANTLE_TEST_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--no-sandbox']
+      : ['--use-angle=metal', '--use-gl=angle', '--no-sandbox'],
 });
 
 async function renderAndSample(svgUrl) {
   const page = await browser.newPage();
   await page.setViewport({ width: 400, height: 400 });
-  await page.goto(`http://127.0.0.1:${port}/mantleDemo.html?svg=/${encodeURIComponent(svgUrl)}`, { waitUntil: 'load', timeout: 10000 });
-  await page.waitForFunction(() => {
-    const st = document.getElementById('status');
-    return st && !/Fetching|Converting/.test(st.textContent);
-  }, { timeout: 8000 });
+  await openReady(
+    page,
+    `http://127.0.0.1:${port}/mantleDemo.html?svg=/${encodeURIComponent(svgUrl)}`,
+    { ready: 'demoSvg' },
+  );
   const stats = await page.evaluate(() => {
     const cnv = document.getElementById('glcanvas');
-    const gl = window.__mantleGl, renderer = window.__mantleRenderer;
+    const gl = window.__mantleGl,
+      renderer = window.__mantleRenderer;
     if (!gl || !renderer) return null;
     renderer.render();
-    const w = cnv.width, h = cnv.height;
+    const w = cnv.width,
+      h = cnv.height;
     const px = new Uint8Array(w * h * 4);
     gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
     // The lime-only zone sits in the right half of the inner group
@@ -75,13 +93,20 @@ async function renderAndSample(svgUrl) {
     // lime-only zone (150..200 in SVG x) sits at roughly canvas x in
     // the right portion of the inner rect. Sample a 40×40 window at
     // canvas (520..560, 200..240) — covers the lime-only zone.
-    let sumG = 0, sumR = 0, sumB = 0, count = 0;
-    const x0 = Math.floor(w * 0.62), x1 = Math.floor(w * 0.72);
-    const y0 = Math.floor(h * 0.45), y1 = Math.floor(h * 0.55);
+    let sumG = 0,
+      sumR = 0,
+      sumB = 0,
+      count = 0;
+    const x0 = Math.floor(w * 0.62),
+      x1 = Math.floor(w * 0.72);
+    const y0 = Math.floor(h * 0.45),
+      y1 = Math.floor(h * 0.55);
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
         const idx = (y * w + x) * 4;
-        sumR += px[idx]; sumG += px[idx + 1]; sumB += px[idx + 2];
+        sumR += px[idx];
+        sumG += px[idx + 1];
+        sumB += px[idx + 2];
         count++;
       }
     }
@@ -91,10 +116,12 @@ async function renderAndSample(svgUrl) {
     // sample should be PURE BLUE if groupEnd correctly preserves the
     // backdrop. (0,0) lands outside the aspect-fit viewBox; sample at
     // (10% w, 30% h) which maps inside the viewBox at upper-left.
-    const bx = Math.floor(w * 0.05), by = Math.floor(h * 0.35);
+    const bx = Math.floor(w * 0.05),
+      by = Math.floor(h * 0.35);
     const idxBackdrop = (by * w + bx) * 4;
     return {
-      w, h,
+      w,
+      h,
       avgR: count ? sumR / count : 0,
       avgG: count ? sumG / count : 0,
       avgB: count ? sumB / count : 0,
@@ -116,18 +143,31 @@ async function renderAndSample(svgUrl) {
 }
 
 let failures = 0;
-function fail(msg) { failures++; console.error('FAIL:', msg); }
+function fail(msg) {
+  failures++;
+  console.error('FAIL:', msg);
+}
 
 const iso = await renderAndSample('examples/_isolation.svg');
 const noiso = await renderAndSample('examples/_no_isolation.svg');
 
-if (iso.dataUrl) writeFileSync(path.join(OUT, 'isolation.png'),
-  Buffer.from(iso.dataUrl.slice('data:image/png;base64,'.length), 'base64'));
-if (noiso.dataUrl) writeFileSync(path.join(OUT, 'no_isolation.png'),
-  Buffer.from(noiso.dataUrl.slice('data:image/png;base64,'.length), 'base64'));
+if (iso.dataUrl)
+  writeFileSync(
+    path.join(OUT, 'isolation.png'),
+    Buffer.from(iso.dataUrl.slice('data:image/png;base64,'.length), 'base64'),
+  );
+if (noiso.dataUrl)
+  writeFileSync(
+    path.join(OUT, 'no_isolation.png'),
+    Buffer.from(noiso.dataUrl.slice('data:image/png;base64,'.length), 'base64'),
+  );
 
-console.log(`  isolation:    inside-lime R=${iso.stats.avgR.toFixed(1)} G=${iso.stats.avgG.toFixed(1)} B=${iso.stats.avgB.toFixed(1)}  |  backdrop=(${iso.stats.backdropR},${iso.stats.backdropG},${iso.stats.backdropB},${iso.stats.backdropA})`);
-console.log(`  no-isolation: inside-lime R=${noiso.stats.avgR.toFixed(1)} G=${noiso.stats.avgG.toFixed(1)} B=${noiso.stats.avgB.toFixed(1)}  |  backdrop=(${noiso.stats.backdropR},${noiso.stats.backdropG},${noiso.stats.backdropB},${noiso.stats.backdropA})`);
+console.log(
+  `  isolation:    inside-lime R=${iso.stats.avgR.toFixed(1)} G=${iso.stats.avgG.toFixed(1)} B=${iso.stats.avgB.toFixed(1)}  |  backdrop=(${iso.stats.backdropR},${iso.stats.backdropG},${iso.stats.backdropB},${iso.stats.backdropA})`,
+);
+console.log(
+  `  no-isolation: inside-lime R=${noiso.stats.avgR.toFixed(1)} G=${noiso.stats.avgG.toFixed(1)} B=${noiso.stats.avgB.toFixed(1)}  |  backdrop=(${noiso.stats.backdropR},${noiso.stats.backdropG},${noiso.stats.backdropB},${noiso.stats.backdropA})`,
+);
 
 // T1: WITH isolation, the lime-only zone over blue should retain
 // strong green signal (lime is rgb(0, 255, 0)). The group composites
@@ -139,7 +179,9 @@ console.log(`  no-isolation: inside-lime R=${noiso.stats.avgR.toFixed(1)} G=${no
 // at the edges. 100 is comfortably above the "blue backdrop bleeding
 // through" case (which averages 0).
 if (iso.stats.avgG > 100) {
-  console.log(`ok T1 isolation: lime-only zone is bright green (avgG=${iso.stats.avgG.toFixed(1)}, isolated multiply)`);
+  console.log(
+    `ok T1 isolation: lime-only zone is bright green (avgG=${iso.stats.avgG.toFixed(1)}, isolated multiply)`,
+  );
 } else {
   fail(`T1 isolation: lime-only avgG=${iso.stats.avgG.toFixed(1)} too low (expected > 100)`);
 }
@@ -152,7 +194,9 @@ if (iso.stats.avgG > 100) {
 if (noiso.stats.avgG < 100) {
   console.log('ok T2 no-isolation: lime-only zone darkened by multiply with blue bg');
 } else {
-  fail(`T2 no-isolation: lime-only avgG=${noiso.stats.avgG.toFixed(1)} too high (expected < 100; isolation FBO may already be applying when it shouldn't)`);
+  fail(
+    `T2 no-isolation: lime-only avgG=${noiso.stats.avgG.toFixed(1)} too high (expected < 100; isolation FBO may already be applying when it shouldn't)`,
+  );
 }
 
 // T3: The two cases must differ meaningfully.
@@ -167,11 +211,19 @@ if (dG > 100) {
 // still be visible. After groupEnd composes the group onto the canvas,
 // the captured mainCopyTex (blue) should source-over for pixels where
 // the group has no coverage. Demand opaque blue at the corner sample.
-if (iso.stats.backdropB > 200 && iso.stats.backdropA > 200 &&
-    iso.stats.backdropR < 50 && iso.stats.backdropG < 50) {
-  console.log(`ok T4 backdrop preserved outside group: (${iso.stats.backdropR},${iso.stats.backdropG},${iso.stats.backdropB},${iso.stats.backdropA})`);
+if (
+  iso.stats.backdropB > 200 &&
+  iso.stats.backdropA > 200 &&
+  iso.stats.backdropR < 50 &&
+  iso.stats.backdropG < 50
+) {
+  console.log(
+    `ok T4 backdrop preserved outside group: (${iso.stats.backdropR},${iso.stats.backdropG},${iso.stats.backdropB},${iso.stats.backdropA})`,
+  );
 } else {
-  fail(`T4 backdrop not preserved: got (${iso.stats.backdropR},${iso.stats.backdropG},${iso.stats.backdropB},${iso.stats.backdropA}) expected ~(0,0,255,255)`);
+  fail(
+    `T4 backdrop not preserved: got (${iso.stats.backdropR},${iso.stats.backdropG},${iso.stats.backdropB},${iso.stats.backdropA}) expected ~(0,0,255,255)`,
+  );
 }
 
 await browser.close();

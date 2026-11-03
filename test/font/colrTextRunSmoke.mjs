@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // colrTextRunSmoke.mjs — verifies MantleTextRun emits N Mantle shapes per
 // colored glyph (one per COLR layer) using the in-memory COLR test font.
 
@@ -8,8 +11,11 @@ import { registerColorEmojiReaders } from '../../src/font/color/index.js';
 registerColorEmojiReaders();
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 const META_HEADER_BYTES = 32;
 const asMetaF32 = (b) =>
@@ -19,7 +25,7 @@ const asMetaF32 = (b) =>
 function fillAt(b, i) {
   const mf = asMetaF32(b);
   const s = b.metaFloatsPerShape;
-  return [mf[i*s+4], mf[i*s+5], mf[i*s+6], mf[i*s+7]];
+  return [mf[i * s + 4], mf[i * s + 5], mf[i * s + 6], mf[i * s + 7]];
 }
 
 // T1: a 1-glyph color string produces 2 shapes (one per COLR layer).
@@ -34,14 +40,15 @@ function fillAt(b, i) {
 {
   const font = new MantleFontAsset(buildColrTestFont({ codepoint: 0x41 }));
   const b = await buildStyled([{ text: 'A', style: { color: [0, 0, 0, 1], sizeScale: 1 } }], font);
-  if (b.numShapes !== 2) { fail(`T2 needs 2 shapes; got ${b.numShapes}`); }
-  else {
+  if (b.numShapes !== 2) {
+    fail(`T2 needs 2 shapes; got ${b.numShapes}`);
+  } else {
     const [r0, g0, b0, a0] = fillAt(b, 0);
     const [r1, g1, b1, a1] = fillAt(b, 1);
     if (Math.abs(r0 - 1) > 1e-3 || Math.abs(g0) > 1e-3 || Math.abs(b0) > 1e-3)
-      fail(`T2 shape0 fill ${[r0,g0,b0,a0]} (expected red)`);
+      fail(`T2 shape0 fill ${[r0, g0, b0, a0]} (expected red)`);
     else if (Math.abs(r1) > 1e-3 || Math.abs(g1 - 1) > 1e-3 || Math.abs(b1) > 1e-3)
-      fail(`T2 shape1 fill ${[r1,g1,b1,a1]} (expected green)`);
+      fail(`T2 shape1 fill ${[r1, g1, b1, a1]} (expected green)`);
     else ok(`T2 layer colors: shape0=red shape1=green`);
   }
 }
@@ -61,7 +68,10 @@ function fillAt(b, i) {
 // shapes should still be red/green from the palette.
 {
   const font = new MantleFontAsset(buildColrTestFont({ codepoint: 0x41 }));
-  const b = await buildStyled([{ text: 'A', style: { color: [0, 0, 1, 1], sizeScale: 1 } /* blue run color */ }], font);
+  const b = await buildStyled(
+    [{ text: 'A', style: { color: [0, 0, 1, 1], sizeScale: 1 } /* blue run color */ }],
+    font,
+  );
   const [r0, g0, bl0] = fillAt(b, 0);
   const [r1, g1, bl1] = fillAt(b, 1);
   if (Math.abs(bl0) > 0.1) fail(`T4 shape0 blue=${bl0} (palette should win)`);
@@ -73,7 +83,8 @@ function fillAt(b, i) {
 {
   const { readFileSync } = await import('fs');
   const arial = new MantleFontAsset(
-    new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')));
+    new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')),
+  );
   const b = await buildFromMarkup('ABC', arial, [0, 0, 0, 1]);
   if (b.numShapes !== 3) fail(`T5 monochrome 'ABC' → ${b.numShapes} shapes (expected 3)`);
   else ok(`T5 monochrome path unchanged: 3 shapes for 'ABC'`);

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The no-AA arc branch, with the damage OUTSIDE the covering stroke (the damage
+     examples/smoke/noAaArcRow__FAR.svg can show stays under its stroke).
+
+     Pin nothing; a default draw at 512 takes band-hard on its own (one path, fill plus an opaque
+     3 em stroke, so noAaFill is true, and a compound path is not a recognized primitive, so NOSDF
+     is not needed either):
+       SVG=examples/smoke/noAaArcRow__GAP.svg N=512 ARMS=bandhard,slug node probes/_zzEnginePaint.mjs
+
+     WHY FAR CANNOT SHOW IT AND THIS ONE CAN. A hardCrossArc window that is a width in em,
+     1e-5 * (|cy| + rx + ry), miscounts a crossing whenever an arc ENDPOINT falls that close to the pixel
+     row, and a miscount flips every pixel of that row to the endpoint's LEFT, up to the next crossing. FAR
+     is six closed ellipses, each two half turn arcs sharing BOTH endpoints, so the next crossing is
+     the same shape's other side a few pixels away: on the render grid its runs are 5 px at
+     512 and 12 at 1024, and all 29 of them sit within 0.71 em of the outline, under a 1.5 em stroke
+     half width. The stroke that legalizes band-hard paints over the whole defect.
+
+     Here the flipped run has somewhere to go. Three subpaths in ONE path: a bar on the left, and two
+     arc lobes whose arc endpoints (200, 200000) and (300, 200040) are alone on their rows. An extra
+     crossing at a lobe takes the winding in the GAP between the bar and that lobe from 0 to 1, which
+     is 150 em of open canvas no stroke is near. Against the exact fill oracle at the render grid
+     (test/noAaArcRenderReachSmoke.mjs), the em-width window gets 4,528 pixel centers wrong at 512 in runs
+     up to 461 px, 4,327 of them farther from the outline than the stroke half width; the kernel's
+     pixel-width window gets 0 outside it.
+
+     The art sits at y about 2e5 because an em-width window must span a pixel row to misfire:
+     1e-5 * |cy| >= extent / N, i.e. a distance from the origin of about 1e5 / N times the
+     drawing's own extent (here 555x at N = 512). Content authored in a large coordinate space meets
+     that condition. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 199890 360 240">
+  <path fill="#3a6ea5" stroke="#101418" stroke-width="3" d="M 6 199900 L 40 199900 L 40 200120 L 6 200120 Z M 200 199900 L 200 200000 A 50 50 0 0 1 250 199950 L 250 199900 Z M 300 199900 L 300 200040 A 50 50 0 0 0 350 199990 L 350 199900 Z"/>
+</svg>

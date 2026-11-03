@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // deltaSetIndexMap.js — OpenType DeltaSetIndexMap reader.
 //
 // Used by HVAR / VVAR / MVAR / COLR (and any other table that maps a
@@ -25,12 +28,12 @@ export class DeltaSetIndexMap {
       mapCount = v.getUint32(off + 2, false);
       dataOff = off + 6;
     }
-    this._innerBits = (entryFormat & 0x0F);
+    this._innerBits = entryFormat & 0x0f;
     this._entrySize = ((entryFormat >> 4) & 0x03) + 1;
     this._innerMask = (1 << (this._innerBits + 1)) - 1;
-    this._mapCount  = mapCount;
-    this._dataOff   = dataOff;
-    this._bytes     = bytes;
+    this._mapCount = mapCount;
+    this._dataOff = dataOff;
+    this._bytes = bytes;
   }
 
   lookup(idx) {
@@ -42,7 +45,7 @@ export class DeltaSetIndexMap {
       // Unsigned accumulation: a signed << overflows to negative for
       // 4-byte entries with the top bit set, and >> then sign-extends
       // into a bogus outer index.
-      raw = (raw * 256) + this._bytes[cursor + i];
+      raw = raw * 256 + this._bytes[cursor + i];
     }
     const inner = raw & this._innerMask;
     const outer = Math.floor(raw / (this._innerMask + 1));

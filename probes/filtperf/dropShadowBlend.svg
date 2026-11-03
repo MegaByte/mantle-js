@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- The drop-shadow recipe ending in feBlend mode="normal", on 12 shapes. Time with shaderArmAB with its move flag. -->
+  <defs>
+    <filter id="ds" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="6"/>
+      <feOffset dx="8" dy="8" result="off"/>
+      <feFlood flood-color="#1d1d3a" flood-opacity="0.55"/>
+      <feComposite in2="off" operator="in" result="shadow"/>
+      <feBlend in="SourceGraphic" in2="shadow" mode="normal"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" fill="#f1efe9"/>
+  <path d="M60 120 C100 60 200 60 230 130 S180 270 120 250 Z" fill="#e63946" filter="url(#ds)"/>
+  <circle cx="380" cy="160" r="80" fill="#f4a261" filter="url(#ds)"/>
+  <path d="M540 120 C580 60 680 60 710 130 S660 270 600 250 Z" fill="#2a9d8f" filter="url(#ds)"/>
+  <circle cx="860" cy="160" r="80" fill="#457b9d" filter="url(#ds)"/>
+  <path d="M60 420 C100 360 200 360 230 430 S180 570 120 550 Z" fill="#8338ec" filter="url(#ds)"/>
+  <circle cx="380" cy="460" r="80" fill="#ffbe0b" filter="url(#ds)"/>
+  <path d="M540 420 C580 360 680 360 710 430 S660 570 600 550 Z" fill="#e63946" filter="url(#ds)"/>
+  <circle cx="860" cy="460" r="80" fill="#f4a261" filter="url(#ds)"/>
+  <path d="M60 720 C100 660 200 660 230 730 S180 870 120 850 Z" fill="#2a9d8f" filter="url(#ds)"/>
+  <circle cx="380" cy="760" r="80" fill="#457b9d" filter="url(#ds)"/>
+  <path d="M540 720 C580 660 680 660 710 730 S660 870 600 850 Z" fill="#8338ec" filter="url(#ds)"/>
+  <circle cx="860" cy="760" r="80" fill="#ffbe0b" filter="url(#ds)"/>
+</svg>

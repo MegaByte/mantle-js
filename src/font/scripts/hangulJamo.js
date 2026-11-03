@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // hangulJamo.js — Hangul shaper: jamo classification helpers.
 //
 // Korean has three writing modes for the same syllables:
@@ -14,7 +17,7 @@
 //      form and must be shaped via 'ljmo'/'vjmo'/'tjmo' GSUB lookups.
 //
 //   3. Hangul Compatibility Jamo (U+3130..U+318F): used in
-//      dictionaries / labels; ALWAYS isolated, no composition.
+//      dictionaries / labels; always isolated, no composition.
 //
 // This module covers (2) — the cases that NFC didn't handle.
 // Compatibility jamo (3) are treated as standalone Latin-like
@@ -22,30 +25,30 @@
 
 /// Hangul jamo positional role for GSUB feature dispatch.
 export const HangulJamoRole = Object.freeze({
-  Leading:  0,  // ljmo — initial consonant
-  Vowel:    1,  // vjmo — vowel
-  Trailing: 2,  // tjmo — final consonant
+  Leading: 0, // ljmo — initial consonant
+  Vowel: 1, // vjmo — vowel
+  Trailing: 2, // tjmo — final consonant
 });
 
 /// True iff `codepoint` is a Hangul Jamo (U+1100..U+11FF). This is
 /// the range that needs jamo shaping. Compatibility Jamo (U+3130..) is
 /// NOT included — those render as standalone graphemes.
 export function isHangulJamo(codepoint) {
-  return codepoint >= 0x1100 && codepoint <= 0x11FF;
+  return codepoint >= 0x1100 && codepoint <= 0x11ff;
 }
 
 /// True iff codepoint is a precomposed Hangul syllable (U+AC00..U+D7A3).
 /// These render through cmap, not jamo shaping.
 export function isPrecomposedHangul(codepoint) {
-  return codepoint >= 0xAC00 && codepoint <= 0xD7A3;
+  return codepoint >= 0xac00 && codepoint <= 0xd7a3;
 }
 
 /// Classify a Hangul Jamo into Leading / Vowel / Trailing. Returns
 /// null for codepoints outside the jamo range.
 export function classifyHangulJamo(codepoint) {
-  if (codepoint < 0x1100 || codepoint > 0x11FF) return null;
-  if (codepoint <= 0x115F) return HangulJamoRole.Leading;
-  if (codepoint <= 0x11A7) return HangulJamoRole.Vowel;
+  if (codepoint < 0x1100 || codepoint > 0x11ff) return null;
+  if (codepoint <= 0x115f) return HangulJamoRole.Leading;
+  if (codepoint <= 0x11a7) return HangulJamoRole.Vowel;
   return HangulJamoRole.Trailing;
 }
 

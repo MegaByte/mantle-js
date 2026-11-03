@@ -1,0 +1,96 @@
+{
+  "how": "see makeGpuInputs.mjs header; ink = sum of alpha / 255 over the canvas",
+  "markersInk": 2,
+  "probes": [
+    {
+      "file": "miter-clip.svg",
+      "canvas": [200, 140],
+      "trueInk": 4610.8,
+      "predictedBefore": 4521.9,
+      "predictedAfter": 4614,
+      "movedPixels": 120,
+      "note": "a 32-degree V past its limit (ratio 3.64 > 2): the spike is cut at 2 * halfW. Base draws it round inside the wedge, and its cover quad stops halfW past the apex."
+    },
+    {
+      "file": "arcs.svg",
+      "canvas": [200, 140],
+      "trueInk": 4610.8,
+      "predictedBefore": 4521.9,
+      "predictedAfter": 4614,
+      "movedPixels": 120,
+      "note": "the same V with stroke-linejoin arcs, which SVG 2 sends to miter-clip on straight segments. Base draws it round past the limit."
+    },
+    {
+      "file": "miter-clip-within-limit.svg",
+      "canvas": [200, 160],
+      "trueInk": 4560.7,
+      "predictedBefore": 4529.1,
+      "predictedAfter": 4566.5,
+      "movedPixels": 62,
+      "note": "miter-clip inside the limit: a 76-degree V (ratio 1.63 <= 4) is a full miter. Base draws miter-clip round inside the wedge even here, so this one moves too; its arcs twin (control-arcs-within-limit) must not."
+    },
+    {
+      "file": "control-arcs-within-limit.svg",
+      "canvas": [200, 160],
+      "trueInk": 4560.7,
+      "predictedBefore": 4566.5,
+      "predictedAfter": 4566.5,
+      "movedPixels": 0,
+      "note": "CONTROL: arcs within its limit is a miter in base too; predicted to move 0 pixels."
+    },
+    {
+      "file": "square-cap-far-plane.svg",
+      "canvas": [170, 120],
+      "trueInk": 5143,
+      "predictedBefore": 5150,
+      "predictedAfter": 5143,
+      "movedPixels": 92,
+      "note": "square caps whose far planes cut pixel columns/rows at .25 and .75: base drops past halfW (hard edge), fixed ramps."
+    },
+    {
+      "file": "square-cap-corners.svg",
+      "canvas": [170, 110],
+      "trueInk": 4241.5,
+      "predictedBefore": 4166.4,
+      "predictedAfter": 4238.3,
+      "movedPixels": 98,
+      "note": "a V of two 45-degree segments with square caps under a bevel join: the cap corners lead along the axes, sqrt(2) * halfW from the endpoints, past the base cover quad (padded by halfW)."
+    },
+    {
+      "file": "control-round.svg",
+      "canvas": [200, 160],
+      "trueInk": 4837.2,
+      "predictedBefore": 4837.6,
+      "predictedAfter": 4837.6,
+      "movedPixels": 0,
+      "note": "CONTROL: round caps and joins; predicted to move 0 pixels."
+    },
+    {
+      "file": "control-miter-butt.svg",
+      "canvas": [200, 160],
+      "trueInk": 4560.7,
+      "predictedBefore": 4566.5,
+      "predictedAfter": 4566.5,
+      "movedPixels": 0,
+      "note": "CONTROL: a miter within its limit, butt caps, few bands; predicted to move 0 pixels."
+    },
+    {
+      "file": "grid-miter-sawtooth.svg",
+      "canvas": [510, 1760],
+      "trueInk": null,
+      "predictedBefore": 38814.2,
+      "predictedAfter": 38988,
+      "movedPixels": 252,
+      "note": "a rising sawtooth, 80 teeth, miterlimit 10 (51 bands): base bins a miter row's bands through path + limit * halfW while the shader indexes them through path + halfW, and some spike centers find no segment."
+    },
+    {
+      "file": "curve-square-cap.svg",
+      "canvas": [170, 110],
+      "trueInk": 3661.6,
+      "predictedBefore": null,
+      "predictedAfter": null,
+      "movedPixels": null,
+      "note": "the square-cap far plane in the curve twin (_strokeMath.glsl): a quadratic whose ends leave at about 48 degrees, with square caps. No CPU prediction (the port is lines only). True area: points within halfW of a 2000-segment flattening whose nearest point is not an end, plus the two cap boxes (valid: the radius of curvature, >= 49.96, exceeds halfW)."
+    }
+  ]
+}

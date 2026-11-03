@@ -1,0 +1,6 @@
+[
+  {
+    "name": "baseline boxBlur",
+    "file": { "boxBlurFrag": "probes/filtperf/pre-boxBlur.boxBlur.frag.glsl" }
+  }
+]

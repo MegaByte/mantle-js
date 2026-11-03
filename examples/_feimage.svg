@@ -8,13 +8,14 @@
       <feImage xlink:href="#bmp" result="img"/>
       <feComposite in="img" in2="SourceGraphic" operator="in"/>
     </filter>
+    <!-- Per SVG/Chrome, feImage href="#id" renders the referenced element in the
+       user space of the filtered element at its OWN x/y/width/height (like
+       <use>), so the image is placed over the filtered rect (50,40,200,120)
+       and stretched with preserveAspectRatio="none". -->
+    <image id="bmp" x="50" y="40" width="200" height="120" preserveAspectRatio="none"
+         href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAQElEQVR4nO3UsQ0AAAgCQXD/nXUEYmHlX29IvtCtHS8PSseKgYREEYkiEj1IZGn34Lv9LFExkJAoIlFEoug80QBLigU8WcCZSQAAAABJRU5ErkJggg=="/>
   </defs>
   <rect width="300" height="200" fill="white"/>
-  <!-- An <image> with an id parked OUT OF the viewBox so it doesn't
-       render directly — the only path the bitmap appears via is the
-       feImage filter applied to the filtered rect below. -->
-  <image id="bmp" x="-100" y="-100" width="20" height="20"
-         href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAQElEQVR4nO3UsQ0AAAgCQXD/nXUEYmHlX29IvtCtHS8PSseKgYREEYkiEj1IZGn34Lv9LFExkJAoIlFEoug80QBLigU8WcCZSQAAAABJRU5ErkJggg=="/>
   <!-- Apply the filter to a solid rect; we should see the R/G/B/Y bitmap
        scaled across that rect rather than the rect's solid fill. -->
   <rect x="50" y="40" width="200" height="120" fill="black" filter="url(#bgFill)"/>

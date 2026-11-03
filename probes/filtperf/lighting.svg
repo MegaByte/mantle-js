@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- feDiffuseLighting / feSpecularLighting with distant and spot lights in the usual bevel recipe
+       (the constant light vectors are formed on the CPU, with no unused center tap).
+       Time with shaderArmAB with its move flag so the lighting passes run every frame. -->
+  <defs>
+    <filter id="spec" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="6" result="blur"/>
+      <feSpecularLighting in="blur" surfaceScale="5" specularConstant="0.9" specularExponent="24" lighting-color="#fff" result="spec">
+        <feDistantLight azimuth="225" elevation="40"/>
+      </feSpecularLighting>
+      <feComposite in="spec" in2="SourceAlpha" operator="in" result="specIn"/>
+      <feComposite in="SourceGraphic" in2="specIn" operator="arithmetic" k1="0" k2="1" k3="1" k4="0"/>
+    </filter>
+    <filter id="spot" x="-10%" y="-10%" width="120%" height="120%">
+      <feDiffuseLighting in="SourceAlpha" surfaceScale="4" diffuseConstant="1.1" lighting-color="#ffe8c0" result="lit">
+        <feSpotLight x="300" y="200" z="260" pointsAtX="520" pointsAtY="700" pointsAtZ="0" specularExponent="4" limitingConeAngle="35"/>
+      </feDiffuseLighting>
+      <feComposite in="lit" in2="SourceGraphic" operator="arithmetic" k1="1" k2="0" k3="0" k4="0"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" fill="#e9e6df"/>
+  <circle cx="270" cy="270" r="200" fill="#c0392b" filter="url(#spec)"/>
+  <rect x="560" y="80" width="380" height="380" rx="60" fill="#2980b9" filter="url(#spec)"/>
+  <path d="M100 560 C300 480 700 980 940 600 L940 960 L100 960 Z" fill="#8e7cc3" filter="url(#spot)"/>
+</svg>

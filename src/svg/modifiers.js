@@ -1,4 +1,7 @@
-// svg/modifiers.js — Lottie-flavoured path-segment modifiers.
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
+// svg/modifiers.js — Lottie-flavored path-segment modifiers.
 //
 // Pure Seg[] → Seg[] functions for the renderer-side primitives a
 // Lottie (or any animation) driver needs to compose at play time.
@@ -9,19 +12,32 @@
 //
 // Numeric conventions: all positional parameters are in the same
 // coordinate space as the input segs (SVG user units, y-down). All
-// "trim" / "amount" parameters are 0..1 normalised. Repeater "offset"
+// "trim" / "amount" parameters are 0..1 normalized. Repeater "offset"
 // is in segs-space units, copies count is non-negative integer.
 
 import {
-  SEG_LINE, SEG_QUAD, SEG_CUBIC, SEG_ARC,
-  mkLine, mkQuad, mkCubic, mkArc, arcToCubics, segStart, segEnd,
+  SEG_LINE,
+  SEG_QUAD,
+  SEG_CUBIC,
+  SEG_ARC,
+  mkLine,
+  mkQuad,
+  mkCubic,
+  mkArc,
+  arcToCubics,
+  segStart,
+  segEnd,
+  pointsMeet,
+  jointMag,
 } from './segment.js';
-import {
-  splitCubicAt, splitQuadAt,
-} from './mesh.js';
-import {
-  _segLenAt, _segLenInvert, _segPointAt, _segTangentAtT,
-} from './textures.js';
+import { splitCubicAt, splitQuadAt } from './mesh.js';
+import { _segLenAt, _segLenInvert, _segPointAt, _segTangentAtT } from './textures.js';
+
+const _edgeless = (l, a, b) =>
+  !(
+    l >
+    64 * Number.EPSILON * Math.max(Math.abs(a[0]), Math.abs(a[1]), Math.abs(b[0]), Math.abs(b[1]))
+  );
 
 // ────────────────────────────────────────────────────────────────
 // Internal helpers
@@ -32,26 +48,25 @@ import {
 // just a θ split. Returns [left, right].
 function splitArcAt(s, t) {
   const thetaMid = s.theta_start + (s.theta_end - s.theta_start) * t;
-  // Sub-arcs preserve sweep direction. large_arc_flag may change for
-  // the sub-arc (a >180° arc split at t=0.5 yields two <180° arcs);
-  // we re-derive it from |dtheta| < π.
+
   const lf1 = Math.abs(thetaMid - s.theta_start) > Math.PI ? 1 : 0;
   const lf2 = Math.abs(s.theta_end - thetaMid) > Math.PI ? 1 : 0;
+  const mid = mkArc(s.cx, s.cy, s.rx, s.ry, thetaMid, thetaMid, s.phi, 0, s.sweep_flag).p1; // one value for both
   return [
-    mkArc(s.cx, s.cy, s.rx, s.ry, s.theta_start, thetaMid, s.phi, lf1, s.sweep_flag),
-    mkArc(s.cx, s.cy, s.rx, s.ry, thetaMid, s.theta_end,   s.phi, lf2, s.sweep_flag),
+    mkArc(s.cx, s.cy, s.rx, s.ry, s.theta_start, thetaMid, s.phi, lf1, s.sweep_flag, s.p1, mid),
+    mkArc(s.cx, s.cy, s.rx, s.ry, thetaMid, s.theta_end, s.phi, lf2, s.sweep_flag, mid, s.p4),
   ];
 }
 
 // Generic split-at-t: dispatches by type. Lines split via lerp.
 function splitSegAt(s, t) {
   if (s.type === SEG_LINE) {
-    const mid = [s.p1[0] + (s.p2[0]-s.p1[0])*t, s.p1[1] + (s.p2[1]-s.p1[1])*t];
+    const mid = [s.p1[0] + (s.p2[0] - s.p1[0]) * t, s.p1[1] + (s.p2[1] - s.p1[1]) * t];
     return [mkLine(s.p1, mid), mkLine(mid, s.p2)];
   }
-  if (s.type === SEG_QUAD)  return splitQuadAt(s, t);
+  if (s.type === SEG_QUAD) return splitQuadAt(s, t);
   if (s.type === SEG_CUBIC) return splitCubicAt(s, t);
-  if (s.type === SEG_ARC)   return splitArcAt(s, t);
+  if (s.type === SEG_ARC) return splitArcAt(s, t);
   return [s, s];
 }
 
@@ -63,7 +78,7 @@ function subSegBetween(s, t0, t1) {
   // First split at t1 → keep the left.
   let cur = s;
   if (t1 < 1) {
-    const [left, ] = splitSegAt(cur, t1);
+    const [left] = splitSegAt(cur, t1);
     cur = left;
     // After splitting at t1, the original [0..1] now maps to [0..1] of `cur`,
     // i.e. the original t0 maps to t0/t1.
@@ -88,8 +103,8 @@ function stitchEndpoints(segs) {
   for (let i = 1; i < segs.length; i++) {
     const prevEnd = segEnd(segs[i - 1]);
     const cur = segs[i];
-    if (cur.type === SEG_LINE)  segs[i] = mkLine(prevEnd, cur.p2);
-    else if (cur.type === SEG_QUAD)  segs[i] = mkQuad(prevEnd, cur.p2, cur.p3);
+    if (cur.type === SEG_LINE) segs[i] = mkLine(prevEnd, cur.p2);
+    else if (cur.type === SEG_QUAD) segs[i] = mkQuad(prevEnd, cur.p2, cur.p3);
     else if (cur.type === SEG_CUBIC) segs[i] = mkCubic(prevEnd, cur.p2, cur.p3, cur.p4);
     // Arcs are parametric; can't reseat endpoints without changing
     // the arc's identity. Leave as-is.
@@ -103,7 +118,7 @@ function stitchEndpoints(segs) {
 // Lottie/AE "Trim Paths". Returns the portion of the path between
 // arc-length fractions `start` and `end` (both 0..1), shifted by
 // `offset` (0..1, wraps around). When start > end after offset
-// folding, behaviour matches AE: emit two disjoint runs that
+// folding, behavior matches AE: emit two disjoint runs that
 // together fill the wrap region.
 //
 // Implementation: build the per-seg cumulative arc-length LUT, then
@@ -113,7 +128,7 @@ export function trimPath(segs, start = 0, end = 1, offset = 0) {
   if (!segs || segs.length === 0) return [];
   // Clamp inputs.
   start = Math.max(0, Math.min(1, start));
-  end   = Math.max(0, Math.min(1, end));
+  end = Math.max(0, Math.min(1, end));
   // Offset wraps mod 1.
   let off = offset - Math.floor(offset);
   if (start === end) return [];
@@ -136,11 +151,11 @@ export function trimPath(segs, start = 0, end = 1, offset = 0) {
     return f;
   };
   let s0 = wrapPos(start + off);
-  let s1 = wrapPos(end   + off);
+  let s1 = wrapPos(end + off);
   // If start == end is excluded above; after wrap they may compare
   // equal at integer boundaries — treat 0/1 endpoints as the same
   // point on closed paths.
-  const wrap = s0 > s1;  // window wraps around the close.
+  const wrap = s0 > s1; // window wraps around the close.
   // Extract a contiguous [a, b] arc-length range, a < b, both in
   // [0, 1]. Helper returns the Seg[] in path order.
   function rangeFrac(a, b) {
@@ -150,19 +165,22 @@ export function trimPath(segs, start = 0, end = 1, offset = 0) {
     let cum = 0;
     for (let i = 0; i < segs.length; i++) {
       const segStartLen = cum;
-      const segEndLen   = cum + lens[i];
+      const segEndLen = cum + lens[i];
       cum = segEndLen;
       if (segEndLen <= aLen || segStartLen >= bLen) continue;
       // Compute local t0 / t1 by inverting arc length within seg i.
       const localA = Math.max(0, aLen - segStartLen);
       const localB = Math.min(lens[i], bLen - segStartLen);
-      const t0 = (localA <= 0)         ? 0 : _segLenInvert(segs[i], localA, lens[i]);
-      const t1 = (localB >= lens[i])   ? 1 : _segLenInvert(segs[i], localB, lens[i]);
+      const t0 = localA <= 0 ? 0 : _segLenInvert(segs[i], localA, lens[i]);
+      const t1 = localB >= lens[i] ? 1 : _segLenInvert(segs[i], localB, lens[i]);
       const sub = subSegBetween(segs[i], t0, t1);
       if (sub) out.push(sub);
     }
     return out;
   }
+  // The whole length under an offset is the whole path, starting at the offset. Its two ends land on one point, which is no window
+  // to read: a full trim drew nothing at any offset that wraps exactly, as a quarter does.
+  if (end - start >= 1) return rangeFrac(s0, 1).concat(rangeFrac(0, s0));
   if (!wrap) return rangeFrac(s0, s1);
   // Wrapped window → two disjoint runs.
   const a = rangeFrac(s0, 1);
@@ -186,32 +204,60 @@ export function trimPath(segs, start = 0, end = 1, offset = 0) {
 export function puckerBloat(segs, amount = 0) {
   if (!segs || segs.length === 0 || amount === 0) return segs ? segs.slice() : [];
   // Compute centroid as mean of every segment's endpoint + control points.
-  let cx = 0, cy = 0, n = 0;
+  let cx = 0,
+    cy = 0,
+    n = 0;
   for (const s of segs) {
-    if (s.type === SEG_LINE)  { cx += s.p1[0] + s.p2[0]; cy += s.p1[1] + s.p2[1]; n += 2; }
-    else if (s.type === SEG_QUAD)  { cx += s.p1[0] + s.p2[0] + s.p3[0]; cy += s.p1[1] + s.p2[1] + s.p3[1]; n += 3; }
-    else if (s.type === SEG_CUBIC) { cx += s.p1[0] + s.p2[0] + s.p3[0] + s.p4[0]; cy += s.p1[1] + s.p2[1] + s.p3[1] + s.p4[1]; n += 4; }
-    else if (s.type === SEG_ARC)   {
+    if (s.type === SEG_LINE) {
+      cx += s.p1[0] + s.p2[0];
+      cy += s.p1[1] + s.p2[1];
+      n += 2;
+    } else if (s.type === SEG_QUAD) {
+      cx += s.p1[0] + s.p2[0] + s.p3[0];
+      cy += s.p1[1] + s.p2[1] + s.p3[1];
+      n += 3;
+    } else if (s.type === SEG_CUBIC) {
+      cx += s.p1[0] + s.p2[0] + s.p3[0] + s.p4[0];
+      cy += s.p1[1] + s.p2[1] + s.p3[1] + s.p4[1];
+      n += 4;
+    } else if (s.type === SEG_ARC) {
       // Use arc center as the contribution.
-      cx += s.cx; cy += s.cy; n += 1;
+      cx += s.cx;
+      cy += s.cy;
+      n += 1;
     }
   }
   if (n === 0) return [];
-  cx /= n; cy /= n;
+  cx /= n;
+  cy /= n;
   const k = 1 + amount;
   const disp = (p) => [cx + (p[0] - cx) * k, cy + (p[1] - cy) * k];
   const out = [];
   for (const s of segs) {
-    if (s.type === SEG_LINE)  out.push(mkLine(disp(s.p1), disp(s.p2)));
-    else if (s.type === SEG_QUAD)  out.push(mkQuad(disp(s.p1), disp(s.p2), disp(s.p3)));
-    else if (s.type === SEG_CUBIC) out.push(mkCubic(disp(s.p1), disp(s.p2), disp(s.p3), disp(s.p4)));
+    if (s.type === SEG_LINE) out.push(mkLine(disp(s.p1), disp(s.p2)));
+    else if (s.type === SEG_QUAD) out.push(mkQuad(disp(s.p1), disp(s.p2), disp(s.p3)));
+    else if (s.type === SEG_CUBIC)
+      out.push(mkCubic(disp(s.p1), disp(s.p2), disp(s.p3), disp(s.p4)));
     else if (s.type === SEG_ARC) {
       // Scale the arc by displacing its center. Radii scale with k
       // because radii are distances from center which itself moved
       // by (k-1)*(center-centroid); the points-on-arc displace by k.
       const nc = [cx + (s.cx - cx) * k, cy + (s.cy - cy) * k];
-      out.push(mkArc(nc[0], nc[1], s.rx * Math.abs(k), s.ry * Math.abs(k),
-                     s.theta_start, s.theta_end, s.phi, s.large_arc_flag, s.sweep_flag));
+      out.push(
+        mkArc(
+          nc[0],
+          nc[1],
+          s.rx * Math.abs(k),
+          s.ry * Math.abs(k),
+          s.theta_start,
+          s.theta_end,
+          s.phi,
+          s.large_arc_flag,
+          s.sweep_flag,
+          disp(s.p1),
+          disp(s.p4),
+        ),
+      );
     }
   }
   return stitchEndpoints(out);
@@ -231,37 +277,52 @@ export function puckerBloat(segs, amount = 0) {
 export function repeater(segs, copies = 1, tx = 0, ty = 0, rotDeg = 0, sx = 1, sy = 1) {
   if (!segs || segs.length === 0 || copies <= 0) return segs ? segs.slice() : [];
   const out = [];
-  const rot = rotDeg * Math.PI / 180;
+  const rot = (rotDeg * Math.PI) / 180;
   for (let c = 0; c < copies; c++) {
-    // Cumulative transform for copy c: scale^c then rotate(c*rot) then translate(c*tx, c*ty).
-    // Lottie's "Composite" is "below|above" — we always emit in copy order
-    // and let the renderer's z handle it.
     const cs = Math.pow(sx, c);
     const csY = Math.pow(sy, c);
-    const co = Math.cos(rot * c), si = Math.sin(rot * c);
+    const co = Math.cos(rot * c),
+      si = Math.sin(rot * c);
     const apply = (p) => {
-      const x = p[0] * cs, y = p[1] * csY;
+      const x = p[0] * cs,
+        y = p[1] * csY;
       const xr = co * x - si * y;
       const yr = si * x + co * y;
       return [xr + tx * c, yr + ty * c];
     };
     for (const s of segs) {
-      if (s.type === SEG_LINE)  out.push(mkLine(apply(s.p1), apply(s.p2)));
-      else if (s.type === SEG_QUAD)  out.push(mkQuad(apply(s.p1), apply(s.p2), apply(s.p3)));
-      else if (s.type === SEG_CUBIC) out.push(mkCubic(apply(s.p1), apply(s.p2), apply(s.p3), apply(s.p4)));
+      if (s.type === SEG_LINE) out.push(mkLine(apply(s.p1), apply(s.p2)));
+      else if (s.type === SEG_QUAD) out.push(mkQuad(apply(s.p1), apply(s.p2), apply(s.p3)));
+      else if (s.type === SEG_CUBIC)
+        out.push(mkCubic(apply(s.p1), apply(s.p2), apply(s.p3), apply(s.p4)));
       else if (s.type === SEG_ARC) {
         // Copy 0 is identity → keep the native arc. For c>0 the affine of an
         // arc is NOT generally an arc (a non-uniform scale yields a tilted
         // ellipse). Decompose the ORIGINAL arc into cubics, then apply
         // the copy's full affine to every control point — the affine of a cubic
         // Bezier is an exact cubic, so this is correct for uniform OR
-        // non-uniform scale + rotation (to arcToCubics' <1e-3 quadrant error).
-        if (c === 0) { out.push(s); continue; }
-        const cubics = arcToCubics(s.p1, s.rx, s.ry, s.phi * 180 / Math.PI,
-                                   s.large_arc_flag, s.sweep_flag, s.p4);
-        for (const cu of cubics) {
-          if (cu.type === SEG_LINE) out.push(mkLine(apply(cu.p1), apply(cu.p2)));
-          else out.push(mkCubic(apply(cu.p1), apply(cu.p2), apply(cu.p3), apply(cu.p4)));
+        // non-uniform scale + rotation (to arcToCubics' 2.7e-4*radius error per 90 degree piece).
+        if (c === 0) {
+          out.push(s);
+          continue;
+        }
+        // A full turn has no endpoint form (both ends are one point), so its copies came back as an empty line. Two halves do.
+        const whole =
+          Math.abs(s.theta_end - s.theta_start) > Math.PI * 1.999 ? splitArcAt(s, 0.5) : [s];
+        for (const part of whole) {
+          const cubics = arcToCubics(
+            part.p1,
+            part.rx,
+            part.ry,
+            (part.phi * 180) / Math.PI,
+            part.large_arc_flag,
+            part.sweep_flag,
+            part.p4,
+          );
+          for (const cu of cubics) {
+            if (cu.type === SEG_LINE) out.push(mkLine(apply(cu.p1), apply(cu.p2)));
+            else out.push(mkCubic(apply(cu.p1), apply(cu.p2), apply(cu.p3), apply(cu.p4)));
+          }
         }
       }
     }
@@ -276,7 +337,7 @@ export function repeater(segs, copies = 1, tx = 0, ty = 0, rotDeg = 0, sx = 1, s
 // joined segment chain with a quadratic-Bezier fillet of radius `r`.
 // A corner is the meeting point of two line segments (curve-curve
 // and curve-line joins are already C0-continuous and aren't normally
-// "rounded" by the AE effect — Lottie matches AE behaviour here).
+// "rounded" by the AE effect — Lottie matches AE behavior here).
 //
 // The fillet inset distance d is min(r, half each adjacent segment's
 // length): for very short edges, the fillet shrinks rather than
@@ -291,17 +352,19 @@ export function roundCorners(segs, r) {
   const N = segs.length;
   // Determine subpath closure by checking endpoint equality.
   const startsP = segs.map(segStart);
-  const endsP   = segs.map(segEnd);
-  const closed = N > 1 &&
-    Math.abs(startsP[0][0] - endsP[N-1][0]) < 1e-9 &&
-    Math.abs(startsP[0][1] - endsP[N-1][1]) < 1e-9;
+  const endsP = segs.map(segEnd);
+  // Closed at the precision segments are built with (segment.js pointsMeet), not an absolute 1e-9, which a
+  // path 1e8 across misses by its own rounding and a path 1e-9 across meets everywhere.
+  const closed =
+    N > 1 && pointsMeet(startsP[0], endsP[N - 1], jointMag(segs[0]), jointMag(segs[N - 1]));
   const out = [];
+  let wrapStart = null;
   for (let i = 0; i < N; i++) {
     const cur = segs[i];
-    const isLastBeforeWrap = (i === N - 1);
+    const isLastBeforeWrap = i === N - 1;
     const nextIdx = isLastBeforeWrap ? 0 : i + 1;
     const next = segs[nextIdx];
-    const corner = endsP[i];           // current's end == next's start
+    const corner = endsP[i]; // current's end == next's start
     // Only round true line-line corners. Skip if either side is a curve.
     const lineLine = cur.type === SEG_LINE && next && next.type === SEG_LINE;
     // Skip last-into-first wrap if the path isn't closed.
@@ -310,24 +373,40 @@ export function roundCorners(segs, r) {
       out.push(cur);
       continue;
     }
-    const a = cur.p1, b = cur.p2, c = next.p2;
-    const dx1 = b[0] - a[0], dy1 = b[1] - a[1];
-    const dx2 = c[0] - b[0], dy2 = c[1] - b[1];
+    // The edges as authored: an earlier fillet has already moved this edge's start, and half of what is left of it would make each
+    // corner's limit depend on the corner before it.
+    const a = cur.p1,
+      b = cur.p2,
+      c = next.p2;
+    const a0 = startsP[i],
+      c0 = endsP[nextIdx];
+    const dx1 = b[0] - a0[0],
+      dy1 = b[1] - a0[1];
+    const dx2 = c0[0] - b[0],
+      dy2 = c0[1] - b[1];
     const l1 = Math.hypot(dx1, dy1);
     const l2 = Math.hypot(dx2, dy2);
-    if (l1 < 1e-9 || l2 < 1e-9) { out.push(cur); continue; }
+    if (_edgeless(l1, a0, b) || _edgeless(l2, b, c0)) {
+      out.push(cur);
+      continue;
+    }
     // Inset distance: clamp to half each edge to avoid overshoot.
     const d = Math.min(r, l1 * 0.5, l2 * 0.5);
-    if (d <= 0) { out.push(cur); continue; }
-    const inA = [b[0] - dx1 / l1 * d, b[1] - dy1 / l1 * d];
-    const inB = [b[0] + dx2 / l2 * d, b[1] + dy2 / l2 * d];
+    if (d <= 0) {
+      out.push(cur);
+      continue;
+    }
+    const inA = [b[0] - (dx1 / l1) * d, b[1] - (dy1 / l1) * d];
+    const inB = [b[0] + (dx2 / l2) * d, b[1] + (dy2 / l2) * d];
     // Replace cur with (a → inA) line; emit quad (inA, b, inB).
     out.push(mkLine(a, inA));
     out.push(mkQuad(inA, b, inB));
-    // The next iteration will see `next` starting from b; we need to
-    // rewrite its start to inB. Mutate the array in place.
-    segs[nextIdx] = mkLine(inB, c);
+
+    if (isLastBeforeWrap)
+      wrapStart = inB; // the first edge was emitted before this corner moved its start
+    else segs[nextIdx] = mkLine(inB, c);
   }
+  if (wrapStart) out[0] = mkLine(wrapStart, out[0].p2);
   return out;
 }
 
@@ -337,22 +416,34 @@ export function roundCorners(segs, r) {
 // Lottie/AE "Offset Paths". Generates a parallel curve at signed
 // distance `dist`. Positive = outward (right of travel direction in
 // y-down space); negative = inward.
-//
-// Implementation: per segment, resample along its normal at K-1
-// internal points. For lines, this is exact (one offset line). For
-// curves and arcs, we lay down a polyline of offset points then
-// emit it as straight lines. K scales with segment length and
-// |dist| so error stays below ~0.5px at typical render scales.
-// Joins are mitered when the angle is < jointLimit (default 60°),
-// bevelled otherwise — matching Lottie's "joint" parameter when set
-// to "Miter" with default limit.
-//
+
 // The polyline output is visually identical to AE/Lottie at reasonable
 // stroke widths. (A tighter implementation would refit cubic Bezier
 // offsets rather than emit a polyline.)
 export function offsetPath(segs, dist, opts = {}) {
   if (!segs || segs.length === 0 || dist === 0) return segs ? segs.slice() : [];
-  const minStep = opts.minStep || 1.0;  // user-units between offset samples on curves
+  // Between offset samples on a curve: a fixed share of the path's own size unless the caller says, so the facets are the same at any
+  // size. One user unit gave a curve 2 units long four chords and one 2000 long a thousand and more.
+  let x0 = Infinity,
+    y0 = Infinity,
+    x1 = -Infinity,
+    y1 = -Infinity;
+  for (const seg of segs)
+    for (const q of [seg.p1, seg.p2, seg.p3, seg.p4]) {
+      if (!q) continue;
+      if (q[0] < x0) x0 = q[0];
+      if (q[0] > x1) x1 = q[0];
+      if (q[1] < y0) y0 = q[1];
+      if (q[1] > y1) y1 = q[1];
+      if (seg.type === SEG_ARC) {
+        const r = Math.max(seg.rx, seg.ry);
+        x0 = Math.min(x0, seg.cx - r);
+        x1 = Math.max(x1, seg.cx + r);
+        y0 = Math.min(y0, seg.cy - r);
+        y1 = Math.max(y1, seg.cy + r);
+      }
+    }
+  const minStep = opts.minStep || Math.hypot(x1 - x0, y1 - y0) / 128 || 1;
   const sampleCount = (seg) => {
     if (seg.type === SEG_LINE) return 1;
     const len = _segLenAt(seg, 1);
@@ -365,16 +456,30 @@ export function offsetPath(segs, dist, opts = {}) {
     const tan = _segTangentAtT(seg, t);
     return [p[0] + tan[1] * dist, p[1] - tan[0] * dist];
   };
+  // Two segments that meet stay joined after the offset, with a straight (bevel) edge across a corner: the parallel curves of two
+  // sides end apart, and a list with a gap at every corner reads as one open contour per side, each filling nothing.
   const out = [];
-  for (const seg of segs) {
+  const gapFloor = 1e-9 * Math.abs(dist);
+  const bridge = (from, to) => {
+    if (Math.hypot(to[0] - from[0], to[1] - from[1]) > gapFloor) out.push(mkLine(from, to));
+  };
+  const meets = (a, b) => pointsMeet(segEnd(a), segStart(b), jointMag(a), jointMag(b));
+  let chainEnd = null,
+    first = null;
+  for (let n = 0; n < segs.length; n++) {
+    const seg = segs[n];
     const K = sampleCount(seg);
     let prev = offsetPoint(seg, 0);
+    if (n === 0) first = prev;
+    else if (meets(segs[n - 1], seg)) bridge(chainEnd, prev);
     for (let i = 1; i <= K; i++) {
       const cur = offsetPoint(seg, i / K);
       out.push(mkLine(prev, cur));
       prev = cur;
     }
+    chainEnd = prev;
   }
+  if (segs.length > 1 && meets(segs[segs.length - 1], segs[0])) bridge(chainEnd, first);
   return out;
 }
 
@@ -383,7 +488,7 @@ export function offsetPath(segs, dist, opts = {}) {
 // ────────────────────────────────────────────────────────────────
 // Lottie "Polystar" shape: parametric N-pointed star or regular
 // polygon. Star mode alternates between outer and inner radii.
-// Polygon mode uses a single radius. Both honour a roundness
+// Polygon mode uses a single radius. Both honor a roundness
 // parameter (0..1, percentage of edge length used as fillet radius)
 // — same model as Lottie ir/or/is/os fields.
 //
@@ -396,13 +501,20 @@ export function offsetPath(segs, dist, opts = {}) {
 //   innerRoundness: 0..1 fraction for inner-vertex fillet (star only)
 //   rotationDeg: vertex-0 angle offset, degrees CCW from +X axis
 //   star: true for star, false for polygon
-export function polystar(cx, cy, points, outerRadius,
-                         innerRadius = 0,
-                         outerRoundness = 0, innerRoundness = 0,
-                         rotationDeg = -90, star = true) {
+export function polystar(
+  cx,
+  cy,
+  points,
+  outerRadius,
+  innerRadius = 0,
+  outerRoundness = 0,
+  innerRoundness = 0,
+  rotationDeg = -90,
+  star = true,
+) {
   if (!(points >= 3) || !(outerRadius > 0)) return [];
   const N = star ? points * 2 : points;
-  const rot = rotationDeg * Math.PI / 180;
+  const rot = (rotationDeg * Math.PI) / 180;
   const dTheta = (Math.PI * 2) / N;
   const verts = new Array(N);
   for (let i = 0; i < N; i++) {
@@ -421,49 +533,36 @@ export function polystar(cx, cy, points, outerRadius,
   // Close back: verts[N-1] → verts[0] is already in.
   const useFillet = outerRoundness > 0 || innerRoundness > 0;
   if (!useFillet) return segs;
-  // Hand off to roundCorners with a per-vertex amount. Since
-  // roundCorners takes a scalar, instead we open-code the fillet
-  // here per vertex using the matching roundness for vertex i.
-  const out = [];
-  for (let i = 0; i < N; i++) {
-    const curIdx  = i;
-    const nextIdx = (i + 1) % N;
-    const corner = verts[nextIdx];                // segment cur ends at corner
-    const after  = verts[(nextIdx + 1) % N];
-    const before = verts[curIdx];
-    // Pick the radius for THIS corner (vertex nextIdx).
-    const roundFrac = star
-      ? (nextIdx % 2 === 0 ? outerRoundness : innerRoundness)
-      : outerRoundness;
-    const dx1 = corner[0] - before[0], dy1 = corner[1] - before[1];
-    const dx2 = after[0]  - corner[0], dy2 = after[1]  - corner[1];
-    const l1 = Math.hypot(dx1, dy1), l2 = Math.hypot(dx2, dy2);
-    if (roundFrac <= 0 || l1 < 1e-9 || l2 < 1e-9) {
-      out.push(segs[i]);
+
+  // Every fillet is read off the polygon as authored, so equal corners get equal fillets. (Moving each corner's start before reading the
+  // next would make each fillet depend on the one before it, and the last would read an edge that is not the polygon's.)
+  const inA = new Array(N),
+    inB = new Array(N);
+  for (let k = 0; k < N; k++) {
+    const corner = verts[k],
+      before = verts[(k + N - 1) % N],
+      after = verts[(k + 1) % N];
+    const roundFrac = star ? (k % 2 === 0 ? outerRoundness : innerRoundness) : outerRoundness;
+    const dx1 = corner[0] - before[0],
+      dy1 = corner[1] - before[1];
+    const dx2 = after[0] - corner[0],
+      dy2 = after[1] - corner[1];
+    const l1 = Math.hypot(dx1, dy1),
+      l2 = Math.hypot(dx2, dy2);
+    if (roundFrac <= 0 || _edgeless(l1, before, corner) || _edgeless(l2, corner, after)) {
+      inA[k] = inB[k] = null;
       continue;
     }
     // Per Lottie: roundFrac is a unit (0..1) of half-edge.
     const d = Math.min(l1, l2) * 0.5 * Math.max(0, Math.min(1, roundFrac));
-    const inA = [corner[0] - dx1 / l1 * d, corner[1] - dy1 / l1 * d];
-    const inB = [corner[0] + dx2 / l2 * d, corner[1] + dy2 / l2 * d];
-    // Edge cur (before → corner) becomes (before → inA).
-    // Insert quad (inA, corner, inB). Next edge's start will be inB —
-    // we mutate verts[nextIdx] so subsequent iterations see it.
-    out.push(mkLine(before, inA));
-    out.push(mkQuad(inA, corner, inB));
-    verts[nextIdx] = inB;  // next iter's "before" = current iter's inB
+    inA[k] = [corner[0] - (dx1 / l1) * d, corner[1] - (dy1 / l1) * d];
+    inB[k] = [corner[0] + (dx2 / l2) * d, corner[1] + (dy2 / l2) * d];
   }
-  // The very first edge's start vertex may have been rewritten by the
-  // last iteration (we filleted vertex 0 last). Patch the first
-  // emitted line so its start matches the post-fillet vertex 0.
-  // Detect: out[0] is the first line, its start should be verts[0]
-  // (which is now post-fillet). If different, rewrite.
-  if (out.length > 0 && out[0].type === SEG_LINE) {
-    const wantStart = verts[0];
-    if (Math.abs(out[0].p1[0] - wantStart[0]) > 1e-9 ||
-        Math.abs(out[0].p1[1] - wantStart[1]) > 1e-9) {
-      out[0] = mkLine(wantStart, out[0].p2);
-    }
+  const out = [];
+  for (let i = 0; i < N; i++) {
+    const nextIdx = (i + 1) % N;
+    out.push(mkLine(inB[i] || verts[i], inA[nextIdx] || verts[nextIdx]));
+    if (inA[nextIdx]) out.push(mkQuad(inA[nextIdx], verts[nextIdx], inB[nextIdx]));
   }
   return out;
 }

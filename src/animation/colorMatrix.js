@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // colorMatrix.js — build 4×4 color matrices + offset for the per-draw
 // recolor path.
 //
@@ -17,12 +20,7 @@
 //     colorMatrixOffset: offset,
 //   });
 
-const _ID_MATRIX = new Float32Array([
-  1, 0, 0, 0,
-  0, 1, 0, 0,
-  0, 0, 1, 0,
-  0, 0, 0, 1,
-]);
+const _ID_MATRIX = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 const _ID_OFFSET = new Float32Array(4);
 
 /** Identity recolor (passthrough). */
@@ -64,13 +62,25 @@ export function dualTint(primary, contrast) {
   return {
     matrix: new Float32Array([
       // col 0 (in.r → out)
-      primary[0],  primary[1],  primary[2],  0,
+      primary[0],
+      primary[1],
+      primary[2],
+      0,
       // col 1 (in.g → out) — zero, no green contribution to body color
-      0, 0, 0, 0,
+      0,
+      0,
+      0,
+      0,
       // col 2 (in.b → out)
-      contrast[0], contrast[1], contrast[2], 0,
+      contrast[0],
+      contrast[1],
+      contrast[2],
+      0,
       // col 3 (in.a → out) — alpha passthrough
-      0, 0, 0, 1,
+      0,
+      0,
+      0,
+      1,
     ]),
     offset: new Float32Array([0, 0, 0, 0]),
   };
@@ -93,13 +103,25 @@ export function tripleTint(primary, highlight, contrast) {
   return {
     matrix: new Float32Array([
       // col 0 (in.r → out)
-      primary[0],   primary[1],   primary[2],   0,
+      primary[0],
+      primary[1],
+      primary[2],
+      0,
       // col 1 (in.g → out)
-      highlight[0], highlight[1], highlight[2], 0,
+      highlight[0],
+      highlight[1],
+      highlight[2],
+      0,
       // col 2 (in.b → out)
-      contrast[0],  contrast[1],  contrast[2],  0,
+      contrast[0],
+      contrast[1],
+      contrast[2],
+      0,
       // col 3 (in.a → out)
-      0, 0, 0, 1,
+      0,
+      0,
+      0,
+      1,
     ]),
     offset: new Float32Array([0, 0, 0, 0]),
   };
@@ -116,17 +138,28 @@ export function monochrome(color = [1, 1, 1, 1]) {
   const [lr, lg, lb] = [0.2126, 0.7152, 0.0722];
   return {
     matrix: new Float32Array([
-      lr * color[0], lr * color[1], lr * color[2], 0,
-      lg * color[0], lg * color[1], lg * color[2], 0,
-      lb * color[0], lb * color[1], lb * color[2], 0,
-      0, 0, 0, 1,
+      lr * color[0],
+      lr * color[1],
+      lr * color[2],
+      0,
+      lg * color[0],
+      lg * color[1],
+      lg * color[2],
+      0,
+      lb * color[0],
+      lb * color[1],
+      lb * color[2],
+      0,
+      0,
+      0,
+      0,
+      1,
     ]),
     offset: new Float32Array([0, 0, 0, 0]),
   };
 }
 
-/** Channel-lerp recolor. Returns the parameter object the renderer's
- *  `opts.channelLerp` expects.
+/** Build parameters for the renderer's `channelLerp` recolor option.
  *
  *  Formula:
  *    tint = R·primary + B·contrast
@@ -144,10 +177,10 @@ export function monochrome(color = [1, 1, 1, 1]) {
  *  @param {[number, number, number, number]} [highlight=[1,1,1,1]]
  *  @returns {{primary: number[], contrast: number[], highlight: number[]}}
  */
-export function unityChannelLerp(primary, contrast, highlight) {
+export function channelLerpParams(primary, contrast, highlight) {
   return {
-    primary:   primary,
-    contrast:  contrast,
+    primary: primary,
+    contrast: contrast,
     highlight: highlight || [1, 1, 1, 1],
   };
 }
@@ -163,7 +196,8 @@ export function unityChannelLerp(primary, contrast, highlight) {
 export function combine(a, b) {
   // out = A * (B * in + b.offset) + a.offset
   //     = (A*B) * in + (A * b.offset + a.offset)
-  const A = a.matrix, B = b.matrix;
+  const A = a.matrix,
+    B = b.matrix;
   const M = new Float32Array(16);
   // Column-major mat4 product: M[col=i] = A * B[col=i].
   for (let i = 0; i < 4; i++) {

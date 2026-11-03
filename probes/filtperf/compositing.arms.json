@@ -1,0 +1,6 @@
+[
+  {
+    "name": "baseline composite",
+    "file": { "feCompositeFrag": "probes/filtperf/pre-compositing.feComposite.frag.glsl" }
+  }
+]

@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 64 64"><rect width="64" height="64" fill="white"/><defs><filter id="f" width="1"><feFlood flood-color="red"/></filter></defs><g filter="url(#f)"><rect x="8" y="8" width="20" height="48" fill="blue"/><circle cx="42" cy="32" r="14" fill="blue"/></g></svg>

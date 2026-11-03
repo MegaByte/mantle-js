@@ -1,0 +1,1294 @@
+{
+  "chrome": "Chrome/147.0.7727.57",
+  "generated": "2026-10-20",
+  "entries": [
+    { "c": "red", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "RED", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "Red", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rebeccapurple", "valid": true, "w": [102, 51, 153], "k": [102, 51, 153] },
+    { "c": "transparent", "valid": true, "w": [255, 255, 255], "k": [0, 0, 0] },
+    { "c": "lightgoldenrodyellow", "valid": true, "w": [250, 250, 210], "k": [250, 250, 210] },
+    { "c": "darkseagreen", "valid": true, "w": [143, 188, 143], "k": [143, 188, 143] },
+    { "c": "grey", "valid": true, "w": [128, 128, 128], "k": [128, 128, 128] },
+    { "c": "darkgrey", "valid": true, "w": [169, 169, 169], "k": [169, 169, 169] },
+    { "c": "lightslategrey", "valid": true, "w": [119, 136, 153], "k": [119, 136, 153] },
+    { "c": "yellowgreen", "valid": true, "w": [154, 205, 50], "k": [154, 205, 50] },
+    { "c": "indigo", "valid": true, "w": [75, 0, 130], "k": [75, 0, 130] },
+    { "c": "aliceblue", "valid": true, "w": [240, 248, 255], "k": [240, 248, 255] },
+    { "c": "#abc", "valid": true, "w": [170, 187, 204], "k": [170, 187, 204] },
+    { "c": "#ABCD", "valid": true, "w": [181, 196, 211], "k": [147, 162, 177] },
+    { "c": "#aabbcc", "valid": true, "w": [170, 187, 204], "k": [170, 187, 204] },
+    { "c": "#aabbcc80", "valid": true, "w": [212, 221, 229], "k": [85, 94, 102] },
+    { "c": "#12345", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "#12", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "#gggggg", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255,0,0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(255 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(255 0 0 / .5)", "valid": true, "w": [255, 127, 127], "k": [128, 0, 0] },
+    { "c": "rgb(255 0 0 / 50%)", "valid": true, "w": [255, 127, 127], "k": [128, 0, 0] },
+    { "c": "rgba(255,0,0,.5)", "valid": true, "w": [255, 127, 127], "k": [128, 0, 0] },
+    { "c": "rgba(255,0,0,50%)", "valid": true, "w": [255, 127, 127], "k": [128, 0, 0] },
+    { "c": "rgb(100%,0%,0%)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(100% 50% 0% / .3)", "valid": true, "w": [255, 217, 178], "k": [77, 39, 0] },
+    { "c": "rgb(300,-20,128)", "valid": true, "w": [255, 0, 128], "k": [255, 0, 128] },
+    { "c": "rgb(300 -20 128)", "valid": true, "w": [255, 0, 128], "k": [255, 0, 128] },
+    { "c": "rgb(127.5,63.5,0.5)", "valid": true, "w": [128, 64, 1], "k": [128, 64, 1] },
+    { "c": "rgb(1e2,0,0)", "valid": true, "w": [100, 0, 0], "k": [100, 0, 0] },
+    { "c": "rgb(50%,50,0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "RGB(10,20,30)", "valid": true, "w": [10, 20, 30], "k": [10, 20, 30] },
+    { "c": "rgb( 10 , 20 , 30 )", "valid": true, "w": [10, 20, 30], "k": [10, 20, 30] },
+    { "c": "rgb(none 0 0)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "rgb(255 0 0 / none)", "valid": true, "w": [255, 255, 255], "k": [0, 0, 0] },
+    { "c": "rgb(from red r g b)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(255,0,0,.5)", "valid": true, "w": [255, 127, 127], "k": [128, 0, 0] },
+    { "c": "rgba(255 0 0 .5)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255 0 0 /)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(,,)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "hsl(120,100%,50%)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "hsl(120deg 100% 50%)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "hsl(0.5turn 100% 50%)", "valid": true, "w": [0, 255, 255], "k": [0, 255, 255] },
+    { "c": "hsl(3.14rad 100% 50%)", "valid": true, "w": [0, 255, 255], "k": [0, 255, 255] },
+    { "c": "hsl(200grad 100% 50%)", "valid": true, "w": [0, 255, 255], "k": [0, 255, 255] },
+    { "c": "hsla(240,100%,50%,.4)", "valid": true, "w": [153, 153, 255], "k": [0, 0, 102] },
+    { "c": "hsl(-120 100% 50%)", "valid": true, "w": [0, 0, 255], "k": [0, 0, 255] },
+    { "c": "hsl(480 100% 50%)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "hsl(120 100% 50% / 25%)", "valid": true, "w": [191, 255, 191], "k": [0, 64, 0] },
+    { "c": "hsl(120,100,50)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "hsl(120 150% 50%)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "hsl(120 100% 150%)", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "hsl(120 -10% 50%)", "valid": true, "w": [128, 128, 128], "k": [128, 128, 128] },
+    { "c": "hsl(none 100% 50%)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "hsl(120 0% 50%)", "valid": true, "w": [128, 128, 128], "k": [128, 128, 128] },
+    { "c": "hwb(120 20% 30%)", "valid": true, "w": [51, 178, 51], "k": [51, 178, 51] },
+    { "c": "hwb(120 60% 60%)", "valid": true, "w": [128, 128, 128], "k": [128, 128, 128] },
+    { "c": "hwb(0 0% 0% / .5)", "valid": true, "w": [255, 128, 128], "k": [128, 0, 0] },
+    { "c": "hwb(240deg 10% 10%)", "valid": true, "w": [26, 26, 229], "k": [26, 26, 229] },
+    { "c": "hwb(120 100% 100%)", "valid": true, "w": [128, 128, 128], "k": [128, 128, 128] },
+    { "c": "lab(50 40 30)", "valid": true, "w": [187, 88, 70], "k": [187, 88, 70] },
+    { "c": "lab(80% 20 -30)", "valid": true, "w": [215, 187, 255], "k": [215, 187, 255] },
+    { "c": "lab(50 40 30 / .5)", "valid": true, "w": [221, 171, 163], "k": [94, 44, 35] },
+    { "c": "lab(100 0 0)", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "lab(0 0 0)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "lab(50% 100% 100%)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "lab(90 120 120)", "valid": true, "w": [255, 31, 0], "k": [255, 31, 0] },
+    { "c": "lch(50 40 30)", "valid": true, "w": [178, 93, 87], "k": [178, 93, 87] },
+    { "c": "lch(70% 50 200)", "valid": true, "w": [0, 194, 201], "k": [0, 194, 201] },
+    { "c": "lch(50 40 30deg)", "valid": true, "w": [178, 93, 87], "k": [178, 93, 87] },
+    { "c": "lch(50 150 120)", "valid": true, "w": [0, 145, 0], "k": [0, 145, 0] },
+    { "c": "oklab(0.6 0.1 0.1)", "valid": true, "w": [195, 96, 46], "k": [195, 96, 46] },
+    { "c": "oklab(60% 0.1 0.1)", "valid": true, "w": [195, 96, 46], "k": [195, 96, 46] },
+    { "c": "oklab(0.6 0.1 0.1 / .4)", "valid": true, "w": [231, 191, 172], "k": [78, 38, 19] },
+    { "c": "oklab(0.9 0.3 0.3)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "oklab(0.5 -0.4 0.4)", "valid": true, "w": [0, 140, 0], "k": [0, 140, 0] },
+    { "c": "oklch(0.6 0.15 30)", "valid": true, "w": [202, 87, 71], "k": [202, 87, 71] },
+    { "c": "oklch(60% 0.15 30deg)", "valid": true, "w": [202, 87, 71], "k": [202, 87, 71] },
+    { "c": "oklch(0.7 0.3 150)", "valid": true, "w": [0, 203, 0], "k": [0, 203, 0] },
+    { "c": "oklch(0.7 0.4 150)", "valid": true, "w": [0, 214, 0], "k": [0, 214, 0] },
+    { "c": "oklch(0.5 0.1 0.5turn)", "valid": true, "w": [0, 117, 101], "k": [0, 117, 101] },
+    { "c": "oklch(1 0 0)", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "oklch(0 0 0)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "oklch(0.6 0.2 30 / 50%)", "valid": true, "w": [239, 158, 150], "k": [111, 31, 22] },
+    { "c": "oklch(0.6 100% 30)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "oklch(0.6 0.15 none)", "valid": true, "w": [197, 84, 124], "k": [197, 84, 124] },
+    { "c": "color(srgb 1 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "color(srgb 100% 50% 0%)", "valid": true, "w": [255, 128, 0], "k": [255, 128, 0] },
+    { "c": "color(srgb 1 0 0 / .5)", "valid": true, "w": [255, 128, 128], "k": [128, 0, 0] },
+    {
+      "c": "color(srgb-linear 0.5 0.5 0.5)",
+      "valid": true,
+      "w": [188, 188, 188],
+      "k": [188, 188, 188]
+    },
+    { "c": "color(display-p3 1 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "color(display-p3 0.5 0.8 0.2)", "valid": true, "w": [100, 206, 0], "k": [100, 206, 0] },
+    { "c": "color(a98-rgb 1 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    {
+      "c": "color(prophoto-rgb 0.5 0.5 0.5)",
+      "valid": true,
+      "w": [146, 146, 146],
+      "k": [146, 146, 146]
+    },
+    { "c": "color(rec2020 0 1 0)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "color(xyz 0.3 0.3 0.3)", "valid": true, "w": [162, 145, 143], "k": [162, 145, 143] },
+    {
+      "c": "color(xyz-d65 0.3 0.3 0.3)",
+      "valid": true,
+      "w": [162, 145, 143],
+      "k": [162, 145, 143]
+    },
+    {
+      "c": "color(xyz-d50 0.3 0.3 0.3)",
+      "valid": true,
+      "w": [151, 147, 165],
+      "k": [151, 147, 165]
+    },
+    { "c": "color(srgb 2 -1 0.5)", "valid": true, "w": [255, 0, 128], "k": [255, 0, 128] },
+    { "c": "color(--custom 1 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "color-mix(in srgb, red, blue)", "valid": true, "w": [128, 0, 128], "k": [128, 0, 128] },
+    {
+      "c": "color-mix(in srgb, red 30%, blue)",
+      "valid": true,
+      "w": [77, 0, 178],
+      "k": [77, 0, 178]
+    },
+    {
+      "c": "color-mix(in oklab, red, blue)",
+      "valid": true,
+      "w": [140, 83, 162],
+      "k": [140, 83, 162]
+    },
+    { "c": "color-mix(in hsl, red, blue)", "valid": true, "w": [255, 0, 255], "k": [255, 0, 255] },
+    {
+      "c": "color-mix(in srgb, red, transparent)",
+      "valid": true,
+      "w": [255, 128, 128],
+      "k": [128, 0, 0]
+    },
+    {
+      "c": "color-mix(in srgb, rgb(255 0 0 / .5), blue)",
+      "valid": true,
+      "w": [128, 64, 191],
+      "k": [64, 0, 128]
+    },
+    {
+      "c": "color-mix(in oklch, red, blue)",
+      "valid": true,
+      "w": [186, 0, 194],
+      "k": [186, 0, 194]
+    },
+    {
+      "c": "color-mix(in srgb, red 120%, blue)",
+      "valid": false,
+      "w": [0, 170, 0],
+      "k": [0, 170, 0]
+    },
+    { "c": "light-dark(red, blue)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "Canvas", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "CanvasText", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "ButtonFace", "valid": true, "w": [239, 239, 239], "k": [239, 239, 239] },
+    { "c": "Highlight", "valid": true, "w": [179, 215, 254], "k": [77, 113, 152] },
+    { "c": "LinkText", "valid": true, "w": [0, 0, 238], "k": [0, 0, 238] },
+    { "c": "GrayText", "valid": true, "w": [128, 128, 128], "k": [128, 128, 128] },
+    { "c": "Field", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "Mark", "valid": true, "w": [255, 255, 0], "k": [255, 255, 0] },
+    { "c": "AccentColor", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "AccentColorText", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "currentColor", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "currentcolor", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "CURRENTCOLOR", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": " red ", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "red;", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "icc-color(x,1)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "red icc-color(x,1)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "#f00 icc-color(x,1)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255,0,0) icc-color(x,1)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "calc(1)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(calc(100*2) 0 0)", "valid": true, "w": [200, 0, 0], "k": [200, 0, 0] },
+    { "c": "rgb(calc(255 / 2) 0 0)", "valid": true, "w": [128, 0, 0], "k": [128, 0, 0] },
+    { "c": "rgb(255 0 0 / calc(.5))", "valid": true, "w": [255, 127, 127], "k": [128, 0, 0] },
+    { "c": "hsl(calc(60*2) 100% 50%)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "rgb(from red 0 g b)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "rgb(from #08f r g b / .5)", "valid": true, "w": [128, 195, 255], "k": [0, 68, 128] },
+    { "c": "hsl(from red h s l)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    {
+      "c": "rgb(from rgb(10 20 30) calc(r*2) g b)",
+      "valid": true,
+      "w": [20, 20, 30],
+      "k": [20, 20, 30]
+    },
+    { "c": "red!important", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255,0,0)!important", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "RED ", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "\tred", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "transparent ", "valid": true, "w": [255, 255, 255], "k": [0, 0, 0] },
+    { "c": "rgb(0 0 0 / 0)", "valid": true, "w": [255, 255, 255], "k": [0, 0, 0] },
+    { "c": "rgb(0 0 0 / 0.001)", "valid": true, "w": [255, 255, 255], "k": [0, 0, 0] },
+    { "c": "rgb(0 0 0 / 0.5019)", "valid": true, "w": [127, 127, 127], "k": [0, 0, 0] },
+    { "c": "rgb(0 0 0 / .498)", "valid": true, "w": [128, 128, 128], "k": [0, 0, 0] },
+    { "c": "rgba(0,0,0,0.5)", "valid": true, "w": [127, 127, 127], "k": [0, 0, 0] },
+    { "c": "rgba(0,0,0,0.502)", "valid": true, "w": [127, 127, 127], "k": [0, 0, 0] },
+    { "c": "rgb(255,0,0,)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255.5,0,0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(255,0,0 )", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(255, 0,0 ,.5)", "valid": true, "w": [255, 127, 127], "k": [128, 0, 0] },
+    { "c": "rgb(255 0,0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(+255 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(2.55e2 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "hsl(1e1 100% 50%)", "valid": true, "w": [255, 42, 0], "k": [255, 42, 0] },
+    { "c": "hsl(120 100% 50% / .5)", "valid": true, "w": [127, 255, 127], "k": [0, 128, 0] },
+    { "c": "color-mix(in lab, red, blue)", "valid": true, "w": [193, 0, 136], "k": [193, 0, 136] },
+    { "c": "color-mix(in lch, red, blue)", "valid": true, "w": [245, 0, 134], "k": [245, 0, 134] },
+    { "c": "color-mix(in hwb, red, blue)", "valid": true, "w": [255, 0, 255], "k": [255, 0, 255] },
+    { "c": "color-mix(in xyz, red, blue)", "valid": true, "w": [188, 0, 188], "k": [188, 0, 188] },
+    {
+      "c": "color-mix(in display-p3, red, blue)",
+      "valid": true,
+      "w": [128, 10, 145],
+      "k": [128, 10, 145]
+    },
+    {
+      "c": "color-mix(in oklch longer hue, red, blue)",
+      "valid": true,
+      "w": [0, 147, 0],
+      "k": [0, 147, 0]
+    },
+    {
+      "c": "color-mix(in oklch increasing hue, red, blue)",
+      "valid": true,
+      "w": [0, 147, 0],
+      "k": [0, 147, 0]
+    },
+    {
+      "c": "color-mix(in hsl shorter hue, red, blue)",
+      "valid": true,
+      "w": [255, 0, 255],
+      "k": [255, 0, 255]
+    },
+    {
+      "c": "color-mix(in hsl decreasing hue, red 30%, blue)",
+      "valid": true,
+      "w": [153, 0, 255],
+      "k": [153, 0, 255]
+    },
+    {
+      "c": "color-mix(in oklab, red 30%, blue 30%)",
+      "valid": true,
+      "w": [186, 152, 199],
+      "k": [84, 50, 97]
+    },
+    {
+      "c": "color-mix(in oklab, red 10%, blue 10%)",
+      "valid": true,
+      "w": [232, 221, 236],
+      "k": [28, 17, 32]
+    },
+    {
+      "c": "color-mix(in srgb, red 25%, blue)",
+      "valid": true,
+      "w": [64, 0, 191],
+      "k": [64, 0, 191]
+    },
+    {
+      "c": "color-mix(in srgb, transparent, blue)",
+      "valid": true,
+      "w": [128, 128, 255],
+      "k": [0, 0, 128]
+    },
+    {
+      "c": "color-mix(in oklab, rgb(255 0 0 / .2), rgb(0 0 255 / .8))",
+      "valid": true,
+      "w": [162, 160, 237],
+      "k": [34, 33, 109]
+    },
+    {
+      "c": "color-mix(in hsl, rgb(255 0 0 / .2), rgb(0 0 255 / .8))",
+      "valid": true,
+      "w": [255, 128, 255],
+      "k": [128, 0, 128]
+    },
+    {
+      "c": "color-mix(in srgb, white, black)",
+      "valid": true,
+      "w": [128, 128, 128],
+      "k": [128, 128, 128]
+    },
+    {
+      "c": "color-mix(in srgb-linear, white, black)",
+      "valid": true,
+      "w": [188, 188, 188],
+      "k": [188, 188, 188]
+    },
+    {
+      "c": "color-mix(in oklch, white, black)",
+      "valid": true,
+      "w": [99, 99, 99],
+      "k": [99, 99, 99]
+    },
+    { "c": "color-mix(in hsl, gray, blue)", "valid": true, "w": [64, 64, 191], "k": [64, 64, 191] },
+    {
+      "c": "color-mix(in oklch, gray, blue)",
+      "valid": true,
+      "w": [58, 100, 196],
+      "k": [58, 100, 196]
+    },
+    {
+      "c": "color-mix(in srgb, hsl(none 50% 50%), blue)",
+      "valid": true,
+      "w": [96, 32, 159],
+      "k": [96, 32, 159]
+    },
+    { "c": "rgb(0 none 0)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "rgb(0 0 none)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "rgb(none none none)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "rgb(none 128 255 / .5)", "valid": true, "w": [127, 191, 255], "k": [0, 64, 128] },
+    { "c": "hsl(120 none 50%)", "valid": true, "w": [128, 128, 128], "k": [128, 128, 128] },
+    { "c": "hsl(120 100% none)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "hsl(120 100% 50% / none)", "valid": true, "w": [255, 255, 255], "k": [0, 0, 0] },
+    { "c": "hsl(120 -100% 50%)", "valid": true, "w": [128, 128, 128], "k": [128, 128, 128] },
+    { "c": "hsl(120 100% -20%)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "hsl(120 100 50)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "hsl(120 100% 50)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "hsl(120deg 50 50 / .5)", "valid": true, "w": [159, 223, 159], "k": [32, 96, 32] },
+    { "c": "hwb(none 20% 30%)", "valid": true, "w": [178, 51, 51], "k": [178, 51, 51] },
+    { "c": "hwb(120 none 30%)", "valid": true, "w": [0, 178, 0], "k": [0, 178, 0] },
+    { "c": "hwb(120 20% none)", "valid": true, "w": [51, 255, 51], "k": [51, 255, 51] },
+    { "c": "hwb(120 20 30)", "valid": true, "w": [51, 178, 51], "k": [51, 178, 51] },
+    { "c": "hwb(120, 20%, 30%)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "lab(none 40 30)", "valid": true, "w": [56, 0, 0], "k": [56, 0, 0] },
+    { "c": "lab(50 none 30)", "valid": true, "w": [132, 118, 67], "k": [132, 118, 67] },
+    { "c": "lab(50 40 none)", "valid": true, "w": [179, 89, 121], "k": [179, 89, 121] },
+    { "c": "lab(50 40 30 / none)", "valid": true, "w": [255, 255, 255], "k": [0, 0, 0] },
+    { "c": "lch(none 40 30)", "valid": true, "w": [50, 0, 0], "k": [50, 0, 0] },
+    { "c": "lch(50 none 30)", "valid": true, "w": [119, 119, 119], "k": [119, 119, 119] },
+    { "c": "lch(50 40 none)", "valid": true, "w": [179, 89, 121], "k": [179, 89, 121] },
+    { "c": "oklab(none 0.1 0.1)", "valid": true, "w": [1, 2, 0], "k": [1, 2, 0] },
+    { "c": "oklab(0.6 none 0.1)", "valid": true, "w": [151, 125, 48], "k": [151, 125, 48] },
+    { "c": "oklab(0.6 0.1 none)", "valid": true, "w": [177, 102, 126], "k": [177, 102, 126] },
+    { "c": "oklch(none 0.15 30)", "valid": true, "w": [3, 0, 0], "k": [3, 0, 0] },
+    { "c": "oklch(0.6 none 30)", "valid": true, "w": [128, 128, 128], "k": [128, 128, 128] },
+    { "c": "oklch(0.6 0.15 30 / none)", "valid": true, "w": [255, 255, 255], "k": [0, 0, 0] },
+    { "c": "color(srgb none 0 0)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "color(srgb 1 none 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "color(display-p3 none 1 0)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "color(xyz 0.3 none 0.3)", "valid": true, "w": [234, 0, 156], "k": [234, 0, 156] },
+    { "c": "color(srgb 1 0 0 / none)", "valid": true, "w": [255, 255, 255], "k": [0, 0, 0] },
+    { "c": "rgba(255,0,0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(255,0,)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255,0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(1,2)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(1)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb()", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb( )", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255 0 0 .5)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255 0 0 / )", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255 0 0 / .5 .5)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255,0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255, 0, 0 / .5)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255 0 0, .5)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgba(255 0 0 / .5)", "valid": true, "w": [255, 127, 127], "k": [128, 0, 0] },
+    { "c": "rgb(100%, 0, 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(100% 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(100%,0%,0%,.5)", "valid": true, "w": [255, 127, 127], "k": [128, 0, 0] },
+    { "c": "rgb(100%,0%,0%,50%)", "valid": true, "w": [255, 127, 127], "k": [128, 0, 0] },
+    { "c": "rgb(255,0,0,50%)", "valid": true, "w": [255, 127, 127], "k": [128, 0, 0] },
+    { "c": "rgb(1e2 0 0)", "valid": true, "w": [100, 0, 0], "k": [100, 0, 0] },
+    { "c": "rgb(1E2 0 0)", "valid": true, "w": [100, 0, 0], "k": [100, 0, 0] },
+    { "c": "rgb(255. 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(.5 0 0)", "valid": true, "w": [1, 0, 0], "k": [1, 0, 0] },
+    { "c": "rgb(0.5,0,0)", "valid": true, "w": [1, 0, 0], "k": [1, 0, 0] },
+    { "c": "rgb(-10 0 0)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "rgb(300 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(127.5 63.5 .5)", "valid": true, "w": [128, 64, 1], "k": [128, 64, 1] },
+    { "c": "rgb(255 0 0 / 2)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(255 0 0 / -1)", "valid": true, "w": [255, 255, 255], "k": [0, 0, 0] },
+    { "c": "rgb(255 0 0 / 200%)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "RGB(255 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "Rgb(255,0,0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb( 255 , 0 , 0 )", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(  255   0   0  /  .5  )", "valid": true, "w": [255, 127, 127], "k": [128, 0, 0] },
+    { "c": "rgb( 255,0,0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb (255,0,0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255,0,0))", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255,0,0", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(red)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255 0 red)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255 0 0px)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255px 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(0deg 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(0 0 0 / 1px)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(#f00)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(from)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "hsla(120,100%,50%)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "hsla(120,100%,50%,.5)", "valid": true, "w": [127, 255, 127], "k": [0, 128, 0] },
+    { "c": "hsl(120,100%,50%,.5)", "valid": true, "w": [127, 255, 127], "k": [0, 128, 0] },
+    { "c": "hsl(120,100%,50%,)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "hsl(120 100% 50%)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "hsl(120 100% 50% .5)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "hsl(120,100%,50)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "hsl(120,100,50%)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "hsl(120deg,100%,50%)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "hsl(0.5turn,100%,50%)", "valid": true, "w": [0, 255, 255], "k": [0, 255, 255] },
+    { "c": "hsl(3.14159rad 100% 50%)", "valid": true, "w": [0, 255, 255], "k": [0, 255, 255] },
+    { "c": "hsl(120px 100% 50%)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "hsl(120% 100% 50%)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "hsl(none none none)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "hsl(120,100%,50% / .5)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "HSL(120 100% 50%)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "hwb(120 20% 30% / .5)", "valid": true, "w": [153, 217, 153], "k": [26, 89, 26] },
+    { "c": "hwb(120deg 20% 30%)", "valid": true, "w": [51, 178, 51], "k": [51, 178, 51] },
+    { "c": "hwb(120,20%,30%)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "hwb(120 20% 30% .5)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "hwb(120 20%)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "hwb(0 0% 0%)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "hwb(240 10% 10%)", "valid": true, "w": [26, 26, 229], "k": [26, 26, 229] },
+    { "c": "lab(50% 40 30)", "valid": true, "w": [187, 88, 70], "k": [187, 88, 70] },
+    { "c": "lab(50,40,30)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "lab(50 40)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "lab(50deg 40 30)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "lab(120 0 0)", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "lab(-10 0 0)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "lab(50 200 200)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "lch(50% 100% 0.5turn)", "valid": true, "w": [0, 158, 115], "k": [0, 158, 115] },
+    { "c": "lch(50 40 30 / 25%)", "valid": true, "w": [236, 215, 213], "k": [45, 23, 22] },
+    { "c": "lch(50 40 30 40)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "lch(50,40,30)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "lch(50 -10 30)", "valid": true, "w": [119, 119, 119], "k": [119, 119, 119] },
+    { "c": "lch(50 200 30)", "valid": true, "w": [255, 0, 3], "k": [255, 0, 3] },
+    { "c": "oklab(60% 25% 25%)", "valid": true, "w": [195, 96, 46], "k": [195, 96, 46] },
+    { "c": "oklab(0.6 0.1 0.1 / .5)", "valid": true, "w": [225, 176, 151], "k": [97, 48, 23] },
+    { "c": "oklab(1.5 0 0)", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "oklab(0.6,0.1,0.1)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "oklch(60% 37.5% 30deg)", "valid": true, "w": [202, 87, 71], "k": [202, 87, 71] },
+    { "c": "oklch(0.6 0.15 30 / .5)", "valid": true, "w": [228, 171, 163], "k": [101, 43, 36] },
+    { "c": "oklch(0.6 -0.1 30)", "valid": true, "w": [128, 128, 128], "k": [128, 128, 128] },
+    { "c": "oklch(0.6 0.15 1turn)", "valid": true, "w": [197, 84, 124], "k": [197, 84, 124] },
+    { "c": "oklch(0.6 0.15 30rad)", "valid": true, "w": [111, 115, 215], "k": [111, 115, 215] },
+    { "c": "oklch(1 0.4 150)", "valid": true, "w": [0, 255, 48], "k": [0, 255, 48] },
+    { "c": "color(srgb 100% 0% 0%)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "color(srgb 1 0 0 /)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "color(srgb 1 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "color(srgb 1 0 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "color(srgb,1,0,0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    {
+      "c": "color(a98-rgb 0.5 0.5 0.5)",
+      "valid": true,
+      "w": [128, 128, 128],
+      "k": [128, 128, 128]
+    },
+    { "c": "color(prophoto-rgb 1 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    {
+      "c": "color(rec2020 0.5 0.5 0.5)",
+      "valid": true,
+      "w": [139, 139, 139],
+      "k": [139, 139, 139]
+    },
+    { "c": "color(xyz 0.2 0.4 0.1)", "valid": true, "w": [0, 197, 53], "k": [0, 197, 53] },
+    { "c": "color(xyz-d50 0.2 0.4 0.1)", "valid": true, "w": [0, 199, 71], "k": [0, 199, 71] },
+    { "c": "color(bogus 1 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "color(SRGB 1 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "color(srgb 50% 0 0)", "valid": true, "w": [128, 0, 0], "k": [128, 0, 0] },
+    { "c": "color(xyz 50% 0 0)", "valid": true, "w": [255, 0, 46], "k": [255, 0, 46] },
+    { "c": "color()", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "color(1 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "color(red)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "#AABBCC80", "valid": true, "w": [212, 221, 229], "k": [85, 94, 102] },
+    { "c": "#1", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "#", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "#ggg", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "#12345g", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "#1234567", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "#123456789", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "# fff", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "#f00 ", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": " #f00", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "TRANSPARENT", "valid": true, "w": [255, 255, 255], "k": [0, 0, 0] },
+    { "c": "redd", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "reds", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "gray10", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "orange ", "valid": true, "w": [255, 165, 0], "k": [255, 165, 0] },
+    { "c": " orange", "valid": true, "w": [255, 165, 0], "k": [255, 165, 0] },
+    { "c": "red blue", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "red, blue", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "1", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "#f00 #0f0", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(255 0 0) rgb(0 255 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(10 20 30 / 0.3)", "valid": true, "w": [181, 184, 187], "k": [3, 6, 9] },
+    { "c": "rgb(10 20 30 / 0.7)", "valid": true, "w": [83, 90, 97], "k": [7, 14, 21] },
+    { "c": "rgb(10 20 30 / 33%)", "valid": true, "w": [174, 178, 181], "k": [3, 7, 10] },
+    { "c": "hsl(200 50% 40% / .25)", "valid": true, "w": [204, 221, 229], "k": [13, 30, 38] },
+    { "c": "hsla(200,50%,40%,.8)", "valid": true, "w": [92, 146, 173], "k": [41, 95, 122] },
+    { "c": "#11223344", "valid": true, "w": [192, 196, 201], "k": [5, 9, 14] },
+    { "c": "#11223380", "valid": true, "w": [136, 144, 153], "k": [9, 17, 26] },
+    { "c": "oklch(0.6 0.15 30 / 0.4)", "valid": true, "w": [234, 188, 181], "k": [81, 35, 28] },
+    {
+      "c": "color-mix(in srgb, red, blue 30%)",
+      "valid": true,
+      "w": [178, 0, 77],
+      "k": [178, 0, 77]
+    },
+    {
+      "c": "color-mix(in srgb, 30% red, blue)",
+      "valid": true,
+      "w": [77, 0, 178],
+      "k": [77, 0, 178]
+    },
+    {
+      "c": "color-mix(in srgb, red, 30% blue)",
+      "valid": true,
+      "w": [178, 0, 77],
+      "k": [178, 0, 77]
+    },
+    {
+      "c": "color-mix(in srgb, red 25%, blue 25%)",
+      "valid": true,
+      "w": [191, 128, 191],
+      "k": [64, 0, 64]
+    },
+    {
+      "c": "color-mix(in srgb, red 30%, blue 30%)",
+      "valid": true,
+      "w": [178, 102, 178],
+      "k": [77, 0, 77]
+    },
+    {
+      "c": "color-mix(in srgb, red 10%, blue 10%)",
+      "valid": true,
+      "w": [230, 204, 230],
+      "k": [26, 0, 26]
+    },
+    { "c": "color-mix(in srgb, red 0%, blue)", "valid": true, "w": [0, 0, 255], "k": [0, 0, 255] },
+    {
+      "c": "color-mix(in srgb, red 0%, blue 0%)",
+      "valid": false,
+      "w": [0, 170, 0],
+      "k": [0, 170, 0]
+    },
+    {
+      "c": "color-mix(in srgb, red 100%, blue)",
+      "valid": true,
+      "w": [255, 0, 0],
+      "k": [255, 0, 0]
+    },
+    {
+      "c": "color-mix(in srgb, red 100%, blue 100%)",
+      "valid": true,
+      "w": [128, 0, 128],
+      "k": [128, 0, 128]
+    },
+    {
+      "c": "color-mix(in srgb, red -10%, blue)",
+      "valid": false,
+      "w": [0, 170, 0],
+      "k": [0, 170, 0]
+    },
+    {
+      "c": "color-mix(in srgb, red 60%, blue 80%)",
+      "valid": true,
+      "w": [109, 0, 146],
+      "k": [109, 0, 146]
+    },
+    {
+      "c": "color-mix(in srgb, red, blue, green)",
+      "valid": false,
+      "w": [0, 170, 0],
+      "k": [0, 170, 0]
+    },
+    { "c": "color-mix(in srgb, red)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "color-mix(in srgb red, blue)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "color-mix(srgb, red, blue)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "color-mix(red, blue)", "valid": true, "w": [140, 83, 162], "k": [140, 83, 162] },
+    {
+      "c": "color-mix(in srgb, rgb(255 0 0 / .2), rgb(0 0 255 / .8))",
+      "valid": true,
+      "w": [153, 128, 229],
+      "k": [26, 0, 102]
+    },
+    {
+      "c": "color-mix(in srgb, red 50%, transparent)",
+      "valid": true,
+      "w": [255, 128, 128],
+      "k": [128, 0, 0]
+    },
+    {
+      "c": "color-mix(in srgb-linear, red, blue)",
+      "valid": true,
+      "w": [188, 0, 188],
+      "k": [188, 0, 188]
+    },
+    {
+      "c": "color-mix(in a98-rgb, red, blue)",
+      "valid": true,
+      "w": [128, 0, 128],
+      "k": [128, 0, 128]
+    },
+    {
+      "c": "color-mix(in prophoto-rgb, red, blue)",
+      "valid": true,
+      "w": [186, 3, 157],
+      "k": [186, 3, 157]
+    },
+    {
+      "c": "color-mix(in rec2020, red, blue)",
+      "valid": true,
+      "w": [162, 19, 147],
+      "k": [162, 19, 147]
+    },
+    {
+      "c": "color-mix(in lab, red 30%, blue)",
+      "valid": true,
+      "w": [156, 0, 183],
+      "k": [156, 0, 183]
+    },
+    {
+      "c": "color-mix(in lch longer hue, red, blue)",
+      "valid": true,
+      "w": [0, 130, 64],
+      "k": [0, 130, 64]
+    },
+    {
+      "c": "color-mix(in oklch shorter hue, red, blue)",
+      "valid": true,
+      "w": [186, 0, 194],
+      "k": [186, 0, 194]
+    },
+    {
+      "c": "color-mix(in oklch decreasing hue, red, blue)",
+      "valid": true,
+      "w": [186, 0, 194],
+      "k": [186, 0, 194]
+    },
+    {
+      "c": "color-mix(in oklch, oklch(0.6 0.2 350), oklch(0.6 0.2 10))",
+      "valid": true,
+      "w": [215, 57, 123],
+      "k": [215, 57, 123]
+    },
+    {
+      "c": "color-mix(in oklch longer hue, oklch(0.6 0.2 350), oklch(0.6 0.2 10))",
+      "valid": true,
+      "w": [0, 163, 133],
+      "k": [0, 163, 133]
+    },
+    {
+      "c": "color-mix(in oklch increasing hue, oklch(0.6 0.2 350), oklch(0.6 0.2 10))",
+      "valid": true,
+      "w": [215, 57, 123],
+      "k": [215, 57, 123]
+    },
+    {
+      "c": "color-mix(in oklch decreasing hue, oklch(0.6 0.2 350), oklch(0.6 0.2 10))",
+      "valid": true,
+      "w": [0, 163, 133],
+      "k": [0, 163, 133]
+    },
+    {
+      "c": "color-mix(in hsl, red 30%, blue)",
+      "valid": true,
+      "w": [153, 0, 255],
+      "k": [153, 0, 255]
+    },
+    {
+      "c": "color-mix(in hsl longer hue, red, blue)",
+      "valid": true,
+      "w": [0, 255, 0],
+      "k": [0, 255, 0]
+    },
+    {
+      "c": "color-mix(in hsl increasing hue, red, blue)",
+      "valid": true,
+      "w": [0, 255, 0],
+      "k": [0, 255, 0]
+    },
+    {
+      "c": "color-mix(in hsl, hsl(none 50% 50%), blue)",
+      "valid": true,
+      "w": [32, 32, 223],
+      "k": [32, 32, 223]
+    },
+    {
+      "c": "color-mix(in hwb, white, blue)",
+      "valid": true,
+      "w": [128, 128, 255],
+      "k": [128, 128, 255]
+    },
+    {
+      "c": "color-mix(in hwb longer hue, red, blue)",
+      "valid": true,
+      "w": [0, 255, 0],
+      "k": [0, 255, 0]
+    },
+    {
+      "c": "color-mix(in xyz-d50, red, blue)",
+      "valid": true,
+      "w": [188, 0, 188],
+      "k": [188, 0, 188]
+    },
+    {
+      "c": "color-mix(in xyz-d65, red, blue)",
+      "valid": true,
+      "w": [188, 0, 188],
+      "k": [188, 0, 188]
+    },
+    {
+      "c": "color-mix(in srgb, oklch(0.6 none 30), blue)",
+      "valid": true,
+      "w": [64, 64, 192],
+      "k": [64, 64, 192]
+    },
+    {
+      "c": "color-mix(in oklch, oklch(none 0.2 30), oklch(0.8 0.1 90))",
+      "valid": true,
+      "w": [255, 164, 78],
+      "k": [255, 164, 78]
+    },
+    {
+      "c": "color-mix(in oklch, oklch(0.6 0.2 none), oklch(0.8 0.1 90))",
+      "valid": true,
+      "w": [195, 153, 0],
+      "k": [195, 153, 0]
+    },
+    {
+      "c": "color-mix(in oklab, oklab(none 0.1 0.1), oklab(0.8 0.1 -0.1))",
+      "valid": true,
+      "w": [243, 163, 187],
+      "k": [243, 163, 187]
+    },
+    {
+      "c": "color-mix(in oklch, oklab(none 0.1 0.1), oklch(0.8 0.1 90))",
+      "valid": true,
+      "w": [241, 174, 100],
+      "k": [241, 174, 100]
+    },
+    {
+      "c": "color-mix(in lab, rgb(none 0 255), blue)",
+      "valid": true,
+      "w": [0, 0, 255],
+      "k": [0, 0, 255]
+    },
+    {
+      "c": "color-mix(in srgb, rgb(255 0 0 / none), rgb(0 0 255 / .5))",
+      "valid": true,
+      "w": [191, 127, 191],
+      "k": [64, 0, 64]
+    },
+    {
+      "c": "color-mix(in srgb, rgb(255 0 0 / none), blue)",
+      "valid": true,
+      "w": [128, 0, 128],
+      "k": [128, 0, 128]
+    },
+    {
+      "c": "color-mix(in srgb, color-mix(in srgb, red, blue), green)",
+      "valid": true,
+      "w": [64, 64, 64],
+      "k": [64, 64, 64]
+    },
+    {
+      "c": "color-mix(in srgb, red, color-mix(in oklab, blue, white))",
+      "valid": true,
+      "w": [185, 81, 132],
+      "k": [185, 81, 132]
+    },
+    {
+      "c": "color-mix(in srgb, #f00, #00f)",
+      "valid": true,
+      "w": [128, 0, 128],
+      "k": [128, 0, 128]
+    },
+    {
+      "c": "color-mix(in srgb, hsl(120 50% 50%), hwb(0 10% 10%))",
+      "valid": true,
+      "w": [147, 108, 45],
+      "k": [147, 108, 45]
+    },
+    {
+      "c": "color-mix(in srgb, currentcolor, blue)",
+      "valid": true,
+      "w": [0, 0, 128],
+      "k": [0, 0, 128]
+    },
+    { "c": "color-mix(IN SRGB, RED, BLUE)", "valid": true, "w": [128, 0, 128], "k": [128, 0, 128] },
+    {
+      "c": "color-mix(in srgb , red , blue)",
+      "valid": true,
+      "w": [128, 0, 128],
+      "k": [128, 0, 128]
+    },
+    {
+      "c": "color-mix( in srgb, red, blue )",
+      "valid": true,
+      "w": [128, 0, 128],
+      "k": [128, 0, 128]
+    },
+    { "c": "color-mix(in bogus, red, blue)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "color-mix(in srgb, bogus, blue)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    {
+      "c": "color-mix(in srgb, red 50% 50%, blue)",
+      "valid": false,
+      "w": [0, 170, 0],
+      "k": [0, 170, 0]
+    },
+    {
+      "c": "color-mix(in srgb longer hue, red, blue)",
+      "valid": false,
+      "w": [0, 170, 0],
+      "k": [0, 170, 0]
+    },
+    {
+      "c": "color-mix(in oklch longer, red, blue)",
+      "valid": false,
+      "w": [0, 170, 0],
+      "k": [0, 170, 0]
+    },
+    { "c": "color-mix(in srgb, red, blue,)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "color-mix(in srgb,,red,blue)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "color-mix(in srgb, red,, blue)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    {
+      "c": "color-mix(in srgb, red 50%, blue 50%)",
+      "valid": true,
+      "w": [128, 0, 128],
+      "k": [128, 0, 128]
+    },
+    {
+      "c": "color-mix(in srgb, red 50.5%, blue)",
+      "valid": true,
+      "w": [129, 0, 126],
+      "k": [129, 0, 126]
+    },
+    {
+      "c": "color-mix(in srgb, red 1e1%, blue)",
+      "valid": true,
+      "w": [26, 0, 229],
+      "k": [26, 0, 229]
+    },
+    { "c": "rgb(from #08f r g b / alpha)", "valid": true, "w": [0, 136, 255], "k": [0, 136, 255] },
+    {
+      "c": "rgb(from rgb(10 20 30 / .5) r g b / alpha)",
+      "valid": true,
+      "w": [132, 137, 142],
+      "k": [5, 10, 15]
+    },
+    {
+      "c": "rgb(from rgb(10 20 30) calc(r * 2) g b)",
+      "valid": true,
+      "w": [20, 20, 30],
+      "k": [20, 20, 30]
+    },
+    {
+      "c": "rgb(from rgb(10 20 30) calc(r + 100) calc(g + 100) calc(b + 100))",
+      "valid": true,
+      "w": [110, 120, 130],
+      "k": [110, 120, 130]
+    },
+    { "c": "rgb(from red none g b)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "rgb(from red r g b / none)", "valid": true, "w": [255, 255, 255], "k": [0, 0, 0] },
+    {
+      "c": "rgb(from red r g b / calc(alpha / 2))",
+      "valid": true,
+      "w": [255, 128, 128],
+      "k": [128, 0, 0]
+    },
+    { "c": "rgb(from red calc(255 - r) g b)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    {
+      "c": "rgb(from hsl(120 50% 50%) r g b)",
+      "valid": true,
+      "w": [64, 191, 64],
+      "k": [64, 191, 64]
+    },
+    { "c": "rgb(from lab(50 40 30) r g b)", "valid": true, "w": [187, 88, 70], "k": [187, 88, 70] },
+    {
+      "c": "rgb(from oklch(0.6 0.15 30) r g b)",
+      "valid": true,
+      "w": [202, 87, 71],
+      "k": [202, 87, 71]
+    },
+    {
+      "c": "rgb(from color(display-p3 1 0 0) r g b)",
+      "valid": true,
+      "w": [255, 0, 0],
+      "k": [255, 0, 0]
+    },
+    { "c": "rgb(from red 50% g b)", "valid": true, "w": [128, 0, 0], "k": [128, 0, 0] },
+    { "c": "rgb(from red g r b)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "rgb(from red r r r)", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "rgb(from red r g)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(from red r g b b)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(from red r, g, b)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(from red h s l)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(from red)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(from bogus r g b)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(FROM red r g b)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(from  red   r  g  b)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgba(from red r g b / .5)", "valid": true, "w": [255, 128, 128], "k": [128, 0, 0] },
+    { "c": "rgb(from currentcolor r g b)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "rgb(from red r g b / 50%)", "valid": true, "w": [255, 128, 128], "k": [128, 0, 0] },
+    { "c": "hsl(from red calc(h + 120) s l)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "hsl(from red h calc(s / 2) l)", "valid": true, "w": [191, 64, 64], "k": [191, 64, 64] },
+    {
+      "c": "hsl(from red h s calc(l + 20))",
+      "valid": true,
+      "w": [255, 102, 102],
+      "k": [255, 102, 102]
+    },
+    { "c": "hsl(from #08f h s l / .5)", "valid": true, "w": [128, 195, 255], "k": [0, 68, 128] },
+    { "c": "hsl(from rgb(10 20 30) h s l)", "valid": true, "w": [10, 20, 30], "k": [10, 20, 30] },
+    {
+      "c": "hsl(from red calc(h + 360) 50 50)",
+      "valid": true,
+      "w": [191, 64, 64],
+      "k": [191, 64, 64]
+    },
+    { "c": "hsl(from red none s l)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "hsl(from red h s l / alpha)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "hsl(from gray h s l)", "valid": true, "w": [128, 128, 128], "k": [128, 128, 128] },
+    {
+      "c": "hsl(from gray calc(h + 40) 50 50)",
+      "valid": true,
+      "w": [191, 149, 64],
+      "k": [191, 149, 64]
+    },
+    { "c": "hsla(from red h s l)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "hwb(from red h w b)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "hwb(from red calc(h + 120) w b)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "hwb(from #08f h w b / .5)", "valid": true, "w": [128, 195, 255], "k": [0, 68, 128] },
+    {
+      "c": "hwb(from red h calc(w + 20) b)",
+      "valid": true,
+      "w": [255, 51, 51],
+      "k": [255, 51, 51]
+    },
+    { "c": "lab(from red l a b)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    {
+      "c": "lab(from red calc(l + 20) a b)",
+      "valid": true,
+      "w": [255, 98, 57],
+      "k": [255, 98, 57]
+    },
+    { "c": "lab(from red l calc(a * -1) b)", "valid": true, "w": [0, 158, 0], "k": [0, 158, 0] },
+    { "c": "lab(from #08f l a b / .5)", "valid": true, "w": [128, 195, 255], "k": [0, 68, 127] },
+    { "c": "lab(from lab(50 40 30) l a b)", "valid": true, "w": [187, 88, 70], "k": [187, 88, 70] },
+    { "c": "lab(from red 50 a b)", "valid": true, "w": [241, 0, 0], "k": [241, 0, 0] },
+    { "c": "lch(from red l c h)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "lch(from red l c calc(h + 120))", "valid": true, "w": [0, 163, 61], "k": [0, 163, 61] },
+    { "c": "lch(from red calc(l / 2) c h)", "valid": true, "w": [166, 0, 0], "k": [166, 0, 0] },
+    { "c": "lch(from gray l c h)", "valid": true, "w": [128, 128, 128], "k": [128, 128, 128] },
+    {
+      "c": "lch(from gray l c calc(h + 120))",
+      "valid": true,
+      "w": [128, 128, 128],
+      "k": [128, 128, 128]
+    },
+    { "c": "oklab(from red l a b)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    {
+      "c": "oklab(from red calc(l + .2) a b)",
+      "valid": true,
+      "w": [255, 111, 89],
+      "k": [255, 111, 89]
+    },
+    { "c": "oklab(from red l a b / .5)", "valid": true, "w": [255, 128, 128], "k": [128, 0, 0] },
+    { "c": "oklab(from #08f l a b)", "valid": true, "w": [0, 136, 255], "k": [0, 136, 255] },
+    { "c": "oklch(from red l c h)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    {
+      "c": "oklch(from red calc(l + .2) c h)",
+      "valid": true,
+      "w": [255, 111, 89],
+      "k": [255, 111, 89]
+    },
+    { "c": "oklch(from red l c calc(h + 120))", "valid": true, "w": [0, 174, 0], "k": [0, 174, 0] },
+    {
+      "c": "oklch(from red l calc(c / 2) h)",
+      "valid": true,
+      "w": [202, 103, 90],
+      "k": [202, 103, 90]
+    },
+    { "c": "oklch(from #08f l c h / .5)", "valid": true, "w": [128, 195, 255], "k": [0, 68, 128] },
+    { "c": "oklch(from red 0.7 c h)", "valid": true, "w": [255, 57, 43], "k": [255, 57, 43] },
+    { "c": "oklch(from rgb(10 20 30) l c h)", "valid": true, "w": [10, 20, 30], "k": [10, 20, 30] },
+    { "c": "oklch(from white l c h)", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    {
+      "c": "oklch(from white l c calc(h + 120))",
+      "valid": true,
+      "w": [255, 255, 255],
+      "k": [255, 255, 255]
+    },
+    { "c": "color(from red srgb r g b)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    {
+      "c": "color(from red srgb calc(r / 2) g b)",
+      "valid": true,
+      "w": [128, 0, 0],
+      "k": [128, 0, 0]
+    },
+    { "c": "color(from red display-p3 r g b)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "color(from red xyz x y z)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "color(from red xyz-d50 x y z)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    {
+      "c": "color(from #08f srgb r g b / .5)",
+      "valid": true,
+      "w": [128, 195, 255],
+      "k": [0, 68, 128]
+    },
+    { "c": "color(from red srgb-linear r g b)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "color(from red a98-rgb r g b)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    {
+      "c": "color(from red srgb r g b / alpha)",
+      "valid": true,
+      "w": [255, 0, 0],
+      "k": [255, 0, 0]
+    },
+    { "c": "color(from red srgb 0 g b)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    {
+      "c": "color(from red display-p3 calc(r * .5) g b)",
+      "valid": true,
+      "w": [126, 46, 30],
+      "k": [126, 46, 30]
+    },
+    {
+      "c": "color-mix(in srgb, rgb(from red r g b), blue)",
+      "valid": true,
+      "w": [128, 0, 128],
+      "k": [128, 0, 128]
+    },
+    {
+      "c": "rgb(from color-mix(in srgb, red, blue) r g b)",
+      "valid": true,
+      "w": [128, 0, 128],
+      "k": [128, 0, 128]
+    },
+    {
+      "c": "rgb(from rgb(from red r g b) r g b)",
+      "valid": true,
+      "w": [255, 0, 0],
+      "k": [255, 0, 0]
+    },
+    {
+      "c": "rgb(from rgb(from red r g b) calc(r / 2) g b)",
+      "valid": true,
+      "w": [128, 0, 0],
+      "k": [128, 0, 0]
+    },
+    { "c": "rgb(calc(100 + 50) 0 0)", "valid": true, "w": [150, 0, 0], "k": [150, 0, 0] },
+    { "c": "rgb(calc(100 - 150) 0 0)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "rgb(calc(50% + 50%) 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(calc(50% + 10) 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    {
+      "c": "rgb(calc(10 * 2) calc(20 * 3) calc(30 * 4))",
+      "valid": true,
+      "w": [20, 60, 120],
+      "k": [20, 60, 120]
+    },
+    { "c": "rgb(calc(1 + 2 * 3) 0 0)", "valid": true, "w": [7, 0, 0], "k": [7, 0, 0] },
+    { "c": "rgb(calc((1 + 2) * 3) 0 0)", "valid": true, "w": [9, 0, 0], "k": [9, 0, 0] },
+    { "c": "rgb(255 0 0 / calc(1 / 4))", "valid": true, "w": [255, 191, 191], "k": [64, 0, 0] },
+    { "c": "rgb(255 0 0 / calc(50%))", "valid": true, "w": [255, 127, 127], "k": [128, 0, 0] },
+    { "c": "rgb(255 0 0 / calc(25% * 2))", "valid": true, "w": [255, 127, 127], "k": [128, 0, 0] },
+    { "c": "rgb(calc(1 / 0) 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(calc(pi * 10) 0 0)", "valid": true, "w": [31, 0, 0], "k": [31, 0, 0] },
+    { "c": "rgb(calc(e * 10) 0 0)", "valid": true, "w": [27, 0, 0], "k": [27, 0, 0] },
+    { "c": "rgb(calc(infinity) 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "rgb(calc(-infinity) 0 0)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "rgb(calc(NaN) 0 0)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "rgb(min(100, 200) 0 0)", "valid": true, "w": [100, 0, 0], "k": [100, 0, 0] },
+    { "c": "rgb(max(100, 200) 0 0)", "valid": true, "w": [200, 0, 0], "k": [200, 0, 0] },
+    { "c": "rgb(clamp(0, 300, 200) 0 0)", "valid": true, "w": [200, 0, 0], "k": [200, 0, 0] },
+    { "c": "rgb(clamp(100, 50, 200) 0 0)", "valid": true, "w": [100, 0, 0], "k": [100, 0, 0] },
+    { "c": "rgb(abs(-100) 0 0)", "valid": true, "w": [100, 0, 0], "k": [100, 0, 0] },
+    { "c": "rgb(sign(-5) 0 0)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "rgb(sqrt(100) 0 0)", "valid": true, "w": [10, 0, 0], "k": [10, 0, 0] },
+    { "c": "rgb(pow(2, 7) 0 0)", "valid": true, "w": [128, 0, 0], "k": [128, 0, 0] },
+    { "c": "rgb(hypot(30, 40) 0 0)", "valid": true, "w": [50, 0, 0], "k": [50, 0, 0] },
+    { "c": "rgb(round(100.6) 0 0)", "valid": true, "w": [101, 0, 0], "k": [101, 0, 0] },
+    { "c": "rgb(round(up, 100.1, 10) 0 0)", "valid": true, "w": [110, 0, 0], "k": [110, 0, 0] },
+    { "c": "rgb(mod(250, 100) 0 0)", "valid": true, "w": [50, 0, 0], "k": [50, 0, 0] },
+    { "c": "rgb(rem(250, 100) 0 0)", "valid": true, "w": [50, 0, 0], "k": [50, 0, 0] },
+    { "c": "rgb(sin(1.5707963) * 255 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(calc(sin(90deg) * 255) 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    {
+      "c": "rgb(calc(sin(1.5707963267948966) * 255) 0 0)",
+      "valid": true,
+      "w": [255, 0, 0],
+      "k": [255, 0, 0]
+    },
+    {
+      "c": "rgb(calc(100) calc(100) calc(100) / calc(1))",
+      "valid": true,
+      "w": [100, 100, 100],
+      "k": [100, 100, 100]
+    },
+    { "c": "rgb(calc(1px) 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(calc(1deg) 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(calc(2 * ) 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(calc() 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(calc(1 +) 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(calc(1+2) 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(calc(1 + 2) 0 0)", "valid": true, "w": [3, 0, 0], "k": [3, 0, 0] },
+    { "c": "rgb(calc(1 +2) 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(CALC(100) 0 0)", "valid": true, "w": [100, 0, 0], "k": [100, 0, 0] },
+    { "c": "rgb(calc( 100 ) 0 0)", "valid": true, "w": [100, 0, 0], "k": [100, 0, 0] },
+    { "c": "rgb(calc(100 0 0)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "rgb(calc(100),0,0)", "valid": true, "w": [100, 0, 0], "k": [100, 0, 0] },
+    { "c": "rgb(calc(100), calc(50), 0)", "valid": true, "w": [100, 50, 0], "k": [100, 50, 0] },
+    {
+      "c": "rgba(calc(100), calc(50), 0, calc(.5))",
+      "valid": true,
+      "w": [177, 152, 127],
+      "k": [50, 25, 0]
+    },
+    { "c": "hsl(calc(60 * 2), 100%, 50%)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "hsl(calc(60deg * 2) 100% 50%)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    { "c": "hsl(120 calc(50% + 25%) 50%)", "valid": true, "w": [32, 223, 32], "k": [32, 223, 32] },
+    { "c": "hsl(120 calc(50 + 25) 50)", "valid": true, "w": [32, 223, 32], "k": [32, 223, 32] },
+    {
+      "c": "hsl(120 calc(100% / 2) calc(100% / 4))",
+      "valid": true,
+      "w": [32, 96, 32],
+      "k": [32, 96, 32]
+    },
+    { "c": "hsl(calc(1turn / 3) 100% 50%)", "valid": true, "w": [0, 255, 0], "k": [0, 255, 0] },
+    {
+      "c": "hsl(calc(0.5turn + 30deg) 100% 50%)",
+      "valid": true,
+      "w": [0, 128, 255],
+      "k": [0, 128, 255]
+    },
+    { "c": "hwb(calc(60 * 2) 10% 10%)", "valid": true, "w": [26, 229, 26], "k": [26, 229, 26] },
+    { "c": "hwb(120 calc(10% + 10%) 10%)", "valid": true, "w": [51, 229, 51], "k": [51, 229, 51] },
+    { "c": "lab(calc(25 * 2) 40 30)", "valid": true, "w": [187, 88, 70], "k": [187, 88, 70] },
+    { "c": "lab(calc(25% * 2) 40 30)", "valid": true, "w": [187, 88, 70], "k": [187, 88, 70] },
+    { "c": "lab(50 calc(20 * 2) 30)", "valid": true, "w": [187, 88, 70], "k": [187, 88, 70] },
+    { "c": "lch(50 40 calc(10 * 3))", "valid": true, "w": [178, 93, 87], "k": [178, 93, 87] },
+    { "c": "lch(50 40 calc(10deg * 3))", "valid": true, "w": [178, 93, 87], "k": [178, 93, 87] },
+    { "c": "oklab(calc(0.3 * 2) 0.1 0.1)", "valid": true, "w": [195, 96, 46], "k": [195, 96, 46] },
+    {
+      "c": "oklch(0.6 calc(0.1 + 0.05) calc(15 * 2))",
+      "valid": true,
+      "w": [202, 87, 71],
+      "k": [202, 87, 71]
+    },
+    {
+      "c": "oklch(calc(60% + 10%) 0.15 30)",
+      "valid": true,
+      "w": [237, 118, 101],
+      "k": [237, 118, 101]
+    },
+    { "c": "color(srgb calc(0.5 * 2) 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "color(srgb calc(50% * 2) 0 0)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "color(srgb 1 0 0 / calc(0.5))", "valid": true, "w": [255, 128, 128], "k": [128, 0, 0] },
+    {
+      "c": "color(display-p3 calc(1 / 2) 0.5 0.5)",
+      "valid": true,
+      "w": [127, 128, 128],
+      "k": [127, 128, 128]
+    },
+    {
+      "c": "color-mix(in srgb, red calc(10% * 3), blue)",
+      "valid": true,
+      "w": [77, 0, 178],
+      "k": [77, 0, 178]
+    },
+    {
+      "c": "color-mix(in srgb, red calc(30), blue)",
+      "valid": false,
+      "w": [0, 170, 0],
+      "k": [0, 170, 0]
+    },
+    { "c": "calc(255)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "light-dark(blue, red)", "valid": true, "w": [0, 0, 255], "k": [0, 0, 255] },
+    { "c": "light-dark(#fff, #000)", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "light-dark(rgb(255 0 0), blue)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "light-dark(red)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "light-dark(red, blue, green)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "light-dark(red blue)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "light-dark(red,)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "light-dark(, blue)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "light-dark(bogus, blue)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "light-dark(red, bogus)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "light-dark(1, 2)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "LIGHT-DARK(red, blue)", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "light-dark( red , blue )", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    {
+      "c": "light-dark(color-mix(in srgb, red, blue), green)",
+      "valid": true,
+      "w": [128, 0, 128],
+      "k": [128, 0, 128]
+    },
+    {
+      "c": "color-mix(in srgb, light-dark(red, blue), white)",
+      "valid": true,
+      "w": [255, 128, 128],
+      "k": [255, 128, 128]
+    },
+    { "c": "light-dark(url(#a), blue)", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "light-dark(currentcolor, blue)", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    {
+      "c": "light-dark(canvas, canvastext)",
+      "valid": true,
+      "w": [255, 255, 255],
+      "k": [255, 255, 255]
+    },
+    {
+      "c": "light-dark(oklch(0.6 0.15 30), blue)",
+      "valid": true,
+      "w": [202, 87, 71],
+      "k": [202, 87, 71]
+    },
+    {
+      "c": "rgb(from light-dark(red, blue) r g b)",
+      "valid": true,
+      "w": [255, 0, 0],
+      "k": [255, 0, 0]
+    },
+    {
+      "c": "light-dark(rgb(from red r g b), blue)",
+      "valid": true,
+      "w": [255, 0, 0],
+      "k": [255, 0, 0]
+    },
+    { "c": "activeborder", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "activecaption", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "appworkspace", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "background", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "buttonface", "valid": true, "w": [239, 239, 239], "k": [239, 239, 239] },
+    { "c": "buttonhighlight", "valid": true, "w": [239, 239, 239], "k": [239, 239, 239] },
+    { "c": "buttonshadow", "valid": true, "w": [239, 239, 239], "k": [239, 239, 239] },
+    { "c": "buttontext", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "captiontext", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "graytext", "valid": true, "w": [128, 128, 128], "k": [128, 128, 128] },
+    { "c": "highlight", "valid": true, "w": [179, 215, 254], "k": [77, 113, 152] },
+    { "c": "highlighttext", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "inactiveborder", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "inactivecaption", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "inactivecaptiontext", "valid": true, "w": [128, 128, 128], "k": [128, 128, 128] },
+    { "c": "infobackground", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "infotext", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "menu", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "menutext", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "scrollbar", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "threeddarkshadow", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "threedface", "valid": true, "w": [239, 239, 239], "k": [239, 239, 239] },
+    { "c": "threedhighlight", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "threedlightshadow", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "threedshadow", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "window", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "windowframe", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "windowtext", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "accentcolor", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "accentcolortext", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "activetext", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "buttonborder", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "canvas", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "canvastext", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "field", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "fieldtext", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "linktext", "valid": true, "w": [0, 0, 238], "k": [0, 0, 238] },
+    { "c": "mark", "valid": true, "w": [255, 255, 0], "k": [255, 255, 0] },
+    { "c": "marktext", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "selecteditem", "valid": true, "w": [179, 215, 255], "k": [179, 215, 255] },
+    { "c": "selecteditemtext", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "visitedtext", "valid": true, "w": [85, 26, 139], "k": [85, 26, 139] },
+    { "c": "ButtonBorder", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "ButtonText", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "FieldText", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "SelectedItem", "valid": true, "w": [179, 215, 255], "k": [179, 215, 255] },
+    { "c": "VisitedText", "valid": true, "w": [85, 26, 139], "k": [85, 26, 139] },
+    { "c": "ActiveText", "valid": true, "w": [255, 0, 0], "k": [255, 0, 0] },
+    { "c": "HighlightText", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "MarkText", "valid": true, "w": [0, 0, 0], "k": [0, 0, 0] },
+    { "c": "CANVAS", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    { "c": "systemcolor", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "canvas1", "valid": false, "w": [0, 170, 0], "k": [0, 170, 0] },
+    { "c": "Canvas ", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    {
+      "c": "color-mix(in srgb, canvas, canvastext)",
+      "valid": true,
+      "w": [128, 128, 128],
+      "k": [128, 128, 128]
+    },
+    { "c": "rgb(from canvas r g b)", "valid": true, "w": [255, 255, 255], "k": [255, 255, 255] },
+    {
+      "c": "color-mix(in srgb, buttonface 50%, red)",
+      "valid": true,
+      "w": [247, 120, 120],
+      "k": [247, 120, 120]
+    }
+  ]
+}

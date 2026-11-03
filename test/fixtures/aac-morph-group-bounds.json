@@ -1,0 +1,193 @@
+{
+  "productionShaders": true,
+  "forceUnified": true,
+  "cases": [
+    {
+      "name": "raw-morph-group-bounds",
+      "size": 256,
+      "bbox": [0, 0, 64, 64],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><g opacity=\".5\"><path id=\"p\" fill=\"#e63333\" fill-opacity=\".5\" d=\"M8 8H56V56H8Z\"/></g></svg>",
+      "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><g opacity=\".5\"><path id=\"p\" fill=\"#e63333\" fill-opacity=\".5\" d=\"M12 6H60V52H12Z\"/></g></svg>",
+      "poseSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><g opacity=\".5\"><path id=\"p\" fill=\"#e63333\" fill-opacity=\".5\" d=\"M9.4 7.3H57.4V54.6H9.4Z\"/></g></svg>",
+      "morphT": 0.35,
+      "morphCycle": [0.05, 0.25, 0.45, 0.65, 0.85, 0.95],
+      "morphWarmTs": [0, 0.2, 0.8, 1],
+      "morphGpuSmallPlanes": true,
+      "arms": [
+        {
+          "name": "rawGpu",
+          "engine": "aac",
+          "morph": true
+        },
+        {
+          "name": "rawGpuAA",
+          "engine": "aac",
+          "morph": true
+        },
+        {
+          "name": "rawClassic",
+          "engine": "aac",
+          "morph": true,
+          "unified": false
+        },
+        {
+          "name": "rawCpu",
+          "engine": "aac",
+          "morph": true,
+          "morphCpu": true
+        },
+        {
+          "name": "poseAAC",
+          "engine": "aac",
+          "pose": true
+        }
+      ],
+      "comparisonBase": "poseAAC",
+      "primer": true,
+      "checkMorphRestoration": true,
+      "captureOverOne": true,
+      "rounds": 1,
+      "batch": 6,
+      "repetitions": 1,
+      "referencePixels": [
+        [38, 29],
+        [128, 128]
+      ],
+      "captureReferencePixels": true,
+      "colorSamples": [
+        {
+          "x": 38,
+          "y": 29,
+          "rgba": [46, 10, 10, 51]
+        },
+        {
+          "x": 128,
+          "y": 128,
+          "rgba": [58, 13, 13, 64]
+        }
+      ]
+    },
+    {
+      "name": "raw-morph-group-bounds-late",
+      "size": 256,
+      "bbox": [0, 0, 64, 64],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><g opacity=\".5\"><path id=\"p\" fill=\"#e63333\" fill-opacity=\".5\" d=\"M8 8H56V56H8Z\"/></g></svg>",
+      "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><g opacity=\".5\"><path id=\"p\" fill=\"#e63333\" fill-opacity=\".5\" d=\"M12 6H60V52H12Z\"/></g></svg>",
+      "poseSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><g opacity=\".5\"><path id=\"p\" fill=\"#e63333\" fill-opacity=\".5\" d=\"M11.4 6.3H59.4V52.6H11.4Z\"/></g></svg>",
+      "morphT": 0.85,
+      "morphCycle": [0.05, 0.25, 0.45, 0.65, 0.85, 0.95],
+      "morphWarmTs": [0, 0.2, 0.8, 1],
+      "morphGpuSmallPlanes": true,
+      "arms": [
+        {
+          "name": "rawGpu",
+          "engine": "aac",
+          "morph": true
+        },
+        {
+          "name": "rawGpuAA",
+          "engine": "aac",
+          "morph": true
+        },
+        {
+          "name": "rawClassic",
+          "engine": "aac",
+          "morph": true,
+          "unified": false
+        },
+        {
+          "name": "rawCpu",
+          "engine": "aac",
+          "morph": true,
+          "morphCpu": true
+        },
+        {
+          "name": "poseAAC",
+          "engine": "aac",
+          "pose": true
+        }
+      ],
+      "comparisonBase": "poseAAC",
+      "primer": true,
+      "checkMorphRestoration": true,
+      "captureOverOne": true,
+      "rounds": 1,
+      "batch": 6,
+      "repetitions": 1,
+      "referencePixels": [
+        [46, 25],
+        [128, 128]
+      ],
+      "captureReferencePixels": true,
+      "colorSamples": [
+        {
+          "x": 46,
+          "y": 25,
+          "rgba": [46, 10, 10, 51]
+        },
+        {
+          "x": 128,
+          "y": 128,
+          "rgba": [58, 13, 13, 64]
+        }
+      ]
+    },
+    {
+      "name": "raw-morph-group-bounds-rotated",
+      "size": 256,
+      "bbox": [0, 0, 64, 64],
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><g opacity=\".5\"><path id=\"p\" fill=\"#e63333\" fill-opacity=\".5\" d=\"M8 8H56V56H8Z\"/></g></svg>",
+      "morphSvgDst": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><g opacity=\".5\"><path id=\"p\" fill=\"#e63333\" fill-opacity=\".5\" d=\"M12 6H60V52H12Z\"/></g></svg>",
+      "poseSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><g opacity=\".5\"><path id=\"p\" fill=\"#e63333\" fill-opacity=\".5\" d=\"M9.4 7.3H57.4V54.6H9.4Z\"/></g></svg>",
+      "morphT": 0.35,
+      "morphCycle": [0.05, 0.25, 0.45, 0.65, 0.85, 0.95],
+      "morphWarmTs": [0, 0.2, 0.8, 1],
+      "morphGpuSmallPlanes": true,
+      "arms": [
+        {
+          "name": "rawGpu",
+          "engine": "aac",
+          "morph": true
+        },
+        {
+          "name": "rawGpuAA",
+          "engine": "aac",
+          "morph": true
+        },
+        {
+          "name": "rawClassic",
+          "engine": "aac",
+          "morph": true,
+          "unified": false
+        },
+        {
+          "name": "rawCpu",
+          "engine": "aac",
+          "morph": true,
+          "morphCpu": true
+        },
+        {
+          "name": "poseAAC",
+          "engine": "aac",
+          "pose": true
+        }
+      ],
+      "comparisonBase": "poseAAC",
+      "primer": true,
+      "checkMorphRestoration": true,
+      "captureOverOne": true,
+      "rounds": 1,
+      "batch": 6,
+      "repetitions": 1,
+      "referencePixels": [],
+      "captureReferencePixels": true,
+      "colorSamples": [],
+      "drawOptions": {
+        "worldMatrix": [
+          0.8598028402130454, 0.2659681859952056, 0, -0.2659681859952056, 0.8598028402130454, 0,
+          0.1, -0.06, 1
+        ]
+      }
+    }
+  ]
+}

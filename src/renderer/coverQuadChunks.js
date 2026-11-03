@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // coverQuadChunks.js — per-shape cover-quad chunk parsing.
 //
 // Bundles ship the cover quads as a flat Float32Array (curveGeom
@@ -31,12 +34,14 @@ export function parseCoverQuadChunks(f32, flags) {
   while (i + COVER_QUAD_STRIDE <= f32.length) {
     const n = Math.floor(f32[i] + 0.5);
     const gid = Math.floor(f32[i + 1] + 0.5);
-    const r = f32[i + 2], g = f32[i + 3], b = f32[i + 4];
+    const r = f32[i + 2],
+      g = f32[i + 3],
+      b = f32[i + 4];
     const aFlag = f32[i + 5];
     const alpha = Math.abs(aFlag);
     if (n <= 0 || i + COVER_QUAD_STRIDE + n * COVER_QUAD_STRIDE > f32.length) break;
     chunks.push({
-      start: (i / COVER_QUAD_STRIDE) + 1,
+      start: i / COVER_QUAD_STRIDE + 1,
       count: n,
       gid,
       fillColor: [r, g, b, alpha],
@@ -47,17 +52,7 @@ export function parseCoverQuadChunks(f32, flags) {
 }
 
 /// Build a header-free cover-quad VBO from the parsed chunks.
-///
-/// `coverQuadFloats` interleaves a one-vertex chunk header (nv/gid/color)
-/// before each chunk's body verts. The header is CPU-only bookkeeping —
-/// drawArrays starts *past* it (chunk.start skips the header) and per-shape
-/// color/gid arrive via the meta texture, so the header slot is dead weight
-/// in the VBO. Worse, it sits between adjacent chunks' vert runs, so the
-/// draw-batching test `chunk.start === pendingEnd` is always off by exactly
-/// one header slot and NEVER matches — every shape flushes as its own
-/// drawArrays (measured: 99% non-contiguous, ~4500 draws/frame in a busy
-/// scene that should issue ~50).
-///
+
 /// This packs the body verts contiguously (headers dropped) and stamps each
 /// chunk with `vboStart` — its offset in the stripped buffer. Consecutive
 /// chunks then satisfy `vboStart === pendingEnd`, so the renderer collapses
@@ -93,7 +88,7 @@ export function buildShapeIdxFloats(coverQuadFloats, chunks, gidToShapeIdx) {
   for (let ci = 0; ci < chunks.length; ci++) {
     const c = chunks[ci];
     const si = gidToShapeIdx.get(c.gid);
-    const sIdx = (si === undefined) ? 0 : si;
+    const sIdx = si === undefined ? 0 : si;
     for (let v = c.start; v < c.start + c.count; v++) arr[v] = sIdx;
   }
   return arr;

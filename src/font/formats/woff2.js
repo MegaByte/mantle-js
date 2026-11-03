@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // font/formats/woff2 — opt-in registration for WOFF2 decompression.
 //
 //   import { registerWoff2Reader } from '@kontek/mantle/font/formats/woff2';
@@ -15,7 +18,7 @@ let _registered = false;
 export function registerWoff2Reader() {
   if (_registered) return;
   _registered = true;
-  registerReader('isWoff2',     isWoff2);
+  registerReader('isWoff2', isWoff2);
   registerReader('decodeWoff2', decodeWoff2);
 }
 

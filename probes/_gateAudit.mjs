@@ -1,16 +1,33 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // _gateAudit — does the gate's PICK match the measured FASTEST? For each (content, on-screen size)
 // read the auto selector's decision (debugStats.autoEngine for AAC/Slug; loopBlinnRouteCount for
 // LB-vs-not) and compare to the per-engine timing truth. Flags every mismatch: the gate said X but
 // engine Y was faster. Content pinned to true on-screen size (globalBBox), all regimes covered.
 import { readFileSync } from 'fs';
-import http from 'http'; import path from 'path'; import { fileURLToPath } from 'url'; import puppeteer from 'puppeteer';
+import { benchNames, BENCH_UNSET } from '../test/_assets.mjs';
+import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { launchBrowser } from '../test/_launch.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const N=1024;
-const CONTENT=[];
-for (const f of ['icon_rotate','quad_torso','cubic_onion','detail_fish']) { try{ CONTENT.push({name:f, svg:readFileSync(path.join(ROOT,'examples/_bench',f+'.svg'),'utf8')});}catch{} }
-try{ CONTENT.push({name:'tiger', svg:readFileSync(path.join(ROOT,'examples/tiger.svg'),'utf8')});}catch{}
-const SIZES=[16,32,64,128,256,512];
-const HTML=`<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas>
+const N = 1024;
+const CONTENT = [];
+if (!benchNames().length) console.log(BENCH_UNSET);
+for (const f of benchNames()) {
+  try {
+    CONTENT.push({
+      name: f,
+      svg: readFileSync(path.join(ROOT, 'examples/_bench', f + '.svg'), 'utf8'),
+    });
+  } catch {}
+}
+try {
+  CONTENT.push({ name: 'tiger', svg: readFileSync(path.join(ROOT, 'examples/tiger.svg'), 'utf8') });
+} catch {}
+const SIZES = [16, 32, 64, 128, 256, 512];
+const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas>
 <script type="module">
 import { importSvg, createBundle, createRenderer, loadShaders } from '/src/index.js';
 const gl=document.getElementById('c').getContext('webgl2',{antialias:false,premultipliedAlpha:true,preserveDrawingBuffer:true});
@@ -55,25 +72,59 @@ window.__run=async(content, sizes)=>{
 };
 window.__ready=true;
 </script></body></html>`;
-const server=http.createServer((q,res)=>{try{if(q.url==='/'){res.writeHead(200,{'content-type':'text/html'});res.end(HTML);return;}
-const pp=decodeURIComponent(q.url.split('?')[0]);res.writeHead(200,{'content-type':pp.endsWith('.glsl')?'text/plain':'text/javascript'});res.end(readFileSync(path.join(ROOT,pp)));}catch{if(!res.headersSent)res.writeHead(404);res.end();}});
-await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const br=await puppeteer.launch({headless:'new',args:['--no-sandbox']});
-const pg=await br.newPage(); pg.on('pageerror',e=>console.error(' [err]',e.message));
-await pg.goto(`http://127.0.0.1:${server.address().port}/`,{waitUntil:'load',timeout:90000});
-await pg.waitForFunction(()=>window.__ready===true,{timeout:180000,polling:50});
-const o=await pg.evaluate((c,s)=>window.__run(c,s), CONTENT, SIZES); await br.close(); server.close();
+const server = http.createServer((q, res) => {
+  try {
+    if (q.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(HTML);
+      return;
+    }
+    const pp = decodeURIComponent(q.url.split('?')[0]);
+    res.writeHead(200, { 'content-type': pp.endsWith('.glsl') ? 'text/plain' : 'text/javascript' });
+    res.end(readFileSync(path.join(ROOT, pp)));
+  } catch {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  }
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const br = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
+const pg = await br.newPage();
+pg.on('pageerror', (e) => console.error(' [err]', e.message));
+await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'load', timeout: 90000 });
+await pg.waitForFunction(() => window.__ready === true, { timeout: 180000, polling: 50 });
+const o = await pg.evaluate((c, s) => window.__run(c, s), CONTENT, SIZES);
+await br.close();
+server.close();
 // The effective auto pick = LB if it routed AND lb is fastest-of-slug/aac path chosen... actually the
-// SHIPPED router: aacFill 'auto' picks Slug/AAC; LB 'auto' overrides to LB when eligible. Effective
+// DEFAULT router: aacFill 'auto' picks Slug/AAC; LB 'auto' overrides to LB when eligible. Effective
 // engine = LB (if lbRouted) else aacPick. Compare to measured fastest of {Slug,AAC,LB}.
-console.log('\\n  GATE AUDIT: pick vs measured fastest. MISMATCH = shipped router chose a slower engine.\\n');
+console.log(
+  '\\n  GATE AUDIT: pick vs measured fastest. MISMATCH = default router chose a slower engine.\\n',
+);
 console.log('  content       size | px2/sh px2/seg | aacGate lbRoute -> PICK | fastest | verdict');
-let last='';
-for(const r of o){ if(r.name!==last){ console.log('  -- '+r.name+' --'); last=r.name; }
-  const eng={Slug:r.tSlug,AAC:r.tAac,LB:r.tLb}; let fastest='Slug',fv=1e9; for(const k in eng) if(eng[k]<fv){fv=eng[k];fastest=k;}
-  const pick = r.lbRouted ? 'LB' : (r.aacPick==='aac'?'AAC':'Slug');
-  const pickMs = pick==='LB'?r.tLb:pick==='AAC'?r.tAac:r.tSlug;
-  const slow = (pickMs/fv - 1)*100;
-  const verdict = pick===fastest ? 'ok' : `MISMATCH picked ${pick} (${pickMs.toFixed(2)}) vs ${fastest} (${fv.toFixed(2)}) +${slow.toFixed(0)}%`;
-  console.log(`  ${r.name.padEnd(12)} ${String(r.px).padStart(3)} | ${String(r.px2).padStart(6)} ${String(r.lbPx2Seg).padStart(6)} | ${(r.aacPick||'?').padEnd(4)}  ${r.lbRouted?'yes':'no '}  -> ${pick.padEnd(4)} | ${fastest.padEnd(4)} | ${verdict}`);
+let last = '';
+for (const r of o) {
+  if (r.name !== last) {
+    console.log('  -- ' + r.name + ' --');
+    last = r.name;
+  }
+  const eng = { Slug: r.tSlug, AAC: r.tAac, LB: r.tLb };
+  let fastest = 'Slug',
+    fv = 1e9;
+  for (const k in eng)
+    if (eng[k] < fv) {
+      fv = eng[k];
+      fastest = k;
+    }
+  const pick = r.lbRouted ? 'LB' : r.aacPick === 'aac' ? 'AAC' : 'Slug';
+  const pickMs = pick === 'LB' ? r.tLb : pick === 'AAC' ? r.tAac : r.tSlug;
+  const slow = (pickMs / fv - 1) * 100;
+  const verdict =
+    pick === fastest
+      ? 'ok'
+      : `MISMATCH picked ${pick} (${pickMs.toFixed(2)}) vs ${fastest} (${fv.toFixed(2)}) +${slow.toFixed(0)}%`;
+  console.log(
+    `  ${r.name.padEnd(12)} ${String(r.px).padStart(3)} | ${String(r.px2).padStart(6)} ${String(r.lbPx2Seg).padStart(6)} | ${(r.aacPick || '?').padEnd(4)}  ${r.lbRouted ? 'yes' : 'no '}  -> ${pick.padEnd(4)} | ${fastest.padEnd(4)} | ${verdict}`,
+  );
 }

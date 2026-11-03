@@ -1,4 +1,6 @@
 #version 300 es
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
 // drawImageInstanced — draw N transformed copies of a unit quad sampling
 // one shared texture, in a single drawArraysInstanced call. The instanced
 // form of drawImage: bake/upload an asset once, then stamp it at many

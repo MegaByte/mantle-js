@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><mask id="m"><path d="M10 10 C60 0 90 40 80 90 L20 70Z" fill="#fff"/><path d="M10 90 C60 100 90 60 80 10 L20 30Z" fill="#888"/></mask></defs><g mask="url(#m)"><rect width="100" height="100" fill="#0a3"/></g></svg>

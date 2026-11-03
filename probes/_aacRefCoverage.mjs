@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // _aacRefCoverage — for WHICH content does aacFill:true actually change the
 // pixels? Before retargeting the smokes' reference from Slug to AAC, establish
 // where AAC is genuinely a different (more accurate) engine and where it is
@@ -9,21 +12,22 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer';
+import { launchBrowser } from '../test/_launch.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const N = 128;
 
 const CASES = {
-  poly:     '<polygon points="14,14 110,30 96,110 30,96" fill="#000"/>',
-  quad:     '<path d="M14 96 Q64 4 114 96 Z" fill="#000"/>',
-  cubic:    '<path d="M14 96 C34 8 94 8 114 96 Z" fill="#000"/>',
-  arc:      '<path d="M20 64 A44 44 0 1 1 108 64 A44 44 0 1 1 20 64 Z" fill="#000"/>',
-  circle:   '<circle cx="64" cy="64" r="46" fill="#000"/>',
-  hole:     '<path d="M10 10 H118 V118 H10 Z M40 40 H88 V88 H40 Z" fill="#000" fill-rule="evenodd"/>',
-  thin:     '<path d="M12 60 L116 62 L116 68 L12 66 Z" fill="#000"/>',
-  gradient: '<defs><linearGradient id="g"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#888"/></linearGradient></defs><circle cx="64" cy="64" r="46" fill="url(#g)"/>',
-  stroke:   '<path d="M20 100 Q64 10 108 100" fill="none" stroke="#000" stroke-width="9"/>',
+  poly: '<polygon points="14,14 110,30 96,110 30,96" fill="#000"/>',
+  quad: '<path d="M14 96 Q64 4 114 96 Z" fill="#000"/>',
+  cubic: '<path d="M14 96 C34 8 94 8 114 96 Z" fill="#000"/>',
+  arc: '<path d="M20 64 A44 44 0 1 1 108 64 A44 44 0 1 1 20 64 Z" fill="#000"/>',
+  circle: '<circle cx="64" cy="64" r="46" fill="#000"/>',
+  hole: '<path d="M10 10 H118 V118 H10 Z M40 40 H88 V88 H40 Z" fill="#000" fill-rule="evenodd"/>',
+  thin: '<path d="M12 60 L116 62 L116 68 L12 66 Z" fill="#000"/>',
+  gradient:
+    '<defs><linearGradient id="g"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#888"/></linearGradient></defs><circle cx="64" cy="64" r="46" fill="url(#g)"/>',
+  stroke: '<path d="M20 100 Q64 10 108 100" fill="none" stroke="#000" stroke-width="9"/>',
 };
 
 const HTML = `<!DOCTYPE html><html><body><canvas id="c" width="${N}" height="${N}"></canvas>
@@ -79,24 +83,45 @@ window.__out = out; window.__ready = true;
 
 const server = http.createServer((q, res) => {
   const f = q.url.split('?')[0];
-  if (f === '/') { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(HTML); return; }
+  if (f === '/') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(HTML);
+    return;
+  }
   try {
     const body = readFileSync(path.join(ROOT, f));
     const ext = path.extname(f);
-    res.writeHead(200, { 'Content-Type': ext === '.js' || ext === '.mjs' ? 'text/javascript' : ext === '.glsl' ? 'text/plain' : 'application/octet-stream' });
+    res.writeHead(200, {
+      'Content-Type':
+        ext === '.js' || ext === '.mjs'
+          ? 'text/javascript'
+          : ext === '.glsl'
+            ? 'text/plain'
+            : 'application/octet-stream',
+    });
     res.end(body);
-  } catch { res.writeHead(404); res.end('nf'); }
+  } catch {
+    res.writeHead(404);
+    res.end('nf');
+  }
 });
 await new Promise((r) => server.listen(0, r));
-const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+const browser = await launchBrowser({ headless: 'new', args: ['--no-sandbox'] });
 const pg = await browser.newPage();
 pg.on('pageerror', (e) => console.error(' [err]', e.message));
 await pg.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'networkidle0' });
 await pg.waitForFunction('window.__ready === true', { timeout: 120000, polling: 50 });
 const o = await pg.evaluate(() => window.__out);
-await browser.close(); server.close();
+await browser.close();
+server.close();
 console.log('\n  does aacFill:true differ from Slug?  (diff = px where they disagree)\n');
 console.log('   case      slugInk   aacInk   REF(2d)   diffPx  maxDiff');
 for (const r of o)
-  console.log(`   ${r.k.padEnd(9)} ${String(r.ink).padStart(7)} ${String(r.inkA).padStart(8)} ${String(r.inkR).padStart(8)} ${String(r.diff).padStart(8)} ${String(r.mx).padStart(8)}`
-    + (r.diff === 0 ? '   IDENTICAL' : Math.abs(r.ink - r.inkA) > r.ink * 0.05 ? '   *** INK MISMATCH ***' : ''));
+  console.log(
+    `   ${r.k.padEnd(9)} ${String(r.ink).padStart(7)} ${String(r.inkA).padStart(8)} ${String(r.inkR).padStart(8)} ${String(r.diff).padStart(8)} ${String(r.mx).padStart(8)}` +
+      (r.diff === 0
+        ? '   IDENTICAL'
+        : Math.abs(r.ink - r.inkA) > r.ink * 0.05
+          ? '   *** INK MISMATCH ***'
+          : ''),
+  );

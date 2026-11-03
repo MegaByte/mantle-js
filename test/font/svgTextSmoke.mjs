@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // SVG <text> element renders via the Mantle pipeline.
 //
 // Each glyph emerges as its own Mantle shape (own bbox, own curve+band
@@ -6,10 +9,14 @@
 // cost scale linearly with run length.
 //
 // Scope: monochrome single-line <text>; no <tspan>, no textPath, no
-// text-anchor adjustments.
+// text-anchor adjustments. SVG 1.2 Tiny <textArea> goes through the same
+// opts.svgTextLayout with its width in em, so the layout wraps: wrapped
+// lines, the width <= 0 / empty / unresolved-font skips, retained-source
+// rows, and a warning (with the text skipped) when no layout is given.
 
 import { readFileSync } from 'fs';
-import { DOMParser } from '@xmldom/xmldom';
+import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
+globalThis.XMLSerializer = XMLSerializer;
 import { MantleFontAsset } from '../../src/font/fontAsset.js';
 import { buildSvgTextGlyphs } from '../../src/font/textRun.js';
 import importSvg from '../../src/svg/importer.js';
@@ -18,12 +25,17 @@ import importSvg from '../../src/svg/importer.js';
 // it onto globalThis from xmldom before running any SVG.
 if (typeof globalThis.DOMParser === 'undefined') globalThis.DOMParser = DOMParser;
 
-const arial = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')));
+const arial = new MantleFontAsset(
+  new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')),
+);
 arial.getMetrics(0x41);
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 // ---- T1: buildSvgTextGlyphs returns per-glyph shapes ----
 {
@@ -41,12 +53,18 @@ const ok   = (msg) => console.log('ok ' + msg);
   // The check: each glyph's individual span is much smaller than the
   // total.
   const bboxOf = (segs) => {
-    let xmin = Infinity, ymin = Infinity, xmax = -Infinity, ymax = -Infinity;
+    let xmin = Infinity,
+      ymin = Infinity,
+      xmax = -Infinity,
+      ymax = -Infinity;
     for (const s of segs) {
-      const pts = s.type === 0 ? [s.p1, s.p2] : s.type === 1 ? [s.p1, s.p2, s.p3] : [s.p1, s.p2, s.p3, s.p4];
+      const pts =
+        s.type === 0 ? [s.p1, s.p2] : s.type === 1 ? [s.p1, s.p2, s.p3] : [s.p1, s.p2, s.p3, s.p4];
       for (const p of pts) {
-        if (p[0] < xmin) xmin = p[0]; if (p[0] > xmax) xmax = p[0];
-        if (p[1] < ymin) ymin = p[1]; if (p[1] > ymax) ymax = p[1];
+        if (p[0] < xmin) xmin = p[0];
+        if (p[0] > xmax) xmax = p[0];
+        if (p[1] < ymin) ymin = p[1];
+        if (p[1] > ymax) ymax = p[1];
       }
     }
     return { w: xmax - xmin, h: ymax - ymin };
@@ -89,7 +107,8 @@ const ok   = (msg) => console.log('ok ' + msg);
     fonts: { Arial: arial },
     svgTextLayout: buildSvgTextGlyphs,
   });
-  if (bundle.numShapes !== 1) fail(`T4 expected 1 shape (rect only; text skipped), got ${bundle.numShapes}`);
+  if (bundle.numShapes !== 1)
+    fail(`T4 expected 1 shape (rect only; text skipped), got ${bundle.numShapes}`);
   else ok(`T4 unregistered font → text skipped, rect emits (${bundle.numShapes} shape)`);
 }
 
@@ -107,6 +126,87 @@ const ok   = (msg) => console.log('ok ' + msg);
   // 1 rect + 1 glyph ('A') = 2 shapes.
   if (bundle.numShapes !== 2) fail(`T5 expected 2 shapes, got ${bundle.numShapes}`);
   else ok(`T5 mixed <rect>+<text> → ${bundle.numShapes} shapes`);
+}
+
+// textArea shares the exported text layout contract and wraps in em units.
+for (const nested of [false, true]) {
+  const content = nested ? 'A <tspan>B</tspan> C' : 'A B C';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><g font-family="Arial" font-size="8"><textArea x="8" y="24" width="12">${content}</textArea></g></svg>`;
+  const calls = [];
+  const bundle = await importSvg(svg, {
+    fonts: { Arial: arial },
+    svgTextLayout: (...args) => {
+      calls.push(args);
+      return buildSvgTextGlyphs(...args);
+    },
+  });
+  if (calls.length !== 1 || calls[0][0] !== 'A B C' || calls[0][1] !== arial || calls[0][6] !== 1.5)
+    fail('textArea layout receives text, resolved font and width in em');
+  const mf = new Float32Array(bundle.meta, 32);
+  const y = Array.from(
+    { length: bundle.numShapes },
+    (_, i) => mf[i * bundle.metaFloatsPerShape + 1],
+  );
+  if (bundle.numShapes !== 3 || new Set(y.map((v) => Math.round(v))).size < 2)
+    fail('textArea must wrap three real glyphs onto multiple lines');
+  else ok(`textArea ${nested ? 'nested' : 'direct'} content uses real-font wrapping`);
+}
+for (const [width, text, family] of [
+  [0, 'A', 'Arial'],
+  [-1, 'A', 'Arial'],
+  [12, '', 'Arial'],
+  [12, 'A', 'Missing'],
+]) {
+  let calls = 0;
+  const bundle = await importSvg(
+    `<svg xmlns="http://www.w3.org/2000/svg"><textArea width="${width}" font-family="${family}">${text}</textArea></svg>`,
+    {
+      fonts: { Arial: arial },
+      svgTextLayout: () => {
+        calls++;
+        throw Error('unexpected layout');
+      },
+    },
+  );
+  if (calls || bundle.numShapes)
+    fail('empty, nonpositive-width or unresolved-font textArea must skip layout');
+}
+
+// Without opts.svgTextLayout a textArea warns and is skipped; the rest of the document still imports.
+{
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><textArea x="0" y="0" width="50" height="50">hello world</textArea><rect x="10" y="10" width="80" height="80" fill="red"/></svg>`;
+  const origWarn = console.warn;
+  const warns = [];
+  console.warn = (...a) => warns.push(a.join(' '));
+  try {
+    const bundle = await importSvg(svg, {});
+    if (!warns.some((w) => /svgTextLayout/.test(w)))
+      fail(`textArea without svgTextLayout must warn naming it: ${JSON.stringify(warns)}`);
+    if (bundle.numShapes !== 1)
+      fail(`textArea without svgTextLayout: the rect must still import, got ${bundle.numShapes}`);
+    else ok('textArea without svgTextLayout: a warning, text skipped, rect imports');
+  } finally {
+    console.warn = origWarn;
+  }
+}
+
+// Retained textArea glyphs occupy distinct native rows and shift later leaves.
+{
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="64"><rect id="before" width="4" height="4"/><textArea id="area" x="8" y="24" width="64" font-family="Arial" font-size="8">ABC</textArea><rect id="after" x="100" width="4" height="4"/></svg>`;
+  const bundle = await importSvg(svg, {
+    retainSource: true,
+    fonts: { Arial: arial },
+    svgTextLayout: buildSvgTextGlyphs,
+  });
+  const source = new DOMParser().parseFromString(bundle.svgSource, 'image/svg+xml');
+  if (
+    source.getElementsByTagName('textArea').length ||
+    source.getElementsByTagName('path').length !== 3
+  )
+    fail('textArea retained source must contain its three glyph outlines');
+  if (JSON.stringify(bundle.shapeDomIndex) !== JSON.stringify([0, 1, 2, 3, 4]))
+    fail(`textArea native row addressing: ${JSON.stringify(bundle.shapeDomIndex)}`);
+  else ok('textArea retained glyph and following-leaf addresses');
 }
 
 console.log();

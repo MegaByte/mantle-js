@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Aaron Kaluszka
+// SPDX-License-Identifier: Apache-2.0
+
 // mathShapingSmoke.mjs — end-to-end OT MATH integration via textRun.
 //
 // Verifies that:
@@ -9,7 +12,7 @@
 
 import { readFileSync } from 'fs';
 import { MantleFontAsset } from '../../src/font/fontAsset.js';
-import { registerCffReader } from "../../src/font/formats/cff.js";
+import { registerCffReader } from '../../src/font/formats/cff.js';
 registerCffReader();
 import { buildSvgTextGlyphs } from '../../src/font/textRun.js';
 import { registerMathReader } from '../../src/font/math/index.js';
@@ -18,20 +21,31 @@ registerMathReader();
 registerMathStretchy();
 
 let failures = 0;
-const fail = (msg) => { console.error('FAIL:', msg); failures++; };
-const ok   = (msg) => console.log('ok ' + msg);
+const fail = (msg) => {
+  console.error('FAIL:', msg);
+  failures++;
+};
+const ok = (msg) => console.log('ok ' + msg);
 
 let math = null;
 try {
-  math = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/STIXTwoMath.otf')));
+  math = new MantleFontAsset(
+    new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/STIXTwoMath.otf')),
+  );
   math.getMetrics(0x41);
-} catch (e) { console.log('Skip math font:', e.message); }
+} catch (e) {
+  console.log('Skip math font:', e.message);
+}
 
 let arial = null;
 try {
-  arial = new MantleFontAsset(new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')));
+  arial = new MantleFontAsset(
+    new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')),
+  );
   arial.getMetrics(0x41);
-} catch (e) { console.log('Skip Arial:', e.message); }
+} catch (e) {
+  console.log('Skip Arial:', e.message);
+}
 
 // ----- T1: math italic 'f' has italic correction applied ----------
 // Pen advance for U+1D453 in STIXTwoMath should equal
@@ -39,21 +53,26 @@ try {
 // We test indirectly by comparing the emitted glyph's advance against
 // what the natural hmtx advance would be.
 if (math) {
-  const gid = math.codepointToGlyphId(0x1D453); // math italic f
+  const gid = math.codepointToGlyphId(0x1d453); // math italic f
   if (!gid) ok(`T1 STIXTwoMath has no glyph for U+1D453; skip`);
   else {
     // getMetricsByGid returns advance in EM units (already / upem).
     const natEm = math.getMetricsByGid(gid).advance;
-    const icFu  = math.math.getItalicCorrection(gid);
-    const icEm  = icFu / math.unitsPerEm;
+    const icFu = math.math.getItalicCorrection(gid);
+    const icEm = icFu / math.unitsPerEm;
     const expectedAdvPx = (natEm + icEm) * 100; // px at fontSize=100
     const { glyphs } = buildSvgTextGlyphs('𝑓', math, 0, 0, 100);
     if (glyphs.length !== 1) fail(`T1 expected 1 glyph, got ${glyphs.length}`);
     else {
       const actualAdv = glyphs[0].advance;
       if (Math.abs(actualAdv - expectedAdvPx) > 0.01) {
-        fail(`T1 advance for 𝑓: got ${actualAdv.toFixed(3)}px, want ${expectedAdvPx.toFixed(3)}px (natEm=${natEm}, icFu=${icFu}, upem=${math.unitsPerEm})`);
-      } else ok(`T1 math italic 𝑓: advance ${actualAdv.toFixed(3)}px = hmtx(${(natEm*100).toFixed(3)}px) + italicCorr(${(icEm*100).toFixed(3)}px) — italic correction wired`);
+        fail(
+          `T1 advance for 𝑓: got ${actualAdv.toFixed(3)}px, want ${expectedAdvPx.toFixed(3)}px (natEm=${natEm}, icFu=${icFu}, upem=${math.unitsPerEm})`,
+        );
+      } else
+        ok(
+          `T1 math italic 𝑓: advance ${actualAdv.toFixed(3)}px = hmtx(${(natEm * 100).toFixed(3)}px) + italicCorr(${(icEm * 100).toFixed(3)}px) — italic correction wired`,
+        );
     }
   }
 }
@@ -71,17 +90,22 @@ if (math) {
     // plusX should equal fAdv (i.e. the '+' sits right after the f's advance).
     if (Math.abs(plusX - fAdv) > 0.01) {
       fail(`T2 '+' pos ${plusX.toFixed(3)} != f.advance ${fAdv.toFixed(3)}`);
-    } else ok(`T2 '𝑓+' pen progression: f→${fAdv.toFixed(3)}px (incl. italic correction) → + at ${plusX.toFixed(3)}px`);
+    } else
+      ok(
+        `T2 '𝑓+' pen progression: f→${fAdv.toFixed(3)}px (incl. italic correction) → + at ${plusX.toFixed(3)}px`,
+      );
   }
 }
 
 // ----- T3: Math italic 'x' italic correction ---------------------
 if (math) {
-  const gid = math.codepointToGlyphId(0x1D465); // math italic x
+  const gid = math.codepointToGlyphId(0x1d465); // math italic x
   if (gid) {
     const natEm = math.getMetricsByGid(gid).advance;
     const icFu = math.math.getItalicCorrection(gid);
-    ok(`T3 math italic 𝑥: hmtx=${(natEm*100).toFixed(3)}px, italicCorr=${icFu} fu (zero is acceptable; not every italic glyph has IC)`);
+    ok(
+      `T3 math italic 𝑥: hmtx=${(natEm * 100).toFixed(3)}px, italicCorr=${icFu} fu (zero is acceptable; not every italic glyph has IC)`,
+    );
   }
 }
 
@@ -93,8 +117,13 @@ if (arial) {
     const gid = arial.codepointToGlyphId(0x66);
     const natPx = arial.getMetricsByGid(gid).advance * 100; // em → px at fontSize=100
     if (Math.abs(glyphs[0].advance - natPx) > 0.01) {
-      fail(`T4 Arial 'f' advance ${glyphs[0].advance.toFixed(3)} != hmtx ${natPx.toFixed(3)} (math IC leaked)`);
-    } else ok(`T4 Arial regression: 'f' advance = hmtx ${natPx.toFixed(3)}px (no math IC for non-math fonts)`);
+      fail(
+        `T4 Arial 'f' advance ${glyphs[0].advance.toFixed(3)} != hmtx ${natPx.toFixed(3)} (math IC leaked)`,
+      );
+    } else
+      ok(
+        `T4 Arial regression: 'f' advance = hmtx ${natPx.toFixed(3)}px (no math IC for non-math fonts)`,
+      );
   }
 }
 
@@ -104,7 +133,7 @@ if (arial) {
 // won't trigger our top-accent path. Use U+20D7 (combining right
 // arrow above) which IS in the math range.
 if (math) {
-  const { glyphs } = buildSvgTextGlyphs('𝑥' + String.fromCodePoint(0x20D7), math, 0, 0, 100);
+  const { glyphs } = buildSvgTextGlyphs('𝑥' + String.fromCodePoint(0x20d7), math, 0, 0, 100);
   if (glyphs.length === 2) {
     // Mark should have advance=0 (attached) AND its penX should be
     // near the base's top-accent attachment X (if the font carries
@@ -112,11 +141,51 @@ if (math) {
     if (glyphs[1].advance === 0) {
       ok(`T5 '𝑥⃗' combining math arrow: mark attached (advance=0)`);
     } else {
-      ok(`T5 '𝑥⃗': mark advance=${glyphs[1].advance.toFixed(3)} (font may not ship arrow glyph or has no attachment data)`);
+      ok(
+        `T5 '𝑥⃗': mark advance=${glyphs[1].advance.toFixed(3)} (font may not ship arrow glyph or has no attachment data)`,
+      );
     }
   } else {
     ok(`T5 '𝑥⃗' produced ${glyphs.length} glyphs — accent may not be in font's cmap`);
   }
+}
+
+// Font-unit top anchors subtract half the mark's font-unit advance.
+if (arial) {
+  const { MathReader } = await import('../../src/font/math/mathReader.js');
+  const { layoutSlots } = await import('../../src/font/textLayout.js');
+  const { defaultStyle } = await import('../../src/font/markupParser.js');
+  const font = new MantleFontAsset(
+    new Uint8Array(readFileSync('/System/Library/Fonts/Supplemental/Arial.ttf')),
+  );
+  font.getMetrics(32);
+  const baseGid = font.codepointToGlyphId(65),
+    markGid = font.codepointToGlyphId(66);
+  const originalMap = font.codepointToGlyphId.bind(font);
+  font.codepointToGlyphId = (cp) => (cp === 0x20d7 ? markGid : originalMap(cp));
+  const words = (...values) => Uint8Array.from(values.flatMap((v) => [(v >> 8) & 255, v & 255]));
+  const data = words(1, 0, 0, 10, 0, 0, 8, 0, 0, 8, 1, 1000, 0, 1, 1, baseGid);
+  font._math = new MathReader({ view: new DataView(data.buffer), math: [0, data.length] });
+  for (const sizeScale of [0.5, 1, 2])
+    for (const widthScale of [0.5, 1, 2]) {
+      const slots = layoutSlots(
+        [{ text: 'A\u20d7', style: { ...defaultStyle(), sizeScale, widthScale } }],
+        font,
+        {},
+      );
+      const expected =
+        slots[0].penX +
+        (1000 / font.unitsPerEm - font.getMetricsByGid(markGid).advance / 2) *
+          sizeScale *
+          widthScale;
+      if (
+        slots.length !== 2 ||
+        Math.abs(slots[1].penX - expected) > 1e-12 ||
+        slots[1].advance !== 0
+      )
+        fail(`top-accent units size=${sizeScale} width=${widthScale}`);
+    }
+  ok('font-unit top-accent controls checked at nine styled scales');
 }
 
 console.log();

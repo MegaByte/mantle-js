@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="120" height="120" viewBox="0 0 120 120"><defs><path id="r" d="M10 10 L110 10 L110 110 L10 110 Z M40 40 L80 40 L80 80 L40 80 Z" fill="#e00"/></defs><rect width="120" height="120" fill="#4060c0"/><use href="#r" fill-rule="evenodd"/></svg>

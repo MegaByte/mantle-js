@@ -18,30 +18,45 @@ vec4 sampleIn(sampler2D tex, vec2 uv) {
   return texture(tex, uv) * (s.x * s.y);
 }
 
+vec3 csSrgbToLinear(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+vec3 csLinearToSrgb(vec3 c) {
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+}
+vec4 csConvert(vec4 p, int mode) {
+  if (mode == 0 || p.a <= 0.0) return p;
+  vec3 c = clamp(p.rgb / p.a, 0.0, 1.0);
+  c = mode == 1 ? csSrgbToLinear(c) : csLinearToSrgb(c);
+  return vec4(c * p.a, p.a);
+}
+
+uniform vec2 uInPast;
+vec4 sampleKept(vec2 uv) {
+  vec2 e = vec2(1.0) - uInPast, s = step(vec2(0.0), uv) * step(uv, e);
+  return texture(uTex, min(uv, e - 0.5 * uTexel)) * (s.x * s.y);
+}
+
 void main() {
   vec2 uv = mapIn(vUV, uInMap);
-  if (uRadius <= 0) { fragColor = sampleIn(uTex, uv); return; }
-  vec4 acc = sampleIn(uTex, uv);
+  if (uRadius <= 0) { fragColor = sampleKept(uv); return; }
+  vec4 acc = sampleKept(uv);
 
-  float n = 1.0;
-  for (int k = 0; k < 32; ++k) {
-    int off = 2 * k + 1;
-    if (off > uRadius) break;
+  int pairs = min(uRadius / 2, 128);
+  bool tail = uRadius <= 256 && uRadius - 2 * pairs == 1;
+  for (int k = 0; k < 128; ++k) {
+    if (k >= pairs) break;
 
-    float pairCount;
-    float fOff;
-    if (off + 1 <= uRadius) {
-      fOff = float(off) + 0.5;
-      pairCount = 2.0;
-    } else {
-      fOff = float(off);
-      pairCount = 1.0;
-    }
-    vec2 d = uDir * uTexel * fOff;
-
-    acc += sampleIn(uTex, uv + d) * pairCount;
-    acc += sampleIn(uTex, uv - d) * pairCount;
-    n += 2.0 * pairCount;
+    vec2 d = uDir * uTexel * (float(2 * k + 1) + 0.5);
+    acc += sampleKept(uv + d) * 2.0;
+    acc += sampleKept(uv - d) * 2.0;
   }
-  fragColor = acc / n;
+  if (tail) {
+
+    vec2 d = uDir * uTexel * float(uRadius);
+    acc += sampleKept(uv + d) * 1.0;
+    acc += sampleKept(uv - d) * 1.0;
+  }
+
+  fragColor = acc / float(1 + 4 * pairs + (tail ? 2 : 0));
 }
