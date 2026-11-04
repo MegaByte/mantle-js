@@ -460,6 +460,11 @@ export function attachInstancedFill(R) {
     const key = _instKeyOf(defs);
     if (!_instProgs.has(key)) _beginInstProg(key, defs);
   };
+  /// Is the instanced program of these defines linked and finished, so a draw binds it rather than falling back?
+  R._instBuilt = (defs) => {
+    const rec = _instProgs.get(_instKeyOf(defs));
+    return !!(rec && rec.prog && !rec.pending);
+  };
   function _selectInstProgram(bundle, baseDefs) {
     const omit = R._instancedOmitDefines ? R._instancedOmitDefines(bundle) : [];
     if (R._khrParallel && R.opts.variantFirst !== false)

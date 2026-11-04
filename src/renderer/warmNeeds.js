@@ -361,6 +361,7 @@ export function attachWarmNeeds(R) {
     bindSetEnumMs: Math.round(R._bindSetEnumMs || 0),
     bindSetEnumMaxMs: Math.round(R._bindSetEnumMax || 0),
     bindSetEnumBundles: R._bindSetEnumBundles | 0,
+    bindSetLastBundles: R._bindSetLastBundles | 0,
     needsWarmCalls: R._needsWarmCalls | 0,
     needsWarmMs: Math.round(R._needsWarmMs || 0),
     needsWarmMaxMs: Math.round(R._needsWarmMax || 0),

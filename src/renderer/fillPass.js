@@ -3847,8 +3847,9 @@ export function attachFillPass(R) {
     }
   }
   /// Draw the bundle's instanced fast path once, under the warm state, scissored to the warm pixel, so its (rotated) instanced program and
-  /// pipeline are built behind the load screen.
-  function warmInstanced(bundle) {
+  /// pipeline are built behind the load screen. `copies` is the instance count drawn: a bundle the fast path cannot take draws each copy
+  /// whole, so one copy builds what three do.
+  function warmInstanced(bundle, copies = 3) {
     if (!R._instancedFastEnabled || !R.drawBundleInstanced || bundle._disposed || !bundle.curveTex)
       return;
     if (R._warmState && R._warmState.inst === false) return; // a recorded plain-draw state: no instanced program to build
@@ -3859,7 +3860,7 @@ export function attachFillPass(R) {
     try {
       R.bindFb(gl.FRAMEBUFFER, R._warmTarget || null);
       R._applyTargetScissor(R._warmTarget || null);
-      const list = [{ worldMatrix: wm }, { worldMatrix: wm }, { worldMatrix: wm }];
+      const list = Array.from({ length: copies }, () => ({ worldMatrix: wm }));
       R._psoWarming = true;
       R.drawBundleInstanced(bundle, list);
     } catch {
@@ -4649,6 +4650,7 @@ export function attachFillPass(R) {
         const d = _nowMs() - tEnum;
         R._bindSetEnumMs = (R._bindSetEnumMs || 0) + d;
         R._bindSetEnumBundles = Math.max(R._bindSetEnumBundles | 0, nEnum);
+        R._bindSetLastBundles = nEnum;
         if (d > (R._bindSetEnumMax || 0)) R._bindSetEnumMax = d;
       }
       if (!todo.length) {
@@ -4894,8 +4896,15 @@ export function attachFillPass(R) {
           if (exhaustive) for (const ws of WARM_STATES) add(ws, bb);
         }
         let last = null;
-        const instWarmed = new Set();
-        const instKeyed = !!(R._khrParallel && R.opts.variantFirst !== false && R._instWantDefsFor);
+        const instKeyed = !!(R._khrParallel && R.opts.variantFirst !== false && R._instWantDefsFor && R._instBuilt);
+        const instDefsByBundle = new Map();
+        const instDefsOf = (bb, rot) => {
+          let pair = instDefsByBundle.get(bb);
+          if (!pair) instDefsByBundle.set(bb, (pair = [undefined, undefined]));
+          const i = rot ? 1 : 0;
+          if (pair[i] === undefined) pair[i] = R._instWantDefsFor(bb, rot);
+          return pair[i];
+        };
         for (let pass = 0; pass < 4; pass++) {
           for (const [ws, bundles] of tasks) {
             R._warmState = ws;
@@ -4908,19 +4917,20 @@ export function attachFillPass(R) {
               n += yield* engineCandidatePass(ws);
             }
             for (const bb of bundles) {
-              // ONE DRAW PER INSTANCED PROGRAM AND TARGET. A bundle that cannot be drawn instanced has no instanced program: its warm drew the whole bundle
-              // three times, filters and mask bakes included, and built nothing the fill warm had not. A bundle whose program another bundle already drew
-              // in this call builds nothing new either.
+              // ONE DRAW PER BUILT INSTANCED PROGRAM. Once a bundle's instanced program is built, another bundle with the same program builds
+              // nothing new and is not drawn; until it is built, every pass draws again. A bundle the fast path cannot take draws one whole copy.
+              let copies = 3;
               if (instKeyed && !(ws && ws.inst === false)) {
-                const defs = R._instWantDefsFor(bb, !!(ws && ws.world));
-                if (!defs) continue;
-                const instKey = defs.slice().sort().join('|') + '@' + (R._warmTargetName || 'canvas');
-                if (instWarmed.has(instKey)) continue;
-                if (bb.curveTex && !bb._disposed) instWarmed.add(instKey);
+                const defs = instDefsOf(bb, !!(ws && ws.world));
+                if (!defs) copies = 1;
+                else if (R._instBuilt(defs) && !bb._disposed) {
+                  if (R._coop) yield* maybeSlice();
+                  continue;
+                }
               }
               // (one instanced program's pipeline build in flight at a time, like every other warm)
               while (R._coop && R._khrParallel && !R._gpuClear()) yield* pause('warm');
-              warmInstanced(bb);
+              warmInstanced(bb, copies);
               if (R._coop) yield* maybeSlice();
             }
           }

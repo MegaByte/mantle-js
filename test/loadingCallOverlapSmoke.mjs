@@ -215,14 +215,10 @@ console.log('(scope) a late bundle warms alone, not the whole scene');
   }
   const ring = await late(W, -4);
   ok(R._policy.needsWarm(ring), 'the late bundle needs a program the scene did not');
-  // (needMiss.bindSetEnumBundles: the most bundles one warm has walked)
-  const mostWalked = () => R.debugStats.needMiss.bindSetEnumBundles;
-  const sceneWalked = mostWalked();
+  // (needMiss.bindSetLastBundles: the bundles the last warm walked)
+  const lastWalked = () => R.debugStats.needMiss.bindSetLastBundles;
   await R.awaitBundleReady(ring);
-  ok(
-    mostWalked() === sceneWalked && sceneWalked <= scene.length,
-    `the late warm did not walk the scene with it (most walked ${mostWalked()}, scene ${scene.length})`,
-  );
+  ok(lastWalked() === 1, `the late warm walked the late bundle alone (${lastWalked()} of ${scene.length + 1})`);
   ok(!R._policy.needsWarm(ring), 'and is ready afterward');
   const p0 = W.model.pipelines;
   R.beginFrame([1, 1, 1, 1]);
@@ -232,8 +228,8 @@ console.log('(scope) a late bundle warms alone, not the whole scene');
   // A full loading call afterward still walks every bundle, so the late warm's scope is gone once it ends.
   await R.precompileFillsAsync({});
   ok(
-    mostWalked() === scene.length + 1,
-    `a full loading call afterward walks every bundle (${mostWalked()} of ${scene.length + 1})`,
+    lastWalked() === scene.length + 1,
+    `a full loading call afterward walks every bundle (${lastWalked()} of ${scene.length + 1})`,
   );
   R.dispose();
 }
