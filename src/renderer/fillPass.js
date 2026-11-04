@@ -4897,6 +4897,7 @@ export function attachFillPass(R) {
         }
         let last = null;
         const instKeyed = !!(R._khrParallel && R.opts.variantFirst !== false && R._instWantDefsFor && R._instBuilt);
+        const wholeDrawn = new Map(); // state -> bundles drawn whole with no draw deferred
         const instDefsByBundle = new Map();
         const instDefsOf = (bb, rot) => {
           let pair = instDefsByBundle.get(bb);
@@ -4916,9 +4917,12 @@ export function attachFillPass(R) {
               n += yield* precompilePass(opts);
               n += yield* engineCandidatePass(ws);
             }
+            let drawnWhole = wholeDrawn.get(ws);
+            if (!drawnWhole) wholeDrawn.set(ws, (drawnWhole = new Set()));
             for (const bb of bundles) {
               // ONE DRAW PER BUILT INSTANCED PROGRAM. Once a bundle's instanced program is built, another bundle with the same program builds
-              // nothing new and is not drawn; until it is built, every pass draws again. A bundle the fast path cannot take draws one whole copy.
+              // nothing new and is not drawn; until it is built, every pass draws again. A bundle the fast path cannot take draws one whole copy,
+              // and once a whole draw of it in this state deferred nothing, the later passes do not draw it again.
               let copies = 3;
               if (instKeyed && !(ws && ws.inst === false)) {
                 const defs = instDefsOf(bb, !!(ws && ws.world));
@@ -4928,9 +4932,12 @@ export function attachFillPass(R) {
                   continue;
                 }
               }
+              if (copies === 1 && drawnWhole.has(bb)) continue;
               // (one instanced program's pipeline build in flight at a time, like every other warm)
               while (R._coop && R._khrParallel && !R._gpuClear()) yield* pause('warm');
+              const deferredBefore = R._deferredWarmDraws | 0;
               warmInstanced(bb, copies);
+              if (copies === 1 && (R._deferredWarmDraws | 0) === deferredBefore) drawnWhole.add(bb);
               if (R._coop) yield* maybeSlice();
             }
           }
