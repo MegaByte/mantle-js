@@ -270,31 +270,6 @@ window.__drawRaster = async () => {
   };
 };
 
-// (8a1) a canvas raster, once its createImage token is ready, draws from a short blob: URL rather than a PNG data: URL, so a new
-// <image> of it parses no long string; the frame's exportFrameSVG() carries the raster as a data: URL and the live <image> keeps its
-// blob: URL; disposing the token revokes the URL, and a later draw falls back to a data: URL.
-window.__canvasHref = async () => {
-  const canvas = document.createElement('canvas');
-  canvas.width = 64; canvas.height = 32;
-  canvas.getContext('2d').fillRect(0, 0, 64, 32);
-  const token = rscene.createImage(canvas);
-  await token.ready;
-  rscene.beginFrame([1,1,1,1]);
-  rscene.drawImage(token, { dstRect: [0, 0, 64, 32] });
-  rscene.endFrame();
-  const href = rscene.svg.querySelector('image').getAttribute('href');
-  const exported = await rscene.exportFrameSVG();
-  const exportedDataOnly = !exported.includes('blob:') && exported.includes('data:image/png;base64,');
-  const liveKeepsBlob = rscene.svg.querySelector('image').getAttribute('href') === href;
-  token.dispose();
-  const revoked = await fetch(href).then(() => false, () => true);
-  rscene.beginFrame([1,1,1,1]);
-  rscene.drawImage(token, { dstRect: [0, 0, 64, 32] });
-  rscene.endFrame();
-  const after = rscene.svg.querySelector('image').getAttribute('href');
-  return { blob: href.startsWith('blob:'), exportedDataOnly, liveKeepsBlob, revoked, afterDispose: after.slice(0, 22) };
-};
-
 // (8a2) compatible repeated vectors use one defs template and lightweight
 // <use> slots; per-instance overrides deliberately retain the clone path.
 const instHost = document.createElement('div'); document.body.appendChild(instHost);
@@ -741,17 +716,6 @@ async function nativeFallback(suite) {
   const outIsGreen = rb.outside[3] > 10 && rb.outside[1] > 150 && rb.outside[0] < 120;
   if (!outIsGreen) ok('drawImage raster confined to dstRect (not green outside)');
   else fail('raster bled outside dstRect: ' + JSON.stringify(rb.outside));
-  const ch = await page.evaluate(() => window.__canvasHref());
-  if (ch.blob) ok('a ready canvas raster draws from a blob: URL');
-  else fail('a ready canvas raster did not draw from a blob: URL: ' + JSON.stringify(ch));
-  if (ch.exportedDataOnly && ch.liveKeepsBlob)
-    ok("a ready canvas raster's exported frame carries it as a data: URL, and its live <image> keeps the blob: URL");
-  else fail('the exported frame of a ready canvas raster: ' + JSON.stringify(ch));
-  if (ch.revoked) ok('disposing the canvas token revokes its blob: URL');
-  else fail('the blob: URL still loads after dispose: ' + JSON.stringify(ch));
-  if (ch.afterDispose === 'data:image/png;base64,')
-    ok('a draw after dispose falls back to a data: URL');
-  else fail('a draw after dispose used ' + JSON.stringify(ch.afterDispose));
 
   const ni = await page.evaluate(() => window.__nativeInstances());
   if (ni.uses === 3 && ni.templates === 1) ok('compatible native instances share one SVG template');

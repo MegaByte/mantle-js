@@ -554,7 +554,7 @@ export function createNativeScene(host, opts = {}) {
   }
 
   function retireSlot(slot) {
-    if (!slot.kind.startsWith('image-')) return dropSlot(slot);
+    if (!slot.kind.startsWith('image-') || slot.hrefPerDraw) return dropSlot(slot);
     if (slot.node.parentNode === svg) svg.removeChild(slot.node);
     forgetRasterDefinitions(slot);
     slot.restFrame = frameEpoch;
@@ -2910,7 +2910,7 @@ export function createNativeScene(host, opts = {}) {
     // Materialize raw sources once for the whole batch. drawImage(rawSource)
     // intentionally stays live, but an instanced batch should not re-encode the
     // same pixels through canvas.toDataURL() for every instance.
-    const batchSource = source && source.__nativeImage ? source : imageToken(source);
+    const batchSource = source && source.__nativeImage ? source : createImage(source);
     let n = 0;
     // Full per-instance passthrough so per-instance tint / srcRect / blendMode
     // / opacity all apply (the GL path tints each blit independently).
@@ -3019,6 +3019,12 @@ export function createNativeScene(host, opts = {}) {
       ownerDoc.createElementNS(SVGNS, layerKind),
     );
     beginSlotFrame(slot);
+    // A raw canvas or raw pixels give a new data: href at each draw: that href is never asked for again, so its slot does not rest.
+    slot.hrefPerDraw =
+      !!source &&
+      !source.__nativeImage &&
+      typeof source !== 'string' &&
+      !(source.nodeType && source.tagName && source.tagName.toLowerCase() === 'img');
     // Reuse one <image> element per live positional slot, not per href. A DOM
     // node can only have one parent, so sharing the same <image> across
     // same-source instances moves it to the last wrapper. Distinct elements
@@ -3486,11 +3492,7 @@ export function createNativeScene(host, opts = {}) {
   // ── createImage — return a token drawImage already accepts (the source
   // itself). No GPU upload; drawImage decodes lazily. Lets a renderer-
   // style `const img = createImage(src); drawImage(img)` flow work. ─────
-  // A canvas token resolves `ready` once the canvas is encoded to a blob: URL. Its <image>s then take that short href instead of a PNG
-  // data: URL, which a slow device parses and decodes again for every new <image>. `dispose()` revokes the blob URL.
-  // The canvas behind each live token blob: URL, so an exported frame carries its pixels as a data: URL that loads anywhere.
-  const _canvasOfBlobHref = new Map();
-  function imageToken(source) {
+  function createImage(source, _opts) {
     return {
       __nativeImage: true,
       source,
@@ -3498,42 +3500,6 @@ export function createNativeScene(host, opts = {}) {
       height: source && source.height,
       href: null,
     };
-  }
-  function createImage(source, _opts) {
-    const token = imageToken(source);
-    token.ready = Promise.resolve(token);
-    token.dispose = () => {};
-    const isCanvas =
-      source && source.nodeType && source.tagName && source.tagName.toLowerCase() === 'canvas';
-    if (
-      isCanvas &&
-      typeof source.toBlob === 'function' &&
-      typeof URL !== 'undefined' &&
-      URL.createObjectURL
-    ) {
-      let blobHref = null,
-        disposed = false;
-      token.ready = new Promise((resolve) => {
-        source.toBlob((blob) => {
-          if (blob && !disposed) {
-            blobHref = URL.createObjectURL(blob);
-            token.href = blobHref;
-            _canvasOfBlobHref.set(blobHref, source);
-          }
-          resolve(token);
-        }, 'image/png');
-      });
-      token.dispose = () => {
-        disposed = true;
-        if (blobHref) {
-          URL.revokeObjectURL(blobHref);
-          _canvasOfBlobHref.delete(blobHref);
-        }
-        if (token.href === blobHref) token.href = null;
-        blobHref = null;
-      };
-    }
-    return token;
   }
 
   function createBundleHandle(bundle, opts = {}) {
@@ -3907,17 +3873,6 @@ export function createNativeScene(host, opts = {}) {
   // can call scene.exportFrameSVG() regardless of backend. Async-shaped for
   // that parity (the value is ready synchronously; `await` works either way).
   async function exportFrameSVG(exportOpts = {}) {
-    const swapped = [];
-    if (_canvasOfBlobHref.size)
-      for (const img of svg.querySelectorAll('image')) {
-        const href = img.getAttribute('href');
-        const canvas = href && _canvasOfBlobHref.get(href);
-        if (!canvas) continue;
-        const dataHref = canvas.toDataURL('image/png');
-        img.setAttribute('href', dataHref);
-        img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', dataHref);
-        swapped.push([img, href]);
-      }
     const out = exportOpts.serialize
       ? exportOpts.serialize(svg)
       : typeof globalThis !== 'undefined' && typeof globalThis.XMLSerializer === 'function'
@@ -3925,10 +3880,6 @@ export function createNativeScene(host, opts = {}) {
         : svg && typeof svg.outerHTML === 'string'
           ? svg.outerHTML
           : '';
-    for (const [img, href] of swapped) {
-      img.setAttribute('href', href);
-      img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', href);
-    }
     return exportOpts.detail ? { svg: out, drawn: -1, skipped: 0, notes: [] } : out;
   }
 
