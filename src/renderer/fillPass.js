@@ -4894,6 +4894,8 @@ export function attachFillPass(R) {
           if (exhaustive) for (const ws of WARM_STATES) add(ws, bb);
         }
         let last = null;
+        const instWarmed = new Set();
+        const instKeyed = !!(R._khrParallel && R.opts.variantFirst !== false && R._instWantDefsFor);
         for (let pass = 0; pass < 4; pass++) {
           for (const [ws, bundles] of tasks) {
             R._warmState = ws;
@@ -4906,6 +4908,16 @@ export function attachFillPass(R) {
               n += yield* engineCandidatePass(ws);
             }
             for (const bb of bundles) {
+              // ONE DRAW PER INSTANCED PROGRAM AND TARGET. A bundle that cannot be drawn instanced has no instanced program: its warm drew the whole bundle
+              // three times, filters and mask bakes included, and built nothing the fill warm had not. A bundle whose program another bundle already drew
+              // in this call builds nothing new either.
+              if (instKeyed && !(ws && ws.inst === false)) {
+                const defs = R._instWantDefsFor(bb, !!(ws && ws.world));
+                if (!defs) continue;
+                const instKey = defs.slice().sort().join('|') + '@' + (R._warmTargetName || 'canvas');
+                if (instWarmed.has(instKey)) continue;
+                if (bb.curveTex && !bb._disposed) instWarmed.add(instKey);
+              }
               // (one instanced program's pipeline build in flight at a time, like every other warm)
               while (R._coop && R._khrParallel && !R._gpuClear()) yield* pause('warm');
               warmInstanced(bb);
