@@ -153,10 +153,19 @@ The native path is selected when **any** of these is set (in order):
 | `opts.backend: 'native'`     | hard override (strongest) |
 | `opts.forceNative: true`     | per-call force            |
 | WebGL2 genuinely unavailable | the real fallback trigger |
+| WebGL failed to start before | on this GPU and browser   |
+
+A WebGL start that fails (a program that does not link, shaders that do not load) falls through to
+native and is remembered in `localStorage` for that GPU and browser, so their next load starts
+native at once. A driver that cannot build a large program holds the browser's GPU process for
+seconds before it fails, and no frame draws meanwhile, so not starting is the only fast fallback.
+A browser update tries WebGL again; `opts.rememberFailedWebgl: false` always tries it. The native
+scene then carries `webglFailed`: `[gpu, ms spent trying]`, with 0 ms when a remembered failure
+skipped WebGL.
 
 Force the **other** way with `opts.backend: 'webgl'` (throws if WebGL2 is missing) to A/B the same
-page. `chooseBackend(canvas, opts)` exposes just the decision (`{ backend, gl }`) if you want to
-branch your own setup — e.g. only fetch shaders when WebGL wins.
+page. `chooseBackend(canvas, opts)` exposes just the decision (`{ backend, gl, webglFailed }`) if
+you want to branch your own setup — e.g. only fetch shaders when WebGL wins.
 
 For low-level testing you can always skip the factory and call `createNativeScene(host)` directly,
 which is unconditionally native.
