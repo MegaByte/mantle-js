@@ -490,6 +490,11 @@ export function createNativeScene(host, opts = {}) {
   // Each stays mounted where it was until a later draw of the frame takes it
   // back (moving its node into place) or endFrame removes it.
   const _parked = [];
+  // Raster slots no draw took back, kept unmounted for `RASTER_KEPT_FRAMES`
+  // frames: a raster that blinks or hides a moment gets its own <image> back
+  // instead of a new one, which a slow device decodes again.
+  const _restingRasters = [];
+  const RASTER_KEPT_FRAMES = 120;
   let _rebuildNextBundle = false;
   // Per-scene SVG templates for the native instancing fast path. Templates
   // live under <defs>; each instance is a lightweight <g><use/></g> slot in
@@ -526,6 +531,14 @@ export function createNativeScene(host, opts = {}) {
       _slots.splice(i, 0, slot);
       return { slot, node: slot.node, reused: true };
     }
+    for (let r = 0; r < _restingRasters.length; r++) {
+      const slot = _restingRasters[r];
+      if (!fits(slot)) continue;
+      _restingRasters.splice(r, 1);
+      mountAt(slot.node, cur);
+      _slots.splice(i, 0, slot);
+      return { slot, node: slot.node, reused: true };
+    }
     const node = makeNode();
     mountAt(node, cur);
     const slot = newSlot(key, kind, node);
@@ -538,6 +551,37 @@ export function createNativeScene(host, opts = {}) {
   function mountAt(node, before) {
     if (before && before.node.parentNode === svg) svg.insertBefore(node, before.node);
     else svg.appendChild(node);
+  }
+
+  function retireSlot(slot) {
+    if (!slot.kind.startsWith('image-') || slot.hrefPerDraw) return dropSlot(slot);
+    if (slot.node.parentNode === svg) svg.removeChild(slot.node);
+    forgetRasterDefinitions(slot);
+    slot.restFrame = frameEpoch;
+    _restingRasters.push(slot);
+  }
+
+  // A resting raster keeps its <image> but not its crop clip or recolor filter: they leave <defs> now, with what the slot recorded
+  // writing into them, and the draw that takes the slot back builds them again.
+  function forgetRasterDefinitions(slot) {
+    const roots = [slot.rasterCrop?.clip, slot.rasterFilter?.filter, slot.dstClip?.clip].filter(Boolean);
+    releaseRasterDefinitions(slot);
+    slot.rasterCrop = slot.rasterFilter = slot.dstClip = null;
+    if (!roots.length) return;
+    const inDefinition = (el) => {
+      for (let n = el; n; n = n.parentNode) if (roots.includes(n)) return true;
+      return false;
+    };
+    for (const records of [slot.applied, slot.orig, slot.frameTouch, slot.overrideAttrs])
+      for (const el of [...records.keys()]) if (inDefinition(el)) records.delete(el);
+  }
+
+  function forgetLongRestingRasters() {
+    for (let r = _restingRasters.length - 1; r >= 0; r--) {
+      if (frameEpoch - _restingRasters[r].restFrame < RASTER_KEPT_FRAMES) continue;
+      dropSlot(_restingRasters[r]);
+      _restingRasters.splice(r, 1);
+    }
   }
 
   function dropSlot(slot) {
@@ -2975,6 +3019,12 @@ export function createNativeScene(host, opts = {}) {
       ownerDoc.createElementNS(SVGNS, layerKind),
     );
     beginSlotFrame(slot);
+    // A raw canvas or raw pixels give a new data: href at each draw: that href is never asked for again, so its slot does not rest.
+    slot.hrefPerDraw =
+      !!source &&
+      !source.__nativeImage &&
+      typeof source !== 'string' &&
+      !(source.nodeType && source.tagName && source.tagName.toLowerCase() === 'img');
     // Reuse one <image> element per live positional slot, not per href. A DOM
     // node can only have one parent, so sharing the same <image> across
     // same-source instances moves it to the last wrapper. Distinct elements
@@ -3762,9 +3812,10 @@ export function createNativeScene(host, opts = {}) {
     }
     frameOpen = false;
 
-    while (_slots.length > _slotCursor) dropSlot(_slots.pop());
-    for (const slot of _parked) dropSlot(slot);
+    while (_slots.length > _slotCursor) retireSlot(_slots.pop());
+    for (const slot of _parked) retireSlot(slot);
     _parked.length = 0;
+    forgetLongRestingRasters();
     // A definition stays mounted while any draw in this frame uses it.
     for (const template of activeTemplates)
       if (template.lastUsedFrame !== frameEpoch) {
@@ -3785,6 +3836,7 @@ export function createNativeScene(host, opts = {}) {
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     _slots.length = 0;
     _parked.length = 0;
+    _restingRasters.length = 0;
     _slotCursor = 0;
     _submitQ.length = 0;
     _submitSeq = 0;

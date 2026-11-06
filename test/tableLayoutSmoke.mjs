@@ -27,6 +27,7 @@ import {
   packTable,
   uploadTableRows,
   maxTextureSize,
+  maxArrayLayers,
 } from '../src/renderer/tableLayout.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -238,6 +239,20 @@ ok(
   msg && /image atlas/.test(msg) && /5000/.test(msg),
   `a plane taller than the device limit throws (${msg})`,
 );
+
+// 5. A layer limit is read from the context once: Safari answers each MAX_ARRAY_TEXTURE_LAYERS read with a round trip to the GPU process
+// (1.6 ms), and every bundle handle checks it.
+let layerReads = 0;
+const glLayers = {
+  MAX_ARRAY_TEXTURE_LAYERS: 0x88ff,
+  getParameter: (p) => (p === 0x88ff ? (layerReads++, 2048) : null),
+};
+const layers = [maxArrayLayers(glLayers), maxArrayLayers(glLayers), maxArrayLayers(glLayers)];
+ok(
+  layers.every((v) => v === 2048) && layerReads === 1,
+  `maxArrayLayers reads the context once (${layerReads} reads)`,
+);
+ok(maxArrayLayers({}) === 256, 'maxArrayLayers is 256 for a stub');
 
 if (fail) {
   console.log('\nTABLE-LAYOUT FAIL');

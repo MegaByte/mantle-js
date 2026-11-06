@@ -10,6 +10,7 @@
 //   textMaskMorph        a matched-shape morph stays addressed beside expanded <text> glyphs and a <mask>
 //   morphInterp          the morph interpolates geometry every frame, and an id-less morph reaches its shape
 //   reconciler           the positional reconciler reuses, resets and trims its slots
+//   rasterImages         a raster's <image> follows it through the draw order, kept a few frames, carrying no other place's attributes
 //   openStrokePaintMorph an open contour stays open, and a fill-opacity fade tweens
 //   morphAutoApply       drawBundle(morph.bundle) draws the tween without forwarding morph.overrides
 //   maskGeometryMorph    an animated <mask>'s geometry interpolates through the morph
@@ -708,7 +709,79 @@ async function morphPerf() {
     );
 }
 
+// A raster's <image> follows the raster through the draw order. A slow device decodes each new <image> again, so a raster joining,
+// leaving or swapping places creates at most its own <image>; one that skips a few frames gets its own back, and one gone longer than
+// 120 frames is let go; a raster drawn in a new place without its fade drops the fade and its old offset.
+async function rasterImages() {
+  const scene = createNativeScene(host(), { coordinateSpace: 'viewport' });
+  scene.setViewport(100, 100);
+  const source = (n) => `data:image/png;base64,raster${n}`;
+  const at = (x) => new Float32Array([1, 0, 0, 0, 1, 0, x, 0, 1]);
+  const frame = (order, alphas = {}) => {
+    scene.beginFrame([0, 0, 0, 1]);
+    order.forEach((n, i) =>
+      scene.drawImage(source(n), {
+        dstRect: [0, 0, 10, 10],
+        worldMatrix: at(i * 12),
+        ...(alphas[n] === undefined ? {} : { alpha: alphas[n] }),
+      }),
+    );
+    scene.endFrame();
+    const images = scene.svg.querySelectorAll('image');
+    const created = images.filter((image) => !image.__seenBySmoke).length;
+    for (const image of images) image.__seenBySmoke = true;
+    return { created, drawn: images.map((image) => image.getAttribute('href')) };
+  };
+  const expect = (label, got, order, created) => {
+    const want = { created, drawn: order.map(source) };
+    if (JSON.stringify(got) === JSON.stringify(want)) ok(label);
+    else fail(`${label}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+  };
+  frame([0, 1, 2, 3]);
+  expect('a raster leaving the middle: the rasters after it keep their <image>s', frame([0, 2, 3]), [0, 2, 3], 0);
+  expect('a raster joining the middle: only its <image> is created', frame([0, 4, 2, 3]), [0, 4, 2, 3], 1);
+  expect('two rasters swapping places keep their <image>s', frame([0, 2, 4, 3]), [0, 2, 4, 3], 0);
+  frame([0, 1]);
+  frame([0]);
+  frame([0]);
+  expect('a raster skipping a few frames gets its <image> back', frame([0, 1]), [0, 1], 0);
+  frame([0, 1], { 1: 0.5 });
+  frame([1]);
+  const moved = scene.svg.querySelectorAll('image')[0];
+  if (moved.getAttribute('opacity') === null && moved.getAttribute('transform') === null)
+    ok('a raster drawn in a new place without its fade drops the fade and its old offset');
+  else
+    fail(
+      `the moved <image> kept opacity=${moved.getAttribute('opacity')} transform=${moved.getAttribute('transform')}`,
+    );
+  const cropped = { __nativeImage: true, source: source(9), width: 10, height: 10, href: null };
+  const drawCropped = (present) => {
+    scene.beginFrame([0, 0, 0, 1]);
+    if (present) scene.drawImage(cropped, { dstRect: [0, 0, 10, 10], srcRect: [0, 0, 5, 5], tint: [0.5, 1, 1, 1] });
+    scene.endFrame();
+    return scene.svg.querySelectorAll('image')[0] || null;
+  };
+  const before = drawCropped(true);
+  drawCropped(false);
+  const back = drawCropped(true);
+  const referenced = (attr) => {
+    const m = /url\(#([^)]+)\)/.exec(back.getAttribute(attr) || '');
+    return !!m && scene.svg.querySelectorAll(attr === 'filter' ? 'filter' : 'clipPath').some((d) => d.getAttribute('id') === m[1]);
+  };
+  if (back === before && referenced('clip-path') && referenced('filter'))
+    ok('a cropped, tinted raster that comes back keeps its <image> and gets its clip and filter again');
+  else
+    fail(
+      `the returning raster: same <image> ${back === before}, clip ${back.getAttribute('clip-path')} ${referenced('clip-path')}, filter ${back.getAttribute('filter')} ${referenced('filter')}`,
+    );
+  frame([0, 1]);
+  for (let i = 0; i < 121; i++) frame([0]);
+  expect('a raster gone longer than 120 frames is let go: drawn again, it gets a new <image>', frame([0, 1]), [0, 1], 1);
+  scene.dispose();
+}
+
 for (const [name, fn] of [
+  ['rasterImages', rasterImages],
   ['textMaskMorph', textMaskMorph],
   ['morphInterp', morphInterp],
   ['reconciler', reconciler],

@@ -72,6 +72,9 @@ const bundles = [
   createBundle(W.gl, await importSvg(svg, { preserveViewport: true })),
   createBundle(W.gl, await importSvg(svg.replace('#', '#0'), { preserveViewport: true })),
 ];
+// (only the loading call's uploads are judged: a bundle's own texImage2D in createBundle can land within 100 ms of a `busy` tick, depending on how long the
+// SVG parse ran, and wait behind the simulated build)
+W.resetWaits();
 await R.precompileFillsAsync({});
 clearInterval(busy);
 if (process.env.DBG) {

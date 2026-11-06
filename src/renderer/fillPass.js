@@ -2446,6 +2446,7 @@ export function attachFillPass(R) {
       if (R._engines) R._engines.declined(engineOfVariantKey(key), DECLINE.COMPILE_FAILED);
       deleteGlResource(gl, 'Program', v.prog);
       variantCache.delete(key);
+      R._programsDropped = (R._programsDropped | 0) + 1;
       if (!(typeof gl.isContextLost === 'function' && gl.isContextLost()))
         _linkFailed.set(key, v.bundleRef || null);
       return false;
@@ -3823,6 +3824,7 @@ export function attachFillPass(R) {
     else _warmScope.delete(b);
   };
   R._liveBundles = () => {
+    if (R._warmOnly) return [...R._warmOnly].filter((b) => !b._disposed);
     if (_warmScope.size && !_fullWarms) return [..._warmScope.keys()].filter((b) => !b._disposed);
     const out = [];
     for (let i = _liveRefs.length - 1; i >= 0; i--) {
@@ -3847,8 +3849,9 @@ export function attachFillPass(R) {
     }
   }
   /// Draw the bundle's instanced fast path once, under the warm state, scissored to the warm pixel, so its (rotated) instanced program and
-  /// pipeline are built behind the load screen.
-  function warmInstanced(bundle) {
+  /// pipeline are built behind the load screen. `copies` is the instance count drawn: a bundle the fast path cannot take draws each copy
+  /// whole, so one copy builds what three do.
+  function warmInstanced(bundle, copies = 3) {
     if (!R._instancedFastEnabled || !R.drawBundleInstanced || bundle._disposed || !bundle.curveTex)
       return;
     if (R._warmState && R._warmState.inst === false) return; // a recorded plain-draw state: no instanced program to build
@@ -3859,7 +3862,7 @@ export function attachFillPass(R) {
     try {
       R.bindFb(gl.FRAMEBUFFER, R._warmTarget || null);
       R._applyTargetScissor(R._warmTarget || null);
-      const list = [{ worldMatrix: wm }, { worldMatrix: wm }, { worldMatrix: wm }];
+      const list = Array.from({ length: copies }, () => ({ worldMatrix: wm }));
       R._psoWarming = true;
       R.drawBundleInstanced(bundle, list);
     } catch {
@@ -4545,18 +4548,29 @@ export function attachFillPass(R) {
     k.charAt(0) === '\u0000'
       ? !!pointsProgOf(k).built
       : isBuilt(variantCache.get(k)) || _linkFailed.has(k);
+  const askedAll = (bb, sz, asked) => {
+    const { image, sig } = sizeKeys(bb, sz);
+    return !(
+      sig.some((k) => !asked.has(k)) ||
+      image.some((k) => !asked.has(k) || (bindPassOn() && !keyBuilt(k)))
+    );
+  };
   R._sizeCoveredG = function* (sz, owners, asked) {
     for (const bb of owners) {
       if (!bb || bb._disposed) continue;
-      const { image, sig } = sizeKeys(bb, sz);
-      if (
-        sig.some((k) => !asked.has(k)) ||
-        image.some((k) => !asked.has(k) || (bindPassOn() && !keyBuilt(k)))
-      )
-        return 0;
+      if (!askedAll(bb, sz, asked)) return 0;
       yield* maybeSlice();
     }
     return 1;
+  };
+  /// The live bundles that ask at `sz` for a key not yet asked for (into `out`): a size that is not covered warms these, not the whole scene again.
+  R._uncoveredG = function* (sz, bundles, asked, out) {
+    for (const bb of bundles) {
+      if (!bb || bb._disposed) continue;
+      if (!askedAll(bb, sz, asked)) out.push(bb);
+      yield* maybeSlice();
+    }
+    return 0;
   };
   R._noteSizeAskedG = function* (sz, asked) {
     for (const bb of R._liveBundles()) {
@@ -4649,6 +4663,7 @@ export function attachFillPass(R) {
         const d = _nowMs() - tEnum;
         R._bindSetEnumMs = (R._bindSetEnumMs || 0) + d;
         R._bindSetEnumBundles = Math.max(R._bindSetEnumBundles | 0, nEnum);
+        R._bindSetLastBundles = nEnum;
         if (d > (R._bindSetEnumMax || 0)) R._bindSetEnumMax = d;
       }
       if (!todo.length) {
@@ -4894,6 +4909,16 @@ export function attachFillPass(R) {
           if (exhaustive) for (const ws of WARM_STATES) add(ws, bb);
         }
         let last = null;
+        const instKeyed = !!(R._khrParallel && R.opts.variantFirst !== false && R._instWantDefsFor && R._instBuilt);
+        const wholeDrawn = new Map(); // state -> bundles drawn whole with no draw deferred
+        const instDefsByBundle = new Map();
+        const instDefsOf = (bb, rot) => {
+          let pair = instDefsByBundle.get(bb);
+          if (!pair) instDefsByBundle.set(bb, (pair = [undefined, undefined]));
+          const i = rot ? 1 : 0;
+          if (pair[i] === undefined) pair[i] = R._instWantDefsFor(bb, rot);
+          return pair[i];
+        };
         for (let pass = 0; pass < 4; pass++) {
           for (const [ws, bundles] of tasks) {
             R._warmState = ws;
@@ -4905,10 +4930,27 @@ export function attachFillPass(R) {
               n += yield* precompilePass(opts);
               n += yield* engineCandidatePass(ws);
             }
+            let drawnWhole = wholeDrawn.get(ws);
+            if (!drawnWhole) wholeDrawn.set(ws, (drawnWhole = new Set()));
             for (const bb of bundles) {
+              // ONE DRAW PER BUILT INSTANCED PROGRAM. Once a bundle's instanced program is built, another bundle with the same program builds
+              // nothing new and is not drawn; until it is built, every pass draws again. A bundle the fast path cannot take draws one whole copy,
+              // and once a whole draw of it in this state deferred nothing, the later passes do not draw it again.
+              let copies = 3;
+              if (instKeyed && !(ws && ws.inst === false)) {
+                const defs = instDefsOf(bb, !!(ws && ws.world));
+                if (!defs) copies = 1;
+                else if (R._instBuilt(defs) && !bb._disposed) {
+                  if (R._coop) yield* maybeSlice();
+                  continue;
+                }
+              }
+              if (copies === 1 && drawnWhole.has(bb)) continue;
               // (one instanced program's pipeline build in flight at a time, like every other warm)
               while (R._coop && R._khrParallel && !R._gpuClear()) yield* pause('warm');
-              warmInstanced(bb);
+              const deferredBefore = R._deferredWarmDraws | 0;
+              warmInstanced(bb, copies);
+              if (copies === 1 && (R._deferredWarmDraws | 0) === deferredBefore) drawnWhole.add(bb);
               if (R._coop) yield* maybeSlice();
             }
           }
@@ -5524,6 +5566,7 @@ export function attachFillPass(R) {
         return false; // (a bare read of R.fillProg would link the universal program)
       deleteProgramWhenLinked(gl, v.prog);
       variantCache.delete(key);
+      R._programsDropped = (R._programsDropped | 0) + 1;
       if (!dropped) _wqReleased.add(key);
       return true;
     },

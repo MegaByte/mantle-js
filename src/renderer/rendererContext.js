@@ -68,6 +68,8 @@
  * _beginInstancedForBundle?: any,
  * _bindSetBuilds?: any,
  * _bindSetEnumBundles?: any,
+ * _bindSetLastBundles?: any,
+ * _instBuilt?: any,
  * _bindSetEnumMax?: any,
  * _bindSetEnumMs?: any,
  * _bindSetImage?: any,
