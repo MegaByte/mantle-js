@@ -225,11 +225,26 @@ console.log('(scope) a late bundle warms alone, not the whole scene');
   R.drawBundle(ring);
   R.endFrame();
   ok(W.model.pipelines === p0, `its first draw builds nothing (${W.model.pipelines - p0})`);
-  // A full loading call afterward still walks every bundle, so the late warm's scope is gone once it ends.
+  // The late warm's scope is gone once it ends: a full loading call afterward warms art outside it (a gradient no bundle had), and every bundle then draws
+  // and builds nothing.
+  const graded = createBundle(
+    W.gl,
+    await importSvg(
+      doc(
+        '<defs><linearGradient id="g"><stop offset="0" stop-color="#f00"/><stop offset="1" stop-color="#00f"/></linearGradient></defs><rect x="10" y="10" width="80" height="80" fill="url(#g)"/>',
+      ),
+      { preserveViewport: true },
+    ),
+  );
+  ok(R._policy.needsWarm(graded), 'the premise: the gradient needs a program the scene did not');
   await R.precompileFillsAsync({});
+  const p1 = W.model.pipelines;
+  R.beginFrame([1, 1, 1, 1]);
+  for (const b of [...scene, ring, graded]) R.drawBundle(b);
+  R.endFrame();
   ok(
-    lastWalked() === scene.length + 1,
-    `a full loading call afterward walks every bundle (${lastWalked()} of ${scene.length + 1})`,
+    W.model.pipelines === p1,
+    `a full loading call afterward warmed outside the late scope: every bundle draws and builds nothing (${W.model.pipelines - p1})`,
   );
   R.dispose();
 }

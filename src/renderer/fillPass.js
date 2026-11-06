@@ -2446,6 +2446,7 @@ export function attachFillPass(R) {
       if (R._engines) R._engines.declined(engineOfVariantKey(key), DECLINE.COMPILE_FAILED);
       deleteGlResource(gl, 'Program', v.prog);
       variantCache.delete(key);
+      R._programsDropped = (R._programsDropped | 0) + 1;
       if (!(typeof gl.isContextLost === 'function' && gl.isContextLost()))
         _linkFailed.set(key, v.bundleRef || null);
       return false;
@@ -5553,6 +5554,7 @@ export function attachFillPass(R) {
         return false; // (a bare read of R.fillProg would link the universal program)
       deleteProgramWhenLinked(gl, v.prog);
       variantCache.delete(key);
+      R._programsDropped = (R._programsDropped | 0) + 1;
       if (!dropped) _wqReleased.add(key);
       return true;
     },

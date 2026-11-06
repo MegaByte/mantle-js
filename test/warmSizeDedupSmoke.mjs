@@ -111,6 +111,63 @@ for (const [name, rOpts] of [
   R.dispose();
 }
 
+// A REPLAY: the app quits a session and starts another with the same art (new bundles, the same content). Every key the second loading call would ask for
+// was asked for and built by the first, so it warms no size (on Safari each redundant size cost ~0.9 s of GPU work and nothing in play); new art still warms.
+const playEverywhere = (W, R, bundles) => {
+  const dv = R.debugStats.viewportWarm.derived;
+  const p0 = W.model.pipelines,
+    w0 = W.model.waits.length,
+    ds0 = { ...R.debugStats };
+  for (const sz of [[1280, 720], ...dv.sizes]) {
+    R.setViewport(sz[0], sz[1]);
+    for (const st of STATES) {
+      R.beginFrame([1, 1, 1, 1]);
+      for (const b of bundles) R.drawBundle(b, st);
+      R.endFrame();
+    }
+  }
+  R.setViewport(1280, 720);
+  const d = (k) => (R.debugStats[k] | 0) - (ds0[k] | 0);
+  return {
+    clean:
+      W.model.pipelines === p0 &&
+      W.model.waits.length === w0 &&
+      d('playBuilds') === 0 &&
+      d('deferredFillDraws') === 0,
+    text: `built ${W.model.pipelines - p0} pipelines, waited ${W.model.waits.length - w0} times, played ${d('playBuilds')} builds, deferred ${d('deferredFillDraws')}`,
+  };
+};
+for (const [name, rOpts] of [
+  ['stand-in-free', { standIns: false, needMissPolicy: 'block' }],
+  ['defaults', {}],
+]) {
+  console.log(`(replay, ${name}) a second loading call over the same art`);
+  const { W, R, bundles } = await load(rOpts);
+  for (const b of bundles) b.dispose();
+  const again = datas.map((d) => createBundle(W.gl, d));
+  await R.precompileFillsAsync({ maxViewportPx: 4096 });
+  const rows = R.debugStats.viewportWarm.loadClasses || [];
+  const warmed = rows.filter((r) => !r.covered).length;
+  ok(warmed === 0, `the replay's loading call warmed ${warmed} of ${rows.length} sizes`);
+  ok(R.debugStats.coopLoad.incomplete === false, 'the replay loading call completed');
+  const played = playEverywhere(W, R, again);
+  ok(played.clean, `playing the replay at every size in every state ${played.text}`);
+  console.log(`(new art, ${name}) a later loading call with art the first did not have`);
+  const fresh = await importSvg(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g"><stop offset="0" stop-color="#f00"/><stop offset="1" stop-color="#00f"/></linearGradient></defs><circle cx="32" cy="32" r="28" fill="url(#g)" stroke="#000" stroke-width="3"/></svg>',
+    { preserveViewport: true },
+  );
+  const added = createBundle(W.gl, fresh);
+  await R.precompileFillsAsync({ maxViewportPx: 4096 });
+  const rowsNew = R.debugStats.viewportWarm.loadClasses || [];
+  const warmedNew = rowsNew.filter((r) => !r.covered).length;
+  ok(warmedNew >= 1, `new art warmed ${warmedNew} size(s)`);
+  const playedNew = playEverywhere(W, R, [...again, added]);
+  ok(playedNew.clean, `playing with the new art at every size in every state ${playedNew.text}`);
+  for (const b of [...again, added]) b.dispose();
+  R.dispose();
+}
+
 console.log('(deadline) a loading call past its deadline starts no further size');
 {
   const { R, bundles } = await load(

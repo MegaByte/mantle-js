@@ -8109,15 +8109,22 @@ export function createRenderer(gl, shaderSources, opts = {}) {
           const classRows =
             (!_scope && R._viewportWarm && (R._viewportWarm.loadClasses = [])) || [];
           // (a derived size whose owners ask for nothing an earlier warmed size did not is skipped: fillPass.js R._sizeCoveredG)
-          const asked = new Set();
+          // The keys asked for carry over to the next loading call while no program has been dropped since: a replay of the same art (new bundles, the same
+          // content) asks for nothing new and warms no size. A size no bundle owns (the current one, the app's hint) is checked against every live bundle.
+          const dropsAtStart = R._programsDropped | 0;
+          const carried = R._askedAcrossLoads;
+          const asked = carried && carried.drops === dropsAtStart ? carried.keys : new Set();
+          R._askedAcrossLoads = null;
           try {
             for (const sz of sizes) {
               if (load.incomplete) break; // past the deadline: no later size is started
-              const own = sz && ownersOf ? ownersOf.get(sz[0] + 'x' + sz[1]) : null;
+              const own = ownersOf
+                ? (sz && ownersOf.get(sz[0] + 'x' + sz[1])) || (asked.size ? R._liveBundles() : null)
+                : null;
               if (own && R._sizeCoveredG && (await drive(R._sizeCoveredG(sz, own, asked), {}))) {
-                if (!_scope) R._noteWarmedViewport(sz[0], sz[1]);
+                if (!_scope && sz) R._noteWarmedViewport(sz[0], sz[1]);
                 classRows.push({
-                  size: sz.slice(),
+                  size: sz ? sz.slice() : null,
                   ms: 0,
                   pipelines: 0,
                   programs: [],
@@ -8145,6 +8152,8 @@ export function createRenderer(gl, shaderSources, opts = {}) {
               const cur = R.viewportSize();
               R._noteWarmedViewport(cur[0], cur[1]);
             }
+            if (ownersOf && !load.incomplete && (R._programsDropped | 0) === dropsAtStart)
+              R._askedAcrossLoads = { keys: asked, drops: dropsAtStart };
           } finally {
             R._refreshLive = false;
             R._warmViewportOpt = null;
