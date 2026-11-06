@@ -81,15 +81,21 @@ export function planeFits(gl, w, h) {
   return w <= limit && h <= limit;
 }
 
-/// The device's MAX_ARRAY_TEXTURE_LAYERS; 256 (the WebGL 2 minimum) when the context cannot say.
+/// The device's MAX_ARRAY_TEXTURE_LAYERS; 256 (the WebGL 2 minimum) when the context cannot say. Read once per context: every bundle
+/// handle checks it, and Safari answers each read with a round trip to its GPU process (1.6 ms; 1.3 s of a replay's loading call).
+const _arrayLayers = new WeakMap();
 export function maxArrayLayers(gl) {
+  const known = gl && typeof gl === 'object' ? _arrayLayers.get(gl) : undefined;
+  if (known !== undefined) return known;
+  let layers = 256;
   try {
     const v = gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS);
-    if (Number.isFinite(v) && v > 0) return v | 0;
+    if (Number.isFinite(v) && v > 0) layers = v | 0;
   } catch {
     /* stub context */
   }
-  return 256;
+  if (gl && typeof gl === 'object') _arrayLayers.set(gl, layers);
+  return layers;
 }
 
 /// Throw (naming what is counted, the count and the limit) when `n` layers of a 2D texture array cannot be allocated.
