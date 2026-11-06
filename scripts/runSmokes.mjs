@@ -117,6 +117,7 @@ const SMOKES = [
   'test/fillBezoutOmitSmoke.mjs',
   'test/submitQueueAllocSmoke.mjs',
   'test/autoSceneDepthAttribSmoke.mjs',
+  'test/rememberFailedWebglSmoke.mjs', // a failed WebGL start is remembered per GPU and browser, so the next load starts native at once
   'test/lbAdoptIntegritySmoke.mjs',
   'test/aacBandLevelsSmoke.mjs',
   'test/lbWorkerWireParitySmoke.mjs',

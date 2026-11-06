@@ -31,18 +31,70 @@ import { mantleWarn } from '../core/diagnostics.js';
  * @param {'webgl'|'native'} [opts.backend]  hard override
  * @param {boolean} [opts.forceNative]
  * @param {object}  [opts.glAttribs]  getContext('webgl2', …) attributes
- * @returns {{backend:'webgl'|'native', gl:WebGL2RenderingContext|null}}
+ * @param {boolean} [opts.rememberFailedWebgl]  false tries WebGL even where it failed to start before
+ * @returns {{backend:'webgl'|'native', gl:WebGL2RenderingContext|null, webglFailed:[string, number]|null, gpu?:string}}
+ *   webglFailed: the GPU and 0 ms when a failed start on this GPU and browser chose native;
+ *   gpu: the GPU WebGL will start on, read while its context still answers
  */
 export function chooseBackend(canvas, opts = {}) {
-  if (opts.backend === 'native') return { backend: 'native', gl: null };
+  if (opts.backend === 'native') return { backend: 'native', gl: null, webglFailed: null };
   if (opts.backend === 'webgl') {
     const gl = getGL(canvas, opts);
     if (!gl) throw new Error("createMantleScene: backend:'webgl' forced but WebGL2 is unavailable");
-    return { backend: 'webgl', gl };
+    return { backend: 'webgl', gl, webglFailed: null };
   }
-  if (opts.forceNative === true) return { backend: 'native', gl: null };
+  if (opts.forceNative === true) return { backend: 'native', gl: null, webglFailed: null };
   const gl = getGL(canvas, opts);
-  return gl ? { backend: 'webgl', gl } : { backend: 'native', gl: null };
+  if (!gl) return { backend: 'native', gl: null, webglFailed: null };
+  const gpu = gpuOf(gl);
+  if (opts.rememberFailedWebgl !== false && webglFailedBefore(gpu)) {
+    try {
+      const lose = gl.getExtension('WEBGL_lose_context');
+      if (lose) lose.loseContext();
+    } catch {
+      /* best effort */
+    }
+    return { backend: 'native', gl: null, webglFailed: [gpu, 0] };
+  }
+  return { backend: 'webgl', gl, webglFailed: null, gpu };
+}
+
+// A driver that cannot build Mantle's large programs holds the browser's GPU process for seconds per program before it fails (a Galaxy Tab A's
+// Mali-T830 in Chrome 101: maskBake 11 s, splitStroke 19 s), and no frame draws meanwhile, native SVG included, so no timeout can cut it short.
+// Only not starting is fast: a failed start is remembered for that GPU and browser, and their next load starts native. A browser update tries
+// WebGL again.
+const WEBGL_FAILED_KEY = 'mantle.webglFailed';
+
+/** The GPU's unmasked renderer, or its masked one, or ''. Read it before WebGL starts: a context whose start failed may answer null. */
+function gpuOf(gl) {
+  try {
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    const renderer = gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER);
+    return typeof renderer === 'string' ? renderer : '';
+  } catch {
+    return '';
+  }
+}
+
+function deviceOf(gpu) {
+  const userAgent = (globalThis.navigator && globalThis.navigator.userAgent) || '';
+  return gpu + ' ' + userAgent;
+}
+
+function webglFailedBefore(gpu) {
+  try {
+    return !!globalThis.localStorage && globalThis.localStorage.getItem(WEBGL_FAILED_KEY) === deviceOf(gpu);
+  } catch {
+    return false;
+  }
+}
+
+function rememberWebglFailed(gpu) {
+  try {
+    if (globalThis.localStorage) globalThis.localStorage.setItem(WEBGL_FAILED_KEY, deviceOf(gpu));
+  } catch {
+    /* storage unavailable */
+  }
 }
 
 function getGL(canvas, opts) {
@@ -115,6 +167,9 @@ function getGL(canvas, opts) {
  *   to the host's ownerDocument
  * @param {'bundle'|'viewport'} [opts.coordinateSpace]  forwarded to the native
  *   scene — a multi-bundle pixel-viewport compositor wants 'viewport'
+ * @param {boolean} [opts.rememberFailedWebgl]  default true: a WebGL start that fails is stored in localStorage for
+ *   this GPU and browser, and their next createMantleScene starts native at once. A native scene then carries
+ *   `webglFailed`: [gpu, ms spent trying], 0 ms when a remembered failure skipped WebGL.
  * @returns {Promise<MantleScene>} the WebGL renderer or the native scene, whichever won; both share this surface.
  */
 export async function createMantleScene(canvas, opts = {}) {
@@ -128,9 +183,13 @@ export async function createMantleScene(canvas, opts = {}) {
       'createMantleScene: opts.warmPolicy must be "strict", "idle" or "off", got ' +
         JSON.stringify(opts.warmPolicy),
     );
-  const { backend, gl } = chooseBackend(canvas, opts);
+  const chosen = chooseBackend(canvas, opts);
+  const { backend, gl } = chosen;
+  let webglFailed = chosen.webglFailed;
 
   if (backend === 'webgl') {
+    const gpu = chosen.gpu !== undefined ? chosen.gpu : gpuOf(gl);
+    const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
     // Lazy-load the GL pipeline only on the WebGL path so a native-only
     // bundle never ships renderer.js / bundle.js (+ filterGraph, shaders).
     // The binding factories (overrides / morph / timeline / palette) ride
@@ -191,6 +250,9 @@ export async function createMantleScene(canvas, opts = {}) {
       return wrapWebgl(renderer, gl, createBundle, { ovr, morph, anim, pal, txt, ctx });
     } catch (err) {
       if (opts.backend === 'webgl') throw err;
+      if (opts.rememberFailedWebgl !== false) rememberWebglFailed(gpu);
+      const endedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      webglFailed = [gpu, Math.round(endedAt - startedAt)];
       mantleWarn(
         '[Mantle] createMantleScene: the WebGL renderer could not start (' +
           String((err && err.message) || err)
@@ -207,7 +269,9 @@ export async function createMantleScene(canvas, opts = {}) {
     import('./nativeBackend.js'),
     import('./nativeText.js'),
   ]);
-  return createNativeBackend(opts.nativeHost || canvas, opts);
+  const scene = createNativeBackend(opts.nativeHost || canvas, opts);
+  scene.webglFailed = webglFailed;
+  return scene;
 }
 
 function wrapWebgl(renderer, gl, createBundle, bind) {
