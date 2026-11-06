@@ -3824,6 +3824,7 @@ export function attachFillPass(R) {
     else _warmScope.delete(b);
   };
   R._liveBundles = () => {
+    if (R._warmOnly) return [...R._warmOnly].filter((b) => !b._disposed);
     if (_warmScope.size && !_fullWarms) return [..._warmScope.keys()].filter((b) => !b._disposed);
     const out = [];
     for (let i = _liveRefs.length - 1; i >= 0; i--) {
@@ -4547,18 +4548,29 @@ export function attachFillPass(R) {
     k.charAt(0) === '\u0000'
       ? !!pointsProgOf(k).built
       : isBuilt(variantCache.get(k)) || _linkFailed.has(k);
+  const askedAll = (bb, sz, asked) => {
+    const { image, sig } = sizeKeys(bb, sz);
+    return !(
+      sig.some((k) => !asked.has(k)) ||
+      image.some((k) => !asked.has(k) || (bindPassOn() && !keyBuilt(k)))
+    );
+  };
   R._sizeCoveredG = function* (sz, owners, asked) {
     for (const bb of owners) {
       if (!bb || bb._disposed) continue;
-      const { image, sig } = sizeKeys(bb, sz);
-      if (
-        sig.some((k) => !asked.has(k)) ||
-        image.some((k) => !asked.has(k) || (bindPassOn() && !keyBuilt(k)))
-      )
-        return 0;
+      if (!askedAll(bb, sz, asked)) return 0;
       yield* maybeSlice();
     }
     return 1;
+  };
+  /// The live bundles that ask at `sz` for a key not yet asked for (into `out`): a size that is not covered warms these, not the whole scene again.
+  R._uncoveredG = function* (sz, bundles, asked, out) {
+    for (const bb of bundles) {
+      if (!bb || bb._disposed) continue;
+      if (!askedAll(bb, sz, asked)) out.push(bb);
+      yield* maybeSlice();
+    }
+    return 0;
   };
   R._noteSizeAskedG = function* (sz, asked) {
     for (const bb of R._liveBundles()) {

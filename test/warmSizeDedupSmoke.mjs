@@ -143,6 +143,7 @@ for (const [name, rOpts] of [
 ]) {
   console.log(`(replay, ${name}) a second loading call over the same art`);
   const { W, R, bundles } = await load(rOpts);
+  const firstLoadDraws = W.model.draws;
   for (const b of bundles) b.dispose();
   const again = datas.map((d) => createBundle(W.gl, d));
   await R.precompileFillsAsync({ maxViewportPx: 4096 });
@@ -158,10 +159,16 @@ for (const [name, rOpts] of [
     { preserveViewport: true },
   );
   const added = createBundle(W.gl, fresh);
+  const drawsBefore = W.model.draws;
   await R.precompileFillsAsync({ maxViewportPx: 4096 });
+  const newArtDraws = W.model.draws - drawsBefore;
   const rowsNew = R.debugStats.viewportWarm.loadClasses || [];
   const warmedNew = rowsNew.filter((r) => !r.covered).length;
   ok(warmedNew >= 1, `new art warmed ${warmedNew} size(s)`);
+  ok(
+    newArtDraws * 4 < firstLoadDraws,
+    `the size the new art asks at warms the new art, not the scene again (${newArtDraws} draws; the first load drew ${firstLoadDraws})`,
+  );
   const playedNew = playEverywhere(W, R, [...again, added]);
   ok(playedNew.clean, `playing with the new art at every size in every state ${playedNew.text}`);
   for (const b of [...again, added]) b.dispose();

@@ -8133,10 +8133,23 @@ export function createRenderer(gl, shaderSources, opts = {}) {
                 continue;
               }
               if (load.incomplete) break;
+              // (once a size has been warmed, a later size warms only the bundles that ask there for a key not yet asked for: keys already built draw nothing new)
+              let only = null;
+              if (ownersOf && asked.size && R._uncoveredG) {
+                const live = R._liveBundles();
+                const out = [];
+                await drive(R._uncoveredG(sz, live, asked, out), {});
+                if (out.length < live.length) only = new Set(out);
+              }
               R._warmViewportOpt = sz;
               const c0 = now(),
                 p0 = R._gateStats && R._gateStats.pipeLog ? R._gateStats.pipeLog.length : 0;
-              n += await drive(R._precompileFillsG(o), { _refreshLive: true, _noSync: true });
+              R._warmOnly = only;
+              try {
+                n += await drive(R._precompileFillsG(o), { _refreshLive: true, _noSync: true });
+              } finally {
+                R._warmOnly = null;
+              }
               if (sz && !_scope) R._noteWarmedViewport(sz[0], sz[1]);
               const pl = R._gateStats && R._gateStats.pipeLog ? R._gateStats.pipeLog : [];
               classRows.push({
