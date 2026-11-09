@@ -54,8 +54,19 @@ import { applyRecolor, hasRecolor } from './recolorColor.js';
 import { scopeCssText } from './scopeCss.js';
 import { unit, shortF32, badMatrix } from './numFormat.js';
 import { clampArg } from '../core/argCheck.js';
+import { createSlotIndex } from './nativeSlotIndex.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
+/**
+ * @typedef {object} NativeImageToken
+ * @property {boolean} __nativeImage
+ * @property {any} source
+ * @property {number|undefined} width
+ * @property {number|undefined} height
+ * @property {string|null} href
+ * @property {Promise<NativeImageToken>} ready Resolves once the image href is settled.
+ * @property {() => void} dispose Releases the token's blob URL.
+ */
 const NATIVE_RESOURCE_ID = Symbol.for('@kontek/mantle.nativeResourceId');
 function nativeResourceId(document, prefix) {
   const next = (document[NATIVE_RESOURCE_ID] || 0) + 1;
@@ -184,6 +195,16 @@ function atlasDataUrls(bundle, ownerDoc) {
   });
   bundle.__atlasDataUrls = urls;
   return urls;
+}
+
+// The data: URL of a Blob's bytes.
+function blobDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }
 
 // Namespace every authored id in a freshly-cloned bundle subtree so that
@@ -476,25 +497,19 @@ export function createNativeScene(host, opts = {}) {
   // ("slots") mounted across frames and, per frame, only UPDATE what
   // changed (a <g>'s transform, an overridden shape's attrs, an <image>'s
   // dst rect) — rather than a full DOM teardown + re-clone every frame.
-  // Draws are matched to last frame's slots POSITIONALLY (slot N this frame
-  // reuses slot N from last frame when the bundle/href matches), so the
-  // consumer keeps the same immediate-mode beginFrame/drawBundle/endFrame
-  // loop. When the slot at a draw's position is another bundle/href (a draw
-  // joined, left or moved within the draw order), the draw takes its own slot
-  // from later in the order or from the parked ones instead of rebuilding, so
-  // the draws after a change keep their nodes. A node is built only for a
-  // bundle/href that last frame did not draw; slots no longer drawn are removed.
-  const _slots = []; // persistent [{ kind, key, node, ... }]
-  let _slotCursor = 0; // next slot index to fill this frame
-  // Last frame's slots that this frame's draws stepped over (see acquireSlot).
-  // Each stays mounted where it was until a later draw of the frame takes it
-  // back (moving its node into place) or endFrame removes it.
-  const _parked = [];
-  // Raster slots no draw took back, kept unmounted for `RASTER_KEPT_FRAMES`
-  // frames: a raster that blinks or hides a moment gets its own <image> back
-  // instead of a new one, which a slow device decodes again.
-  const _restingRasters = [];
+  // Match slots by draw position until the order changes, then index unused slots.
+  // Skipped nodes stay mounted until reused or removed by endFrame. Separate
+  // input/output arrays avoid repeated shifts; steady frames reuse their array.
+  let _slots = [],
+    _nextSlots = [];
+  let _readCursor = 0,
+    _slotIndex = null,
+    _reconciling = false,
+    _reconcileFrom = 0;
+  // Retain one detached raster slot per href for brief absences, oldest first.
+  const _restingRasters = new Map();
   const RASTER_KEPT_FRAMES = 120;
+  const MAX_RESTING_RASTERS = 32;
   let _rebuildNextBundle = false;
   // Per-scene SVG templates for the native instancing fast path. Templates
   // live under <defs>; each instance is a lightweight <g><use/></g> slot in
@@ -503,47 +518,60 @@ export function createNativeScene(host, opts = {}) {
   let _instanceTemplates = new WeakMap();
   const activeTemplates = new Set();
 
-  // Acquire the slot at the current cursor for (key, kind). If the existing
-  // slot matches, reuse its mounted node (reused:true → caller updates attrs
-  // only). Otherwise look for a matching slot further on (the slots stepped
-  // over are parked, and the match's node is already in place) and then among
-  // the parked ones (its node moves into place). Only when neither has one is
-  // a fresh node built via makeNode() and inserted at this position. Advances
-  // the cursor. `reusable(slot)`, when given, refuses a slot whose mounted
-  // content cannot be updated into this draw's. The node stays mounted across
-  // frames; endFrame() removes the parked slots and those past the cursor.
-  function acquireSlot(key, kind, makeNode, reusable) {
-    const i = _slotCursor++;
-    const cur = _slots[i];
-    if (cur && cur.key === key && cur.kind === kind && (!reusable || reusable(cur)))
+  function startReconcile() {
+    if (_reconciling) return;
+    _reconciling = true;
+    _reconcileFrom = _readCursor;
+    for (let i = 0; i < _readCursor; i++) _nextSlots.push(_slots[i]);
+  }
+
+  // Prefer the next old slot, then a matching slot ahead, then one stepped over.
+  // Only a returning node moves; a skipped node stays mounted until endFrame.
+  function acquireSlot(key, kind, makeNode, source, rebuild = false) {
+    const cur = _slots[_readCursor];
+    if (
+      !rebuild &&
+      cur &&
+      cur.key === key &&
+      cur.kind === kind &&
+      (!cur.streamSource || cur.streamSource === source)
+    ) {
+      _readCursor++;
+      if (_reconciling) {
+        cur.seenFrame = frameEpoch;
+        _nextSlots.push(cur);
+      }
       return { slot: cur, node: cur.node, reused: true };
-    const fits = (s) => s.key === key && s.kind === kind && (!reusable || reusable(s));
-    for (let j = i + 1; j < _slots.length; j++) {
-      if (!fits(_slots[j])) continue;
-      for (const skipped of _slots.splice(i, j - i)) _parked.push(skipped);
-      return { slot: _slots[i], node: _slots[i].node, reused: true };
     }
-    for (let p = 0; p < _parked.length; p++) {
-      const slot = _parked[p];
-      if (!fits(slot)) continue;
-      _parked.splice(p, 1);
-      mountAt(slot.node, cur);
-      _slots.splice(i, 0, slot);
-      return { slot, node: slot.node, reused: true };
+    startReconcile();
+    let slot = null;
+    if (!rebuild) {
+      if (!_slotIndex) _slotIndex = createSlotIndex(_slots, frameEpoch, _reconcileFrom);
+      slot = _slotIndex(key, kind, source, _readCursor);
+      if (slot) {
+        if (slot.position >= _readCursor) _readCursor = slot.position + 1;
+        else mountAt(slot.node, cur);
+      }
+      if (!slot && kind.startsWith('image-')) {
+        const resting = _restingRasters.get(key);
+        if (resting && resting.kind === kind) {
+          slot = resting;
+          _restingRasters.delete(key);
+          for (const def of [slot.rasterCrop?.clip, slot.rasterFilter?.filter, slot.dstClip?.clip])
+            if (def && !def.parentNode) ensureDefs().appendChild(def);
+          mountAt(slot.node, cur);
+        }
+      }
     }
-    for (let r = 0; r < _restingRasters.length; r++) {
-      const slot = _restingRasters[r];
-      if (!fits(slot)) continue;
-      _restingRasters.splice(r, 1);
-      mountAt(slot.node, cur);
-      _slots.splice(i, 0, slot);
-      return { slot, node: slot.node, reused: true };
+    const reused = !!slot;
+    if (!slot) {
+      const node = makeNode();
+      mountAt(node, cur);
+      slot = newSlot(key, kind, node);
     }
-    const node = makeNode();
-    mountAt(node, cur);
-    const slot = newSlot(key, kind, node);
-    _slots.splice(i, 0, slot);
-    return { slot, node, reused: false };
+    slot.seenFrame = frameEpoch;
+    _nextSlots.push(slot);
+    return { slot, node: slot.node, reused };
   }
 
   // Mount `node` just before the slot now at the cursor (document order is
@@ -553,40 +581,28 @@ export function createNativeScene(host, opts = {}) {
     else svg.appendChild(node);
   }
 
-  function retireSlot(slot) {
-    if (!slot.kind.startsWith('image-') || slot.hrefPerDraw) return dropSlot(slot);
-    if (slot.node.parentNode === svg) svg.removeChild(slot.node);
-    forgetRasterDefinitions(slot);
-    slot.restFrame = frameEpoch;
-    _restingRasters.push(slot);
-  }
-
-  // A resting raster keeps its <image> but not its crop clip or recolor filter: they leave <defs> now, with what the slot recorded
-  // writing into them, and the draw that takes the slot back builds them again.
-  function forgetRasterDefinitions(slot) {
-    const roots = [slot.rasterCrop?.clip, slot.rasterFilter?.filter, slot.dstClip?.clip].filter(Boolean);
-    releaseRasterDefinitions(slot);
-    slot.rasterCrop = slot.rasterFilter = slot.dstClip = null;
-    if (!roots.length) return;
-    const inDefinition = (el) => {
-      for (let n = el; n; n = n.parentNode) if (roots.includes(n)) return true;
-      return false;
-    };
-    for (const records of [slot.applied, slot.orig, slot.frameTouch, slot.overrideAttrs])
-      for (const el of [...records.keys()]) if (inDefinition(el)) records.delete(el);
-  }
-
-  function forgetLongRestingRasters() {
-    for (let r = _restingRasters.length - 1; r >= 0; r--) {
-      if (frameEpoch - _restingRasters[r].restFrame < RASTER_KEPT_FRAMES) continue;
-      dropSlot(_restingRasters[r]);
-      _restingRasters.splice(r, 1);
-    }
-  }
-
   function dropSlot(slot) {
     if (slot.node.parentNode === svg) svg.removeChild(slot.node);
     releaseRasterDefinitions(slot);
+  }
+
+  function retireSlot(slot) {
+    dropSlot(slot);
+    if (!slot.imageEl || slot.rasterDisposed) return;
+    slot.restFrame = frameEpoch;
+    _restingRasters.delete(slot.key);
+    _restingRasters.set(slot.key, slot);
+  }
+
+  function trimRestingRasters() {
+    for (const [key, slot] of _restingRasters) {
+      if (
+        _restingRasters.size <= MAX_RESTING_RASTERS &&
+        frameEpoch - slot.restFrame < RASTER_KEPT_FRAMES
+      )
+        break;
+      _restingRasters.delete(key);
+    }
   }
 
   function releaseRasterDefinitions(slot) {
@@ -997,9 +1013,12 @@ export function createNativeScene(host, opts = {}) {
   }
 
   function beginFrame(clearColor) {
+    if (frameOpen) endFrame();
     frameOpen = true;
     frameEpoch++;
-    _slotCursor = 0;
+    _readCursor = 0;
+    _slotIndex = null;
+    _reconciling = false;
     _clearPushed = false;
     clearSlot = null;
     clearViewBox = null;
@@ -2391,13 +2410,10 @@ export function createNativeScene(host, opts = {}) {
       }
     }
 
-    // Stream and morph geometry is written straight onto the clone, outside the slot's diff. When its source changes or goes (a new morph
-    // of this bundle, a disposed one), what it wrote has no owner to revert it: the slot starts from a fresh clone.
-    // A draw redone because its slot lost geometry (below) takes a fresh clone, not another slot of this bundle.
+    // Attribute diffs cannot restore streamed geometry from a different source.
+    // Irreversible geometry changes require a fresh clone.
     const rebuild = _rebuildNextBundle;
     _rebuildNextBundle = false;
-    const reusable = (s) =>
-      !rebuild && (!s.streamSource || s.streamSource === bundle.__streamPathD);
     const {
       slot,
       node: g,
@@ -2425,7 +2441,8 @@ export function createNativeScene(host, opts = {}) {
         );
         return ng;
       },
-      reusable,
+      bundle.__streamPathD,
+      rebuild,
     );
     // Begin this slot's frame: clear the per-frame touch record. Overrides
     // applied below are diffed against last frame; anything applied last
@@ -2610,8 +2627,8 @@ export function createNativeScene(host, opts = {}) {
     // (e.g. a shape that stopped being hidden, or a dropped recolor).
     finishSlotFrame(slot);
     if (slot.lostGeometry) {
-      slot.key = null;
-      _slotCursor--;
+      startReconcile();
+      dropSlot(_nextSlots.pop());
       _rebuildNextBundle = true;
       return drawBundle(bundle, drawOpts);
     }
@@ -2909,8 +2926,9 @@ export function createNativeScene(host, opts = {}) {
     if (!Array.isArray(instances)) return 0;
     // Materialize raw sources once for the whole batch. drawImage(rawSource)
     // intentionally stays live, but an instanced batch should not re-encode the
-    // same pixels through canvas.toDataURL() for every instance.
-    const batchSource = source && source.__nativeImage ? source : createImage(source);
+    // same pixels through canvas.toDataURL() for every instance. A plain token: a createImage
+    // token would encode a blob: URL per call that nothing disposes.
+    const batchSource = source && source.__nativeImage ? source : plainToken(source);
     let n = 0;
     // Full per-instance passthrough so per-instance tint / srcRect / blendMode
     // / opacity all apply (the GL path tints each blit independently).
@@ -2936,44 +2954,40 @@ export function createNativeScene(host, opts = {}) {
   function sourceToHref(source) {
     if (source && source.__nativeImage) {
       if (source.href) return source.href;
-      const href = sourceToHref(source.source);
+      // Drawn before its blob: URL is ready, or with none: a data: URL, kept for the token's
+      // life (its <image>s never change href, so none is decoded twice).
+      const href = sourceToHref(_tokenPixels.get(source) || source.source);
       source.href = href;
+      _tokenPixels.delete(source);
       return href;
     }
     if (typeof source === 'string') return source; // url / data uri
-    if (
-      source &&
-      (source.rgba || source.data) &&
-      source.width &&
-      source.height &&
-      !source.nodeType
-    ) {
-      // raw pixels / ImageData
-      const w = source.width | 0,
-        h = source.height | 0;
-      const cv = ownerDoc.createElement('canvas');
-      cv.width = w;
-      cv.height = h;
-      const c2 = cv.getContext('2d');
-      const id = c2.createImageData(w, h);
+    if (source && source.nodeType && !isCanvas(source)) return source.src || null; // <img>
+    const cv = rasterCanvas(source);
+    return cv ? cv.toDataURL('image/png') : null;
+  }
+
+  const isCanvas = (source) =>
+    !!(source && source.nodeType && source.tagName && source.tagName.toLowerCase() === 'canvas');
+
+  // The canvas holding a pixel source's pixels: a canvas itself, else a new one with the raw
+  // pixels, ImageData or ImageBitmap's. null for a URL string or an <img>.
+  function rasterCanvas(source) {
+    if (isCanvas(source)) return source;
+    if (!source || typeof source === 'string') return null;
+    const raw = (source.rgba || source.data) && source.width && source.height && !source.nodeType;
+    const bitmap = typeof ImageBitmap !== 'undefined' && source instanceof ImageBitmap;
+    if (!raw && !bitmap) return null;
+    const cv = ownerDoc.createElement('canvas');
+    cv.width = source.width | 0;
+    cv.height = source.height | 0;
+    const c2 = cv.getContext('2d');
+    if (raw) {
+      const id = c2.createImageData(cv.width, cv.height);
       id.data.set(source.rgba || source.data);
       c2.putImageData(id, 0, 0);
-      return cv.toDataURL('image/png');
-    }
-    if (source && source.nodeType) {
-      // <img>/<canvas>
-      if (source.tagName && source.tagName.toLowerCase() === 'canvas')
-        return source.toDataURL('image/png');
-      if (source.src) return source.src; // <img>
-    }
-    if (typeof ImageBitmap !== 'undefined' && source instanceof ImageBitmap) {
-      const cv = ownerDoc.createElement('canvas');
-      cv.width = source.width;
-      cv.height = source.height;
-      cv.getContext('2d').drawImage(source, 0, 0);
-      return cv.toDataURL('image/png');
-    }
-    return null;
+    } else c2.drawImage(source, 0, 0);
+    return cv;
   }
 
   // Map a WebGL blendMode enum to the SVG/CSS mix-blend-mode keyword that
@@ -3015,16 +3029,12 @@ export function createNativeScene(host, opts = {}) {
     const viewportSpace = coordSpace === 'viewport';
 
     const layerKind = viewportSpace ? 'g' : 'svg';
-    const { slot, node: layer } = acquireSlot(`img:${href}`, `image-${layerKind}`, () =>
+    // Keyed by the href itself: the same string each frame compares by identity, where a key
+    // built per draw copied and compared a canvas's whole data: URL every frame.
+    const { slot, node: layer } = acquireSlot(href, `image-${layerKind}`, () =>
       ownerDoc.createElementNS(SVGNS, layerKind),
     );
     beginSlotFrame(slot);
-    // A raw canvas or raw pixels give a new data: href at each draw: that href is never asked for again, so its slot does not rest.
-    slot.hrefPerDraw =
-      !!source &&
-      !source.__nativeImage &&
-      typeof source !== 'string' &&
-      !(source.nodeType && source.tagName && source.tagName.toLowerCase() === 'img');
     // Reuse one <image> element per live positional slot, not per href. A DOM
     // node can only have one parent, so sharing the same <image> across
     // same-source instances moves it to the last wrapper. Distinct elements
@@ -3489,10 +3499,15 @@ export function createNativeScene(host, opts = {}) {
     _extClips.delete(rec);
   }
 
-  // ── createImage — return a token drawImage already accepts (the source
-  // itself). No GPU upload; drawImage decodes lazily. Lets a renderer-
-  // style `const img = createImage(src); drawImage(img)` flow work. ─────
-  function createImage(source, _opts) {
+  // Pixel sources are encoded at creation. A draw before encoding completes
+  // uses a data: URL for the token's lifetime. dispose() revokes blob: URLs;
+  // exportFrameSVG() embeds their bytes as data: URLs.
+  // Token -> the canvas its blob: URL is being encoded from, until the href settles.
+  const _tokenPixels = new Map();
+  // Token -> the Blob behind its live blob: href (for export, and revoked by dispose).
+  const _blobTokens = new Map();
+
+  function plainToken(source) {
     return {
       __nativeImage: true,
       source,
@@ -3500,6 +3515,52 @@ export function createNativeScene(host, opts = {}) {
       height: source && source.height,
       href: null,
     };
+  }
+
+  /** @param {any} source @param {object} [_opts] @returns {NativeImageToken} */
+  function createImage(source, _opts) {
+    const token = /** @type {NativeImageToken} */ (plainToken(source));
+    token.dispose = () => disposeToken(token);
+    const pixels = rasterCanvas(source);
+    if (
+      !pixels ||
+      typeof pixels.toBlob !== 'function' ||
+      typeof URL === 'undefined' ||
+      !URL.createObjectURL
+    ) {
+      token.ready = Promise.resolve(token);
+      return token;
+    }
+    _tokenPixels.set(token, pixels);
+    token.ready = new Promise((resolve) => {
+      try {
+        pixels.toBlob((blob) => {
+          // Unless a draw, the token's dispose() or the scene's settled it first.
+          if (blob && _tokenPixels.has(token)) {
+            token.href = URL.createObjectURL(blob);
+            _blobTokens.set(token, blob);
+          }
+          _tokenPixels.delete(token);
+          resolve(token);
+        }, 'image/png');
+      } catch {
+        resolve(token); // a tainted canvas: its draw takes the data: path, as before
+      }
+    });
+    return token;
+  }
+
+  // Release a token's blob: URL. A later draw of it takes the data: path from its source.
+  function disposeToken(token) {
+    _tokenPixels.delete(token);
+    if (token.href) {
+      _restingRasters.delete(token.href);
+      for (const slots of [_slots, _nextSlots])
+        for (const slot of slots) if (slot.imageHref === token.href) slot.rasterDisposed = true;
+    }
+    if (!_blobTokens.delete(token)) return;
+    URL.revokeObjectURL(token.href);
+    token.href = null;
   }
 
   function createBundleHandle(bundle, opts = {}) {
@@ -3812,10 +3873,21 @@ export function createNativeScene(host, opts = {}) {
     }
     frameOpen = false;
 
-    while (_slots.length > _slotCursor) retireSlot(_slots.pop());
-    for (const slot of _parked) retireSlot(slot);
-    _parked.length = 0;
-    forgetLongRestingRasters();
+    if (_reconciling) {
+      for (let i = _reconcileFrom; i < _slots.length; i++)
+        if (_slots[i].seenFrame !== frameEpoch) retireSlot(_slots[i]);
+      const old = _slots;
+      _slots = _nextSlots;
+      _nextSlots = old;
+      _nextSlots.length = 0;
+      _readCursor = _slots.length;
+      _reconciling = false;
+    } else {
+      for (let i = _readCursor; i < _slots.length; i++) retireSlot(_slots[i]);
+      _slots.length = _readCursor;
+    }
+    _slotIndex = null;
+    trimRestingRasters();
     // A definition stays mounted while any draw in this frame uses it.
     for (const template of activeTemplates)
       if (template.lastUsedFrame !== frameEpoch) {
@@ -3835,9 +3907,16 @@ export function createNativeScene(host, opts = {}) {
     activeViewBox = null;
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     _slots.length = 0;
-    _parked.length = 0;
-    _restingRasters.length = 0;
-    _slotCursor = 0;
+    _nextSlots.length = 0;
+    _slotIndex = null;
+    _restingRasters.clear();
+    _tokenPixels.clear();
+    for (const token of _blobTokens.keys()) {
+      URL.revokeObjectURL(token.href);
+      token.href = null;
+    }
+    _blobTokens.clear();
+    _readCursor = 0;
     _submitQ.length = 0;
     _submitSeq = 0;
     _instanceTemplates = new WeakMap();
@@ -3873,13 +3952,17 @@ export function createNativeScene(host, opts = {}) {
   // can call scene.exportFrameSVG() regardless of backend. Async-shaped for
   // that parity (the value is ready synchronously; `await` works either way).
   async function exportFrameSVG(exportOpts = {}) {
-    const out = exportOpts.serialize
+    let out = exportOpts.serialize
       ? exportOpts.serialize(svg)
       : typeof globalThis !== 'undefined' && typeof globalThis.XMLSerializer === 'function'
         ? new globalThis.XMLSerializer().serializeToString(svg)
         : svg && typeof svg.outerHTML === 'string'
           ? svg.outerHTML
           : '';
+    // A blob: href resolves only in this page: write each token's as the data: URL of its pixels.
+    if (typeof out === 'string')
+      for (const [href, blob] of [..._blobTokens].map(([token, b]) => [token.href, b]))
+        if (out.includes(href)) out = out.split(href).join(await blobDataUrl(blob));
     return exportOpts.detail ? { svg: out, drawn: -1, skipped: 0, notes: [] } : out;
   }
 

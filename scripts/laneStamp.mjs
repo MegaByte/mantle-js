@@ -48,8 +48,11 @@ const read = (cwd) => {
   }
 };
 
-/** The record of a passing full run on `tree`, or undefined. */
-export const passedOn = (cwd, tree) => read(cwd)[tree];
+/** Return a full pass with no skips or retries; reject legacy records without a completeness marker. */
+export const passedOn = (cwd, tree) => {
+  const pass = read(cwd)[tree];
+  return pass?.complete === true ? pass : undefined;
+};
 
 /** Record that both lanes passed on `tree` (the newest 20 trees are kept). */
 export function recordPass(cwd, tree, detail) {

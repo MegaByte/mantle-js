@@ -74,7 +74,7 @@ On the **native** backend the scene exposes the same method surface, and most re
 | `drawBundleInstanced` / `drawImageInstanced`                         | **real** — one draw per instance (no GPU bind-once to amortize)                                 |
 | `drawInstance`                                                       | **real** — `drawBundle` mid-frame                                                               |
 | `setScissorRect` / `clearScissorRect`                                | **real** — CSS `clip-path: inset()` on the `<svg>`                                              |
-| `createImage`                                                        | returns a token `drawImage` accepts                                                             |
+| `createImage`                                                        | a token `drawImage` accepts; a pixel source's is a `blob:` URL (`ready`, `dispose()`)           |
 | `createBundleHandle`                                                 | returns `{ bundle }` (no GPU cache to handle)                                                   |
 | `enableStaticCache` / `disableStaticCache` / `invalidateRenderState` | **no-op** — GPU render-target caching has no native analogue (the browser re-rasterizes anyway) |
 
@@ -302,6 +302,15 @@ feColorMatrix chained ahead of the tint's, matching the GL shader's order), `ble
 `mix-blend-mode`). Rasters live in a nested `<svg viewBox="0 0 vpW vpH">` so they place in
 viewport-pixel space, independent of any bundle's em/bbox viewBox — matching the WebGL blit's
 pixel-space semantics.
+
+`scene.createImage(source)` returns a token to draw every frame. A pixel source (a canvas, pixels,
+`ImageData`, an `ImageBitmap`) is encoded off the frame to a `blob:` URL of its pixels at creation,
+as WebGL uploads them at creation, so each `<image>` of it takes a short href rather than a PNG
+`data:` URL. `await token.ready` before the first draw; a token drawn before then takes a `data:`
+URL of its pixels at that draw and keeps it. `token.dispose()` revokes the URL. `exportFrameSVG()`
+writes each `blob:` href as a `data:` URL, so an exported frame stays self-contained; markup
+serialized from `scene.svg` directly keeps the `blob:` hrefs, which resolve only in this page. A raw
+canvas passed to `drawImage` stays live: it is encoded again at every draw.
 
 Both `drawBundle` and `drawImage` are on `createMantleScene`'s returned scene too, so raster
 compositing is backend-agnostic.

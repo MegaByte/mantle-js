@@ -190,6 +190,87 @@ console.log(
   );
   R.dispose();
 }
+console.log('(instanced) the instanced warm links only programs allowed by the declared reach');
+{
+  // Declared reach limits instanced warm variants. Each allowed state must draw without building a program.
+  const TRI = (i) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M${10 + i} 10 L${60 + i} 15 L40 ${70 + i} Z" fill="#c33"/></svg>`;
+  const ID = new Float32Array([0.5, 0, 0, 0, 0.5, 0, 0, 0, 1]);
+  const TINT_OFF = new Float32Array([0.05, 0, 0, 0]);
+  for (const [tags, draws] of [
+    [[], [[ID, null]]],
+    [
+      ['recolor'],
+      [
+        [ID, null],
+        [ID, tint],
+      ],
+    ],
+    [
+      null,
+      [
+        [ID, null],
+        [rot, null],
+        [ID, tint],
+        [rot, tint],
+      ],
+    ],
+  ]) {
+    const W = createPendingGl({ linkMs: 2, pipelineMs: 2 });
+    const gl = W.gl;
+    const shaders = new Map(),
+      rotatedInst = new Set();
+    const shaderSource = gl.shaderSource,
+      attachShader = gl.attachShader;
+    gl.shaderSource = (sh, src) => {
+      shaders.set(sh, src);
+      return shaderSource(sh, src);
+    };
+    gl.attachShader = (p, sh) => {
+      const src = shaders.get(sh) || '';
+      if (src.includes('MANTLE_INSTANCED') && src.includes('MANTLE_ROTATED_MAP'))
+        rotatedInst.add(p);
+      return attachShader(p, sh);
+    };
+    const R = createRenderer(gl, taggedShaderSources(), {
+      asyncShaderCompile: true,
+      nonBlocking: true,
+      strictPlay: true,
+      standIns: false,
+      needMissPolicy: 'block',
+    });
+    R.ready.catch(() => {});
+    setTimeout(() => W.release(), 10);
+    await R.ready;
+    R.setViewport(512, 512);
+    const bs = [];
+    for (let i = 0; i < 6; i++) {
+      const b = createBundle(gl, await importSvg(TRI(i), { preserveViewport: true }));
+      if (tags) R.declareReach(b, tags);
+      bs.push(b);
+    }
+    await R.precompileFillsAsync({});
+    const name = tags ? `declared [${tags}]` : 'undeclared';
+    ok(
+      tags ? rotatedInst.size === 0 : rotatedInst.size > 0,
+      `${name}: ${tags ? 'no rotated instanced program linked' : 'the rotated instanced program linked'} (${rotatedInst.size})`,
+    );
+    const p0 = W.model.pipelines;
+    for (const [m, cm] of draws)
+      for (let f = 0; f < 4; f++) {
+        R.beginFrame([1, 1, 1, 1]);
+        const shared = cm ? { colorMatrix: cm, colorMatrixOffset: TINT_OFF } : undefined;
+        for (const b of bs)
+          R.drawBundleInstanced(b, [{ worldMatrix: m }, { worldMatrix: m }], shared);
+        R.endFrame();
+      }
+    ok(
+      W.model.pipelines === p0,
+      `${name}: its declared instanced draws build nothing in play (${W.model.pipelines - p0})`,
+    );
+    R.dispose();
+  }
+}
 if (fail) {
   console.log(`\n${fail} FAILED`);
   process.exit(1);

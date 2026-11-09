@@ -8115,6 +8115,9 @@ export function createRenderer(gl, shaderSources, opts = {}) {
           const carried = R._askedAcrossLoads;
           const asked = carried && carried.drops === dropsAtStart ? carried.keys : new Set();
           R._askedAcrossLoads = null;
+          // Bundles reached by this loading call's warm draws.
+          const draws = !(o && o.draw === false);
+          const warmed = new Set();
           try {
             for (const sz of sizes) {
               if (load.incomplete) break; // past the deadline: no later size is started
@@ -8147,6 +8150,8 @@ export function createRenderer(gl, shaderSources, opts = {}) {
               R._warmOnly = only;
               try {
                 n += await drive(R._precompileFillsG(o), { _refreshLive: true, _noSync: true });
+                if (draws && !load.incomplete)
+                  for (const b of only || R._liveBundles()) warmed.add(b);
               } finally {
                 R._warmOnly = null;
               }
@@ -8164,6 +8169,13 @@ export function createRenderer(gl, shaderSources, opts = {}) {
             if (!_scope) {
               const cur = R.viewportSize();
               R._noteWarmedViewport(cur[0], cur[1]);
+            }
+            // Skipped sizes may still need new, evicted or invalidated instanced meshes.
+            if (draws && ownersOf && !load.incomplete && R._instancedPrepG) {
+              const fresh = R._liveBundles().filter(
+                (b) => !b._disposed && !warmed.has(b) && !R._hasInstancedMesh(b),
+              );
+              if (fresh.length) await drive(R._instancedPrepG(fresh), {});
             }
             if (ownersOf && !load.incomplete && (R._programsDropped | 0) === dropsAtStart)
               R._askedAcrossLoads = { keys: asked, drops: dropsAtStart };

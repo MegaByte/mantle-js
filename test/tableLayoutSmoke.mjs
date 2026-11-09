@@ -253,6 +253,18 @@ ok(
   `maxArrayLayers reads the context once (${layerReads} reads)`,
 );
 ok(maxArrayLayers({}) === 256, 'maxArrayLayers is 256 for a stub');
+// A lost context answers null: the minimum, and the restored context's own limit at the next read.
+let lost = true;
+const glLost = {
+  MAX_ARRAY_TEXTURE_LAYERS: 0x88ff,
+  getParameter: (p) => (p === 0x88ff && !lost ? 2048 : null),
+};
+const whileLost = maxArrayLayers(glLost);
+lost = false;
+ok(
+  whileLost === 256 && maxArrayLayers(glLost) === 2048,
+  `a lost context reads 256 and keeps no answer (${whileLost}, then ${maxArrayLayers(glLost)})`,
+);
 
 if (fail) {
   console.log('\nTABLE-LAYOUT FAIL');

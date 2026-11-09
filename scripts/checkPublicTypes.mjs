@@ -62,6 +62,18 @@ const lines = subpaths.flatMap(([, rel], i) => [
 // with no parameters rejected draw:false even while runtime and README allowed it.
 const rootIndex = subpaths.findIndex(([name]) => name === '.');
 if (rootIndex < 0) throw new Error('Root public declaration is missing.');
+const nativeIndex = subpaths.findIndex(([name]) => name === './native');
+if (nativeIndex < 0) throw new Error('Native public declaration is missing.');
+lines.push(
+  `declare const nativeHost: HTMLElement;`,
+  `const nativeScene = m${nativeIndex}.createNativeScene(nativeHost);`,
+  `const nativeImage = nativeScene.createImage(document.createElement('canvas'));`,
+  'export const nativeImageReady: Promise<typeof nativeImage> = nativeImage.ready;',
+  'nativeImage.ready.then(image => image.dispose());',
+  'nativeImage.dispose();',
+  '// @ts-expect-error resolved image tokens have a fixed API',
+  'nativeImage.ready.then(image => image.destroy());',
+);
 lines.push(
   `declare const loadingRenderer: ReturnType<typeof m${rootIndex}.createRenderer>;`,
   'export const loadingDefaultAttempts: number = loadingRenderer.precompileFills();',

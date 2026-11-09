@@ -3,11 +3,12 @@
 
 // trackedCleanSmoke -- scripts/trackedClean.mjs: a lane that dirties the tracked tree is detected, a tree that was already dirty is not blamed, an
 // untracked file counts only under examples/smoke, MANTLE_LANE_ALLOW_DIRTY=1 switches the verdict off, and a non-git folder answers null.
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
+import { copyFileSync, mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { spawnSync } from 'child_process';
 import os from 'os';
 import path from 'path';
 import { snapshot, newlyDirty, reportLeaks } from '../scripts/trackedClean.mjs';
+import { cleanTreeId, passedOn, recordPass } from '../scripts/laneStamp.mjs';
 const inheritedAllowDirty = process.env.MANTLE_LANE_ALLOW_DIRTY;
 delete process.env.MANTLE_LANE_ALLOW_DIRTY;
 let fail = 0;
@@ -91,6 +92,51 @@ try {
     packageLeaks.length === 1 && packageLeaks[0].endsWith('package/entry.js'),
     'the same lane still detects tracked changes inside its package',
   );
+
+  // Exercise the actual lane coordinator against tiny child lanes in a clean
+  // repository. Exit 0 with a skipped test must not authorize a later publish.
+  const stampRoot = path.join(nogit, 'lanes');
+  const scripts = path.join(stampRoot, 'scripts');
+  mkdirSync(scripts, { recursive: true });
+  writeFileSync(path.join(stampRoot, '.gitignore'), 'node_modules/\n');
+  for (const f of ['runLanes.mjs', 'trackedClean.mjs', 'laneStamp.mjs'])
+    copyFileSync(new URL('../scripts/' + f, import.meta.url), path.join(scripts, f));
+  writeFileSync(path.join(scripts, 'fetchTestFixtures.mjs'), '');
+  writeFileSync(
+    path.join(scripts, 'runSmokes.mjs'),
+    `const mode = process.env.MANTLE_STAMP_FIXTURE;
+if (mode === 'skip') console.log('SKIPPED (1)');
+if (mode === 'retry') console.log('PASSED ON RETRY (1)');
+console.log('SMOKES ' + (mode === 'fail' ? 'FAIL (1/1)' : 'PASS (1/1)'));
+process.exitCode = mode === 'fail' ? 1 : 0;
+`,
+  );
+  writeFileSync(
+    path.join(scripts, 'runRenderSmokes.mjs'),
+    "if (process.env.MANTLE_STAMP_FIXTURE === 'render-skip') console.log('SKIPPED (1)');\n" +
+      "console.log('RENDER-SMOKES PASS (1/1)');\n",
+  );
+  git(stampRoot, 'init', '-q');
+  git(stampRoot, 'add', '.');
+  git(stampRoot, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'fixture');
+  const tree = cleanTreeId(stampRoot);
+  ok(!!tree, 'the coordinator fixture has a clean committed tree');
+  for (const mode of ['skip', 'render-skip', 'retry', 'fail', 'pass']) {
+    rmSync(path.join(stampRoot, 'node_modules'), { recursive: true, force: true });
+    const r = spawnSync(
+      process.execPath,
+      [path.join(scripts, 'runLanes.mjs'), '--out', path.join(stampRoot, 'node_modules', 'lane-logs')],
+      {
+        cwd: stampRoot,
+        encoding: 'utf8',
+        env: { ...process.env, MANTLE_STAMP_FIXTURE: mode },
+      },
+    );
+    ok(r.status === (mode === 'fail' ? 1 : 0), `${mode}: the lane exit status is preserved`);
+    ok(!!passedOn(stampRoot, tree) === (mode === 'pass'), `${mode}: only a complete pass is cached`);
+  }
+  recordPass(stampRoot, tree, { nodeSecs: 1, renderSecs: 1 });
+  ok(!passedOn(stampRoot, tree), 'legacy records without complete coverage are not reused');
 } finally {
   if (inheritedAllowDirty === undefined) delete process.env.MANTLE_LANE_ALLOW_DIRTY;
   else process.env.MANTLE_LANE_ALLOW_DIRTY = inheritedAllowDirty;

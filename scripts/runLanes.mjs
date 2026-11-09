@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Run CPU validation and browser rendering validation concurrently, with separate logs.
 // SMOKE_JOBS sets CPU concurrency (default: half the cores, 2 to 8); RENDER_JOBS sets browser concurrency (default 3).
-// A full pass with no retries on a clean committed tree is recorded (scripts/laneStamp.mjs) so a publish of that tree skips
-// the lanes.
+// Cache full passes without retries or skips on clean committed trees (scripts/laneStamp.mjs).
+// Publishing the same tree can reuse that validation.
 // Shader models run separately through npm run diagnose:accuracy during development.
 // Do not use this validation runner for GPU timing.
 // Usage: node scripts/runLanes.mjs [--out DIR]
@@ -72,7 +72,8 @@ const results = await Promise.all([
   lane('render', 'runRenderSmokes.mjs', { RENDER_JOBS: renderJobs }),
 ]);
 let bad = 0,
-  retried = 0;
+  retried = 0,
+  skipped = 0;
 for (const r of results) {
   const text = readFileSync(path.join(OUT, `${r.name}.log`), 'utf8').split('\n');
   const summary = text.filter((l) =>
@@ -83,10 +84,15 @@ for (const r of results) {
   );
   for (const l of summary.slice(-30)) console.log(l);
   if (text.some((l) => /^PASSED ON RETRY/.test(l))) retried++;
+  if (text.some((l) => /^SKIPPED\b/.test(l))) skipped++;
   if (r.code !== 0) bad++;
 }
 if (reportLeaks(newlyDirty(ROOT, GIT_BEFORE), 'lanes')) bad++;
-if (!bad && !retried && TREE && cleanTreeId(ROOT) === TREE)
-  recordPass(ROOT, TREE, Object.fromEntries(results.map((r) => [r.name + 'Secs', r.secs])));
+if (!bad && !retried && !skipped && TREE && cleanTreeId(ROOT) === TREE)
+  recordPass(ROOT, TREE, {
+    complete: true,
+    ...Object.fromEntries(results.map((r) => [r.name + 'Secs', r.secs])),
+  });
+if (skipped) console.log('\nLane skips prevent caching this run for publishing.');
 console.log(bad ? `\nLANES FAIL (${bad}/2)` : `\nLANES PASS (node + render)`);
 process.exit(bad ? 1 : 0);

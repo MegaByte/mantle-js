@@ -7,10 +7,11 @@
 // element a morph writes to, its `d`, its paint attributes, which elements are reused or trimmed), never on pixels: the
 // render lane's nativeFallbackSmoke rasterizes the scene in a real browser. The shim supports tag and `[id]` selectors
 // only, so the cases find elements by walking the tree. Cases:
+//   slotIndex            the slot index matches a changed draw order in linear work
+//   rasterMoves          a raster's <image> follows it through the draw order, carrying no other place's attributes
 //   textMaskMorph        a matched-shape morph stays addressed beside expanded <text> glyphs and a <mask>
 //   morphInterp          the morph interpolates geometry every frame, and an id-less morph reaches its shape
 //   reconciler           the positional reconciler reuses, resets and trims its slots
-//   rasterImages         a raster's <image> follows it through the draw order, kept a few frames, carrying no other place's attributes
 //   openStrokePaintMorph an open contour stays open, and a fill-opacity fade tweens
 //   morphAutoApply       drawBundle(morph.bundle) draws the tween without forwarding morph.overrides
 //   maskGeometryMorph    an animated <mask>'s geometry interpolates through the morph
@@ -19,6 +20,7 @@ import { readFileSync } from 'fs';
 import { xmldom, doc } from './_domShim.mjs';
 import { fontFixture, requireAsset } from './_assets.mjs';
 import { emitFixture } from './_fixtures.mjs';
+import { createSlotIndex } from '../src/fallback/nativeSlotIndex.js';
 
 globalThis.DOMParser = xmldom.DOMParser;
 globalThis.XMLSerializer = xmldom.XMLSerializer;
@@ -64,6 +66,82 @@ const visiblePaths = (svg) =>
   });
 const ID = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
 const fontBytes = readFileSync(requireAsset(fontFixture('roboto-regular.ttf')));
+
+function slotIndex() {
+  const frame = 2;
+  const N = 4096;
+  for (const mode of ['reverse', 'replace', 'streams']) {
+    let reads = 0;
+    const sources = Array.from({ length: N }, () => ({}));
+    const slots = Array.from({ length: N }, (_, i) => {
+      let seen = 1;
+      return {
+        kind: 'bundle',
+        get key() {
+          reads++;
+          return mode === 'streams' ? 'shared' : i;
+        },
+        streamSource: mode === 'streams' ? sources[i] : null,
+        get seenFrame() {
+          reads++;
+          return seen;
+        },
+        set seenFrame(value) {
+          seen = value;
+        },
+      };
+    });
+    const find = createSlotIndex(slots, frame);
+    let cursor = 0;
+    const matched = new Set();
+    for (let i = N - 1; i >= 0; i--) {
+      const key = mode === 'streams' ? 'shared' : mode === 'replace' ? N + i : i;
+      const slot = find(key, 'bundle', mode === 'streams' ? sources[i] : null, cursor);
+      if (slot) {
+        matched.add(slot);
+        slot.seenFrame = frame;
+        cursor = Math.max(cursor, slot.position + 1);
+      }
+    }
+    if (matched.size === (mode === 'replace' ? 0 : N))
+      ok(`${mode}: each old slot is used at most once`);
+    else fail(`${mode}: wrong matching count (${matched.size})`);
+    if (reads <= 12 * N) ok(`${mode}: linear matching work (${reads} slot reads for ${N} draws)`);
+    else fail(`${mode}: matching revisits slots (${reads} reads for ${N} draws)`);
+  }
+
+  // Compare duplicate keys, kinds and changing stream sources with a simple
+  // ordered scan. A future match wins over a compatible parked clone.
+  const sources = [null, {}, {}];
+  const slots = Array.from({ length: 128 }, (_, i) => ({
+    key: i % 5,
+    kind: i % 2,
+    streamSource: sources[i % 3],
+    seenFrame: i < 3 ? frame : 1,
+  }));
+  const find = createSlotIndex(slots, frame);
+  let cursor = 3,
+    mismatches = 0;
+  for (let i = 0; i < 256; i++) {
+    const key = (i * 7) % 6,
+      kind = (i >> 2) % 2,
+      source = sources[(i >> 1) % 3];
+    const fits = (s) =>
+      s.seenFrame !== frame &&
+      s.key === key &&
+      s.kind === kind &&
+      (!s.streamSource || s.streamSource === source);
+    const expected = slots.find((s) => s.position >= cursor && fits(s)) || slots.find(fits) || null;
+    const got = find(key, kind, source, cursor);
+    if (got !== expected) mismatches++;
+    if (got) {
+      got.seenFrame = frame;
+      cursor = Math.max(cursor, got.position + 1);
+    }
+  }
+  if (!mismatches) ok('duplicate keys and stream changes follow the ordered-scan control');
+  else fail(`${mismatches} slot choices differ from the control`);
+}
 
 // A matched-shape morph stays correctly addressed when the bundle has expanded <text> glyphs AND a <mask>.
 //
@@ -381,6 +459,22 @@ async function reconciler() {
   else fail('expected 2 groups, got ' + two);
   if (one === 1) ok('one bundle next frame → tail slot trimmed (one <g>)');
   else fail('tail not trimmed: ' + one);
+
+  scene.beginFrame();
+  scene.drawBundle(prefab);
+  scene.drawBundle(prefab);
+  scene.endFrame();
+  scene.endFrame();
+  if (bundleGroups().length === 2) ok('ending a reconciled frame twice keeps every draw');
+  else fail('a second endFrame removed a reconciled draw');
+  scene.beginFrame();
+  scene.drawBundle(prefab);
+  scene.beginFrame();
+  scene.drawBundle(prefab);
+  scene.endFrame();
+  if (bundleGroups().length === 1)
+    ok('starting another frame closes and trims an unfinished frame');
+  else fail('an unfinished frame left stale slots');
 }
 
 // Two things the native (no-WebGL) morph must get right, as the WebGL path does:
@@ -709,10 +803,8 @@ async function morphPerf() {
     );
 }
 
-// A raster's <image> follows the raster through the draw order. A slow device decodes each new <image> again, so a raster joining,
-// leaving or swapping places creates at most its own <image>; one that skips a few frames gets its own back, and one gone longer than
-// 120 frames is let go; a raster drawn in a new place without its fade drops the fade and its old offset.
-async function rasterImages() {
+// Reordered rasters retain their nodes and reset omitted opacity and transforms.
+function rasterMoves() {
   const scene = createNativeScene(host(), { coordinateSpace: 'viewport' });
   scene.setViewport(100, 100);
   const source = (n) => `data:image/png;base64,raster${n}`;
@@ -738,13 +830,19 @@ async function rasterImages() {
     else fail(`${label}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
   };
   frame([0, 1, 2, 3]);
-  expect('a raster leaving the middle: the rasters after it keep their <image>s', frame([0, 2, 3]), [0, 2, 3], 0);
-  expect('a raster joining the middle: only its <image> is created', frame([0, 4, 2, 3]), [0, 4, 2, 3], 1);
+  expect(
+    'a raster leaving the middle: the rasters after it keep their <image>s',
+    frame([0, 2, 3]),
+    [0, 2, 3],
+    0,
+  );
+  expect(
+    'a raster joining the middle: only its <image> is created',
+    frame([0, 4, 2, 3]),
+    [0, 4, 2, 3],
+    1,
+  );
   expect('two rasters swapping places keep their <image>s', frame([0, 2, 4, 3]), [0, 2, 4, 3], 0);
-  frame([0, 1]);
-  frame([0]);
-  frame([0]);
-  expect('a raster skipping a few frames gets its <image> back', frame([0, 1]), [0, 1], 0);
   frame([0, 1], { 1: 0.5 });
   frame([1]);
   const moved = scene.svg.querySelectorAll('image')[0];
@@ -754,34 +852,72 @@ async function rasterImages() {
     fail(
       `the moved <image> kept opacity=${moved.getAttribute('opacity')} transform=${moved.getAttribute('transform')}`,
     );
-  const cropped = { __nativeImage: true, source: source(9), width: 10, height: 10, href: null };
-  const drawCropped = (present) => {
-    scene.beginFrame([0, 0, 0, 1]);
-    if (present) scene.drawImage(cropped, { dstRect: [0, 0, 10, 10], srcRect: [0, 0, 5, 5], tint: [0.5, 1, 1, 1] });
+  scene.dispose();
+}
+
+function rasterRetention() {
+  const scene = createNativeScene(host(), { coordinateSpace: 'viewport' });
+  scene.setViewport(100, 100);
+  const source = (n) => `data:image/png;base64,retained${n}`;
+  const frame = (order = []) => {
+    scene.beginFrame();
+    for (const src of order) scene.drawImage(src, { dstRect: [0, 0, 10, 10] });
     scene.endFrame();
-    return scene.svg.querySelectorAll('image')[0] || null;
+    return scene.svg.querySelectorAll('image');
   };
-  const before = drawCropped(true);
-  drawCropped(false);
-  const back = drawCropped(true);
-  const referenced = (attr) => {
-    const m = /url\(#([^)]+)\)/.exec(back.getAttribute(attr) || '');
-    return !!m && scene.svg.querySelectorAll(attr === 'filter' ? 'filter' : 'clipPath').some((d) => d.getAttribute('id') === m[1]);
-  };
-  if (back === before && referenced('clip-path') && referenced('filter'))
-    ok('a cropped, tinted raster that comes back keeps its <image> and gets its clip and filter again');
-  else
-    fail(
-      `the returning raster: same <image> ${back === before}, clip ${back.getAttribute('clip-path')} ${referenced('clip-path')}, filter ${back.getAttribute('filter')} ${referenced('filter')}`,
-    );
-  frame([0, 1]);
-  for (let i = 0; i < 121; i++) frame([0]);
-  expect('a raster gone longer than 120 frames is let go: drawn again, it gets a new <image>', frame([0, 1]), [0, 1], 1);
+  const original = frame([source(0)])[0];
+  frame();
+  if (!scene.svg.querySelectorAll('image').length) ok('retained rasters are absent from the scene');
+  else fail('a retained raster stayed mounted');
+  for (let i = 0; i < 118; i++) frame();
+  if (frame([source(0)])[0] === original)
+    ok('a raster returning before 120 frames reuses its image');
+  else fail('a recently removed raster lost its image');
+  frame();
+  for (let i = 0; i < 120; i++) frame();
+  if (frame([source(0)])[0] !== original) ok('a raster retained for 120 frames expires');
+  else fail('a raster survived its retention window');
+
+  const sources = Array.from({ length: 40 }, (_, i) => source(i + 10));
+  const images = frame(sources);
+  frame();
+  const returned = frame(sources);
+  if (returned.every((image, i) => (image === images[i]) === i >= 8))
+    ok('the 32-entry cache retains recent images and evicts older ones');
+  else fail('the raster cache did not enforce its capacity');
+  const duplicate = source(100);
+  frame([duplicate, duplicate]);
+  frame();
+  const duplicates = frame([duplicate, duplicate]);
+  if (duplicates.length === 2 && duplicates[0] !== duplicates[1])
+    ok('returning duplicates have distinct image nodes');
+  else fail('returning duplicates shared an image node');
+
+  const token = scene.createImage(source(200));
+  const disposed = frame([token])[0];
+  token.dispose();
+  frame();
+  const afterDispose = frame([token])[0];
+  if (afterDispose !== disposed) ok('disposing a mounted token prevents later retention');
+  else fail('a disposed token retained its old image');
+  frame();
+  token.dispose();
+  if (frame([token])[0] !== afterDispose) ok('disposing a retained token releases its image');
+  else fail('a retained token survived dispose');
+  frame([source(300)]);
+  frame();
+  scene.setCoordinateSpace('bundle');
+  const changed = frame([source(300)])[0];
+  if (changed.parentNode.localName === 'svg')
+    ok('a coordinate-space change uses the correct wrapper');
+  else fail('a retained raster reused an incompatible coordinate-space wrapper');
   scene.dispose();
 }
 
 for (const [name, fn] of [
-  ['rasterImages', rasterImages],
+  ['slotIndex', slotIndex],
+  ['rasterMoves', rasterMoves],
+  ['rasterRetention', rasterRetention],
   ['textMaskMorph', textMaskMorph],
   ['morphInterp', morphInterp],
   ['reconciler', reconciler],

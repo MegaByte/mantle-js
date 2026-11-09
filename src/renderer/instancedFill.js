@@ -140,18 +140,18 @@ export function attachInstancedFill(R) {
     return vao;
   }
 
-  function _instCompactFor(handle) {
-    const bundle = handle.bundle;
-    const geomGen = bundle._geomGen | 0;
-    const cullGen = bundle._cullGen | 0;
-    const invalidGen = bundle._instCompactInvalidGen | 0;
-    let compact = _instCompacts.get(bundle);
-    if (
+  function _instCompactMatches(bundle, compact) {
+    return !!(
       compact &&
-      compact.geomGen === geomGen &&
-      compact.cullGen === cullGen &&
-      compact.invalidGen === invalidGen
-    ) {
+      compact.geomGen === (bundle._geomGen | 0) &&
+      compact.cullGen === (bundle._cullGen | 0) &&
+      compact.invalidGen === (bundle._instCompactInvalidGen | 0)
+    );
+  }
+
+  function _instCompactFor(bundle) {
+    let compact = _instCompacts.get(bundle);
+    if (_instCompactMatches(bundle, compact)) {
       _instCompacts.delete(bundle);
       _instCompacts.set(bundle, compact);
       if (R._frameOpen) compact.frame = R._frameSerial | 0;
@@ -194,9 +194,9 @@ export function attachInstancedFill(R) {
       w += chunk.count;
     }
     compact = {
-      geomGen,
-      cullGen,
-      invalidGen,
+      geomGen: bundle._geomGen | 0,
+      cullGen: bundle._cullGen | 0,
+      invalidGen: bundle._instCompactInvalidGen | 0,
       frame: R._frameOpen ? R._frameSerial | 0 : -1,
       t: _nowMs(),
       bytes: verts.byteLength + shapes.byteLength,
@@ -419,6 +419,8 @@ export function attachInstancedFill(R) {
       _useInst(want);
       return true;
     }
+    // A warm draw that declines on a link still running: the loading call draws it again once the link is done.
+    if (want.prog && R._psoWarming && R._instWarm) R._instWarm.declined = want;
     return false;
   }
   /// Start the program an axis-aligned instanced draw of this bundle will want, when the bundle can be drawn instanced at all, so
@@ -456,14 +458,18 @@ export function attachInstancedFill(R) {
     const omit = R._instancedOmitDefines ? R._instancedOmitDefines(bundle) : [];
     return omit.length && R.opts.psoWarm !== false ? base.concat(omit) : base;
   };
+  /// Whether the instanced program record `rec` is still linking (not failed, the driver not done).
+  R._instLinking = (rec) => !!(rec && rec.prog && rec.pending && !_instComplete(rec));
+  /// The record of the instanced program of `defs` while its link is still running, else null.
+  R._instLinkingFor = (defs) => {
+    const rec = _instProgs.get(_instKeyOf(defs));
+    return R._instLinking(rec) ? rec : null;
+  };
+  /// Whether `rec` linked: a draw now binds it.
+  R._instLinked = (rec) => !!(rec && rec.prog && (!rec.pending || _instComplete(rec)));
   R._instStart = (defs) => {
     const key = _instKeyOf(defs);
     if (!_instProgs.has(key)) _beginInstProg(key, defs);
-  };
-  /// Is the instanced program of these defines linked and finished, so a draw binds it rather than falling back?
-  R._instBuilt = (defs) => {
-    const rec = _instProgs.get(_instKeyOf(defs));
-    return !!(rec && rec.prog && !rec.pending);
   };
   function _selectInstProgram(bundle, baseDefs) {
     const omit = R._instancedOmitDefines ? R._instancedOmitDefines(bundle) : [];
@@ -556,6 +562,13 @@ export function attachInstancedFill(R) {
       if (resume && typeof ms.relerp === 'function') ms.relerp();
     }
     const n = instances.length;
+    const warm = R._psoWarming && R._instWarm;
+    const target = R._boundDrawFbo || null;
+    if (warm) {
+      warm.bundles.add(bundle);
+      if (warm.programs.get(_instProg)?.has(target)) return n;
+    }
+    const compact = _instCompactFor(bundle);
     R._instFastCount = (R._instFastCount | 0) + 1; // debugStats.instancedFastCount
     // Upload per-instance worldMatrix (col-major mat3) + alpha + rgba tint.
     if (n > _instAttrCap) {
@@ -627,8 +640,6 @@ export function attachInstancedFill(R) {
     // for every simple instanced batch.
     R.glDisable(R.gl.STENCIL_TEST);
     // ...and no color clear: it belongs to the frame (renderer.js renderEntry, the frame-entry contract).
-
-    const compact = _instCompactFor(R._handle);
 
     R.glBindVertexArray(compact.vao);
 
@@ -752,6 +763,7 @@ export function attachInstancedFill(R) {
     // outer loop (inst 0's full shape list, then inst 1's, …) → identical
     // painter order to the per-instance render() loop.
     const sr = R.draw.shapeRange;
+    let drew = !sr && compact.count > 0;
     if (!sr) R.gl.drawArraysInstanced(R.gl.TRIANGLES, 0, compact.count, n);
     else {
       // A sprite subset: only the runs of the compacted buffer whose shape row is in the range (adjacent chunks merge into one run).
@@ -763,9 +775,16 @@ export function attachInstancedFill(R) {
         if (inside) to = compact.opStart[k] + compact.opCount[k];
         if (from >= 0 && (!inside || k === compact.opShape.length - 1)) {
           R.gl.drawArraysInstanced(R.gl.TRIANGLES, from, to - from, n);
+          drew = true;
           from = -1;
         }
       }
+    }
+
+    if (warm && drew) {
+      let targets = warm.programs.get(_instProg);
+      if (!targets) warm.programs.set(_instProg, (targets = new Set()));
+      targets.add(target);
     }
 
     if (R._engines && !R._psoWarming)
@@ -847,6 +866,8 @@ export function attachInstancedFill(R) {
     _instProg = null;
     _instU = null;
   };
+  R._prepareInstancedMesh = _instCompactFor;
+  R._hasInstancedMesh = (bundle) => _instCompactMatches(bundle, _instCompacts.get(bundle));
   /// The endFrame safe point: meshes beyond the bound that neither this frame nor the previous one drew go.
   R._instCompactTrim = () => _trimInstCompacts(0, (R._frameSerial | 0) - 1);
   /// The memory budget's evictor: drop meshes the current frame has not drawn, least recently used first. Returns the bytes freed.

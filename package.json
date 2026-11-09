@@ -1,6 +1,6 @@
 {
   "name": "@kontek/mantle",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Mantle is a vector graphics renderer. WebGL2 implementation: imports .svg into a compact bundle and draws with analytic area, Loop-Blinn, CPatch, and hierarchical winding fills. Fonts, morphs, filters, and a native-SVG fallback included.",
   "keywords": [
     "vector",

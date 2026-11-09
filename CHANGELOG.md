@@ -3,6 +3,37 @@
 All notable changes to the Mantle JS package are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.2] - 2026-11-06
+
+### Changed
+
+- **Native canvas images.** `createImage()` encodes canvas, pixel-array, `ImageData` and
+  `ImageBitmap` sources at creation. Tokens expose `ready` and `dispose()` and use `blob:` URLs;
+  `exportFrameSVG()` embeds their pixels as `data:` URLs. Drawing before `ready` retains the first
+  draw's `data:` URL.
+
+### Performance
+
+- Reduce repeated instanced shader warm-up draws during loading.
+- Warm non-instanceable bundles with one copy per state.
+- Limit instanced and point-program warm-up to each bundle's declared reach.
+- Skip loading-call warm-up for sizes and bundles whose programs an earlier size or loading call
+  already prepared. Reloading the same art prepares only missing or invalidated instanced geometry.
+- Read the array-texture layer limit once per WebGL context.
+- Match native-scene slots in linear time when draws reorder or change source.
+- Reduce native raster string handling and first-draw encoding with reusable image URLs.
+- Retain up to 32 removed native raster slots for 120 frames to reduce decoding when images return.
+
+### Fixed
+
+- Include native image tokens' `ready` and `dispose()` in the generated public declarations.
+- Honor `draw: false` when preparing replayed bundles during loading.
+- Prepare instanced geometry during loading, including bundles whose shaders finish linking late.
+- Finish instanced shader warm-up before play when linking outlasts the initial passes.
+- Prepare instanced shaders for shared color-matrix draws during loading.
+
+[1.2.2]: https://github.com/MegaByte/mantle-js/releases/tag/v1.2.2
+
 ## [1.2.1] - 2026-11-03
 
 This release carries the mesh-caching, culled-draw and native-scene optimizations of

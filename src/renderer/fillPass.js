@@ -954,9 +954,12 @@ export function attachFillPass(R) {
       (R.opts.standIns === false || bundle._streamDeclared === true)
     );
   }
-  /// The omissions the instanced fast path compiles into its program. These are a fill variant's
-  /// MANTLE_NO_* defines for this bundle and draw: the bundle's baked feature omissions and the draw's recolor ones. Nothing that changes the vertex format (the
-  /// LB and CPatch streams, the cover kernel id) or the kernel (instancedEngineDefines picks that).
+  /// Keep recolor blocks when the bundle's declared reach allows them.
+  function instancedFoldsRecolor(bundle) {
+    const dom = R._declaredDomain ? R._declaredDomain(bundle) : null;
+    return !dom || dom.recolor || dom.channelLerp;
+  }
+  /// Instanced omissions preserve vertex layout and kernel selection.
   function instancedOmitDefines(bundle) {
     if (R.opts.disableFillVariants || !bundle) return [];
     const baked = bakedOmitFor(bundle);
@@ -970,7 +973,18 @@ export function attachFillPass(R) {
     )
       omit.splice(omit.indexOf('stroke'), 1);
     const defines = omitDefinesFor(omit);
-    pushRecolorOmits(defines);
+    // Plain and color-matrix draws share a program; other recolor blocks follow reach and draw state.
+    if (instancedFoldsRecolor(bundle)) {
+      const dom = R._declaredDomain ? R._declaredDomain(bundle) : null;
+      if (
+        !R.draw.channelLerp &&
+        !(dom && dom.channelLerp) &&
+        !defines.includes('MANTLE_NO_CHANNEL_LERP')
+      )
+        defines.push('MANTLE_NO_CHANNEL_LERP');
+      if (!(R.draw.palette && R.draw.palette.texture) && !defines.includes('MANTLE_NO_PALETTE'))
+        defines.push('MANTLE_NO_PALETTE');
+    } else pushRecolorOmits(defines);
     // Use the same conservative type mask as ordinary cover draws. Missing
     // masks keep all kernels; streamed and morph masks cover every pose.
     // (a declared stream's instanced program holds every type, as its fill key does: a type its update brings is not a new program)
@@ -3848,27 +3862,41 @@ export function attachFillPass(R) {
       /* a context without read-back: the finish above is the best available */
     }
   }
-  /// Draw the bundle's instanced fast path once, under the warm state, scissored to the warm pixel, so its (rotated) instanced program and
-  /// pipeline are built behind the load screen. `copies` is the instance count drawn: a bundle the fast path cannot take draws each copy
-  /// whole, so one copy builds what three do.
-  function warmInstanced(bundle, copies = 3) {
+  /// Program defines for the warm state without shared recolor.
+  function instWantDefsUnder(bundle, ws) {
+    const d = R.draw,
+      saved = [d.colorMatrix, d.colorMatrixOffset, d.channelLerp, d.palette];
+    d.colorMatrix = null;
+    d.colorMatrixOffset = null;
+    d.channelLerp = null;
+    d.palette = null;
+    try {
+      return R._instWantDefsFor(bundle, !!(ws && ws.world));
+    } finally {
+      [d.colorMatrix, d.colorMatrixOffset, d.channelLerp, d.palette] = saved;
+    }
+  }
+  /// Warm the requested copies under `ws`, scissored to one pixel. Fallback draws need only one copy.
+  function warmInstanced(bundle, warm, copies = 3, ws = R._warmState) {
     if (!R._instancedFastEnabled || !R.drawBundleInstanced || bundle._disposed || !bundle.curveTex)
       return;
-    if (R._warmState && R._warmState.inst === false) return; // a recorded plain-draw state: no instanced program to build
-    const ws = R._warmState,
-      wm = ws && ws.world ? ws.world : WARM_IDENTITY_MAP;
+    if (ws && ws.inst === false) return; // a recorded plain-draw state: no instanced program to build
+    const wm = ws && ws.world ? ws.world : WARM_IDENTITY_MAP;
     const savedFbo = R._boundDrawFbo || null;
+    const savedWarm = R._instWarm;
     R._warmScissor = WARM_PIXEL;
     try {
       R.bindFb(gl.FRAMEBUFFER, R._warmTarget || null);
       R._applyTargetScissor(R._warmTarget || null);
       const list = Array.from({ length: copies }, () => ({ worldMatrix: wm }));
       R._psoWarming = true;
+      R._instWarm = warm;
       R.drawBundleInstanced(bundle, list);
     } catch {
-      /* the first real instanced draw builds it */
+      /* Warm-up failures leave the regular draw path available. */
     } finally {
       R._psoWarming = false;
+      R._instWarm = savedWarm;
       R._warmScissor = null;
       R.bindFb(gl.FRAMEBUFFER, savedFbo);
       R._applyTargetScissor(savedFbo);
@@ -4180,6 +4208,38 @@ export function attachFillPass(R) {
     { cm: WARM_TINT, off: WARM_TINT_OFFSET },
     { world: WARM_ROTATED_MAP, cm: WARM_TINT, off: WARM_TINT_OFFSET },
   ];
+  /// Explicit plain state for the instanced warm.
+  const WARM_AS_DRAWN = {};
+  /// The states to build, per bundle: the ones a manifest recorded for it, else every state it could be drawn in. state -> [bundle]
+  function warmTasksOf(bundles) {
+    const tasks = new Map();
+    const add = (ws, bb) => {
+      let l = tasks.get(ws);
+      if (!l) tasks.set(ws, (l = []));
+      l.push(bb);
+    };
+    for (const bb of bundles) {
+      const recorded = R._wmStatesFor ? R._wmStatesFor(bb) : null;
+      let exhaustive = !recorded;
+      if (recorded)
+        for (const sig of recorded) {
+          const st = warmStateOf(sig);
+          st.inst = sig.i === 1 ? undefined : false;
+          add(st, bb);
+          if (sig.ov === 1 && !sig.w.some((x, i) => (i === 1 || i === 2 ? x !== 0 : false)))
+            add({ world: WARM_ROTATED_MAP, inst: st.inst, cm: st.cm, off: st.off }, bb); // an override table that turns a row: the rotated footprint too
+          else if (sig.ov === 2) exhaustive = true; // a stroke-raising table: the stroke walk, which only the exhaustive states reach
+        }
+      if (exhaustive) {
+        // Restrict default warm states to the bundle's declared reach.
+        const dom = R._declaredDomain ? R._declaredDomain(bb) : null;
+        add(WARM_AS_DRAWN, bb);
+        for (const ws of WARM_STATES)
+          if (!dom || ((!ws.world || dom.rotate) && (!ws.cm || dom.recolor))) add(ws, bb);
+      }
+    }
+    return tasks;
+  }
   const WARM_CHANNEL_LERP = {
     primary: [0.8, 0.2, 0.2, 1],
     contrast: [0.2, 0.2, 0.8, 1],
@@ -4663,7 +4723,8 @@ export function attachFillPass(R) {
         const d = _nowMs() - tEnum;
         R._bindSetEnumMs = (R._bindSetEnumMs || 0) + d;
         R._bindSetEnumBundles = Math.max(R._bindSetEnumBundles | 0, nEnum);
-        R._bindSetLastBundles = nEnum;
+        if (R._loadStats && R._loadStats.phase !== 'done')
+          R._loadStats.bindSetEnumBundles = Math.max(R._loadStats.bindSetEnumBundles | 0, nEnum);
         if (d > (R._bindSetEnumMax || 0)) R._bindSetEnumMax = d;
       }
       if (!todo.length) {
@@ -4887,70 +4948,53 @@ export function attachFillPass(R) {
             if (R._coop) yield* maybeSlice();
           }
         }
-        // The states to build, per bundle: the ones a manifest recorded for it, else every state it could be drawn in.
-        const tasks = new Map(); // state -> [bundle]
-        const add = (ws, bb) => {
-          let l = tasks.get(ws);
-          if (!l) tasks.set(ws, (l = []));
-          l.push(bb);
-        };
-        for (const bb of R._liveBundles()) {
-          const recorded = R._wmStatesFor ? R._wmStatesFor(bb) : null;
-          let exhaustive = !recorded;
-          if (recorded)
-            for (const sig of recorded) {
-              const st = warmStateOf(sig);
-              st.inst = sig.i === 1 ? undefined : false;
-              add(st, bb);
-              if (sig.ov === 1 && !sig.w.some((x, i) => (i === 1 || i === 2 ? x !== 0 : false)))
-                add({ world: WARM_ROTATED_MAP, inst: st.inst, cm: st.cm, off: st.off }, bb); // an override table that turns a row: the rotated footprint too
-              else if (sig.ov === 2) exhaustive = true; // a stroke-raising table: the stroke walk, which only the exhaustive states reach
-            }
-          if (exhaustive) for (const ws of WARM_STATES) add(ws, bb);
-        }
+        const tasks = warmTasksOf(R._liveBundles());
         let last = null;
-        const instKeyed = !!(R._khrParallel && R.opts.variantFirst !== false && R._instWantDefsFor && R._instBuilt);
-        const wholeDrawn = new Map(); // state -> bundles drawn whole with no draw deferred
-        const instDefsByBundle = new Map();
-        const instDefsOf = (bb, rot) => {
-          let pair = instDefsByBundle.get(bb);
-          if (!pair) instDefsByBundle.set(bb, (pair = [undefined, undefined]));
-          const i = rot ? 1 : 0;
-          if (pair[i] === undefined) pair[i] = R._instWantDefsFor(bb, rot);
-          return pair[i];
+        const instWarm = { programs: new Map(), bundles: new Set(), declined: null };
+        _instWarmCall = { warm: instWarm, pending: [] };
+        // Retry whole fallback draws only while they defer work.
+        const instKeyed = !!(R._khrParallel && R.opts.variantFirst !== false && R._instWantDefsFor);
+        const instDefsByBundle = new Map(); // bundle -> state -> instanced defines (null: the fast path cannot take it)
+        const instDefsOf = (bb, st) => {
+          let byState = instDefsByBundle.get(bb);
+          if (!byState) instDefsByBundle.set(bb, (byState = new Map()));
+          if (!byState.has(st)) byState.set(st, instWantDefsUnder(bb, st));
+          return byState.get(st);
         };
+        const canInstance = (bb) => instDefsOf(bb, null) !== null;
+        const wholeDrawn = new Map(); // state -> bundles drawn whole with no draw deferred
         for (let pass = 0; pass < 4; pass++) {
           for (const [ws, bundles] of tasks) {
             R._warmState = ws;
             const queued = new Set(_psoWarmQueue.slice(_psoWarmHead));
             for (const bb of bundles) if (!queued.has(bb)) _psoWarmQueue.push(bb);
-            // (the stand-in-free policy builds the fill programs of these states from the exact image, bindSetPass: K over the same states; this older pass would link the candidate
-            // keys of the states beside them, programs no draw asks for. The instanced programs below are not fill variants and stay.)
-            if (R.opts.standIns !== false) {
+            // Exact-program loading prepares fill variants in bindSetPass.
+            // Instanced programs are warmed here under each requested state.
+            if (R.opts.standIns !== false && ws !== WARM_AS_DRAWN) {
               n += yield* precompilePass(opts);
               n += yield* engineCandidatePass(ws);
             }
+            // Recolor states share the instanced programs warmed by the plain states.
+            if (ws && ws.cm && WARM_STATES.includes(ws)) continue;
             let drawnWhole = wholeDrawn.get(ws);
             if (!drawnWhole) wholeDrawn.set(ws, (drawnWhole = new Set()));
             for (const bb of bundles) {
-              // ONE DRAW PER BUILT INSTANCED PROGRAM. Once a bundle's instanced program is built, another bundle with the same program builds
-              // nothing new and is not drawn; until it is built, every pass draws again. A bundle the fast path cannot take draws one whole copy,
-              // and once a whole draw of it in this state deferred nothing, the later passes do not draw it again.
-              let copies = 3;
-              if (instKeyed && !(ws && ws.inst === false)) {
-                const defs = instDefsOf(bb, !!(ws && ws.world));
-                if (!defs) copies = 1;
-                else if (R._instBuilt(defs) && !bb._disposed) {
-                  if (R._coop) yield* maybeSlice();
-                  continue;
-                }
+              const whole = instKeyed && !(ws && ws.inst === false) && !canInstance(bb);
+              if (whole && drawnWhole.has(bb)) continue;
+              // Defer draws that would fall back while an instanced program links.
+              const defs = instKeyed && !whole ? instDefsOf(bb, ws) : null;
+              const linking = defs && R._instLinkingFor(defs);
+              if (linking) {
+                _instWarmCall.pending.push([bb, ws, linking]);
+                continue;
               }
-              if (copies === 1 && drawnWhole.has(bb)) continue;
-              // (one instanced program's pipeline build in flight at a time, like every other warm)
+              // Wait for the current pipeline build before issuing another warm draw.
               while (R._coop && R._khrParallel && !R._gpuClear()) yield* pause('warm');
               const deferredBefore = R._deferredWarmDraws | 0;
-              warmInstanced(bb, copies);
-              if (copies === 1 && (R._deferredWarmDraws | 0) === deferredBefore) drawnWhole.add(bb);
+              instWarm.declined = null;
+              warmInstanced(bb, instWarm, whole ? 1 : 3, ws);
+              if (whole && (R._deferredWarmDraws | 0) === deferredBefore) drawnWhole.add(bb);
+              if (instWarm.declined) _instWarmCall.pending.push([bb, ws, instWarm.declined]);
               if (R._coop) yield* maybeSlice();
             }
           }
@@ -4992,11 +5036,74 @@ export function attachFillPass(R) {
     }
     return _warmTargets;
   }
+  /// Pending instanced draws and shader deduplication state for this loading call.
+  let _instWarmCall = null;
+  /// Finish pending shader warms, then prepare every bundle's geometry. `call`: this loading call's record, or another pass's own.
+  function* finishInstancedWarm(call = _instWarmCall) {
+    if (call === _instWarmCall) _instWarmCall = null;
+    if (!call) return;
+    for (const [bb, st, rec] of call.pending) {
+      if (R._contextLost) break;
+      if (bb._disposed || !bb.curveTex) continue;
+      if (R._coop) while (R._instLinking(rec) && !R._contextLost) yield* pause('link');
+      else if (R._finishInstancedPrograms) R._finishInstancedPrograms();
+      if (!R._instLinked(rec)) continue; // a link that failed: the per-instance loop draws it
+      while (R._coop && R._khrParallel && !R._gpuClear()) yield* pause('warm');
+      warmInstanced(bb, call.warm, 3, st);
+      if (R._coop) yield* maybeSlice();
+    }
+    // Late shader warms can add bundles; prepare meshes once all warm draws have finished.
+    for (const bb of call.warm.bundles) {
+      if (R._contextLost) break;
+      if (bb._disposed || !bb.curveTex) continue;
+      while (R._coop && R._khrParallel && !R._gpuClear()) yield* pause('warm');
+      R._prepareInstancedMesh(bb);
+      if (R._coop) yield* maybeSlice();
+    }
+  }
+  /// The instanced warm alone, for bundles no warm draw reached: a loading call skips a size whose keys were all asked for already
+  /// (R._sizeCoveredG) and a bundle that asks for none there (R._uncoveredG), so a replay's new bundles (the same art) reach no warm. Their
+  /// programs and pipelines are built; their instanced geometry is what the warm's instanced draws prepare (finishInstancedWarm), and
+  /// without them the first play frame builds it. The draws are the warm's own, under the states the bundle's reach draws instanced.
+  R._instancedPrepG = function* (bundles) {
+    if (R.opts.psoWarm === false || R.opts.warmFutureStates === false) return 0; // (the warm's own gate: precompileRound)
+    if (R._contextLost || !R._instancedFastEnabled) return 0;
+    // (its own record: a loading call nested in one of these draws resets the shared one, L13-LOAD-19)
+    const instWarm = { programs: new Map(), bundles: new Set(), declined: null };
+    const call = { warm: instWarm, pending: [] };
+    const instKeyed = !!(R._khrParallel && R.opts.variantFirst !== false && R._instWantDefsFor);
+    try {
+      for (const [ws, list] of warmTasksOf(bundles)) {
+        if (ws && ws.cm && WARM_STATES.includes(ws)) continue; // (as in the warm: a recolor state's instanced program is its plain state's)
+        R._warmState = ws;
+        for (const bb of list) {
+          if (R._contextLost) break;
+          if (bb._disposed || (instKeyed && instWantDefsUnder(bb, null) === null)) continue; // (the fast path cannot take it: no geometry to prepare)
+          const linking = instKeyed && R._instLinkingFor(instWantDefsUnder(bb, ws));
+          if (linking) {
+            call.pending.push([bb, ws, linking]);
+            continue;
+          }
+          while (R._coop && R._khrParallel && !R._gpuClear()) yield* pause('warm');
+          instWarm.declined = null;
+          warmInstanced(bb, instWarm, 3, ws);
+          if (instWarm.declined) call.pending.push([bb, ws, instWarm.declined]);
+          if (R._coop) yield* maybeSlice();
+        }
+      }
+    } finally {
+      R._warmState = null;
+    }
+    yield* finishInstancedWarm(call);
+    return 0;
+  };
   function* precompileFillsG(opts) {
     if (R.opts.psoWarm === false || R._contextLost) return 0;
     const draws = !(opts && opts.draw === false);
+    _instWarmCall = null; // Discard state from an interrupted loading call.
     let n = yield* precompileRound(opts);
     if (draws && !R._warmQuick && R._refreshLive) n += yield* bindSetPass();
+    if (draws) yield* finishInstancedWarm();
     if (draws && !R._warmQuick && !R._noSync) gpuSync();
     return n;
   }
@@ -5174,7 +5281,9 @@ export function attachFillPass(R) {
       pts = new Map();
     for (const b of R._liveBundles()) {
       if (b._disposed) continue;
-      for (const rot of [false, true]) {
+      // Plan rotated programs only when the declared reach allows them.
+      const dom = R._declaredDomain ? R._declaredDomain(b) : null;
+      for (const rot of dom && !dom.rotate ? [false] : [false, true]) {
         const defs = R._instWantDefsFor && R._instWantDefsFor(b, rot);
         if (defs) inst.set(defs.slice().sort().join('|'), defs);
         // both OUTCOMES of the classic AAC gate (coverKernelPolicy.aacClassicBar), for a bundle whose bar lies inside the display's reachable range: the instanced engine

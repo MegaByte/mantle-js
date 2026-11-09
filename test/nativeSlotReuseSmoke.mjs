@@ -1,15 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Aaron Kaluszka
 // SPDX-License-Identifier: Apache-2.0
 
-// nativeSlotReuseSmoke.mjs -- what a native (no-WebGL) frame writes into its DOM, counted by a MutationObserver in a real
-// browser. A slow device's SVG fallback restyles and repaints for every DOM write, and decodes each new <image> again.
-//
-// Given a raster drawn in place, the frame mutates nothing; moved, only its transform; faded, only its opacity, and the
-// fade's end removes only that. Given a raster or a bundle joining, leaving or swapping places in the middle of the draw
-// order (alone or between the other kind), the draws after it keep their nodes: only a bundle the last frame did not draw
-// builds a clone, and only a raster not drawn in the last 120 frames builds an <image>. Each sequence's last frame draws the same pixels as a fresh scene drawing
-// that frame, and every mounted <image> shows its own draw's source. A raw canvas redrawn shows its new pixels, and a
-// canvas createImage token's href is a data: URL, so the frame's own exportFrameSVG() still carries the raster.
+// Check native slot reuse, attribute diffs and raster retention in a browser.
+// Mutation counts cover steady draws and order changes; pixels are compared with
+// fresh scenes. Canvas-token checks cover snapshots, export and URL disposal.
 import { readFileSync } from 'fs';
 import http from 'http';
 import path from 'path';
@@ -21,7 +15,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HTML = `<!DOCTYPE html><html><body><script type="module">
 import { importSvg, createNativeScene } from '/src/index.js';
 const W = 80, H = 40;
-const FILLS = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff'];
+const FILLS = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff'];
 const svgOf = (fill) => '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><rect width="10" height="10" fill="' + fill + '"/></svg>';
 const pngOf = (fill) => {
   const c = document.createElement('canvas'); c.width = c.height = 10;
@@ -117,6 +111,117 @@ window.__canvas = async () => {
   const red = at(await pixelsOf(scene.svg), 25, 5);
   return { dataHref: tokenHref.startsWith('data:'), exported, blue, red, imageCount: scene.svg.querySelectorAll('image').length };
 };
+// A canvas token's blob: URL: its pixels, the export, an early draw, instanced raw canvases and disposal.
+window.__tokens = async () => {
+  const made = [], revoked = [];
+  const create = URL.createObjectURL, revoke = URL.revokeObjectURL;
+  URL.createObjectURL = (b) => { const u = create.call(URL, b); made.push(u); return u; };
+  URL.revokeObjectURL = (u) => { revoked.push(u); return revoke.call(URL, u); };
+  try {
+    const scene = newScene();
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 10;
+    const g = canvas.getContext('2d');
+    const paint = (fill) => { g.fillStyle = fill; g.fillRect(0, 0, 10, 10); };
+    const at = (px, x, y) => Array.from(px.slice((y * W + x) * 4, (y * W + x) * 4 + 3));
+    const frame = (draw) => { scene.beginFrame([1, 1, 1, 1]); draw(); scene.endFrame(); };
+    paint('#00ff00');
+    const token = scene.createImage(canvas);
+    paint('#0000ff');
+    await token.ready;
+    frame(() => scene.drawImage(token, { dstRect: [0, 0, 10, 10] }));
+    const href = scene.svg.querySelector('image').getAttribute('href');
+    const bitmap = await createImageBitmap(await (await fetch(href)).blob());
+    const probe = document.createElement('canvas'); probe.width = probe.height = 10;
+    probe.getContext('2d').drawImage(bitmap, 0, 0);
+    const pixels = Array.from(probe.getContext('2d').getImageData(5, 5, 1, 1).data.slice(0, 3));
+    const text = await scene.exportFrameSVG();
+    const exported = at(await pixelsOf(text), 5, 5);
+    const early = scene.createImage(canvas);
+    frame(() => { scene.drawImage(token, { dstRect: [0, 0, 10, 10] }); scene.drawImage(early, { dstRect: [20, 0, 10, 10] }); });
+    const earlyHref = early.href;
+    await early.ready;
+    const observer = new MutationObserver(() => {});
+    observer.observe(scene.svg, { subtree: true, attributes: true, attributeFilter: ['href'] });
+    frame(() => { scene.drawImage(token, { dstRect: [0, 0, 10, 10] }); scene.drawImage(early, { dstRect: [20, 0, 10, 10] }); });
+    const hrefWrites = observer.takeRecords().length;
+    observer.disconnect();
+    const madeBeforeInstanced = made.length;
+    frame(() => scene.drawImageInstanced(canvas, [{ dstRect: [40, 0, 10, 10] }, { dstRect: [55, 0, 10, 10] }]));
+    const instancedUrls = made.length - madeBeforeInstanced;
+    token.dispose();
+    frame(() => scene.drawImage(token, { dstRect: [0, 0, 10, 10] }));
+    const afterDispose = scene.svg.querySelector('image').getAttribute('href').slice(0, 22);
+    const other = newScene();
+    const pending = other.createImage(canvas);
+    other.dispose();
+    await pending.ready;
+    return {
+      blobHref: href.startsWith('blob:'), pixels, exportHasBlob: text.includes('blob:'), exported,
+      earlyData: earlyHref.startsWith('data:'), earlyKept: early.href === earlyHref, hrefWrites, instancedUrls,
+      revokedOnDispose: revoked.includes(href), leaked: made.filter((u) => !revoked.includes(u)).length, afterDispose,
+    };
+  } finally {
+    URL.createObjectURL = create;
+    URL.revokeObjectURL = revoke;
+  }
+};
+window.__largeOrder = () => {
+  const scene = newScene(), n = 2048;
+  const hrefs = Array.from({ length: n }, (_, i) => RASTERS[0] + '#' + i);
+  const draw = (order) => {
+    scene.beginFrame();
+    for (const href of order) scene.drawImage(href, { dstRect: [0, 0, 10, 10] });
+    scene.endFrame();
+  };
+  draw(hrefs);
+  const original = [...scene.svg.querySelectorAll('image')];
+  const byHref = new Map(original.map(img => [img.getAttribute('href'), img]));
+  let reused = true, ordered = true;
+  for (const order of [hrefs.slice().reverse(), hrefs.slice(700).concat(hrefs.slice(0, 700))]) {
+    draw(order);
+    const images = [...scene.svg.querySelectorAll('image')];
+    reused &&= images.length === n && images.every(img => byHref.get(img.getAttribute('href')) === img);
+    ordered &&= images.every((img, i) => img.getAttribute('href') === order[i]);
+  }
+  const replacement = hrefs.map(href => href + '-new');
+  draw(replacement);
+  const images = [...scene.svg.querySelectorAll('image')];
+  const replaced = images.length === n && images.every((img, i) =>
+    img.getAttribute('href') === replacement[i] && !byHref.has(img.getAttribute('href')));
+  scene.dispose();
+  return { reused, ordered, replaced };
+};
+window.__retention = async () => {
+  const scene = newScene();
+  const image = new Image(10, 10); image.src = RASTERS[0]; await image.decode();
+  const token = scene.createImage(image);
+  const cropped = { dstRect: [5, 5, 20, 20], srcRect: [1, 1, 6, 6],
+    tint: [0.5, 0.8, 1, 0.75], worldMatrix: matrix(4, 3), alpha: 0.5 };
+  const plain = { dstRect: [20, 5, 20, 20] };
+  const frame = (opts) => {
+    scene.beginFrame([1, 1, 1, 1]);
+    if (opts) scene.drawImage(token, opts);
+    scene.endFrame();
+  };
+  const diff = (a, b) => a.reduce((n, v, i) => n + (v !== b[i]), 0);
+  frame(cropped);
+  const original = scene.svg.querySelector('image');
+  const first = await pixelsOf(scene.svg);
+  frame();
+  const detached = !scene.svg.querySelector('image');
+  const defsDropped = !scene.svg.querySelector('clipPath, filter');
+  frame(cropped);
+  const reused = scene.svg.querySelector('image') === original;
+  const restored = diff(first, await pixelsOf(scene.svg));
+  frame();
+  frame(plain);
+  const fresh = newScene();
+  fresh.beginFrame([1, 1, 1, 1]); fresh.drawImage(token, plain); fresh.endFrame();
+  const reset = diff(await pixelsOf(scene.svg), await pixelsOf(fresh.svg));
+  const attributesReset = ['opacity', 'transform', 'filter', 'clip-path'].every(a => !original.hasAttribute(a));
+  scene.dispose(); fresh.dispose();
+  return { detached, defsDropped, reused, restored, reset, attributesReset };
+};
 window.__ready = true;
 </script></body></html>`;
 
@@ -198,8 +303,16 @@ const SEQUENCES = [
       ['a raster leaves the middle', ['r0', 'r2', 'r3'], { images: 0, clones: 0 }],
       ['a raster joins the middle', ['r0', 'r4', 'r2', 'r3'], { images: 1, clones: 0 }],
       ['two rasters swap places', ['r0', 'r2', 'r4', 'r3'], { images: 0, clones: 0 }],
-      ['a raster changes source in place', ['r0', 'r5', 'r4', 'r3'], { images: 1, clones: 0 }],
-      ['a raster that left frames ago comes back', ['r0', 'r1', 'r4', 'r3'], { images: 0, clones: 0 }],
+      ['a raster changes source in place', ['r0', 'r1', 'r4', 'r3'], { images: 0, clones: 0 }],
+    ],
+  ],
+  [
+    'duplicates',
+    [
+      ['r0', 'r1', 'r0', 'r2'],
+      ['duplicates reorder', ['r2', 'r0', 'r1', 'r0'], { images: 0, clones: 0 }],
+      ['a duplicate leaves', ['r0', 'r2', 'r1'], { images: 0, clones: 0 }],
+      ['another duplicate joins', ['r0', 'r2', 'r1', 'r0'], { images: 0, clones: 0 }],
     ],
   ],
   [
@@ -217,10 +330,10 @@ const SEQUENCES = [
       ['b0', 'r1', 'b2', 'r3'],
       ['a raster between bundles leaves', ['b0', 'b2', 'r3'], { images: 0, clones: 0 }],
       ['a bundle joins ahead of all', ['b4', 'b0', 'b2', 'r3'], { images: 0, clones: 1 }],
-      ['a raster joins between bundles', ['b4', 'r5', 'b0', 'b2', 'r3'], { images: 1, clones: 0 }],
+      ['a raster joins between bundles', ['b4', 'r1', 'b0', 'b2', 'r3'], { images: 0, clones: 0 }],
       [
         'a raster moves ahead of a bundle',
-        ['b4', 'r5', 'b0', 'r3', 'b2'],
+        ['b4', 'r1', 'b0', 'r3', 'b2'],
         { images: 0, clones: 0 },
       ],
     ],
@@ -236,7 +349,7 @@ for (const [name, [first, ...steps]] of SEQUENCES) {
       `${what}: ${got.records} mutation records, ${got.images} <image>, ${got.clones} clones`,
     );
     expect(
-      `Given ${what}, then the frame builds only what the last frame did not draw`,
+      `Given ${what}, then the frame reuses available nodes`,
       { images: got.images, clones: got.clones },
       want,
     );
@@ -256,10 +369,20 @@ for (const [name, [first, ...steps]] of SEQUENCES) {
   );
 }
 for (const m of measured) console.log('  measured ' + m);
+expect(
+  'Removed rasters retain their images, restore detached definitions and reset omitted attributes on return',
+  await page.evaluate(() => window.__retention()),
+  { detached: true, defsDropped: true, reused: true, restored: 0, reset: 0, attributesReset: true },
+);
+expect(
+  'Given thousands of rasters reverse, rotate and change sources, then their nodes are reused in draw order and stale nodes leave',
+  await page.evaluate(() => window.__largeOrder()),
+  { reused: true, ordered: true, replaced: true },
+);
 
 const canvas = await page.evaluate(() => window.__canvas());
 expect(
-  'Given a canvas createImage token, then its <image> draws from a data: URL',
+  'Given a canvas createImage token drawn before it is ready, then its <image> draws from a data: URL',
   canvas.dataHref,
   true,
 );
@@ -277,6 +400,43 @@ expect(
   'Given it is redrawn again and drawn alone, then it shows those pixels with one <image>',
   [canvas.red, canvas.imageCount],
   [[255, 0, 0], 1],
+);
+
+const tokens = await page.evaluate(() => window.__tokens());
+expect(
+  'Given a canvas token once ready, then its <image> draws from a blob: URL',
+  tokens.blobHref,
+  true,
+);
+expect(
+  'Given the canvas is repainted after createImage, then the blob: URL holds its pixels at creation',
+  tokens.pixels,
+  [0, 255, 0],
+);
+expect(
+  "Given the token's frame, then exportFrameSVG() writes no blob: href and draws the raster",
+  [tokens.exportHasBlob, tokens.exported],
+  [false, [0, 255, 0]],
+);
+expect(
+  'Given a token drawn before it is ready, then it keeps the data: URL it drew with, and no href is written again',
+  [tokens.earlyData, tokens.earlyKept, tokens.hrefWrites],
+  [true, true, 0],
+);
+expect(
+  'Given drawImageInstanced of a raw canvas, then it makes no blob: URL',
+  tokens.instancedUrls,
+  0,
+);
+expect(
+  "Given dispose(), then the token's blob: URL is revoked, and a scene disposed mid-encode leaves none",
+  [tokens.revokedOnDispose, tokens.leaked],
+  [true, 0],
+);
+expect(
+  'Given a draw after dispose(), then it falls back to a data: URL',
+  tokens.afterDispose,
+  'data:image/png;base64,',
 );
 
 await browser.close();
