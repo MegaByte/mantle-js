@@ -541,6 +541,7 @@ const SMOKES = [
   'test/groupFrameTargetSmoke.mjs', // a filter frame does not re-size the accumulator of the group around it: a graph-filtered leaf, a plain group, a blend leaf; a faded draw
   'test/sharedGroupSiblingBakeSmoke.mjs', // members of a shared static-cache group never blit a raster that shows something else: a sibling's bake is adopted when equal, and a raster in use is not baked over
   'test/setTextRetrySmoke.mjs', // setText and setStyle after a failed rebuild can be retried; a repeat of a call still running waits for it
+  'test/nativeTextRebuildSmoke.mjs', // a native label outlines each glyph once, builds curves only to the same source and box, and rebuilds once for two changes in one task
   'test/maskStandInNotStampedSmoke.mjs', // a rotated mask bake drawn by the axis-aligned program while its own links is not kept once the program is ready
   'test/bundleDisposeCachesSmoke.mjs', // what a renderer caches for a bundle goes with its dispose: point lists on each renderer, instanced compact buffers
   'test/handleExportSmoke.mjs', // exportFrameSVG of a frame drawn through a mount is the export of the same frame through drawBundle

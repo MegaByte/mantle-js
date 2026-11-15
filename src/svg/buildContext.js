@@ -200,6 +200,17 @@ export function pickBandsAxis(n, k = 32) {
 /// per-shape emit still drives those itself.
 export function emitShape(ctx, segs, opts, gidBox, bboxBox = null) {
   const bb = pathBbox(segs);
+  if (ctx.boxOnly) {
+    gidBox.next++;
+    ctx.metas.push(null);
+    if (bboxBox) {
+      if (bb[0] < bboxBox.xmin) bboxBox.xmin = bb[0];
+      if (bb[1] < bboxBox.ymin) bboxBox.ymin = bb[1];
+      if (bb[2] > bboxBox.xmax) bboxBox.xmax = bb[2];
+      if (bb[3] > bboxBox.ymax) bboxBox.ymax = bb[3];
+    }
+    return ctx.metas.length - 1;
+  }
   //
   // TWO boxes, and they are not interchangeable:
   //   bbMeta     path + halfW. Stored on the row, and it is the box the SHADER indexes bands

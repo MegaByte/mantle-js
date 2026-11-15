@@ -154,7 +154,7 @@ export function sectionsToSvgSource(sections) {
 // textRun output + an svgSource for the native scene.
 /** @returns {Promise<NativeTextBundleSrc>} */
 async function buildNativeTextBundle(font, text, style, markup) {
-  const { sections, bundleSrc } = await buildTextSections(font, text, style, markup);
+  const { sections, bundleSrc } = await buildTextSections(font, text, style, markup, { curvesOnly: true });
   // Empty runs (no glyphs in the input font / text): same stub the GL path
   // returns, carrying font metrics for layout, plus a valid (blank) source.
   if (!bundleSrc || bundleSrc.numShapes === 0) {
@@ -186,6 +186,9 @@ async function buildNativeTextBundle(font, text, style, markup) {
  * @param {object} [opts.style] TextStyle (same contract as createTextBundle)
  * @param {boolean} [opts.markup] treat text as rich-text markup
  */
+const WARMED_GLYPHS = '0123456789:';
+const digitsWarmed = new WeakSet();
+
 export async function createNativeTextBundle(opts) {
   if (!opts || !opts.font) throw new Error('createNativeTextBundle: opts.font required');
   const font = opts.font;
@@ -195,6 +198,19 @@ export async function createNativeTextBundle(opts) {
 
   let bundle = await buildNativeTextBundle(font, text, style, markup);
   let runMetrics = bundle.runMetrics || null;
+  if (!digitsWarmed.has(font)) {
+    digitsWarmed.add(font);
+    setTimeout(() => buildNativeTextBundle(font, WARMED_GLYPHS, style, false).catch(() => {}), 0);
+  }
+  let requested = 0;
+  async function rebuildInOwnTask() {
+    const asked = ++requested;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (asked !== requested) return bundle;
+    bundle = await buildNativeTextBundle(font, text, style, markup);
+    runMetrics = bundle.runMetrics || null;
+    return bundle;
+  }
 
   return {
     get bundle() {
@@ -221,16 +237,12 @@ export async function createNativeTextBundle(opts) {
     async setText(newText, newStyle) {
       text = typeof newText === 'string' ? newText : '';
       if (newStyle != null) style = newStyle;
-      bundle = await buildNativeTextBundle(font, text, style, markup);
-      runMetrics = bundle.runMetrics || null;
-      return bundle;
+      return rebuildInOwnTask();
     },
 
     async setStyle(newStyle) {
       if (newStyle != null) style = newStyle;
-      bundle = await buildNativeTextBundle(font, text, style, markup);
-      runMetrics = bundle.runMetrics || null;
-      return bundle;
+      return rebuildInOwnTask();
     },
 
     dispose() {

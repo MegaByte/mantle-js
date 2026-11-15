@@ -556,7 +556,9 @@ async function assembleBundle(slots, font, varCoords = null, layout = null, line
     curve64: false,
     gwnTree: !!(layout && layout.gwnTree),
     aacLevels: !(layout && layout.aacLevels === false),
+    ...(layout && layout.curvesOnly ? { vBands: false, aacLevels: false, rayLanes: false, coverFan: false, bandK: 1 } : {}),
   });
+  if (layout && layout.boxOnly) ctx.boxOnly = true;
   const decorationMetrics = varCoords != null ? font.getMetricsVar(varCoords) : font;
   const fillNoopByFont = new Map();
   const fillNoopStatusOf = (slotFont) => {
@@ -775,6 +777,16 @@ async function assembleBundle(slots, font, varCoords = null, layout = null, line
     ymax = Number.isFinite(ymax) && ymax >= ymin ? ymax : ymin;
   }
 
+  if (ctx.boxOnly) {
+    return {
+      boxOnly: true,
+      numShapes,
+      globalBBox: [xmin, ymin, xmax - xmin, ymax - ymin],
+      fontMetrics: font && typeof font.fontMetrics === 'function' ? font.fontMetrics(varCoords) : null,
+      firstBaselineY,
+      lastBaselineY,
+    };
+  }
   const curveTexels = new Float32Array(ctx.curveBuf.count * 4);
   for (let i = 0; i < ctx.curveBuf.count * 4; i++) curveTexels[i] = ctx.curveBuf.floats[i];
   const bandTexels = new Float32Array(ctx.bandBuf.count * 4);
