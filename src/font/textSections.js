@@ -38,6 +38,7 @@ import { defaultStyle } from './markupParser.js';
 export async function buildTextSections(font, text, style, markup, opts) {
   const layout = layoutFromStyle(style);
   if (opts && opts.gwnTree) layout.gwnTree = true;
+  if (opts && opts.curvesOnly) layout.curvesOnly = true;
   const spans = markup
     ? null // buildFromMarkup parses internally
     : [{ text: text || '', style: spanStyleFromStyle(style) }];
@@ -49,7 +50,7 @@ export async function buildTextSections(font, text, style, markup, opts) {
   // Probe-build to learn the bbox, then rebuild with originX/Y so
   // globalBBox's (xmin, ymin) sits at (0, 0) — matches the textRun path the hit-test +
   // worldMatrix code assumes. Bundle format is (xmin, ymin, w, h).
-  let raw = await build(layout);
+  let raw = await build(layout.curvesOnly ? { ...layout, boxOnly: true } : layout);
 
   const boxW = layout.layoutWidthEm > 0 ? layout.layoutWidthEm : 0;
   if (boxW > 0) {
@@ -57,12 +58,13 @@ export async function buildTextSections(font, text, style, markup, opts) {
     const typoTop = fm ? raw.firstBaselineY - fm.ascent : raw.globalBBox[1];
     const typoBottom = fm ? raw.lastBaselineY + fm.descent : raw.globalBBox[1] + raw.globalBBox[3];
     if (typoTop !== 0) raw = await build({ ...layout, originY: -typoTop });
+    else if (raw.boxOnly) raw = await build(layout);
     raw.globalBBox = [0, 0, boxW, typoBottom - typoTop];
   } else {
     const [bbXmin, bbYmin] = raw.globalBBox;
     if (bbXmin !== 0 || bbYmin !== 0) {
       raw = await build({ ...layout, originX: -bbXmin, originY: -bbYmin });
-    }
+    } else if (raw.boxOnly) raw = await build(layout);
   }
 
   // Reconstruct the sections dict createBundle expects.

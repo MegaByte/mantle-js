@@ -9,6 +9,7 @@
 // only, so the cases find elements by walking the tree. Cases:
 //   slotIndex            the slot index matches a changed draw order in linear work
 //   rasterMoves          a raster's <image> follows it through the draw order, carrying no other place's attributes
+//   rasterSteady         a raster drawn again unchanged writes nothing, and each changed option still reaches its <image>
 //   textMaskMorph        a matched-shape morph stays addressed beside expanded <text> glyphs and a <mask>
 //   morphInterp          the morph interpolates geometry every frame, and an id-less morph reaches its shape
 //   reconciler           the positional reconciler reuses, resets and trims its slots
@@ -855,6 +856,76 @@ function rasterMoves() {
   scene.dispose();
 }
 
+// A raster drawn again unchanged writes nothing, and each changed draw option still reaches its <image>.
+function rasterSteady() {
+  const source = 'data:image/png;base64,steady';
+  const at = (x, s = 1) => new Float32Array([s, 0, 0, 0, s, 0, x, 0, 1]);
+  const draws = [
+    ['the first draw', { dstRect: [0, 0, 10, 10], worldMatrix: at(0) }],
+    ['the same draw again', { dstRect: [0, 0, 10, 10], worldMatrix: at(0) }],
+    ['a moved draw', { dstRect: [0, 0, 10, 10], worldMatrix: at(30) }],
+    ['a scaled draw', { dstRect: [0, 0, 10, 10], worldMatrix: at(30, 2) }],
+    ['a faded draw', { dstRect: [0, 0, 10, 10], worldMatrix: at(30, 2), alpha: 0.5 }],
+    ['a resized draw', { dstRect: [0, 0, 20, 5], worldMatrix: at(30, 2), alpha: 0.5 }],
+    ['a cropped draw', { dstRect: [0, 0, 20, 5], srcRect: [0, 0, 4, 4], worldMatrix: at(30, 2), alpha: 0.5 }],
+    ['a tinted draw', { dstRect: [0, 0, 20, 5], srcRect: [0, 0, 4, 4], worldMatrix: at(30, 2), alpha: 0.5, tint: [1, 0, 0, 1] }],
+    ['a draw back to the first', { dstRect: [0, 0, 10, 10], worldMatrix: at(0) }],
+  ];
+  const sceneOf = () => {
+    const scene = createNativeScene(host(), { coordinateSpace: 'viewport' });
+    scene.setViewport(100, 100);
+    return scene;
+  };
+  const drawn = (scene, opts) => {
+    scene.beginFrame();
+    scene.drawImage(source, opts);
+    scene.endFrame();
+    const image = scene.svg.querySelectorAll('image')[0];
+    const attrs = {};
+    for (const attr of Array.from(image.attributes)) if (attr.name !== 'id') attrs[attr.name] = attr.value;
+    const filterId = /^url\(#(.+)\)$/.exec(attrs.filter || '')?.[1];
+    if (filterId) {
+      const filter = scene.svg.querySelectorAll('filter').find((each) => each.getAttribute('id') === filterId);
+      attrs.filter = filter
+        ? filter.querySelectorAll('*').map((each) => `${each.localName || each.tagName} ${each.getAttribute('values')}`)
+        : 'missing';
+    }
+    return attrs;
+  };
+  const writes = { count: 0 };
+  const EP = Object.getPrototypeOf(doc.documentElement);
+  const origSet = EP.setAttribute,
+    origRemove = EP.removeAttribute;
+  const steady = sceneOf();
+  EP.setAttribute = function (...a) {
+    if (steady.svg.contains(this)) writes.count++;
+    return origSet.apply(this, a);
+  };
+  EP.removeAttribute = function (...a) {
+    if (steady.svg.contains(this)) writes.count++;
+    return origRemove.apply(this, a);
+  };
+  try {
+    for (const [label, opts] of draws) {
+      writes.count = 0;
+      const got = drawn(steady, opts);
+      const fresh = sceneOf();
+      const want = drawn(fresh, opts);
+      fresh.dispose();
+      if (JSON.stringify(got) === JSON.stringify(want)) ok(`${label} shows as a fresh scene draws it`);
+      else fail(`${label}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+      if (label === 'the same draw again') {
+        if (writes.count === 0) ok('the same draw again writes no attribute');
+        else fail(`the same draw again wrote ${writes.count} attributes`);
+      }
+    }
+  } finally {
+    EP.setAttribute = origSet;
+    EP.removeAttribute = origRemove;
+    steady.dispose();
+  }
+}
+
 function rasterRetention() {
   const scene = createNativeScene(host(), { coordinateSpace: 'viewport' });
   scene.setViewport(100, 100);
@@ -918,6 +989,7 @@ for (const [name, fn] of [
   ['slotIndex', slotIndex],
   ['rasterMoves', rasterMoves],
   ['rasterRetention', rasterRetention],
+  ['rasterSteady', rasterSteady],
   ['textMaskMorph', textMaskMorph],
   ['morphInterp', morphInterp],
   ['reconciler', reconciler],

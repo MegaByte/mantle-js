@@ -549,7 +549,13 @@ export class MantleFontAsset {
   getGlyphSegsByGidVar(gid, userCoords) {
     this._ensure();
     if (!this.isVariable || userCoords == null) {
-      return this._outline(gid);
+      const outlines = (this._plainOutlines ??= new Map());
+      let segs = outlines.get(gid);
+      if (segs === undefined) {
+        segs = this._outline(gid);
+        outlines.set(gid, segs);
+      }
+      return segs;
     }
     return this._outline(gid, this._normCoords(userCoords));
   }

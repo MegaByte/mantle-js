@@ -3034,6 +3034,19 @@ export function createNativeScene(host, opts = {}) {
     const { slot, node: layer } = acquireSlot(href, `image-${layerKind}`, () =>
       ownerDoc.createElementNS(SVGNS, layerKind),
     );
+    if (!slot.imageDrawSig) slot.imageDrawSig = new Float64Array(IMAGE_DRAW_SIG_LEN).fill(NaN);
+    const sameDraw = imageDrawSigMatches(slot.imageDrawSig, naturalSource, rawSource, drawOpts);
+    if (
+      sameDraw &&
+      slot.imageDrawSettled &&
+      slot.imageHref === href &&
+      slot.imageDrawPar === drawOpts.par &&
+      slot.imageEl &&
+      slot.imageEl.parentNode === layer
+    )
+      return true;
+    slot.imageDrawSettled = false;
+    slot.imageDrawPar = drawOpts.par;
     beginSlotFrame(slot);
     // Reuse one <image> element per live positional slot, not per href. A DOM
     // node can only have one parent, so sharing the same <image> across
@@ -3147,8 +3160,50 @@ export function createNativeScene(host, opts = {}) {
       applyAttr(slot, img, 'filter', rasterRecolorFilter(slot, cm, cmo, rgbTint));
     if (img.parentNode !== layer) layer.appendChild(img);
     finishSlotFrame(slot);
+    slot.imageDrawSettled = true;
     // The wrapper is already mounted (slotted); nothing to push.
     return true;
+  }
+
+  const IMAGE_DRAW_SIG_LEN = 52;
+  const ABSENT = -1e300;
+  function imageDrawSigMatches(sig, naturalSource, rawSource, o) {
+    let i = 0,
+      same = true;
+    const put = (v) => {
+      const n = typeof v === 'number' ? v : ABSENT;
+      if (sig[i] !== n) {
+        same = false;
+        sig[i] = n;
+      }
+      i++;
+    };
+    const putAll = (values, count) => {
+      put(values ? 1 : 0);
+      for (let k = 0; k < count; k++) put(values ? values[k] : 0);
+    };
+    put(vpW);
+    put(vpH);
+    put(naturalSource && naturalSource.width);
+    put(naturalSource && naturalSource.height);
+    put(rawSource && rawSource.naturalWidth);
+    put(rawSource && rawSource.naturalHeight);
+    putAll(o.dstRect, 4);
+    putAll(o.srcRect, 4);
+    const wm = o.worldMatrix;
+    put(wm ? 1 : 0);
+    put(wm ? wm[0] : 0);
+    put(wm ? wm[1] : 0);
+    put(wm ? wm[3] : 0);
+    put(wm ? wm[4] : 0);
+    put(wm ? wm[6] : 0);
+    put(wm ? wm[7] : 0);
+    put(o.alpha);
+    put(o.blendMode | 0);
+    putAll(o.tint, 4);
+    putAll(o.colorMatrix, 16);
+    putAll(o.colorMatrixOffset, 4);
+    return same;
   }
 
   // Build an feColorMatrix filter that multiplies RGB by the tint and
